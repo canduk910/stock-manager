@@ -65,9 +65,13 @@ def fetch_price(code: str, refresh: bool = False) -> Optional[dict]:
         mktcap = int(df_cap.loc[code, "시가총액"]) if code in df_cap.index else None
         shares = int(df_cap.loc[code, "상장주식수"]) if code in df_cap.index else None
 
+        # 절대 등락액: close * change_pct / (100 + change_pct)
+        change = round(close * change_pct / (100 + change_pct)) if (100 + change_pct) != 0 else 0
+
         result = {
             "code": code,
             "close": close,
+            "change": change,
             "change_pct": change_pct,
             "mktcap": mktcap,
             "shares": shares,
@@ -121,12 +125,26 @@ def fetch_detail(code: str, refresh: bool = False) -> Optional[dict]:
     except Exception:
         pass
 
+    # PER / PBR
+    per, pbr = None, None
+    try:
+        df_fund = krx.get_market_fundamental_by_ticker(trading_date, market="ALL")
+        if code in df_fund.index:
+            per_raw = float(df_fund.loc[code, "PER"])
+            pbr_raw = float(df_fund.loc[code, "PBR"])
+            per = per_raw if per_raw > 0 else None
+            pbr = pbr_raw if pbr_raw > 0 else None
+    except Exception:
+        pass
+
     result = {
         **price,
         "market_type": market_type,
         "sector": sector,
         "high_52": high_52,
         "low_52": low_52,
+        "per": per,
+        "pbr": pbr,
     }
     set_cached(cache_key, result)
     return result

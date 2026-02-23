@@ -14,6 +14,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ---
 
+## 상세 스펙 (작업 전 반드시 참조)
+- API 엔드포인트 설계: docs/API_SPEC.md
+- wrapper.py 메서드 + KIS API 참조: docs/KIS_API_REFERENCE.md
+- 프론트엔드 컴포넌트 설계: docs/FRONTEND_SPEC.md
+
+---
+
 ## 개발 명령어
 
 ```bash

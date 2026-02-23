@@ -5,6 +5,7 @@ const NAV_ITEMS = [
   { to: '/screener', label: '종목 스크리너' },
   { to: '/earnings', label: '공시 조회' },
   { to: '/balance', label: '잔고 조회' },
+  { to: '/watchlist', label: '관심종목' },
 ]
 
 export default function Header() {

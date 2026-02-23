@@ -36,11 +36,12 @@ app.add_middleware(
 )
 
 # 라우터 등록
-from routers import screener, earnings, balance  # noqa: E402 (라우터는 app 생성 후 import)
+from routers import screener, earnings, balance, watchlist  # noqa: E402
 
 app.include_router(screener.router)
 app.include_router(earnings.router)
 app.include_router(balance.router)
+app.include_router(watchlist.router)
 
 
 # 프론트엔드 빌드 결과 정적 파일 서빙 (API 라우터 등록 이후에 마운트)

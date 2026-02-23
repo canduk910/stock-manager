@@ -1,0 +1,202 @@
+import { useEffect, useState } from 'react'
+import { useStockInfo } from '../../hooks/useWatchlist'
+
+function fmtPrice(v) {
+  return v != null ? v.toLocaleString() + '원' : '-'
+}
+function fmtAwk(v) {
+  return v != null ? v.toLocaleString() + '억' : '-'
+}
+function fmtPct(v) {
+  if (v == null) return '-'
+  const sign = v > 0 ? '+' : ''
+  return `${sign}${v.toFixed(1)}%`
+}
+
+function growthColor(v) {
+  if (v == null) return 'text-gray-400'
+  return v > 0 ? 'text-red-600' : v < 0 ? 'text-blue-600' : 'text-gray-500'
+}
+
+function ChangeCell({ change, changePct }) {
+  if (changePct == null) return <span className="text-gray-400">-</span>
+  const up = changePct > 0
+  const down = changePct < 0
+  const color = up ? 'text-red-600' : down ? 'text-blue-600' : 'text-gray-600'
+  const sign = up ? '+' : ''
+  return (
+    <span className={color}>
+      {sign}{change?.toLocaleString()}원 ({sign}{changePct?.toFixed(2)}%)
+    </span>
+  )
+}
+
+export default function StockInfoModal({ code, name, onClose, onMemoSave }) {
+  const { data, loading, error, load } = useStockInfo()
+  const [editingMemo, setEditingMemo] = useState(false)
+  const [memoVal, setMemoVal] = useState('')
+
+  useEffect(() => {
+    if (code) load(code)
+  }, [code])
+
+  useEffect(() => {
+    if (data?.memo != null) setMemoVal(data.memo)
+  }, [data])
+
+  // ESC 키로 닫기
+  useEffect(() => {
+    const handler = (e) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [onClose])
+
+  const handleMemoSave = async () => {
+    await onMemoSave(code, memoVal)
+    setEditingMemo(false)
+  }
+
+  const b = data?.basic || {}
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* 헤더 */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+          <div>
+            <h2 className="text-lg font-bold text-gray-900">{name}</h2>
+            <span className="text-xs text-gray-400 font-mono">{code}</span>
+          </div>
+          <button
+            onClick={onClose}
+            className="text-gray-400 hover:text-gray-700 text-xl leading-none"
+          >
+            ✕
+          </button>
+        </div>
+
+        <div className="px-6 py-5 space-y-6">
+          {loading && (
+            <div className="text-center py-8">
+              <div className="inline-block w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-2" />
+              <p className="text-sm text-gray-400">조회 중...</p>
+            </div>
+          )}
+
+          {error && (
+            <div className="bg-red-50 text-red-700 rounded-lg px-4 py-3 text-sm">{error}</div>
+          )}
+
+          {data && !loading && (
+            <>
+              {/* 기본정보 카드 */}
+              <div className="grid grid-cols-2 gap-3">
+                <InfoCard label="현재가" value={fmtPrice(b.price)} />
+                <InfoCard
+                  label="전일대비"
+                  value={<ChangeCell change={b.change} changePct={b.change_pct} />}
+                />
+                <InfoCard label="시가총액" value={fmtAwk(b.market_cap)} />
+                <InfoCard label="상장주식수" value={b.shares?.toLocaleString() ?? '-'} />
+                <InfoCard label="PER" value={b.per != null ? `${b.per}배` : '-'} />
+                <InfoCard label="PBR" value={b.pbr != null ? `${b.pbr}배` : '-'} />
+                <InfoCard label="52주 고가" value={fmtPrice(b.high_52)} />
+                <InfoCard label="52주 저가" value={fmtPrice(b.low_52)} />
+                <InfoCard label="시장" value={b.market ?? '-'} />
+                <InfoCard label="업종" value={b.sector ?? '-'} />
+              </div>
+
+              {/* 3개년 재무 테이블 */}
+              {data.financials_3y && data.financials_3y.length > 0 && (
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-700 mb-2">재무 요약 (단위: 억원)</h3>
+                  <div className="overflow-x-auto rounded-lg border border-gray-200">
+                    <table className="min-w-full text-sm">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-4 py-2 text-left text-xs font-semibold text-gray-500">항목</th>
+                          {data.financials_3y.map((f) => (
+                            <th key={f.year} className="px-4 py-2 text-right text-xs font-semibold text-gray-500">
+                              {f.year}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <FinRow label="매출액" rows={data.financials_3y} field="revenue" yoyField="yoy_revenue" />
+                        <FinRow label="영업이익" rows={data.financials_3y} field="operating_profit" yoyField="yoy_op" />
+                        <FinRow label="당기순이익" rows={data.financials_3y} field="net_income" />
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* 메모 */}
+              <div>
+                <div className="flex items-center gap-2 mb-1">
+                  <h3 className="text-sm font-semibold text-gray-700">메모</h3>
+                  {!editingMemo && (
+                    <button
+                      onClick={() => setEditingMemo(true)}
+                      className="text-xs text-gray-400 hover:text-blue-500"
+                    >
+                      수정
+                    </button>
+                  )}
+                </div>
+                {editingMemo ? (
+                  <div className="flex gap-2">
+                    <input
+                      autoFocus
+                      value={memoVal}
+                      onChange={(e) => setMemoVal(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') handleMemoSave(); if (e.key === 'Escape') setEditingMemo(false) }}
+                      className="flex-1 border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                    />
+                    <button onClick={handleMemoSave} className="px-3 py-1.5 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">저장</button>
+                    <button onClick={() => setEditingMemo(false)} className="px-3 py-1.5 border border-gray-300 text-sm rounded-lg hover:bg-gray-50">취소</button>
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-600 bg-gray-50 rounded-lg px-3 py-2 min-h-[36px]">
+                    {data.memo || <span className="text-gray-300">메모 없음</span>}
+                  </p>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function InfoCard({ label, value }) {
+  return (
+    <div className="bg-gray-50 rounded-lg px-4 py-3">
+      <p className="text-xs text-gray-400 mb-0.5">{label}</p>
+      <p className="text-sm font-semibold text-gray-800">{value}</p>
+    </div>
+  )
+}
+
+function FinRow({ label, rows, field, yoyField }) {
+  return (
+    <tr className="border-t border-gray-100">
+      <td className="px-4 py-2 text-gray-700 font-medium">{label}</td>
+      {rows.map((f, i) => (
+        <td key={f.year} className="px-4 py-2 text-right">
+          <div className="font-medium">{f[field] != null ? f[field].toLocaleString() : '-'}</div>
+          {yoyField && i > 0 && f[yoyField] != null && (
+            <div className={`text-xs ${growthColor(f[yoyField])}`}>
+              {fmtPct(f[yoyField])}
+            </div>
+          )}
+        </td>
+      ))}
+    </tr>
+  )
+}
