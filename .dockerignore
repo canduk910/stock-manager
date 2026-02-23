@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# 프론트엔드 (Stage 1에서 빌드하므로 제외)
+frontend/node_modules/
+frontend/dist/
+
+# 개발/로컬 파일
+.env
+.git/
+.DS_Store
+screener_cache.db
+*.csv
+token.dat
