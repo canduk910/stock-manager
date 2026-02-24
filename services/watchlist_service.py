@@ -8,7 +8,7 @@ import time
 from typing import Optional
 
 from stock import store, symbol_map
-from stock.dart_fin import fetch_financials
+from stock.dart_fin import fetch_financials, fetch_financials_multi_year
 from stock.market import fetch_detail, fetch_price
 
 
@@ -116,9 +116,9 @@ class WatchlistService:
     # ── 단일 종목 상세 ───────────────────────────────────────────────────────
 
     def get_stock_detail(self, code: str) -> dict:
-        """기본정보 + 3개년 재무 통합."""
+        """기본정보 + 최대 10개년 재무 통합."""
         detail = fetch_detail(code)
-        fin = fetch_financials(code)
+        multi_rows = fetch_financials_multi_year(code, years=10)
         item = store.get_item(code)
 
         basic: dict = {"code": code}
@@ -140,51 +140,29 @@ class WatchlistService:
                 }
             )
 
-        financials_3y = []
-        if fin and fin.get("bsns_year"):
-            bsns_year = fin["bsns_year"]
-
-            rev_pp = fin.get("revenue_prev2")
-            op_pp = fin.get("operating_income_prev2")
-            net_pp = fin.get("net_income_prev2")
-
-            rev_p = fin.get("revenue_prev")
-            op_p = fin.get("operating_income_prev")
-            net_p = fin.get("net_income_prev")
-
-            rev = fin.get("revenue")
-            op = fin.get("operating_income")
-            net = fin.get("net_income")
-
-            financials_3y = [
+        # 과거 → 최신 순으로 정렬된 multi_rows에서 전년도 YoY 계산
+        financials_ny = []
+        for i, row in enumerate(multi_rows):
+            prev = multi_rows[i - 1] if i > 0 else None
+            rev = row["revenue"]
+            op = row["operating_income"]
+            net = row["net_income"]
+            prev_rev = prev["revenue"] if prev else None
+            prev_op = prev["operating_income"] if prev else None
+            financials_ny.append(
                 {
-                    "year": fin.get("period_prev2") or str(bsns_year - 2),
-                    "revenue": _awk(rev_pp),
-                    "operating_profit": _awk(op_pp),
-                    "net_income": _awk(net_pp),
-                    "yoy_revenue": None,
-                    "yoy_op": None,
-                },
-                {
-                    "year": fin.get("period_prev") or str(bsns_year - 1),
-                    "revenue": _awk(rev_p),
-                    "operating_profit": _awk(op_p),
-                    "net_income": _awk(net_p),
-                    "yoy_revenue": _growth(rev_p, rev_pp),
-                    "yoy_op": _growth(op_p, op_pp),
-                },
-                {
-                    "year": fin.get("period_cur") or str(bsns_year),
+                    "year": row["year"],         # 정수 (e.g. 2024)
                     "revenue": _awk(rev),
                     "operating_profit": _awk(op),
                     "net_income": _awk(net),
-                    "yoy_revenue": _growth(rev, rev_p),
-                    "yoy_op": _growth(op, op_p),
-                },
-            ]
+                    "yoy_revenue": _growth(rev, prev_rev),
+                    "yoy_op": _growth(op, prev_op),
+                    "dart_url": row.get("dart_url", ""),
+                }
+            )
 
         return {
             "basic": basic,
-            "financials_3y": financials_3y,
+            "financials_3y": financials_ny,   # 키 이름 유지 (하위 호환)
             "memo": item.get("memo", "") if item else "",
         }

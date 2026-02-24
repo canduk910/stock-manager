@@ -109,18 +109,32 @@ export default function StockInfoModal({ code, name, onClose, onMemoSave }) {
                 <InfoCard label="업종" value={b.sector ?? '-'} />
               </div>
 
-              {/* 3개년 재무 테이블 */}
+              {/* 재무 테이블 (최대 10개년) */}
               {data.financials_3y && data.financials_3y.length > 0 && (
                 <div>
-                  <h3 className="text-sm font-semibold text-gray-700 mb-2">재무 요약 (단위: 억원)</h3>
+                  <h3 className="text-sm font-semibold text-gray-700 mb-2">
+                    재무 요약 (단위: 억원)
+                  </h3>
                   <div className="overflow-x-auto rounded-lg border border-gray-200">
                     <table className="min-w-full text-sm">
                       <thead className="bg-gray-50">
                         <tr>
-                          <th className="px-4 py-2 text-left text-xs font-semibold text-gray-500">항목</th>
+                          <th className="px-4 py-2 text-left text-xs font-semibold text-gray-500 sticky left-0 bg-gray-50">항목</th>
                           {data.financials_3y.map((f) => (
-                            <th key={f.year} className="px-4 py-2 text-right text-xs font-semibold text-gray-500">
-                              {f.year}
+                            <th key={f.year} className="px-4 py-2 text-right text-xs font-semibold text-gray-500 min-w-[72px]">
+                              {f.dart_url ? (
+                                <a
+                                  href={f.dart_url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-blue-600 hover:underline"
+                                  title="DART 사업보고서 열기"
+                                >
+                                  {f.year}
+                                </a>
+                              ) : (
+                                f.year
+                              )}
                             </th>
                           ))}
                         </tr>

@@ -5,6 +5,7 @@ import ScreenerPage from './pages/ScreenerPage'
 import EarningsPage from './pages/EarningsPage'
 import BalancePage from './pages/BalancePage'
 import WatchlistPage from './pages/WatchlistPage'
+import DetailPage from './pages/DetailPage'
 
 export default function App() {
   return (
@@ -17,6 +18,7 @@ export default function App() {
           <Route path="/earnings" element={<EarningsPage />} />
           <Route path="/balance" element={<BalancePage />} />
           <Route path="/watchlist" element={<WatchlistPage />} />
+          <Route path="/detail/:symbol" element={<DetailPage />} />
         </Routes>
       </main>
     </div>

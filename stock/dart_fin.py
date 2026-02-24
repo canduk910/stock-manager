@@ -113,9 +113,9 @@ def _parse_amount(s) -> Optional[int]:
 
 
 _ACCOUNT_KEYS = {
-    "revenue": ("매출액", "수익(매출액)", "영업수익"),
-    "operating_income": ("영업이익", "영업이익(손실)"),
-    "net_income": ("당기순이익", "당기순이익(손실)", "당기순손익"),
+    "revenue": ("매출액", "수익(매출액)", "영업수익", "매출"),
+    "operating_income": ("영업이익", "영업이익(손실)", "영업손실"),
+    "net_income": ("당기순이익", "당기순이익(손실)", "당기순손익", "당기순손실"),
 }
 
 
@@ -146,6 +146,24 @@ def _extract_accounts(items: list[dict]) -> dict:
             result[f"{field}_prev"] = None
             result[f"{field}_prev2"] = None
 
+    return result
+
+
+def _extract_period_accounts(is_items: list[dict], period_key: str) -> dict:
+    """특정 기간(thstrm/frmtrm/bfefrmtrm)의 IS 계정 금액 추출.
+
+    period_key: "thstrm" | "frmtrm" | "bfefrmtrm"
+    반환: {revenue, operating_income, net_income} — 단위: 원
+    """
+    amount_key = f"{period_key}_amount"
+    result: dict[str, Optional[int]] = {}
+    for field, keywords in _ACCOUNT_KEYS.items():
+        result[field] = None
+        for item in is_items:
+            nm = item.get("account_nm", "").strip()
+            if nm in keywords:
+                result[field] = _parse_amount(item.get(amount_key))
+                break
     return result
 
 
@@ -210,3 +228,99 @@ def fetch_financials(stock_code: str, refresh: bool = False) -> Optional[dict]:
     empty = {"bsns_year": None, "fs_div": None}
     set_cached(cache_key, empty, ttl_hours=6)
     return empty
+
+
+def fetch_financials_multi_year(
+    stock_code: str, years: int = 10
+) -> list[dict]:
+    """최대 years개 사업연도의 재무데이터 반환.
+
+    3년 단위 배치 호출(최대 4회)로 효율적으로 수집한다.
+    반환: [
+        {
+            "year": 2024,
+            "revenue": ...,           # 원
+            "operating_income": ...,
+            "net_income": ...,
+            "rcept_no": "20250317000123",
+            "dart_url": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=...",
+        },
+        ...  # 과거 → 최신 순 정렬
+    ]
+    """
+    cache_key = f"dart:fin_multi:{stock_code}:{years}"
+    cached = get_cached(cache_key)
+    if cached is not None:
+        return cached
+
+    corp_code = _fetch_corp_code(stock_code)
+    if not corp_code:
+        set_cached(cache_key, [], ttl_hours=6)
+        return []
+
+    # 최근 확정 사업연도 결정 (4월 이후면 전년도 보고서 공시됨)
+    today = date.today()
+    latest_year = today.year - 1 if today.month >= 4 else today.year - 2
+
+    # 3년 단위 앵커 연도 목록 (최대 ceil(years/3)개 배치)
+    num_batches = (years + 2) // 3
+    anchor_years = [latest_year - i * 3 for i in range(num_batches)]
+
+    collected: dict[int, dict] = {}
+    fs_div_used: Optional[str] = None  # 연결/별도 결정 후 고정
+
+    for anchor in anchor_years:
+        if len(collected) >= years:
+            break
+
+        fs_divs = [fs_div_used] if fs_div_used else ["CFS", "OFS"]
+        for fs_div in fs_divs:
+            try:
+                items = _call_fin_api(corp_code, anchor, fs_div)
+            except Exception:
+                continue
+            if not items:
+                continue
+
+            is_items = [i for i in items if i.get("sj_div") in ("IS", "CIS")]
+            if not is_items:
+                continue
+
+            rcept_no = is_items[0].get("rcept_no", "")
+            dart_url = (
+                f"https://dart.fss.or.kr/dsaf001/main.do?rcpNo={rcept_no}"
+                if rcept_no
+                else ""
+            )
+
+            # thstrm(당기), frmtrm(전기), bfefrmtrm(전전기) 각각 추출
+            for period_key, year_offset in [
+                ("thstrm", 0),
+                ("frmtrm", -1),
+                ("bfefrmtrm", -2),
+            ]:
+                target_year = anchor + year_offset
+                if target_year in collected:
+                    continue
+                period_data = _extract_period_accounts(is_items, period_key)
+                if period_data.get("revenue") is None:
+                    continue
+                collected[target_year] = {
+                    "year": target_year,
+                    "revenue": period_data["revenue"],
+                    "operating_income": period_data["operating_income"],
+                    "net_income": period_data["net_income"],
+                    "rcept_no": rcept_no,
+                    "dart_url": dart_url,
+                }
+
+            if fs_div_used is None and collected:
+                fs_div_used = fs_div
+            break
+
+    # 과거 → 최신 정렬, 최대 years개
+    result = sorted(collected.values(), key=lambda x: x["year"])
+    result = result[-years:]
+
+    set_cached(cache_key, result, ttl_hours=24)
+    return result

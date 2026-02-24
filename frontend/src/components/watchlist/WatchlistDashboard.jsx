@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 
 // ── 포맷 유틸 ────────────────────────────────────────────────────────────────
 
@@ -106,6 +107,7 @@ export default function WatchlistDashboard({
   onMemoSave,
   onShowInfo,
 }) {
+  const navigate = useNavigate()
   const [confirmCode, setConfirmCode] = useState(null)
 
   const handleDeleteClick = (code) => setConfirmCode(code)
@@ -178,7 +180,7 @@ export default function WatchlistDashboard({
                   <td className="px-3 py-2.5 text-gray-500 font-mono text-xs">{s.code}</td>
                   <td className="px-3 py-2.5">
                     <button
-                      onClick={() => onShowInfo(s.code, s.name)}
+                      onClick={() => navigate(`/detail/${s.code}`)}
                       className="font-medium text-blue-700 hover:underline text-left"
                     >
                       {s.name}

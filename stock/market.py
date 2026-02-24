@@ -3,6 +3,8 @@
 from datetime import date, timedelta
 from typing import Optional
 
+import pandas as pd
+
 from .cache import delete_prefix, get_cached, set_cached
 
 
@@ -147,4 +149,107 @@ def fetch_detail(code: str, refresh: bool = False) -> Optional[dict]:
         "pbr": pbr,
     }
     set_cached(cache_key, result)
+    return result
+
+
+def fetch_valuation_history(code: str, years: int = 10) -> list[dict]:
+    """월말 기준 PER/PBR 히스토리 반환.
+
+    반환: [{"date": "2024-01", "per": 12.5, "pbr": 1.2}, ...]  # 과거 → 최신 순
+    """
+    cache_key = f"market:valuation_hist:{code}:{years}"
+    cached = get_cached(cache_key)
+    if cached is not None:
+        return cached
+
+    from pykrx import stock as krx
+
+    end_dt = date.today()
+    start_dt = end_dt.replace(year=end_dt.year - years)
+    end_str = end_dt.strftime("%Y%m%d")
+    start_str = start_dt.strftime("%Y%m%d")
+
+    try:
+        df = krx.get_market_fundamental_by_date(start_str, end_str, code)
+    except Exception:
+        return []
+
+    if df.empty:
+        return []
+
+    df.index = pd.to_datetime(df.index)
+    # 월말 마지막 거래일 기준으로 리샘플
+    df_monthly = df.resample("ME").last()
+
+    result = []
+    for dt, row in df_monthly.iterrows():
+        per_val = float(row.get("PER", 0) or 0)
+        pbr_val = float(row.get("PBR", 0) or 0)
+        if per_val <= 0 and pbr_val <= 0:
+            continue
+        result.append({
+            "date": dt.strftime("%Y-%m"),
+            "per": round(per_val, 2) if per_val > 0 else None,
+            "pbr": round(pbr_val, 2) if pbr_val > 0 else None,
+        })
+
+    set_cached(cache_key, result, ttl_hours=24)
+    return result
+
+
+def fetch_period_returns(code: str) -> dict:
+    """당일/3개월/6개월/1년 주가 수익률 반환 (%).
+
+    반환: {change_pct, return_3m, return_6m, return_1y}
+    각 값은 None 가능 (데이터 없을 때)
+    """
+    cache_key = f"market:period_returns:{code}"
+    cached = get_cached(cache_key)
+    if cached is not None:
+        return cached
+
+    from pykrx import stock as krx
+
+    today = date.today()
+    one_year_ago = today - timedelta(days=370)  # 여유 있게 370일
+    end_str = today.strftime("%Y%m%d")
+    start_str = one_year_ago.strftime("%Y%m%d")
+
+    try:
+        df = krx.get_market_ohlcv_by_date(start_str, end_str, code)
+    except Exception:
+        return {"change_pct": None, "return_3m": None, "return_6m": None, "return_1y": None}
+
+    if df is None or df.empty:
+        return {"change_pct": None, "return_3m": None, "return_6m": None, "return_1y": None}
+
+    df.index = pd.to_datetime(df.index)
+    df = df.sort_index()
+
+    current_close = float(df["종가"].iloc[-1])
+
+    # 당일 등락률: 최근 2 거래일 비교
+    if len(df) >= 2:
+        prev_close = float(df["종가"].iloc[-2])
+        day_pct = round((current_close - prev_close) / prev_close * 100, 2) if prev_close else None
+    else:
+        day_pct = None
+
+    def get_past_close(days: int) -> Optional[float]:
+        target = pd.Timestamp(today - timedelta(days=days))
+        subset = df[df.index <= target]
+        return float(subset["종가"].iloc[-1]) if not subset.empty else None
+
+    def pct(past: Optional[float]) -> Optional[float]:
+        if past is None or past == 0:
+            return None
+        return round((current_close - past) / abs(past) * 100, 1)
+
+    result = {
+        "change_pct": day_pct,
+        "return_3m": pct(get_past_close(90)),
+        "return_6m": pct(get_past_close(180)),
+        "return_1y": pct(get_past_close(365)),
+    }
+    set_cached(cache_key, result, ttl_hours=1)
     return result

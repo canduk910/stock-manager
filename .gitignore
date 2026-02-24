@@ -1,6 +1,15 @@
 # Ignore environment files with secrets
 .env
 
+# macOS
+.DS_Store
+
+# IDE
+.idea/
+
+# KIS API 토큰 캐시 (보안)
+token.dat
+
 # Python
 __pycache__/
 *.py[cod]

@@ -12,7 +12,7 @@ export default function Header() {
   return (
     <header className="bg-gray-900 text-white shadow-lg">
       <div className="max-w-7xl mx-auto px-4 py-3 flex items-center gap-8">
-        <span className="font-bold text-lg tracking-tight">주식 스크리너</span>
+        <span className="font-bold text-lg tracking-tight">DK STOCK</span>
         <nav className="flex gap-1">
           {NAV_ITEMS.map(({ to, label }) => (
             <NavLink

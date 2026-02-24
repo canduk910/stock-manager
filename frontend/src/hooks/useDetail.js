@@ -1,16 +1,17 @@
 import { useState, useCallback } from 'react'
-import { fetchFilings } from '../api/earnings'
+import { fetchDetailReport } from '../api/detail'
 
-export function useEarnings() {
+export function useDetailReport() {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
 
-  const load = useCallback(async (startDate, endDate) => {
+  const load = useCallback(async (symbol, years = 10) => {
     setLoading(true)
     setError(null)
+    setData(null)
     try {
-      const result = await fetchFilings(startDate, endDate)
+      const result = await fetchDetailReport(symbol, years)
       setData(result)
     } catch (e) {
       setError(e.message)

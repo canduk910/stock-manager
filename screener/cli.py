@@ -58,7 +58,7 @@ def earnings(date_str: str | None, export_fmt: str | None):
     console.print(f"[cyan]{formatted}[/cyan] 정기보고서 제출 종목을 조회합니다...")
 
     try:
-        filings = fetch_filings(target_date)
+        filings = fetch_filings(target_date, target_date)
     except RuntimeError as e:
         console.print(f"[red]오류:[/red] {e}")
         raise SystemExit(1)
@@ -135,7 +135,7 @@ def screen(
     if earnings_today:
         console.print("  당일 실적발표 종목을 필터링합니다...")
         try:
-            filings = fetch_filings(target_date)
+            filings = fetch_filings(target_date, target_date)
         except RuntimeError as e:
             console.print(f"[red]오류:[/red] {e}")
             raise SystemExit(1)

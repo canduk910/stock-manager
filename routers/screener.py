@@ -57,7 +57,7 @@ def get_stocks(
     # 당일 실적발표 종목 필터
     if earnings_only:
         try:
-            filings = fetch_filings(target_date)
+            filings = fetch_filings(target_date, target_date)
         except RuntimeError as e:
             raise HTTPException(status_code=502, detail=str(e))
         filing_codes = {f["stock_code"] for f in filings}
