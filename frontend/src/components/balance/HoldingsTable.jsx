@@ -6,7 +6,6 @@ function fmtKRW(val) {
   return n.toLocaleString('ko-KR')
 }
 
-/** 한국 관례: 수익 = 빨간색, 손실 = 파란색 */
 function ProfitCell({ value }) {
   const n = Number(value)
   if (isNaN(n)) return <span>{value || '-'}</span>
@@ -22,10 +21,45 @@ function RateCell({ value }) {
   return <span className={`font-medium ${cls}`}>{sign}{n.toFixed(2)}%</span>
 }
 
+function WeightCell({ value }) {
+  if (value == null) return <span className="text-gray-400">-</span>
+  return (
+    <span className="text-gray-700 font-medium">{value.toFixed(1)}%</span>
+  )
+}
+
+function fmtMktcapKRW(v) {
+  if (v == null) return '-'
+  const awk = v / 100000000
+  if (awk >= 10000) return (awk / 10000).toFixed(1) + '조'
+  return Math.floor(awk).toLocaleString() + '억'
+}
+
+function RoeCell({ value }) {
+  if (value == null) return <span className="text-gray-400">-</span>
+  const n = Number(value)
+  if (isNaN(n)) return <span className="text-gray-400">-</span>
+  const cls = n > 0 ? 'text-red-600' : n < 0 ? 'text-blue-600' : 'text-gray-600'
+  return <span className={cls}>{n.toFixed(1)}%</span>
+}
+
 const COLUMNS = [
+  {
+    key: 'exchange',
+    label: '거래소',
+    align: 'center',
+    render: (v) => v || '-',
+  },
   { key: 'code', label: '종목코드', align: 'center' },
   { key: 'name', label: '종목명', align: 'left' },
+  {
+    key: '_weight',
+    label: '투자비중',
+    align: 'right',
+    render: (v) => <WeightCell value={v} />,
+  },
   { key: 'quantity', label: '보유수량', align: 'right', render: fmtKRW },
+  { key: 'eval_amount', label: '평가금액', align: 'right', render: fmtKRW },
   { key: 'avg_price', label: '매입단가', align: 'right', render: (v) => Math.floor(Number(v)).toLocaleString('ko-KR') },
   { key: 'current_price', label: '현재가', align: 'right', render: fmtKRW },
   {
@@ -40,8 +74,37 @@ const COLUMNS = [
     align: 'right',
     render: (v) => <RateCell value={v} />,
   },
+  {
+    key: 'mktcap',
+    label: '시가총액',
+    align: 'right',
+    render: (v) => fmtMktcapKRW(v),
+  },
+  {
+    key: 'per',
+    label: 'PER',
+    align: 'right',
+    render: (v) => v != null ? Math.floor(v) + '배' : '-',
+  },
+  {
+    key: 'roe',
+    label: 'ROE',
+    align: 'right',
+    render: (v) => <RoeCell value={v} />,
+  },
+  {
+    key: 'pbr',
+    label: 'PBR',
+    align: 'right',
+    render: (v) => v != null ? Number(v).toFixed(2) + '배' : '-',
+  },
 ]
 
 export default function HoldingsTable({ stocks }) {
-  return <DataTable columns={COLUMNS} data={stocks} rowKey="code" />
+  const totalEval = stocks.reduce((sum, s) => sum + (Number(s.eval_amount) || 0), 0)
+  const enriched = stocks.map((s) => ({
+    ...s,
+    _weight: totalEval > 0 ? (Number(s.eval_amount) || 0) / totalEval * 100 : null,
+  }))
+  return <DataTable columns={COLUMNS} data={enriched} rowKey="code" />
 }

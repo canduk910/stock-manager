@@ -126,6 +126,9 @@ def fetch_detail_yf(code: str) -> Optional[dict]:
         change_pct = _safe(round((close - prev_close) / prev_close * 100, 2)) if prev_close else None
         mktcap = _safe(fi.market_cap) or _safe(info.get("marketCap"))
 
+        roe_raw = info.get("returnOnEquity")
+        roe = _safe(round(roe_raw * 100, 2)) if roe_raw is not None else None
+
         result = {
             "code": code.upper(),
             "name": info.get("longName") or info.get("shortName") or code.upper(),
@@ -140,6 +143,7 @@ def fetch_detail_yf(code: str) -> Optional[dict]:
             "low_52": _safe(info.get("fiftyTwoWeekLow")),
             "per": _safe(info.get("trailingPE") or info.get("forwardPE")),
             "pbr": _safe(info.get("priceToBook")),
+            "roe": roe,
         }
         set_cached(key, result, ttl_hours=1)
         return result
@@ -215,7 +219,7 @@ def fetch_financials_multi_year_yf(code: str, years: int = 4) -> list[dict]:
     key = f"yf:fin_multi:{code.upper()}"
     cached = get_cached(key)
     if cached is not None:
-        return cached
+        return cached[-years:] if len(cached) > years else cached
 
     try:
         t = _ticker(code)
@@ -246,10 +250,9 @@ def fetch_financials_multi_year_yf(code: str, years: int = 4) -> list[dict]:
                 "dart_url": "",
             })
 
-        # 최대 years개만
-        rows = rows[-years:] if len(rows) > years else rows
+        # 전체 rows를 캐시에 저장 (슬라이싱 전)
         set_cached(key, rows, ttl_hours=24)
-        return rows
+        return rows[-years:] if len(rows) > years else rows
     except Exception:
         set_cached(key, [], ttl_hours=24)
         return []

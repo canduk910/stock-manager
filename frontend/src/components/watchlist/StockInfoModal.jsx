@@ -118,8 +118,8 @@ export default function StockInfoModal({ code, name, market = 'KR', onClose, onM
                 />
                 <InfoCard label="시가총액" value={b.market_cap != null ? `${b.market_cap.toLocaleString()} ${currency === 'USD' ? 'M USD' : '억'}` : '-'} />
                 {currency === 'KRW' && <InfoCard label="상장주식수" value={b.shares?.toLocaleString() ?? '-'} />}
-                <InfoCard label="PER" value={b.per != null ? `${typeof b.per === 'number' ? b.per.toFixed(1) : b.per}배` : '-'} />
-                <InfoCard label="PBR" value={b.pbr != null ? `${typeof b.pbr === 'number' ? b.pbr.toFixed(2) : b.pbr}배` : '-'} />
+                <InfoCard label="PER" value={b.per != null ? `${Math.floor(b.per)}배` : '-'} />
+                <InfoCard label="PBR" value={b.pbr != null ? `${Math.floor(b.pbr)}배` : '-'} />
                 <InfoCard label="52주 고가" value={fmtPrice(b.high_52, currency)} />
                 <InfoCard label="52주 저가" value={fmtPrice(b.low_52, currency)} />
                 <InfoCard label="시장/거래소" value={b.market ?? '-'} />

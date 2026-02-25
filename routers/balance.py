@@ -6,6 +6,9 @@ import os
 import requests
 from fastapi import APIRouter, HTTPException
 
+from stock.market import fetch_market_metrics
+from stock.yf_client import fetch_detail_yf
+
 router = APIRouter(prefix="/api", tags=["balance"])
 
 BASE_URL = os.getenv("KIS_BASE_URL") or "https://openapi.koreainvestment.com:9443"
@@ -182,6 +185,8 @@ def _fetch_overseas_balance(token: str, app_key: str, app_secret: str, acnt_no: 
                         exrt = exchange_rates.get(crcy, 0)
                         frcr_pfls = float(item.get("frcr_evlu_pfls_amt", 0) or 0)
                         profit_loss_krw = str(round(frcr_pfls * exrt)) if exrt > 0 else ""
+                        eval_amount_raw = float(item.get("ovrs_stck_evlu_amt", 0) or 0)
+                        eval_amount_krw = str(round(eval_amount_raw * exrt)) if exrt > 0 else ""
                         stocks.append({
                             "name": item.get("ovrs_item_name", ""),
                             "code": item.get("ovrs_pdno", ""),
@@ -194,6 +199,7 @@ def _fetch_overseas_balance(token: str, app_key: str, app_secret: str, acnt_no: 
                             "profit_loss_krw": profit_loss_krw,
                             "profit_rate": item.get("evlu_pfls_rt", "0"),
                             "eval_amount": item.get("ovrs_stck_evlu_amt", "0"),
+                            "eval_amount_krw": eval_amount_krw,
                         })
                     except Exception:
                         continue
@@ -370,6 +376,32 @@ def get_balance():
         futures_list = _fetch_futures_balance(token, app_key, app_secret, acnt_no, acnt_prdt_cd)
     except Exception:
         futures_list = []
+
+    # 국내주식 시가총액·PER·PBR·ROE 보강 (캐시 기반, 실패 시 None)
+    for s in stocks:
+        try:
+            m = fetch_market_metrics(s["code"])
+            s["exchange"] = m.get("market_type")
+            s["mktcap"] = m.get("mktcap")
+            s["per"] = m.get("per")
+            s["pbr"] = m.get("pbr")
+            s["roe"] = m.get("roe")
+        except Exception:
+            s["exchange"] = s["mktcap"] = s["per"] = s["pbr"] = s["roe"] = None
+
+    # 해외주식 시가총액·PER·PBR·ROE 보강 (yfinance, 캐시 기반, 실패 시 None)
+    for s in overseas_list:
+        try:
+            d = fetch_detail_yf(s["code"])
+            if d:
+                s["mktcap"] = d.get("mktcap")
+                s["per"] = d.get("per")
+                s["pbr"] = d.get("pbr")
+                s["roe"] = d.get("roe")
+            else:
+                s["mktcap"] = s["per"] = s["pbr"] = s["roe"] = None
+        except Exception:
+            s["mktcap"] = s["per"] = s["pbr"] = s["roe"] = None
 
     return {
         # 합산 총계

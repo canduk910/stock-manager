@@ -197,6 +197,53 @@ def fetch_valuation_history(code: str, years: int = 10) -> list[dict]:
     return result
 
 
+def fetch_market_metrics(code: str) -> dict:
+    """잔고 페이지용 시가총액·PER·PBR·ROE 단일 종목 조회 (52주 고저 없음, 가볍고 빠름).
+
+    반환: {mktcap(원), per, pbr, roe(%, None 가능)}
+    """
+    cache_key = f"market:metrics:{code}"
+    cached = get_cached(cache_key)
+    if cached is not None:
+        return cached
+
+    from pykrx import stock as krx
+
+    trading_date = _latest_trading_date()
+    result: dict = {"market_type": None, "mktcap": None, "per": None, "pbr": None, "roe": None}
+
+    try:
+        kospi_tickers = set(krx.get_market_ticker_list(trading_date, market="KOSPI"))
+        result["market_type"] = "KOSPI" if code in kospi_tickers else "KOSDAQ"
+    except Exception:
+        pass
+
+    try:
+        df_cap = krx.get_market_cap_by_ticker(trading_date, market="ALL")
+        if code in df_cap.index:
+            result["mktcap"] = int(df_cap.loc[code, "시가총액"])
+    except Exception:
+        pass
+
+    try:
+        df_fund = krx.get_market_fundamental_by_ticker(trading_date, market="ALL")
+        if code in df_fund.index:
+            row = df_fund.loc[code]
+            per_raw = float(row.get("PER", 0))
+            pbr_raw = float(row.get("PBR", 0))
+            eps_raw = float(row.get("EPS", 0))
+            bps_raw = float(row.get("BPS", 0))
+            result["per"] = per_raw if per_raw > 0 else None
+            result["pbr"] = pbr_raw if pbr_raw > 0 else None
+            if bps_raw != 0:
+                result["roe"] = round(eps_raw / bps_raw * 100, 2)
+    except Exception:
+        pass
+
+    set_cached(cache_key, result, ttl_hours=6)
+    return result
+
+
 def fetch_period_returns(code: str) -> dict:
     """당일/3개월/6개월/1년 주가 수익률 반환 (%).
 

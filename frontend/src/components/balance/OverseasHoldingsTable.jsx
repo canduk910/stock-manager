@@ -24,6 +24,20 @@ function fmtKRW(val) {
   return n.toLocaleString('ko-KR')
 }
 
+function fmtMktcapUSD(v) {
+  if (v == null) return '-'
+  const abs = Math.abs(v)
+  if (abs >= 1e12) return `$${(v / 1e12).toFixed(1)}T`
+  if (abs >= 1e9) return `$${(v / 1e9).toFixed(1)}B`
+  if (abs >= 1e6) return `$${(v / 1e6).toFixed(0)}M`
+  return `$${v.toLocaleString()}`
+}
+
+function WeightCell({ value }) {
+  if (value == null) return <span className="text-gray-400">-</span>
+  return <span className="text-gray-700 font-medium">{value.toFixed(1)}%</span>
+}
+
 function ForeignProfitCell({ value, currency }) {
   const n = Number(value)
   if (isNaN(n)) return <span>{value || '-'}</span>
@@ -53,6 +67,14 @@ function RateCell({ value }) {
   return <span className={`font-medium ${cls}`}>{sign}{n.toFixed(2)}%</span>
 }
 
+function RoeCell({ value }) {
+  if (value == null) return <span className="text-gray-400">-</span>
+  const n = Number(value)
+  if (isNaN(n)) return <span className="text-gray-400">-</span>
+  const cls = n > 0 ? 'text-red-600' : n < 0 ? 'text-blue-600' : 'text-gray-600'
+  return <span className={cls}>{n.toFixed(1)}%</span>
+}
+
 const COLUMNS = [
   {
     key: 'exchange',
@@ -62,6 +84,12 @@ const COLUMNS = [
   },
   { key: 'code', label: '종목코드', align: 'center' },
   { key: 'name', label: '종목명', align: 'left' },
+  {
+    key: '_weight',
+    label: '투자비중',
+    align: 'right',
+    render: (v) => <WeightCell value={v} />,
+  },
   {
     key: 'currency',
     label: '통화',
@@ -73,6 +101,21 @@ const COLUMNS = [
     label: '보유수량',
     align: 'right',
     render: (v) => Number(v).toLocaleString(),
+  },
+  {
+    key: 'eval_amount',
+    label: '평가금액',
+    align: 'right',
+    render: (v, row) => {
+      const n = Number(v)
+      if (isNaN(n)) return '-'
+      return (
+        <span>
+          {n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          <span className="text-xs text-gray-400 ml-1">{row.currency}</span>
+        </span>
+      )
+    },
   },
   {
     key: 'avg_price',
@@ -108,8 +151,38 @@ const COLUMNS = [
     align: 'right',
     render: (v) => <RateCell value={v} />,
   },
+  {
+    key: 'mktcap',
+    label: '시가총액',
+    align: 'right',
+    render: (v) => fmtMktcapUSD(v),
+  },
+  {
+    key: 'per',
+    label: 'PER',
+    align: 'right',
+    render: (v) => v != null ? Math.floor(v) + '배' : '-',
+  },
+  {
+    key: 'roe',
+    label: 'ROE',
+    align: 'right',
+    render: (v) => <RoeCell value={v} />,
+  },
+  {
+    key: 'pbr',
+    label: 'PBR',
+    align: 'right',
+    render: (v) => v != null ? Number(v).toFixed(2) + '배' : '-',
+  },
 ]
 
 export default function OverseasHoldingsTable({ stocks }) {
-  return <DataTable columns={COLUMNS} data={stocks} />
+  // 투자비중: KRW 환산 평가금액 기준
+  const totalEvalKRW = stocks.reduce((sum, s) => sum + (Number(s.eval_amount_krw) || 0), 0)
+  const enriched = stocks.map((s) => ({
+    ...s,
+    _weight: totalEvalKRW > 0 ? (Number(s.eval_amount_krw) || 0) / totalEvalKRW * 100 : null,
+  }))
+  return <DataTable columns={COLUMNS} data={enriched} />
 }

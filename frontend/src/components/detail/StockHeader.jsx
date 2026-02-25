@@ -1,17 +1,33 @@
-function fmtPrice(v) {
-  return v != null ? v.toLocaleString() + '원' : '-'
+function fmtPrice(v, currency = 'KRW') {
+  if (v == null) return '-'
+  if (currency === 'USD') return `$${v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  return v.toLocaleString() + '원'
 }
 
-function ChangeCell({ change, changePct }) {
+function fmtMktCap(v, currency = 'KRW') {
+  if (v == null) return null
+  if (currency === 'USD') {
+    if (Math.abs(v) >= 1000000) return `$${(v / 1000000).toFixed(1)}T`
+    if (Math.abs(v) >= 1000) return `$${(v / 1000).toFixed(1)}B`
+    return `$${v.toLocaleString()}M`
+  }
+  return `${v.toLocaleString()}억`
+}
+
+function ChangeCell({ change, changePct, currency = 'KRW' }) {
   if (changePct == null) return <span className="text-gray-400">-</span>
   const up = changePct > 0
   const down = changePct < 0
   const color = up ? 'text-red-600' : down ? 'text-blue-600' : 'text-gray-600'
   const sign = up ? '+' : ''
   const arrow = up ? '▲' : down ? '▼' : ''
+  const changeStr = currency === 'USD'
+    ? `$${Math.abs(change ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+    : `${Math.abs(change ?? 0).toLocaleString()}원`
+  const changeSign = (change ?? 0) >= 0 ? '+' : '-'
   return (
     <span className={`font-semibold ${color}`}>
-      {arrow} {sign}{change?.toLocaleString()}원 ({sign}{changePct?.toFixed(2)}%)
+      {arrow} {changeSign}{changeStr} ({sign}{changePct?.toFixed(2)}%)
     </span>
   )
 }
@@ -29,10 +45,10 @@ function ValBadge({ label, value, avg, vsAvg }) {
   return (
     <div className={`px-3 py-2 rounded-lg border text-center ${badgeColor}`}>
       <p className="text-xs text-gray-400 mb-0.5">{label}</p>
-      <p className="text-sm font-bold">{value}배</p>
+      <p className="text-sm font-bold">{Math.floor(value)}배</p>
       {avg != null && (
         <p className="text-xs mt-0.5">
-          평균 {avg}배
+          평균 {Math.floor(avg)}배
           {vsAvg != null && (
             <span className={vsAvg < 0 ? 'text-blue-600 ml-1' : 'text-red-600 ml-1'}>
               ({vsAvg > 0 ? '+' : ''}{vsAvg}%)
@@ -45,6 +61,7 @@ function ValBadge({ label, value, avg, vsAvg }) {
 }
 
 export default function StockHeader({ symbol, name, basic, summary }) {
+  const currency = basic?.currency || 'KRW'
   const avgPer = summary?.avg_per
   const avgPbr = summary?.avg_pbr
   const perVsAvg = summary?.per_vs_avg
@@ -63,15 +80,15 @@ export default function StockHeader({ symbol, name, basic, summary }) {
           </div>
           <div className="flex items-center gap-3 mt-2 flex-wrap">
             <span className="text-2xl font-bold text-gray-900">
-              {fmtPrice(basic?.price)}
+              {fmtPrice(basic?.price, currency)}
             </span>
-            <ChangeCell change={basic?.change} changePct={basic?.change_pct} />
+            <ChangeCell change={basic?.change} changePct={basic?.change_pct} currency={currency} />
           </div>
           <div className="flex gap-2 mt-2 flex-wrap text-xs text-gray-500">
             {basic?.market && <span className="bg-gray-100 px-2 py-0.5 rounded">{basic.market}</span>}
             {basic?.sector && <span className="bg-gray-100 px-2 py-0.5 rounded">{basic.sector}</span>}
             {basic?.market_cap != null && (
-              <span className="text-gray-400">시총 {basic.market_cap.toLocaleString()}억</span>
+              <span className="text-gray-400">시총 {fmtMktCap(basic.market_cap, currency)}</span>
             )}
           </div>
         </div>

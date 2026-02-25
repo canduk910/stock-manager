@@ -31,6 +31,19 @@ if ! touch /app/screener_cache.db 2>/dev/null; then
   echo "[경고] /app 쓰기 권한 없음 — screener 캐시 비활성화 (매 요청마다 KRX/DART API 호출)" >&2
 fi
 
+# ── 시작 시 캐시 초기화 ──────────────────────────────────────
+# 배포마다 구버전 캐시(필드 누락, NaN 등)가 남지 않도록 전체 초기화
+python3 - <<'PYEOF'
+import sys
+sys.path.insert(0, '/app')
+try:
+    from stock.cache import delete_prefix
+    delete_prefix('')   # 빈 prefix → 전체 삭제 (watchlist.db 별개, 영향 없음)
+    print('[정보] 캐시 초기화 완료 (cache.db)')
+except Exception as e:
+    print(f'[경고] 캐시 초기화 실패: {e}', file=sys.stderr)
+PYEOF
+
 # ── uvicorn 실행 ─────────────────────────────────────────────
 echo "[시작] uvicorn main:app --host 0.0.0.0 --port ${PORT}"
 exec uvicorn main:app --host 0.0.0.0 --port "$PORT" "$@"

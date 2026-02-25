@@ -4,6 +4,15 @@ function fmtAwk(v) {
   return v.toLocaleString()
 }
 
+// M USD 기준 → B/T 단위로 변환
+function fmtUsdM(v) {
+  if (v == null) return '-'
+  const abs = Math.abs(v)
+  if (abs >= 1000000) return '$' + (v / 1000000).toFixed(1) + 'T'
+  if (abs >= 1000) return '$' + (v / 1000).toFixed(1) + 'B'
+  return '$' + v.toLocaleString() + 'M'
+}
+
 function fmtPct(v, digits = 1) {
   if (v == null) return null
   const sign = v > 0 ? '+' : ''
@@ -32,7 +41,7 @@ function YearHeader({ year, dartUrl }) {
   return <span className="font-semibold text-gray-700">{year}</span>
 }
 
-function DataRow({ label, rows, field, yoyField }) {
+function DataRow({ label, rows, field, yoyField, currency }) {
   return (
     <tr className="border-t border-gray-100">
       <td className="px-4 py-2.5 text-sm font-medium text-gray-700 whitespace-nowrap bg-gray-50 sticky left-0">
@@ -41,7 +50,7 @@ function DataRow({ label, rows, field, yoyField }) {
       {rows.map((r) => (
         <td key={r.year} className="px-4 py-2.5 text-right min-w-[80px]">
           <div className="text-sm font-medium text-gray-800">
-            {fmtAwk(r[field])}
+            {currency === 'USD' ? fmtUsdM(r[field]) : fmtAwk(r[field])}
           </div>
           {yoyField && r[yoyField] != null && (
             <div className={`text-xs ${growthColor(r[yoyField])}`}>
@@ -55,6 +64,7 @@ function DataRow({ label, rows, field, yoyField }) {
 }
 
 export default function FinancialTable({ data }) {
+  const currency = data?.currency || 'KRW'
   if (!data) {
     return (
       <div className="bg-white rounded-xl border border-gray-200 p-8 text-center text-gray-400 text-sm">
@@ -78,7 +88,10 @@ export default function FinancialTable({ data }) {
       <div className="px-5 py-3 border-b border-gray-100">
         <h2 className="text-sm font-semibold text-gray-700">
           연간 재무 요약
-          <span className="ml-2 text-xs font-normal text-gray-400">단위: 억원 (1조 이상은 조원)</span>
+          {currency === 'USD'
+            ? <span className="ml-2 text-xs font-normal text-gray-400">단위: M USD (1,000M 이상은 B/T · yfinance 기준)</span>
+            : <span className="ml-2 text-xs font-normal text-gray-400">단위: 억원 (1조 이상은 조원)</span>
+          }
         </h2>
       </div>
       <div className="overflow-x-auto">
@@ -96,8 +109,8 @@ export default function FinancialTable({ data }) {
             </tr>
           </thead>
           <tbody>
-            <DataRow label="매출액" rows={rows} field="revenue" yoyField="yoy_revenue" />
-            <DataRow label="영업이익" rows={rows} field="operating_profit" yoyField="yoy_op" />
+            <DataRow label="매출액" rows={rows} field="revenue" yoyField="yoy_revenue" currency={currency} />
+            <DataRow label="영업이익" rows={rows} field="operating_profit" yoyField="yoy_op" currency={currency} />
             <tr className="border-t border-gray-100">
               <td className="px-4 py-2.5 text-sm font-medium text-gray-700 bg-gray-50 sticky left-0">
                 영업이익률
@@ -112,12 +125,15 @@ export default function FinancialTable({ data }) {
                 </td>
               ))}
             </tr>
-            <DataRow label="당기순이익" rows={rows} field="net_income" />
+            <DataRow label="당기순이익" rows={rows} field="net_income" currency={currency} />
           </tbody>
         </table>
       </div>
       <p className="px-5 py-2 text-xs text-gray-400 border-t border-gray-100">
-        * 연도 클릭 시 DART 사업보고서로 이동합니다. YoY는 전년도 대비 증감률입니다.
+        {currency === 'USD'
+          ? '* YoY는 전년도 대비 증감률입니다.'
+          : '* 연도 클릭 시 DART 사업보고서로 이동합니다. YoY는 전년도 대비 증감률입니다.'
+        }
       </p>
     </div>
   )

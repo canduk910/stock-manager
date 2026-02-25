@@ -1,10 +1,42 @@
 /**
- * 범용 데이터 테이블.
+ * 범용 데이터 테이블 (컬럼 클릭 정렬 지원).
  *
  * columns: Array<{ key, label, align?, render? }>
  * data: Array<object>
  */
+import { useState, useMemo } from 'react'
+
+function SortIcon({ active, dir }) {
+  if (!active) return <span className="ml-1 text-gray-300 text-xs">⇅</span>
+  return <span className={`ml-1 text-xs ${active ? 'text-blue-500' : 'text-gray-300'}`}>{dir === 'asc' ? '▲' : '▼'}</span>
+}
+
 export default function DataTable({ columns, data, rowKey }) {
+  const [sortKey, setSortKey] = useState(null)
+  const [sortDir, setSortDir] = useState('asc')
+
+  const handleSort = (key) => {
+    if (sortKey === key) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
+    } else {
+      setSortKey(key)
+      setSortDir('asc')
+    }
+  }
+
+  const sortedData = useMemo(() => {
+    if (!sortKey || !data) return data
+    return [...data].sort((a, b) => {
+      const va = a[sortKey]
+      const vb = b[sortKey]
+      const na = Number(va)
+      const nb = Number(vb)
+      const isNum = va !== null && vb !== null && va !== '' && vb !== '' && !isNaN(na) && !isNaN(nb)
+      const cmp = isNum ? na - nb : String(va ?? '').localeCompare(String(vb ?? ''), 'ko')
+      return sortDir === 'asc' ? cmp : -cmp
+    })
+  }, [data, sortKey, sortDir])
+
   if (!data || data.length === 0) return null
 
   return (
@@ -15,7 +47,8 @@ export default function DataTable({ columns, data, rowKey }) {
             {columns.map((col) => (
               <th
                 key={col.key}
-                className={`px-4 py-2.5 font-semibold text-gray-600 whitespace-nowrap ${
+                onClick={() => handleSort(col.key)}
+                className={`px-4 py-2.5 font-semibold text-gray-600 whitespace-nowrap cursor-pointer select-none hover:bg-gray-100 transition-colors ${
                   col.align === 'right'
                     ? 'text-right'
                     : col.align === 'center'
@@ -24,12 +57,13 @@ export default function DataTable({ columns, data, rowKey }) {
                 }`}
               >
                 {col.label}
+                <SortIcon active={sortKey === col.key} dir={sortDir} />
               </th>
             ))}
           </tr>
         </thead>
         <tbody>
-          {data.map((row, i) => (
+          {sortedData.map((row, i) => (
             <tr
               key={rowKey ? row[rowKey] : i}
               className="border-b border-gray-100 hover:bg-gray-50 transition-colors"
