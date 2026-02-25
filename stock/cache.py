@@ -1,9 +1,21 @@
 """24시간 TTL SQLite 캐시 (~/stock-watchlist/cache.db)."""
 
 import json
+import math
 import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
+
+
+def _sanitize(obj):
+    """재귀적으로 NaN/Inf를 None으로 변환 (JSON 직렬화 안전 보장)."""
+    if isinstance(obj, float):
+        return None if (math.isnan(obj) or math.isinf(obj)) else obj
+    if isinstance(obj, dict):
+        return {k: _sanitize(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_sanitize(v) for v in obj]
+    return obj
 
 _CACHE_DIR = Path.home() / "stock-watchlist"
 _DB_PATH = _CACHE_DIR / "cache.db"
@@ -26,7 +38,7 @@ def _conn() -> sqlite3.Connection:
 
 
 def get_cached(key: str):
-    """캐시 조회. 만료됐거나 없으면 None 반환."""
+    """캐시 조회. 만료됐거나 없으면 None 반환. NaN 값은 None으로 정제."""
     try:
         with _conn() as con:
             row = con.execute(
@@ -37,19 +49,20 @@ def get_cached(key: str):
         value, expires = row
         if datetime.utcnow() > datetime.fromisoformat(expires):
             return None
-        return json.loads(value)
+        return _sanitize(json.loads(value))
     except Exception:
         return None
 
 
 def set_cached(key: str, value, ttl_hours: int = 24) -> None:
-    """데이터를 캐시에 저장."""
+    """데이터를 캐시에 저장. NaN/Inf는 None으로 변환 후 저장."""
     expires = (datetime.utcnow() + timedelta(hours=ttl_hours)).isoformat()
     try:
+        sanitized = _sanitize(value)
         with _conn() as con:
             con.execute(
                 "INSERT OR REPLACE INTO cache (key, value, expires) VALUES (?, ?, ?)",
-                (key, json.dumps(value, ensure_ascii=False), expires),
+                (key, json.dumps(sanitized, ensure_ascii=False), expires),
             )
     except Exception:
         pass

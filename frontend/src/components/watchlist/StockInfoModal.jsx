@@ -1,12 +1,18 @@
 import { useEffect, useState } from 'react'
 import { useStockInfo } from '../../hooks/useWatchlist'
 
-function fmtPrice(v) {
-  return v != null ? v.toLocaleString() + '원' : '-'
+function fmtPrice(v, currency = 'KRW') {
+  if (v == null) return '-'
+  if (currency === 'USD') return `$${v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  return v.toLocaleString() + '원'
 }
-function fmtAwk(v) {
-  return v != null ? v.toLocaleString() + '억' : '-'
+
+function fmtFinVal(v, currency = 'KRW') {
+  if (v == null) return '-'
+  if (currency === 'USD') return `$${v.toLocaleString()}M`
+  return v.toLocaleString() + '억'
 }
+
 function fmtPct(v) {
   if (v == null) return '-'
   const sign = v > 0 ? '+' : ''
@@ -18,27 +24,31 @@ function growthColor(v) {
   return v > 0 ? 'text-red-600' : v < 0 ? 'text-blue-600' : 'text-gray-500'
 }
 
-function ChangeCell({ change, changePct }) {
+function ChangeCell({ change, changePct, currency = 'KRW' }) {
   if (changePct == null) return <span className="text-gray-400">-</span>
   const up = changePct > 0
   const down = changePct < 0
   const color = up ? 'text-red-600' : down ? 'text-blue-600' : 'text-gray-600'
   const sign = up ? '+' : ''
+  const changeStr = currency === 'USD'
+    ? `$${Math.abs(change ?? 0).toFixed(2)}`
+    : (change != null ? Math.abs(change).toLocaleString() + '원' : '')
+  const changeSign = change != null ? (change >= 0 ? '+' : '-') : sign
   return (
     <span className={color}>
-      {sign}{change?.toLocaleString()}원 ({sign}{changePct?.toFixed(2)}%)
+      {changeSign}{changeStr} ({sign}{changePct?.toFixed(2)}%)
     </span>
   )
 }
 
-export default function StockInfoModal({ code, name, onClose, onMemoSave }) {
+export default function StockInfoModal({ code, name, market = 'KR', onClose, onMemoSave }) {
   const { data, loading, error, load } = useStockInfo()
   const [editingMemo, setEditingMemo] = useState(false)
   const [memoVal, setMemoVal] = useState('')
 
   useEffect(() => {
-    if (code) load(code)
-  }, [code])
+    if (code) load(code, market)
+  }, [code, market])
 
   useEffect(() => {
     if (data?.memo != null) setMemoVal(data.memo)
@@ -52,11 +62,13 @@ export default function StockInfoModal({ code, name, onClose, onMemoSave }) {
   }, [onClose])
 
   const handleMemoSave = async () => {
-    await onMemoSave(code, memoVal)
+    await onMemoSave(code, memoVal, market)
     setEditingMemo(false)
   }
 
   const b = data?.basic || {}
+  const currency = b.currency || (market === 'US' ? 'USD' : 'KRW')
+  const unitLabel = currency === 'USD' ? 'M USD' : '억원'
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={onClose}>
@@ -69,6 +81,11 @@ export default function StockInfoModal({ code, name, onClose, onMemoSave }) {
           <div>
             <h2 className="text-lg font-bold text-gray-900">{name}</h2>
             <span className="text-xs text-gray-400 font-mono">{code}</span>
+            {market !== 'KR' && (
+              <span className="ml-2 text-xs px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded font-medium">
+                {market}
+              </span>
+            )}
           </div>
           <button
             onClick={onClose}
@@ -94,26 +111,29 @@ export default function StockInfoModal({ code, name, onClose, onMemoSave }) {
             <>
               {/* 기본정보 카드 */}
               <div className="grid grid-cols-2 gap-3">
-                <InfoCard label="현재가" value={fmtPrice(b.price)} />
+                <InfoCard label="현재가" value={fmtPrice(b.price, currency)} />
                 <InfoCard
                   label="전일대비"
-                  value={<ChangeCell change={b.change} changePct={b.change_pct} />}
+                  value={<ChangeCell change={b.change} changePct={b.change_pct} currency={currency} />}
                 />
-                <InfoCard label="시가총액" value={fmtAwk(b.market_cap)} />
-                <InfoCard label="상장주식수" value={b.shares?.toLocaleString() ?? '-'} />
-                <InfoCard label="PER" value={b.per != null ? `${b.per}배` : '-'} />
-                <InfoCard label="PBR" value={b.pbr != null ? `${b.pbr}배` : '-'} />
-                <InfoCard label="52주 고가" value={fmtPrice(b.high_52)} />
-                <InfoCard label="52주 저가" value={fmtPrice(b.low_52)} />
-                <InfoCard label="시장" value={b.market ?? '-'} />
+                <InfoCard label="시가총액" value={b.market_cap != null ? `${b.market_cap.toLocaleString()} ${currency === 'USD' ? 'M USD' : '억'}` : '-'} />
+                {currency === 'KRW' && <InfoCard label="상장주식수" value={b.shares?.toLocaleString() ?? '-'} />}
+                <InfoCard label="PER" value={b.per != null ? `${typeof b.per === 'number' ? b.per.toFixed(1) : b.per}배` : '-'} />
+                <InfoCard label="PBR" value={b.pbr != null ? `${typeof b.pbr === 'number' ? b.pbr.toFixed(2) : b.pbr}배` : '-'} />
+                <InfoCard label="52주 고가" value={fmtPrice(b.high_52, currency)} />
+                <InfoCard label="52주 저가" value={fmtPrice(b.low_52, currency)} />
+                <InfoCard label="시장/거래소" value={b.market ?? '-'} />
                 <InfoCard label="업종" value={b.sector ?? '-'} />
               </div>
 
-              {/* 재무 테이블 (최대 10개년) */}
+              {/* 재무 테이블 */}
               {data.financials_3y && data.financials_3y.length > 0 && (
                 <div>
                   <h3 className="text-sm font-semibold text-gray-700 mb-2">
-                    재무 요약 (단위: 억원)
+                    재무 요약 (단위: {unitLabel})
+                    {currency === 'USD' && (
+                      <span className="ml-2 text-xs text-gray-400 font-normal">yfinance 기준 · 최대 4년</span>
+                    )}
                   </h3>
                   <div className="overflow-x-auto rounded-lg border border-gray-200">
                     <table className="min-w-full text-sm">

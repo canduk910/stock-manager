@@ -3,26 +3,51 @@ import { useNavigate } from 'react-router-dom'
 
 // ── 포맷 유틸 ────────────────────────────────────────────────────────────────
 
-function fmtPrice(v) {
-  return v != null ? v.toLocaleString() : '-'
+function fmtPrice(v, currency = 'KRW') {
+  if (v == null) return '-'
+  if (currency === 'USD') return `$${v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  return v.toLocaleString()
 }
-function fmtAwk(v) {
-  return v != null ? v.toLocaleString() : '-'
+
+function fmtFinVal(v, currency = 'KRW') {
+  if (v == null) return '-'
+  if (currency === 'USD') return `$${v.toLocaleString()}M`
+  return v.toLocaleString()
 }
+
+function fmtCap(v, currency = 'KRW') {
+  if (v == null) return '-'
+  if (currency === 'USD') return `$${v.toLocaleString()}M`
+  return v.toLocaleString()
+}
+
 function fmtPct(v, digits = 1) {
   return v != null ? `${v.toFixed(digits)}%` : '-'
 }
 
-function ChangeCell({ change, changePct }) {
+function ChangeCell({ change, changePct, currency = 'KRW' }) {
   if (changePct == null) return <span className="text-gray-400">-</span>
   const up = changePct > 0
   const down = changePct < 0
   const color = up ? 'text-red-600' : down ? 'text-blue-600' : 'text-gray-600'
   const arrow = up ? '▲' : down ? '▼' : ''
   const sign = up ? '+' : ''
+  const changeStr = currency === 'USD'
+    ? `$${Math.abs(change ?? 0).toFixed(2)}`
+    : (change != null ? Math.abs(change).toLocaleString() : '')
+  const changeSign = change != null ? (change >= 0 ? '+' : '-') : sign
   return (
     <span className={`font-medium ${color}`}>
-      {arrow} {sign}{fmtPrice(change)} ({sign}{fmtPct(changePct, 2)})
+      {arrow} {changeSign}{changeStr} ({sign}{fmtPct(changePct, 2)})
+    </span>
+  )
+}
+
+function MarketBadge({ market }) {
+  if (!market || market === 'KR') return null
+  return (
+    <span className="ml-1 text-xs px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded font-medium">
+      {market}
     </span>
   )
 }
@@ -31,12 +56,12 @@ function ChangeCell({ change, changePct }) {
 
 function downloadCsv(stocks) {
   const headers = [
-    '종목코드','종목명','현재가','전일대비(원)','전일대비(%)','시가총액(억)',
-    '매출액(억)','영업이익(억)','당기순이익(억)','영업이익률(%)','보고서기준','메모',
+    '종목코드','시장','종목명','현재가','통화','전일대비(%)','시가총액',
+    '매출액','영업이익','당기순이익','영업이익률(%)','보고서기준','메모',
   ]
   const rows = stocks.map((s) => [
-    s.code, s.name, s.price ?? '', s.change ?? '', s.change_pct ?? '',
-    s.market_cap ?? '', s.revenue ?? '', s.operating_profit ?? '',
+    s.code, s.market ?? 'KR', s.name, s.price ?? '', s.currency ?? 'KRW',
+    s.change_pct ?? '', s.market_cap ?? '', s.revenue ?? '', s.operating_profit ?? '',
     s.net_income ?? '', s.oi_margin ?? '', s.report_date ?? '', s.memo ?? '',
   ])
   const csv = [headers, ...rows].map((r) => r.map(String).join(',')).join('\n')
@@ -51,7 +76,7 @@ function downloadCsv(stocks) {
 
 // ── 인라인 메모 편집 셀 ───────────────────────────────────────────────────────
 
-function MemoCell({ code, memo, onSave }) {
+function MemoCell({ code, market, memo, onSave }) {
   const [editing, setEditing] = useState(false)
   const [val, setVal] = useState(memo || '')
   const [saving, setSaving] = useState(false)
@@ -59,7 +84,7 @@ function MemoCell({ code, memo, onSave }) {
   const handleSave = async () => {
     setSaving(true)
     try {
-      await onSave(code, val)
+      await onSave(code, val, market)
       setEditing(false)
     } finally {
       setSaving(false)
@@ -108,13 +133,13 @@ export default function WatchlistDashboard({
   onShowInfo,
 }) {
   const navigate = useNavigate()
-  const [confirmCode, setConfirmCode] = useState(null)
+  const [confirmItem, setConfirmItem] = useState(null) // { code, market }
 
-  const handleDeleteClick = (code) => setConfirmCode(code)
+  const handleDeleteClick = (code, market) => setConfirmItem({ code, market })
   const handleDeleteConfirm = async () => {
-    if (!confirmCode) return
-    await onDelete(confirmCode)
-    setConfirmCode(null)
+    if (!confirmItem) return
+    await onDelete(confirmItem.code, confirmItem.market)
+    setConfirmItem(null)
   }
 
   if (!stocks && !loading) return null
@@ -165,8 +190,8 @@ export default function WatchlistDashboard({
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
                 {[
-                  '종목코드','종목명','현재가','전일대비','시가총액(억)',
-                  '매출액(억)','영업이익(억)','순이익(억)','영업이익률','보고서기준','메모','',
+                  '종목코드','종목명','현재가','전일대비','시가총액',
+                  '매출액','영업이익','순이익','영업이익률','보고서기준','메모','',
                 ].map((h) => (
                   <th key={h} className="px-3 py-2.5 text-left text-xs font-semibold text-gray-600 whitespace-nowrap">
                     {h}
@@ -175,57 +200,76 @@ export default function WatchlistDashboard({
               </tr>
             </thead>
             <tbody>
-              {stocks.map((s) => (
-                <tr key={s.code} className="border-b border-gray-100 hover:bg-gray-50">
-                  <td className="px-3 py-2.5 text-gray-500 font-mono text-xs">{s.code}</td>
-                  <td className="px-3 py-2.5">
-                    <button
-                      onClick={() => navigate(`/detail/${s.code}`)}
-                      className="font-medium text-blue-700 hover:underline text-left"
-                    >
-                      {s.name}
-                    </button>
-                  </td>
-                  <td className="px-3 py-2.5 text-right font-medium">{fmtPrice(s.price)}</td>
-                  <td className="px-3 py-2.5 text-right whitespace-nowrap">
-                    <ChangeCell change={s.change} changePct={s.change_pct} />
-                  </td>
-                  <td className="px-3 py-2.5 text-right">{fmtAwk(s.market_cap)}</td>
-                  <td className="px-3 py-2.5 text-right">{fmtAwk(s.revenue)}</td>
-                  <td className="px-3 py-2.5 text-right">{fmtAwk(s.operating_profit)}</td>
-                  <td className="px-3 py-2.5 text-right">{fmtAwk(s.net_income)}</td>
-                  <td className="px-3 py-2.5 text-right">{fmtPct(s.oi_margin)}</td>
-                  <td className="px-3 py-2.5 text-center text-xs text-gray-500">{s.report_date || '-'}</td>
-                  <td className="px-3 py-2.5">
-                    <MemoCell code={s.code} memo={s.memo} onSave={onMemoSave} />
-                  </td>
-                  <td className="px-3 py-2.5">
-                    <button
-                      onClick={() => handleDeleteClick(s.code)}
-                      className="text-xs text-gray-400 hover:text-red-500 transition-colors"
-                      title="삭제"
-                    >
-                      ✕
-                    </button>
-                  </td>
-                </tr>
-              ))}
+              {stocks.map((s) => {
+                const currency = s.currency || 'KRW'
+                const mkt = s.market || 'KR'
+                return (
+                  <tr key={`${mkt}:${s.code}`} className="border-b border-gray-100 hover:bg-gray-50">
+                    <td className="px-3 py-2.5 text-gray-500 font-mono text-xs">
+                      {s.code}
+                      <MarketBadge market={mkt !== 'KR' ? mkt : null} />
+                    </td>
+                    <td className="px-3 py-2.5">
+                      <button
+                        onClick={() => navigate(`/detail/${s.code}`)}
+                        className="font-medium text-blue-700 hover:underline text-left"
+                      >
+                        {s.name}
+                      </button>
+                    </td>
+                    <td className="px-3 py-2.5 text-right font-medium">{fmtPrice(s.price, currency)}</td>
+                    <td className="px-3 py-2.5 text-right whitespace-nowrap">
+                      <ChangeCell change={s.change} changePct={s.change_pct} currency={currency} />
+                    </td>
+                    <td className="px-3 py-2.5 text-right text-xs">
+                      {fmtCap(s.market_cap, currency)}
+                      {s.market_cap != null && <span className="text-gray-400 ml-0.5">{currency === 'USD' ? 'M' : '억'}</span>}
+                    </td>
+                    <td className="px-3 py-2.5 text-right text-xs">
+                      {fmtFinVal(s.revenue, currency)}
+                      {s.revenue != null && <span className="text-gray-400 ml-0.5">{currency === 'USD' ? 'M' : '억'}</span>}
+                    </td>
+                    <td className="px-3 py-2.5 text-right text-xs">
+                      {fmtFinVal(s.operating_profit, currency)}
+                      {s.operating_profit != null && <span className="text-gray-400 ml-0.5">{currency === 'USD' ? 'M' : '억'}</span>}
+                    </td>
+                    <td className="px-3 py-2.5 text-right text-xs">
+                      {fmtFinVal(s.net_income, currency)}
+                      {s.net_income != null && <span className="text-gray-400 ml-0.5">{currency === 'USD' ? 'M' : '억'}</span>}
+                    </td>
+                    <td className="px-3 py-2.5 text-right">{fmtPct(s.oi_margin)}</td>
+                    <td className="px-3 py-2.5 text-center text-xs text-gray-500">{s.report_date || '-'}</td>
+                    <td className="px-3 py-2.5">
+                      <MemoCell code={s.code} market={mkt} memo={s.memo} onSave={onMemoSave} />
+                    </td>
+                    <td className="px-3 py-2.5">
+                      <button
+                        onClick={() => handleDeleteClick(s.code, mkt)}
+                        className="text-xs text-gray-400 hover:text-red-500 transition-colors"
+                        title="삭제"
+                      >
+                        ✕
+                      </button>
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         </div>
       )}
 
       {/* 삭제 확인 팝업 */}
-      {confirmCode && (
+      {confirmItem && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl shadow-xl p-6 w-80">
             <p className="font-semibold text-gray-800 mb-1">관심종목 삭제</p>
             <p className="text-sm text-gray-500 mb-4">
-              <strong>{confirmCode}</strong> 종목을 관심종목에서 삭제할까요?
+              <strong>{confirmItem.code}</strong> 종목을 관심종목에서 삭제할까요?
             </p>
             <div className="flex gap-2 justify-end">
               <button
-                onClick={() => setConfirmCode(null)}
+                onClick={() => setConfirmItem(null)}
                 className="px-4 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50"
               >
                 취소

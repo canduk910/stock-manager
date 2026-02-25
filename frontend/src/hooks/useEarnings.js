@@ -6,11 +6,11 @@ export function useEarnings() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
 
-  const load = useCallback(async (startDate, endDate) => {
+  const load = useCallback(async (startDate, endDate, market = 'KR') => {
     setLoading(true)
     setError(null)
     try {
-      const result = await fetchFilings(startDate, endDate)
+      const result = await fetchFilings(startDate, endDate, market)
       setData(result)
     } catch (e) {
       setError(e.message)

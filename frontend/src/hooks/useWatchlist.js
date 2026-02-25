@@ -27,21 +27,21 @@ export function useWatchlist() {
     }
   }, [])
 
-  const add = useCallback(async (code, memo) => {
-    const data = await addToWatchlist(code, memo)
+  const add = useCallback(async (code, memo, market = 'KR') => {
+    const data = await addToWatchlist(code, memo, market)
     setItems((prev) => (prev ? [...prev, data.item] : [data.item]))
     return data.item
   }, [])
 
-  const remove = useCallback(async (code) => {
-    await removeFromWatchlist(code)
-    setItems((prev) => prev?.filter((i) => i.code !== code) ?? [])
+  const remove = useCallback(async (code, market = 'KR') => {
+    await removeFromWatchlist(code, market)
+    setItems((prev) => prev?.filter((i) => !(i.code === code && i.market === market)) ?? [])
   }, [])
 
-  const memo = useCallback(async (code, text) => {
-    const data = await updateMemo(code, text)
+  const memo = useCallback(async (code, text, market = 'KR') => {
+    const data = await updateMemo(code, text, market)
     setItems((prev) =>
-      prev?.map((i) => (i.code === code ? data.item : i)) ?? []
+      prev?.map((i) => (i.code === code && i.market === market ? data.item : i)) ?? []
     )
     return data.item
   }, [])
@@ -77,12 +77,12 @@ export function useStockInfo() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
 
-  const load = useCallback(async (code) => {
+  const load = useCallback(async (code, market = 'KR') => {
     setLoading(true)
     setError(null)
     setData(null)
     try {
-      const result = await fetchStockInfo(code)
+      const result = await fetchStockInfo(code, market)
       setData(result)
     } catch (e) {
       setError(e.message)

@@ -18,16 +18,17 @@ export default function EarningsPage() {
   const [startDate, setStartDate] = useState(todayStr())
   const [endDate, setEndDate] = useState(todayStr())
   const [filterText, setFilterText] = useState('')
+  const [market, setMarket] = useState('KR')
   const { data, loading, error, load } = useEarnings()
 
   useEffect(() => {
     const today = todayStr().replace(/-/g, '')
-    load(today, today)
+    load(today, today, 'KR')
   }, []) // 첫 마운트 시 오늘 날짜로 조회
 
   const handleSearch = () => {
     setFilterText('')
-    load(startDate.replace(/-/g, ''), endDate.replace(/-/g, ''))
+    load(startDate.replace(/-/g, ''), endDate.replace(/-/g, ''), market)
   }
 
   const filteredFilings = () => {
@@ -37,7 +38,7 @@ export default function EarningsPage() {
     return data.filings.filter(
       (f) =>
         f.corp_name?.toLowerCase().includes(q) ||
-        f.stock_code?.includes(q)
+        f.stock_code?.toLowerCase().includes(q)
     )
   }
 
@@ -53,12 +54,34 @@ export default function EarningsPage() {
     return s === e ? s : `${s} ~ ${e}`
   }
 
+  const marketLabel = data?.market === 'US' ? '미국 SEC' : '국내 DART'
+
   return (
     <div className="space-y-6">
       <h1 className="text-2xl font-bold text-gray-900">공시 조회</h1>
 
       {/* 검색 패널 */}
-      <div className="bg-white rounded-xl border border-gray-200 p-4">
+      <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-3">
+        {/* 시장 선택 탭 */}
+        <div className="flex gap-1">
+          {[
+            { value: 'KR', label: '국내 (DART)' },
+            { value: 'US', label: '미국 (SEC EDGAR)' },
+          ].map(({ value, label }) => (
+            <button
+              key={value}
+              onClick={() => setMarket(value)}
+              className={`px-4 py-1.5 text-sm rounded-lg font-medium transition-colors ${
+                market === value
+                  ? 'bg-blue-600 text-white'
+                  : 'border border-gray-300 text-gray-600 hover:bg-gray-50'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
         <div className="flex flex-wrap items-end gap-3">
           <label className="flex flex-col gap-1">
             <span className="text-xs font-medium text-gray-500">시작 날짜</span>
@@ -113,6 +136,12 @@ export default function EarningsPage() {
             {loading ? '조회 중...' : '조회'}
           </button>
         </div>
+
+        {market === 'US' && (
+          <p className="text-xs text-gray-400">
+            미국 SEC EDGAR에서 10-K (연간보고서) 및 10-Q (분기보고서)를 조회합니다.
+          </p>
+        )}
       </div>
 
       {loading && <LoadingSpinner />}
@@ -143,14 +172,14 @@ export default function EarningsPage() {
                 : <><span className="font-semibold text-gray-800">{data.total}건</span>의 정기보고서 제출</>
               }
               {dateRangeText() && ` (${dateRangeText()})`}
-              <span className="ml-2 text-gray-400 text-xs">· 상장종목만</span>
+              <span className="ml-2 text-gray-400 text-xs">· {marketLabel}</span>
             </p>
           </div>
 
           {filteredFilings().length === 0 ? (
             <EmptyState message={filterText ? `'${filterText}'에 해당하는 종목이 없습니다.` : '해당 기간에 제출된 정기보고서가 없습니다.'} />
           ) : (
-            <FilingsTable filings={filteredFilings()} />
+            <FilingsTable filings={filteredFilings()} market={data?.market || 'KR'} />
           )}
         </>
       )}

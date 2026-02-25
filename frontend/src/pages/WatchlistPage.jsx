@@ -9,7 +9,7 @@ import ErrorAlert from '../components/common/ErrorAlert'
 export default function WatchlistPage() {
   const { items, loading: listLoading, error: listError, load: loadList, add, remove, memo } = useWatchlist()
   const { stocks, loading: dashLoading, error: dashError, load: loadDash } = useDashboard()
-  const [modal, setModal] = useState(null) // { code, name }
+  const [modal, setModal] = useState(null) // { code, name, market }
 
   // 첫 마운트 시 목록 + 대시보드 동시 로드
   useEffect(() => {
@@ -17,19 +17,18 @@ export default function WatchlistPage() {
     loadDash()
   }, [])
 
-  const handleAdd = async (code, memoText) => {
-    await add(code, memoText)
+  const handleAdd = async (code, memoText, market) => {
+    await add(code, memoText, market)
     loadDash()
   }
 
-  const handleDelete = async (code) => {
-    await remove(code)
+  const handleDelete = async (code, market) => {
+    await remove(code, market)
     loadDash()
   }
 
-  const handleMemoSave = async (code, text) => {
-    await memo(code, text)
-    // 대시보드 memo 컬럼도 갱신
+  const handleMemoSave = async (code, text, market) => {
+    await memo(code, text, market)
     loadDash()
   }
 
@@ -59,7 +58,7 @@ export default function WatchlistPage() {
           onRefresh={handleRefresh}
           onDelete={handleDelete}
           onMemoSave={handleMemoSave}
-          onShowInfo={(code, name) => setModal({ code, name })}
+          onShowInfo={(code, name, market) => setModal({ code, name, market })}
         />
       )}
 
@@ -68,6 +67,7 @@ export default function WatchlistPage() {
         <StockInfoModal
           code={modal.code}
           name={modal.name}
+          market={modal.market}
           onClose={() => setModal(null)}
           onMemoSave={handleMemoSave}
         />

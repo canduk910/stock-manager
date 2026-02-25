@@ -6,3 +6,4 @@ pandas
 click
 rich
 pykrx
+yfinance

@@ -1,6 +1,6 @@
 """관심종목 서비스 레이어.
 
-stock/ 패키지(pykrx + OpenDart)를 조합해 웹 API용 데이터를 조립한다.
+stock/ 패키지(pykrx + OpenDart + yfinance)를 조합해 웹 API용 데이터를 조립한다.
 broker(KoreaInvestment)는 선택 인자로, 미설정 시 pykrx로 대체한다.
 """
 
@@ -10,11 +10,18 @@ from typing import Optional
 from stock import store, symbol_map
 from stock.dart_fin import fetch_financials, fetch_financials_multi_year
 from stock.market import fetch_detail, fetch_price
+from stock.utils import is_domestic
+import stock.yf_client as yf_client
 
 
 def _awk(won: Optional[int]) -> Optional[int]:
     """원 → 억원 (반올림 int). None이면 None."""
     return round(won / 1_0000_0000) if won is not None else None
+
+
+def _usd_m(usd: Optional[int]) -> Optional[float]:
+    """USD → 백만달러(M). None이면 None."""
+    return round(usd / 1_000_000, 1) if usd is not None else None
 
 
 def _growth(cur: Optional[int], prev: Optional[int]) -> Optional[float]:
@@ -35,15 +42,24 @@ class WatchlistService:
 
     # ── 종목 resolve ────────────────────────────────────────────────────────
 
-    def resolve_symbol(self, name_or_code: str) -> tuple[str, str]:
-        """종목명 또는 코드 → (종목코드, 종목명).
+    def resolve_symbol(self, name_or_code: str, market: str = "KR") -> tuple[str, str, str]:
+        """종목명 또는 코드 → (종목코드, 종목명, market).
 
         Raises:
             ValueError: 종목을 찾을 수 없거나 복수 매칭인 경우
         """
+        if market != "KR":
+            # 해외: ticker 직접 검증
+            ticker = name_or_code.upper().strip()
+            info = yf_client.validate_ticker(ticker)
+            if not info:
+                raise ValueError(f"종목을 찾을 수 없습니다: '{ticker}'")
+            return ticker, info["name"], market
+
+        # 국내: 기존 pykrx 기반 검색
         result = symbol_map.resolve(name_or_code)
         if result:
-            return result
+            return result[0], result[1], "KR"
 
         import re
         if not re.match(r"^\d{6}$", name_or_code):
@@ -65,10 +81,15 @@ class WatchlistService:
         results = []
         for item in items:
             code = item["code"]
+            market = item.get("market", "KR")
+            domestic = is_domestic(code) and market == "KR"
+
             row: dict = {
                 "code": code,
+                "market": market,
                 "name": item["name"],
                 "memo": item.get("memo", ""),
+                "currency": "KRW" if domestic else "USD",
                 # 시세
                 "price": None,
                 "change": None,
@@ -82,31 +103,60 @@ class WatchlistService:
                 "report_date": None,
             }
 
-            try:
-                price = fetch_price(code)
-                if price:
-                    row["price"] = price["close"]
-                    row["change"] = price.get("change")
-                    row["change_pct"] = price.get("change_pct")
-                    row["market_cap"] = _awk(price.get("mktcap"))
-            except Exception:
-                pass
+            if domestic:
+                try:
+                    price = fetch_price(code)
+                    if price:
+                        row["price"] = price["close"]
+                        row["change"] = price.get("change")
+                        row["change_pct"] = price.get("change_pct")
+                        row["market_cap"] = _awk(price.get("mktcap"))
+                except Exception:
+                    pass
 
-            try:
-                fin = fetch_financials(code)
-                if fin and fin.get("bsns_year"):
-                    rev = fin.get("revenue")
-                    op = fin.get("operating_income")
-                    net = fin.get("net_income")
-                    row["revenue"] = _awk(rev)
-                    row["operating_profit"] = _awk(op)
-                    row["net_income"] = _awk(net)
-                    row["oi_margin"] = (
-                        round(op / rev * 100, 1) if rev and op and rev != 0 else None
-                    )
-                    row["report_date"] = _period_label(fin)
-            except Exception:
-                pass
+                try:
+                    fin = fetch_financials(code)
+                    if fin and fin.get("bsns_year"):
+                        rev = fin.get("revenue")
+                        op = fin.get("operating_income")
+                        net = fin.get("net_income")
+                        row["revenue"] = _awk(rev)
+                        row["operating_profit"] = _awk(op)
+                        row["net_income"] = _awk(net)
+                        row["oi_margin"] = (
+                            round(op / rev * 100, 1) if rev and op and rev != 0 else None
+                        )
+                        row["report_date"] = _period_label(fin)
+                except Exception:
+                    pass
+            else:
+                # 해외: yfinance
+                try:
+                    price = yf_client.fetch_price_yf(code)
+                    if price:
+                        row["price"] = price["close"]
+                        row["change"] = price.get("change")
+                        row["change_pct"] = price.get("change_pct")
+                        mktcap = price.get("mktcap")
+                        row["market_cap"] = _usd_m(mktcap)  # M USD
+                except Exception:
+                    pass
+
+                try:
+                    fin = yf_client.fetch_financials_yf(code)
+                    if fin:
+                        rev = fin.get("revenue")
+                        op = fin.get("operating_income")
+                        net = fin.get("net_income")
+                        row["revenue"] = _usd_m(rev)
+                        row["operating_profit"] = _usd_m(op)
+                        row["net_income"] = _usd_m(net)
+                        row["oi_margin"] = (
+                            round(op / rev * 100, 1) if rev and op and rev != 0 else None
+                        )
+                        row["report_date"] = str(fin.get("year", "")) if fin.get("year") else None
+                except Exception:
+                    pass
 
             results.append(row)
             time.sleep(0.05)  # rate-limit 여유
@@ -115,51 +165,97 @@ class WatchlistService:
 
     # ── 단일 종목 상세 ───────────────────────────────────────────────────────
 
-    def get_stock_detail(self, code: str) -> dict:
+    def get_stock_detail(self, code: str, market: str = "KR") -> dict:
         """기본정보 + 최대 10개년 재무 통합."""
-        detail = fetch_detail(code)
-        multi_rows = fetch_financials_multi_year(code, years=10)
-        item = store.get_item(code)
+        domestic = is_domestic(code) and market == "KR"
 
-        basic: dict = {"code": code}
-        if detail:
-            mktcap = detail.get("mktcap")
-            basic.update(
-                {
-                    "price": detail["close"],
-                    "change": detail.get("change"),
-                    "change_pct": detail.get("change_pct"),
-                    "market_cap": _awk(mktcap),
-                    "per": detail.get("per"),
-                    "pbr": detail.get("pbr"),
-                    "high_52": detail.get("high_52"),
-                    "low_52": detail.get("low_52"),
-                    "market": detail.get("market_type"),
-                    "sector": detail.get("sector"),
-                    "shares": detail.get("shares"),
-                }
-            )
+        if domestic:
+            detail = fetch_detail(code)
+            multi_rows = fetch_financials_multi_year(code, years=10)
+            item = store.get_item(code, market="KR")
 
-        # 과거 → 최신 순으로 정렬된 multi_rows에서 전년도 YoY 계산
-        financials_ny = []
-        for i, row in enumerate(multi_rows):
-            prev = multi_rows[i - 1] if i > 0 else None
-            rev = row["revenue"]
-            op = row["operating_income"]
-            net = row["net_income"]
-            prev_rev = prev["revenue"] if prev else None
-            prev_op = prev["operating_income"] if prev else None
-            financials_ny.append(
-                {
-                    "year": row["year"],         # 정수 (e.g. 2024)
-                    "revenue": _awk(rev),
-                    "operating_profit": _awk(op),
-                    "net_income": _awk(net),
-                    "yoy_revenue": _growth(rev, prev_rev),
-                    "yoy_op": _growth(op, prev_op),
-                    "dart_url": row.get("dart_url", ""),
-                }
-            )
+            basic: dict = {"code": code, "currency": "KRW"}
+            if detail:
+                mktcap = detail.get("mktcap")
+                basic.update(
+                    {
+                        "price": detail["close"],
+                        "change": detail.get("change"),
+                        "change_pct": detail.get("change_pct"),
+                        "market_cap": _awk(mktcap),
+                        "per": detail.get("per"),
+                        "pbr": detail.get("pbr"),
+                        "high_52": detail.get("high_52"),
+                        "low_52": detail.get("low_52"),
+                        "market": detail.get("market_type"),
+                        "sector": detail.get("sector"),
+                        "shares": detail.get("shares"),
+                    }
+                )
+
+            financials_ny = []
+            for i, row in enumerate(multi_rows):
+                prev = multi_rows[i - 1] if i > 0 else None
+                rev = row["revenue"]
+                op = row["operating_income"]
+                net = row["net_income"]
+                prev_rev = prev["revenue"] if prev else None
+                prev_op = prev["operating_income"] if prev else None
+                financials_ny.append(
+                    {
+                        "year": row["year"],
+                        "revenue": _awk(rev),
+                        "operating_profit": _awk(op),
+                        "net_income": _awk(net),
+                        "yoy_revenue": _growth(rev, prev_rev),
+                        "yoy_op": _growth(op, prev_op),
+                        "dart_url": row.get("dart_url", ""),
+                    }
+                )
+        else:
+            # 해외: yfinance
+            detail = yf_client.fetch_detail_yf(code)
+            multi_rows_yf = yf_client.fetch_financials_multi_year_yf(code, years=4)
+            item = store.get_item(code, market=market)
+
+            basic: dict = {"code": code, "currency": "USD"}
+            if detail:
+                mktcap = detail.get("mktcap")
+                basic.update(
+                    {
+                        "name": detail.get("name", code),
+                        "price": detail.get("close"),
+                        "change": detail.get("change"),
+                        "change_pct": detail.get("change_pct"),
+                        "market_cap": _usd_m(mktcap),
+                        "per": detail.get("per"),
+                        "pbr": detail.get("pbr"),
+                        "high_52": detail.get("high_52"),
+                        "low_52": detail.get("low_52"),
+                        "market": detail.get("market_type"),
+                        "sector": detail.get("sector"),
+                    }
+                )
+
+            financials_ny = []
+            for i, row in enumerate(multi_rows_yf):
+                prev = multi_rows_yf[i - 1] if i > 0 else None
+                rev = row["revenue"]
+                op = row["operating_income"]
+                net = row["net_income"]
+                prev_rev = prev["revenue"] if prev else None
+                prev_op = prev["operating_income"] if prev else None
+                financials_ny.append(
+                    {
+                        "year": row["year"],
+                        "revenue": _usd_m(rev),
+                        "operating_profit": _usd_m(op),
+                        "net_income": _usd_m(net),
+                        "yoy_revenue": _growth(rev, prev_rev),
+                        "yoy_op": _growth(op, prev_op),
+                        "dart_url": "",
+                    }
+                )
 
         return {
             "basic": basic,

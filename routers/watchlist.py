@@ -1,6 +1,6 @@
 """관심종목 API 라우터."""
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from services.watchlist_service import WatchlistService
@@ -15,6 +15,7 @@ _svc = WatchlistService()
 class AddBody(BaseModel):
     code: str           # 종목코드 또는 종목명
     memo: str = ""
+    market: str = "KR"  # "KR" 또는 "US"
 
 
 class MemoBody(BaseModel):
@@ -31,34 +32,34 @@ def list_watchlist():
 
 @router.post("", status_code=201)
 def add_watchlist(body: AddBody):
-    """관심종목 추가 (종목코드 또는 종목명 허용)."""
+    """관심종목 추가 (종목코드 또는 종목명 허용). market: KR | US."""
     try:
-        code, name = _svc.resolve_symbol(body.code)
+        code, name, market = _svc.resolve_symbol(body.code, body.market)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
-    added = store.add_item(code, name, body.memo)
+    added = store.add_item(code, name, body.memo, market)
     if not added:
         raise HTTPException(status_code=409, detail=f"이미 등록된 종목입니다: {name} ({code})")
 
-    item = store.get_item(code)
+    item = store.get_item(code, market)
     return {"item": item}
 
 
 @router.delete("/{code}")
-def remove_watchlist(code: str):
+def remove_watchlist(code: str, market: str = Query("KR")):
     """관심종목 삭제."""
-    if not store.remove_item(code):
+    if not store.remove_item(code, market):
         raise HTTPException(status_code=404, detail=f"관심종목에 없는 종목코드입니다: {code}")
     return {"deleted": True}
 
 
 @router.patch("/{code}")
-def update_memo(code: str, body: MemoBody):
+def update_memo(code: str, body: MemoBody, market: str = Query("KR")):
     """메모 수정."""
-    if not store.update_memo(code, body.memo):
+    if not store.update_memo(code, body.memo, market):
         raise HTTPException(status_code=404, detail=f"관심종목에 없는 종목코드입니다: {code}")
-    item = store.get_item(code)
+    item = store.get_item(code, market)
     return {"item": item}
 
 
@@ -75,10 +76,10 @@ def get_dashboard():
 
 
 @router.get("/info/{code}")
-def get_stock_info(code: str):
-    """단일 종목 상세 (기본정보 + 3개년 재무)."""
+def get_stock_info(code: str, market: str = Query("KR")):
+    """단일 종목 상세 (기본정보 + 재무)."""
     try:
-        detail = _svc.get_stock_detail(code)
+        detail = _svc.get_stock_detail(code, market)
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
 

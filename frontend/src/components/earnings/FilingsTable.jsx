@@ -7,20 +7,22 @@ function fmtDate(s) {
   return `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}`
 }
 
-function WatchlistButton({ code }) {
+function WatchlistButton({ code, market = 'KR' }) {
   const [status, setStatus] = useState('idle') // idle | loading | done | error
 
   const handleAdd = async () => {
-    if (status === 'loading' || status === 'done') return
+    if (status === 'loading' || status === 'done' || !code) return
     setStatus('loading')
     try {
-      await addToWatchlist(code)
+      await addToWatchlist(code, '', market)
       setStatus('done')
     } catch {
       setStatus('error')
       setTimeout(() => setStatus('idle'), 2000)
     }
   }
+
+  if (!code) return null
 
   if (status === 'done')
     return <span className="text-green-600 text-xs font-medium">✓ 추가됨</span>
@@ -80,58 +82,74 @@ function ReturnCell({ value }) {
   )
 }
 
-const REPORT_TYPE_COLORS = {
+const REPORT_TYPE_COLORS_KR = {
   '사업보고서': 'bg-purple-100 text-purple-700',
   '반기보고서': 'bg-blue-100 text-blue-700',
   '분기보고서': 'bg-teal-100 text-teal-700',
 }
 
-const COLUMNS = [
-  {
-    key: '_watchlist',
-    label: '',
-    align: 'center',
-    render: (_, row) => <WatchlistButton code={row.stock_code} />,
-  },
-  { key: 'stock_code', label: '종목코드', align: 'center' },
-  { key: 'corp_name', label: '종목명', align: 'left' },
-  { key: 'change_pct', label: '당일',   align: 'right', render: (v) => <ReturnCell value={v} /> },
-  { key: 'return_3m',  label: '3개월', align: 'right', render: (v) => <ReturnCell value={v} /> },
-  { key: 'return_6m',  label: '6개월', align: 'right', render: (v) => <ReturnCell value={v} /> },
-  { key: 'return_1y',  label: '1년',   align: 'right', render: (v) => <ReturnCell value={v} /> },
-  { key: 'revenue',          label: '매출액',  align: 'right', render: (v, row) => <FinCell value={v} prevValue={row.revenue_prev} /> },
-  { key: 'operating_income', label: '영업이익', align: 'right', render: (v, row) => <FinCell value={v} prevValue={row.operating_income_prev} /> },
-  {
-    key: 'report_type',
-    label: '보고서 종류',
-    align: 'center',
-    render: (v) => {
-      const cls = REPORT_TYPE_COLORS[v] || 'bg-gray-100 text-gray-700'
-      return <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${cls}`}>{v}</span>
-    },
-  },
-  {
-    key: 'report_name',
-    label: '보고서명',
-    align: 'left',
-    render: (v, row) =>
-      row.dart_url ? (
-        <a
-          href={row.dart_url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-blue-600 hover:text-blue-800 hover:underline"
-        >
-          {v}
-        </a>
-      ) : (
-        v
-      ),
-  },
-  { key: 'rcept_dt', label: '제출일', align: 'center', render: fmtDate },
-  { key: 'flr_nm', label: '제출인', align: 'left' },
-]
+const REPORT_TYPE_COLORS_US = {
+  '10-K': 'bg-purple-100 text-purple-700',
+  '10-Q': 'bg-teal-100 text-teal-700',
+}
 
-export default function FilingsTable({ filings }) {
-  return <DataTable columns={COLUMNS} data={filings} rowKey="stock_code" />
+function makeColumns(market) {
+  const isUS = market === 'US'
+  return [
+    {
+      key: '_watchlist',
+      label: '',
+      align: 'center',
+      render: (_, row) => <WatchlistButton code={row.stock_code} market={market} />,
+    },
+    { key: 'stock_code', label: isUS ? '티커' : '종목코드', align: 'center' },
+    { key: 'corp_name', label: '종목명', align: 'left' },
+    { key: 'change_pct', label: '당일',   align: 'right', render: (v) => <ReturnCell value={v} /> },
+    { key: 'return_3m',  label: '3개월', align: 'right', render: (v) => <ReturnCell value={v} /> },
+    { key: 'return_6m',  label: '6개월', align: 'right', render: (v) => <ReturnCell value={v} /> },
+    { key: 'return_1y',  label: '1년',   align: 'right', render: (v) => <ReturnCell value={v} /> },
+    ...(!isUS ? [
+      { key: 'revenue',          label: '매출액',  align: 'right', render: (v, row) => <FinCell value={v} prevValue={row.revenue_prev} /> },
+      { key: 'operating_income', label: '영업이익', align: 'right', render: (v, row) => <FinCell value={v} prevValue={row.operating_income_prev} /> },
+    ] : []),
+    {
+      key: isUS ? 'report_code' : 'report_type',
+      label: '보고서 종류',
+      align: 'center',
+      render: (v) => {
+        const colors = isUS ? REPORT_TYPE_COLORS_US : REPORT_TYPE_COLORS_KR
+        const cls = colors[v] || 'bg-gray-100 text-gray-700'
+        return <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${cls}`}>{v}</span>
+      },
+    },
+    {
+      key: 'report_name',
+      label: '보고서명',
+      align: 'left',
+      render: (v, row) => {
+        const url = row.link || row.dart_url
+        return url ? (
+          <a
+            href={url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-blue-600 hover:text-blue-800 hover:underline"
+          >
+            {v}
+          </a>
+        ) : (
+          v
+        )
+      },
+    },
+    { key: 'rcept_dt', label: '제출일', align: 'center', render: fmtDate },
+    ...(!isUS ? [{ key: 'flr_nm', label: '제출인', align: 'left' }] : []),
+  ]
+}
+
+export default function FilingsTable({ filings, market = 'KR' }) {
+  const columns = makeColumns(market)
+  // US는 rcept_no가 없을 수 있으므로 인덱스 기반 key 사용 (DataTable은 rowKey 미전달 시 index 사용)
+  const rowKey = market === 'US' ? undefined : 'stock_code'
+  return <DataTable columns={columns} data={filings} rowKey={rowKey} />
 }
