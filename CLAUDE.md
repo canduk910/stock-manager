@@ -98,6 +98,7 @@ standalone으로 사용 가능. `main.py`/`routers/`와는 독립적이다.
 - `routers/` 5개 라우터 등록 (screener, earnings, balance, watchlist, detail)
 - SPA 라우팅: `/assets` StaticFiles 마운트 + `/{full_path:path}` 캐치올로 index.html 반환
 - `frontend/dist/`가 존재하면 정적 파일 서빙 (라우터 등록 **이후** 마지막에 마운트)
+- `index.html` 응답에 `Cache-Control: no-cache, no-store, must-revalidate` 헤더 적용 — 도커 재빌드 후 브라우저가 반드시 최신 JS 번들을 로드하도록 강제
 - KIS API를 직접 호출하지 않음. 모든 로직은 `routers/` → `services/` → `stock/`/`screener/`로 위임.
 
 ---
@@ -108,7 +109,7 @@ standalone으로 사용 가능. `main.py`/`routers/`와는 독립적이다.
 |------|-----------|------|
 | `screener.py` | `GET /api/screener/stocks` | 멀티팩터 스크리닝 |
 | `earnings.py` | `GET /api/earnings/filings` | 정기보고서 목록 (기간 조회) |
-| `balance.py` | `GET /api/balance` | KIS 실전계좌 잔고 |
+| `balance.py` | `GET /api/balance` | KIS 실전계좌 잔고 (국내주식 + 해외주식 + 국내선물옵션) |
 | `watchlist.py` | `/api/watchlist/*` | 관심종목 CRUD + 대시보드 + 종목정보 |
 | `detail.py` | `/api/detail/*` | 10년 재무 + PER/PBR 히스토리 + 종합 리포트 |
 
@@ -117,6 +118,49 @@ standalone으로 사용 가능. `main.py`/`routers/`와는 독립적이다.
 - OPENDART 키 미설정 시 `/api/earnings/filings`, `/api/detail/*`는 502 반환
 
 > 각 엔드포인트 상세 파라미터는 `docs/API_SPEC.md` 참조.
+
+#### `balance.py` — 잔고 조회 상세
+
+`GET /api/balance` 는 3종류의 잔고를 순차 조회해 단일 응답으로 반환한다.
+
+**사용 TR_ID**
+
+| TR_ID | API | 용도 |
+|-------|-----|------|
+| `TTTC8434R` | `/uapi/domestic-stock/v1/trading/inquire-balance` | 국내주식 잔고 |
+| `JTTT3010R` | `/uapi/overseas-stock/v1/trading/dayornight` | 해외주식 주야간원장 구분 |
+| `TTTS3012R` / `JTTT3012R` | `/uapi/overseas-stock/v1/trading/inquire-balance` | 해외주식 잔고 (주간/야간) |
+| `CTRP6504R` | `/uapi/overseas-stock/v1/trading/inquire-present-balance` | 기준환율 + KRW 합계 |
+| `CTFO6118R` | `/uapi/domestic-futureoption/v1/trading/inquire-balance` | 국내선물옵션 잔고 |
+
+**KIS API 구조 주의사항 (잔고 관련)**
+
+- `bass_exrt`(기준환율)는 `TTTS3012R` output1/output2에 **없다**. `CTRP6504R` output2의 `frst_bltn_exrt` 필드에만 존재.
+- 해외주식 KRW 환산 절차: ① `CTRP6504R` 먼저 호출 → 통화별 환율 dict 수집 → ② `TTTS3012R` 종목별 `frcr_evlu_pfls_amt × 환율` 계산
+- `CTRP6504R` output3 주요 필드: `evlu_amt_smtl`(해외주식 평가금액 KRW 합계), `frcr_evlu_tota`(외화 예수금 KRW 환산 합계)
+- `CTFO6118R` 미결제수량 필드: `thdt_nccs_qty` (당일 기준), 포지션 구분: `trad_dvsn_name`
+- 해외주식/선물옵션 조회 실패 시 해당 목록만 `[]`로 반환하고 국내주식은 정상 응답
+
+**`/api/balance` 응답 구조**
+
+```json
+{
+  "total_evaluation": "...",          // 국내 전체 + 해외주식 + 외화예수금 KRW 합산
+  "stock_eval": "...",                // 주식 평가금액 합산 (국내 + 해외 KRW환산)
+  "stock_eval_domestic": "...",       // 국내주식 평가금액
+  "stock_eval_overseas_krw": "...",   // 해외주식 평가금액 (원화환산)
+  "deposit": "...",                   // 예수금 합산 (원화 + 외화 KRW환산)
+  "deposit_domestic": "...",          // 원화 예수금
+  "deposit_overseas_krw": "...",      // 외화 예수금 (원화환산)
+  "stock_list": [...],                // 국내주식 보유 종목
+  "overseas_list": [...],             // 해외주식 보유 종목 (profit_loss_krw 포함)
+  "futures_list": [...]               // 국내선물옵션 포지션
+}
+```
+
+`overseas_list` 항목: `name`, `code`, `exchange`, `currency`, `quantity`, `avg_price`, `current_price`, `profit_loss`(외화), `profit_loss_krw`(원화환산), `profit_rate`, `eval_amount`
+
+`futures_list` 항목: `name`, `code`, `trade_type`(매수/매도 포지션), `quantity`, `avg_price`, `current_price`, `profit_loss`, `profit_rate`, `eval_amount`
 
 ---
 
@@ -156,7 +200,7 @@ CLI와 API 라우터 양쪽에서 공용으로 사용한다. 데이터는 `~/sto
 
 | 파일 | 역할 |
 |------|------|
-| `store.py` | 관심종목 CRUD. `~/stock-watchlist/watchlist.json` 관리. |
+| `store.py` | 관심종목 CRUD. `~/stock-watchlist/watchlist.db` (SQLite) 관리. 최초 실행 시 테이블 자동 생성. 기존 `watchlist.json` 존재 시 자동 마이그레이션 후 `.json.bak`으로 백업. |
 | `symbol_map.py` | pykrx 기반 종목코드↔종목명 매핑 (7일 캐시). |
 | `market.py` | pykrx 기반 시세/시가총액/52주 고저/PER/PBR + 월별 밸류에이션 히스토리 + `fetch_period_returns()`(당일/3M/6M/1Y 수익률, 1시간 캐시). |
 | `dart_fin.py` | OpenDart `fnlttSinglAcntAll` API 기반 재무제표 조회. 3년 단위 배치 호출로 최대 10년치 수집. DART 사업보고서 링크(`dart_url`) 포함. `_ACCOUNT_KEYS`에 적자 기업 변형 계정명(`영업손실`, `당기순손실`, `매출` 등) 포함. |
@@ -199,7 +243,7 @@ frontend/
       common/             LoadingSpinner, ErrorAlert, EmptyState, DataTable
       screener/           FilterPanel, StockTable
       earnings/           FilingsTable  (수익률·재무·관심종목 버튼 포함)
-      balance/            PortfolioSummary, HoldingsTable
+      balance/            PortfolioSummary, HoldingsTable, OverseasHoldingsTable, FuturesTable
       watchlist/          AddStockForm, WatchlistDashboard, StockInfoModal
       detail/             StockHeader, FinancialTable, ValuationChart, ReportSummary
     pages/
@@ -221,6 +265,11 @@ frontend/
 - DetailPage: Recharts로 PER/PBR 시계열 차트 렌더링
 - EarningsPage: 종목명/종목코드 클라이언트 사이드 필터 지원. "조회" 시 필터 초기화.
 - FilingsTable: 관심종목 추가 버튼(`WatchlistButton`) + 당일/3M/6M/1Y 수익률 + 매출액/영업이익(YoY) 컬럼 포함
+- BalancePage: 국내주식 / 해외주식 / 국내선물옵션 3개 섹션으로 분리. 해외·선물 보유분이 있을 때만 해당 섹션 표시
+- PortfolioSummary: 해외주식·외화 예수금 보유 시 카드 하단에 세부 분류 표시 (국내/해외 원화환산 분리)
+- OverseasHoldingsTable: 거래소·통화 컬럼 포함. `평가손익(외화)` + `평가손익(원화)` 두 컬럼 표시. 외화 소수점 포맷
+- 매입단가 포맷: 국내주식 `Math.floor()` 소수점 절사(정수 표시), 해외주식 소수점 2자리 고정
+- FuturesTable: 포지션 뱃지 (매수=빨강, 매도=파랑), 미결제수량 표시
 
 > 상세 컴포넌트 설명은 `docs/FRONTEND_SPEC.md` 참조.
 
@@ -233,8 +282,9 @@ Stage 1  node:22-slim    → npm ci + npm run build → /frontend/dist
 Stage 2  python:3.11-slim → pip install + 앱 소스 + COPY --from Stage 1
 ```
 
+- **`Dockerfile`**: `useradd -m` 옵션으로 `/home/app` 홈 디렉토리 생성. `/home/app/stock-watchlist` 디렉토리를 `app:app` 소유로 사전 생성 (볼륨 마운트 시 권한 보장).
 - **`.dockerignore`**: `frontend/node_modules/`, `frontend/dist/`, `.env`, `token.dat`, `screener_cache.db` 제외
-- **`docker-compose.yml`**: 볼륨 마운트 없음 (볼륨이 있으면 컨테이너 내부 `frontend/dist/`가 가려짐)
+- **`docker-compose.yml`**: `watchlist-data` 네임드 볼륨을 `/home/app/stock-watchlist`에 마운트 — 컨테이너 재시작 시 관심종목 DB 보존. `frontend/dist/`는 볼륨 없이 이미지에 포함.
 - 프로덕션: `docker-compose up --build` → `http://localhost:8000` (프론트 + 백엔드 통합)
 - 개발: 볼륨 마운트로 핫리로드 시 프론트엔드는 `npm run dev`로 분리 실행
 
@@ -308,6 +358,6 @@ KIS API는 실전/모의투자에 따라 TR_ID 접두사가 다르다.
 |------|------|-----|
 | `screener_cache.db` (프로젝트 루트) | 스크리너 KRX/DART 데이터 캐시 | 만료 없음 (날짜키 기반) |
 | `~/stock-watchlist/cache.db` | 관심종목 시세/재무/종목코드/수익률 캐시 | 키별 상이 |
-| `~/stock-watchlist/watchlist.json` | 관심종목 목록 (CRUD) | 영구 |
+| `~/stock-watchlist/watchlist.db` | 관심종목 목록 (SQLite CRUD) | 영구 |
 
 `stock/` 캐시 TTL: `corpCode.xml` 30일, `symbol_map` 7일, 시세/재무 24시간, `market:period_returns:` 1시간.

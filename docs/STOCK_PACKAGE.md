@@ -2,7 +2,7 @@
 
 관심종목 관리 + 종목 데이터 수집 패키지. CLI와 웹 API 양쪽에서 사용한다.
 
-데이터 저장: `~/stock-watchlist/` (watchlist.json + cache.db)
+데이터 저장: `~/stock-watchlist/` (watchlist.db + cache.db)
 
 ---
 
@@ -10,7 +10,7 @@
 
 | 파일 | 역할 |
 |------|------|
-| `store.py` | 관심종목 CRUD (JSON 파일) |
+| `store.py` | 관심종목 CRUD (SQLite) |
 | `symbol_map.py` | 종목코드 ↔ 종목명 매핑 (pykrx 기반) |
 | `market.py` | pykrx 시세/펀더멘털 수집 |
 | `dart_fin.py` | OpenDart 재무데이터 수집 |
@@ -22,29 +22,42 @@
 
 ## `store.py` — 관심종목 CRUD
 
-`~/stock-watchlist/watchlist.json`에 관심종목 목록을 저장한다.
+`~/stock-watchlist/watchlist.db` (SQLite)에 관심종목 목록을 저장한다.
+
+- 최초 접속 시 `watchlist` 테이블 자동 생성 (`CREATE TABLE IF NOT EXISTS`)
+- 기존 `watchlist.json` 파일이 있으면 자동 마이그레이션 후 `watchlist.json.bak`으로 백업
+- Docker 환경: `watchlist-data` 네임드 볼륨 마운트로 컨테이너 재시작 시 데이터 보존
 
 ### 함수
 
 | 함수 | 설명 |
 |------|------|
-| `all_items()` | 전체 목록 반환 |
+| `all_items()` | 전체 목록 반환 (added_date, code 순 정렬) |
 | `get_item(code)` | 단일 종목 조회 (없으면 None) |
 | `add_item(code, name, memo)` | 추가 (중복이면 False) |
 | `remove_item(code)` | 삭제 (없으면 False) |
 | `update_memo(code, memo)` | 메모 수정 |
 
-### 데이터 구조
+### 테이블 스키마
 
-```json
-[
-  {
+```sql
+CREATE TABLE watchlist (
+    code       TEXT PRIMARY KEY,
+    name       TEXT NOT NULL,
+    added_date TEXT NOT NULL,
+    memo       TEXT NOT NULL DEFAULT ''
+)
+```
+
+### 반환 dict 구조
+
+```python
+{
     "code": "005930",
     "name": "삼성전자",
     "added_date": "2025-02-20",
     "memo": "반도체 대장"
-  }
-]
+}
 ```
 
 ---

@@ -6,7 +6,6 @@ function fmtKRW(val) {
   return n.toLocaleString('ko-KR')
 }
 
-/** 한국 관례: 수익 = 빨간색, 손실 = 파란색 */
 function ProfitCell({ value }) {
   const n = Number(value)
   if (isNaN(n)) return <span>{value || '-'}</span>
@@ -22,11 +21,32 @@ function RateCell({ value }) {
   return <span className={`font-medium ${cls}`}>{sign}{n.toFixed(2)}%</span>
 }
 
+function PositionBadge({ value }) {
+  const isBuy = value && value.includes('매수')
+  const isSell = value && value.includes('매도')
+  const cls = isBuy
+    ? 'bg-red-100 text-red-700'
+    : isSell
+    ? 'bg-blue-100 text-blue-700'
+    : 'bg-gray-100 text-gray-600'
+  return (
+    <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${cls}`}>
+      {value || '-'}
+    </span>
+  )
+}
+
 const COLUMNS = [
   { key: 'code', label: '종목코드', align: 'center' },
   { key: 'name', label: '종목명', align: 'left' },
-  { key: 'quantity', label: '보유수량', align: 'right', render: fmtKRW },
-  { key: 'avg_price', label: '매입단가', align: 'right', render: (v) => Math.floor(Number(v)).toLocaleString('ko-KR') },
+  {
+    key: 'trade_type',
+    label: '포지션',
+    align: 'center',
+    render: (v) => <PositionBadge value={v} />,
+  },
+  { key: 'quantity', label: '미결제수량', align: 'right', render: fmtKRW },
+  { key: 'avg_price', label: '평균단가', align: 'right', render: fmtKRW },
   { key: 'current_price', label: '현재가', align: 'right', render: fmtKRW },
   {
     key: 'profit_loss',
@@ -42,6 +62,6 @@ const COLUMNS = [
   },
 ]
 
-export default function HoldingsTable({ stocks }) {
-  return <DataTable columns={COLUMNS} data={stocks} rowKey="code" />
+export default function FuturesTable({ positions }) {
+  return <DataTable columns={COLUMNS} data={positions} />
 }

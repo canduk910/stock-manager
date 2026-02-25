@@ -39,8 +39,10 @@ COPY --from=frontend-builder /frontend/dist /app/frontend/dist
 RUN chmod +x /app/entrypoint.sh
 
 # 비루트 사용자 생성 + /app 소유권 이전 (캐시 DB 쓰기 권한 필요)
-RUN groupadd -r app && useradd -r -g app app \
-    && chown -R app:app /app
+RUN groupadd -r app && useradd -r -g app -m app \
+    && chown -R app:app /app \
+    && mkdir -p /home/app/stock-watchlist \
+    && chown -R app:app /home/app
 USER app
 
 ENTRYPOINT ["/app/entrypoint.sh"]

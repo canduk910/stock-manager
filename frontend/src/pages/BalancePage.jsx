@@ -2,6 +2,8 @@ import { useEffect } from 'react'
 import { useBalance } from '../hooks/useBalance'
 import PortfolioSummary from '../components/balance/PortfolioSummary'
 import HoldingsTable from '../components/balance/HoldingsTable'
+import OverseasHoldingsTable from '../components/balance/OverseasHoldingsTable'
+import FuturesTable from '../components/balance/FuturesTable'
 import LoadingSpinner from '../components/common/LoadingSpinner'
 import EmptyState from '../components/common/EmptyState'
 
@@ -46,15 +48,33 @@ export default function BalancePage() {
       )}
 
       {data && !loading && (
-        <div className="space-y-6">
+        <div className="space-y-8">
           <PortfolioSummary data={data} />
-          {data.stock_list.length === 0 ? (
-            <EmptyState message="보유 종목이 없습니다." />
-          ) : (
-            <>
-              <h2 className="text-lg font-semibold text-gray-800">보유 종목</h2>
+
+          {/* 국내주식 */}
+          <div>
+            <h2 className="text-lg font-semibold text-gray-800 mb-3">국내주식</h2>
+            {data.stock_list.length === 0 ? (
+              <EmptyState message="보유 중인 국내주식이 없습니다." />
+            ) : (
               <HoldingsTable stocks={data.stock_list} />
-            </>
+            )}
+          </div>
+
+          {/* 해외주식 */}
+          {data.overseas_list && data.overseas_list.length > 0 && (
+            <div>
+              <h2 className="text-lg font-semibold text-gray-800 mb-3">해외주식</h2>
+              <OverseasHoldingsTable stocks={data.overseas_list} />
+            </div>
+          )}
+
+          {/* 국내선물옵션 */}
+          {data.futures_list && data.futures_list.length > 0 && (
+            <div>
+              <h2 className="text-lg font-semibold text-gray-800 mb-3">국내선물옵션</h2>
+              <FuturesTable positions={data.futures_list} />
+            </div>
           )}
         </div>
       )}

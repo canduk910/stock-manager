@@ -106,8 +106,10 @@ frontend/
 
 | 컴포넌트 | 설명 |
 |---------|------|
-| `PortfolioSummary` | 총평가금액/예수금/주식평가 카드 |
-| `HoldingsTable` | 보유종목 테이블 (종목명, 수량, 현재가, 평가손익, 수익률) |
+| `PortfolioSummary` | 총평가금액/주식평가/예수금 카드. 해외주식·외화 보유 시 카드 하단에 국내/해외(원화환산) 세부 분류 표시. |
+| `HoldingsTable` | 국내주식 보유종목 테이블. 매입단가 소수점 절사(`Math.floor`). |
+| `OverseasHoldingsTable` | 해외주식 보유종목 테이블. 거래소·통화 컬럼 포함. 매입단가 소수점 2자리 고정. `평가손익(외화)` + `평가손익(원화)` 두 컬럼 표시. |
+| `FuturesTable` | 국내선물옵션 포지션 테이블. 포지션 뱃지(매수=빨강, 매도=파랑). 미결제수량 표시. |
 
 ### 관심종목 (`src/components/watchlist/`)
 
@@ -146,6 +148,7 @@ frontend/
 
 ### BalancePage (`/balance`)
 - KIS 키 없으면 에러 대신 안내 메시지 표시
+- 국내주식 / 해외주식 / 국내선물옵션 3개 섹션으로 분리. 해외주식·선물 보유분이 있을 때만 해당 섹션 표시
 
 ### WatchlistPage (`/watchlist`)
 - 마운트 시 목록 + 대시보드 동시 로드
@@ -165,3 +168,4 @@ frontend/
 - 시가총액: 억/조 포맷팅은 프론트에서 처리 (1조 이상은 `X.Y조`, 미만은 `X,XXX억`)
 - 변동: 상승 시 `▲` + `+`, 하락 시 `▼`
 - DART 링크: `target="_blank"`, `rel="noopener noreferrer"`
+- 매입단가 포맷: 국내주식 `Math.floor()` 소수점 절사(정수), 해외주식 소수점 2자리 고정(`toFixed`)

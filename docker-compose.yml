@@ -7,11 +7,16 @@ services:
       - .env
     ports:
       - "8000:8000"
+    volumes:
+      - watchlist-data:/home/app/stock-watchlist
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8000/ || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 3
+
+volumes:
+  watchlist-data:
 
 # 개발 시 핫리로드:
 #   docker-compose run --service-ports --rm web \

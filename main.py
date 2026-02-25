@@ -3,7 +3,7 @@ import uvicorn
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
 
@@ -53,9 +53,14 @@ if os.path.isdir(_frontend_dist):
 
     # SPA 캐치올: API에 매칭되지 않는 모든 경로에 index.html 반환
     # (React Router가 클라이언트 사이드에서 라우팅 처리)
+    # index.html은 캐싱 금지 — 배포 후 브라우저가 항상 최신 번들을 로드하도록 함
     @app.get("/{full_path:path}")
     def serve_spa(full_path: str):
-        return FileResponse(os.path.join(_frontend_dist, "index.html"))
+        response = FileResponse(os.path.join(_frontend_dist, "index.html"))
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+        return response
 
 
 if __name__ == "__main__":
