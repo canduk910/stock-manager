@@ -15,8 +15,9 @@ KIS 계정 없이도 종목 스크리닝과 공시 조회를 사용할 수 있�
 |------|------|
 | **대시보드** | 잔고 요약 + 오늘 공시 5건 + 시총 상위 10종목 한눈에 보기 |
 | **종목 스크리너** | PER·PBR·ROE·시가총액 멀티팩터 필터링 + 정렬 |
-| **공시 조회** | 날짜별 사업/반기/분기 보고서 제출 목록. 보고서명 클릭 → DART 원문 |
-| **잔고 조회** | 보유종목·평가금액·손익 현황 (KIS API 키 필요) |
+| **공시 조회** | 날짜별 사업/반기/분기 보고서. 국내(DART) / 미국(SEC EDGAR) 탭 선택 |
+| **잔고 조회** | 국내주식·해외주식·선물옵션 잔고. 거래소·투자비중·평가금액·시가총액·PER·ROE·PBR 포함. 컬럼 클릭 정렬 지원. (KIS API 키 필요) |
+| **관심종목** | 국내·미국 종목 추가·관리. 시세·재무 대시보드. 종목 상세(재무 10년/4년·밸류에이션·종합 리포트) |
 
 ### CLI 스크리너
 KIS 계정 없이 터미널에서 바로 사용 가능
@@ -172,7 +173,10 @@ KIS API 키가 `.env`에 설정되어 있어야 합니다.
 
 1. 사이드바에서 **잔고 조회** 클릭
 2. 총평가금액·예수금·주식평가금액 카드 확인
-3. 보유종목별 현재가·평가손익·수익률 확인
+3. 국내주식·해외주식·선물옵션 섹션별 보유 현황 확인
+4. 컬럼 헤더 클릭으로 원하는 기준 정렬 (수익률·시가총액·PER 등)
+
+표시 컬럼: 거래소 | 종목명 | 투자비중 | 평가금액 | 매입단가 | 현재가 | 평가손익 | 수익률 | 시가총액 | PER | ROE | PBR
 
 > 키가 없으면 에러 대신 설정 안내 메시지가 표시됩니다.
 
@@ -205,14 +209,18 @@ curl "http://localhost:8000/api/screener/stocks?market=KOSPI&per_max=15&roe_min=
 
 ### `GET /api/earnings/filings`
 
-날짜별 정기보고서 제출 목록
+날짜별 정기보고서 제출 목록 (국내 DART / 미국 SEC EDGAR)
 
 | 파라미터 | 타입 | 기본값 | 설명 |
 |---------|------|--------|------|
+| `market` | string | `KR` | `KR`(국내 DART) 또는 `US`(미국 SEC) |
 | `date` | string | 오늘 | `YYYYMMDD` 또는 `YYYY-MM-DD` |
+| `start_date` | string | - | 기간 조회 시작일 |
+| `end_date` | string | - | 기간 조회 종료일 |
 
 ```bash
 curl "http://localhost:8000/api/earnings/filings?date=2025-02-20"
+curl "http://localhost:8000/api/earnings/filings?market=US&start_date=20250201&end_date=20250228"
 ```
 
 ### `GET /api/balance`
@@ -229,9 +237,10 @@ curl "http://localhost:8000/api/balance"
 
 | 데이터 | 출처 | 비고 |
 |--------|------|------|
-| PER·PBR·EPS·BPS·시가총액 | [pykrx](https://github.com/sharebook-kr/pykrx) (KRX) | 당일 장 종료 후 갱신 |
-| ROE | EPS ÷ BPS × 100 계산값 | |
-| 정기보고서 공시 | [OpenDART API](https://opendart.fss.or.kr) | `OPENDART_API_KEY` 필요 |
+| PER·PBR·EPS·BPS·시가총액·ROE | [pykrx](https://github.com/sharebook-kr/pykrx) (KRX) | 당일 장 종료 후 갱신 |
+| 정기보고서 공시 (국내) | [OpenDART API](https://opendart.fss.or.kr) | `OPENDART_API_KEY` 필요 |
+| 정기보고서 공시 (미국) | [SEC EDGAR](https://www.sec.gov/cgi-bin/browse-edgar) | 키 불필요 |
+| 미국 주식 시세·재무·ROE | [yfinance](https://github.com/ranaroussi/yfinance) | 15분 지연, 최대 4년 재무 |
 | 계좌 잔고 | 한국투자증권 OpenAPI | KIS API 키 필요 |
 
 ---
@@ -241,3 +250,5 @@ curl "http://localhost:8000/api/balance"
 - `.env` 파일에 민감정보가 포함되므로 절대 Git에 커밋하지 마세요 (`.gitignore`에 포함됨)
 - pykrx는 KRX 데이터를 당일 장 마감 이후 제공합니다. 장중에는 전일 데이터가 반환될 수 있습니다
 - 동일 날짜 스크리닝 결과는 `screener_cache.db`에 캐시됩니다. 오래된 캐시를 지우려면 해당 파일을 삭제하세요
+- 시세·재무 캐시(`cache.db`)는 컨테이너 시작 시 자동으로 초기화됩니다. 재배포 후 구버전 캐시로 인한 문제를 방지합니다
+- 미국 주식 시세는 15분 지연, 재무 데이터는 최대 4년치만 제공됩니다 (yfinance 기준)
