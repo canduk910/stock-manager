@@ -11,12 +11,41 @@
 | 파일 | 역할 |
 |------|------|
 | `store.py` | 관심종목 CRUD (SQLite) |
+| `order_store.py` | 주문 이력 + 예약주문 CRUD (SQLite, `orders.db`) |
 | `symbol_map.py` | 종목코드 ↔ 종목명 매핑 (pykrx 기반) |
 | `market.py` | pykrx 시세/펀더멘털 수집 |
 | `dart_fin.py` | OpenDart 재무데이터 수집 |
 | `display.py` | Rich 테이블 렌더링 + CSV 내보내기 |
 | `cache.py` | SQLite 캐시 (TTL 지원) |
 | `cli.py` | Click CLI (`python -m stock watch ...`) |
+
+---
+
+## `order_store.py` — 주문 이력 + 예약주문
+
+`~/stock-watchlist/orders.db` (SQLite). `orders`와 `reservations` 두 테이블 관리. DB 파일이 없으면 최초 접속 시 자동 생성.
+
+### 주문 이력 함수 (`orders` 테이블)
+
+| 함수 | 설명 |
+|------|------|
+| `insert_order(symbol, symbol_name, market, side, order_type, price, quantity, currency, memo, order_no, org_no, kis_response)` | 신규 주문 기록 (status=PLACED) |
+| `update_order_status(id, status, filled_quantity, filled_price)` | 주문 상태 갱신 |
+| `list_orders(symbol, market, status, date_from, date_to, limit)` | 주문 이력 조회 (필터 지원) |
+| `list_active_orders()` | PLACED/PARTIAL 상태 주문만 반환 (대사 용도) |
+
+주문 상태값: `PLACED` / `PARTIAL` / `FILLED` / `CANCELLED` / `CANCEL_REQUESTED` / `MODIFY_REQUESTED` / `REJECTED` / `UNKNOWN`
+
+### 예약주문 함수 (`reservations` 테이블)
+
+| 함수 | 설명 |
+|------|------|
+| `insert_reservation(symbol, symbol_name, market, side, order_type, price, quantity, condition_type, condition_value, memo)` | 예약주문 등록 (status=WAITING) |
+| `update_reservation_status(id, status, result_order_no, triggered_at)` | 예약주문 상태 갱신 |
+| `list_reservations(status)` | 예약주문 목록 (status 필터 선택) |
+| `delete_reservation(id)` | 예약주문 삭제 (WAITING 상태만 가능) |
+
+예약주문 상태값: `WAITING` / `TRIGGERED` / `EXECUTED` / `FAILED` / `CANCELLED`
 
 ---
 

@@ -6,12 +6,19 @@ const NAV_ITEMS = [
   { to: '/earnings', label: '공시 조회' },
   { to: '/balance', label: '잔고 조회' },
   { to: '/watchlist', label: '관심종목' },
+  { to: '/order', label: '주문' },
 ]
 
-export default function Header() {
+const WIDTH_OPTIONS = [
+  { key: 'normal', label: '표준' },
+  { key: 'wide',   label: '넓게' },
+  { key: 'full',   label: '전체' },
+]
+
+export default function Header({ widthKey, onWidthChange, maxCls }) {
   return (
     <header className="bg-gray-900 text-white shadow-lg">
-      <div className="max-w-7xl mx-auto px-4 py-3 flex items-center gap-8">
+      <div className={`${maxCls} px-4 py-3 flex items-center gap-8`}>
         <span className="font-bold text-lg tracking-tight">DK STOCK</span>
         <nav className="flex gap-1">
           {NAV_ITEMS.map(({ to, label }) => (
@@ -31,6 +38,23 @@ export default function Header() {
             </NavLink>
           ))}
         </nav>
+
+        {/* 너비 선택 */}
+        <div className="ml-auto flex rounded-md border border-gray-600 overflow-hidden text-xs font-medium">
+          {WIDTH_OPTIONS.map((opt) => (
+            <button
+              key={opt.key}
+              onClick={() => onWidthChange(opt.key)}
+              className={`px-3 py-1.5 transition-colors ${
+                widthKey === opt.key
+                  ? 'bg-gray-100 text-gray-900'
+                  : 'text-gray-400 hover:bg-gray-700 hover:text-white'
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
       </div>
     </header>
   )

@@ -1,4 +1,5 @@
 import DataTable from '../common/DataTable'
+import { useNavigate } from 'react-router-dom'
 
 function fmtKRW(val) {
   const n = Number(val)
@@ -41,6 +42,35 @@ function RoeCell({ value }) {
   if (isNaN(n)) return <span className="text-gray-400">-</span>
   const cls = n > 0 ? 'text-red-600' : n < 0 ? 'text-blue-600' : 'text-gray-600'
   return <span className={cls}>{n.toFixed(1)}%</span>
+}
+
+function OrderButtons({ row, navigate }) {
+  const params = new URLSearchParams({
+    symbol: row.code,
+    symbol_name: row.name || '',
+    market: 'KR',
+    side: 'sell',
+    quantity: row.quantity || '',
+  })
+  return (
+    <div className="flex gap-1">
+      <button
+        onClick={() => navigate(`/order?${params.toString()}`)}
+        className="px-2 py-0.5 text-xs rounded border border-blue-300 text-blue-700 hover:bg-blue-50"
+      >
+        매도
+      </button>
+      <button
+        onClick={() => {
+          const buyParams = new URLSearchParams({ symbol: row.code, symbol_name: row.name || '', market: 'KR', side: 'buy' })
+          navigate(`/order?${buyParams.toString()}`)
+        }}
+        className="px-2 py-0.5 text-xs rounded border border-red-300 text-red-700 hover:bg-red-50"
+      >
+        매수
+      </button>
+    </div>
+  )
 }
 
 const COLUMNS = [
@@ -98,13 +128,21 @@ const COLUMNS = [
     align: 'right',
     render: (v) => v != null ? Number(v).toFixed(2) + '배' : '-',
   },
+  {
+    key: '_actions',
+    label: '주문',
+    align: 'center',
+    sortable: false,
+    render: (_, row, { navigate }) => <OrderButtons row={row} navigate={navigate} />,
+  },
 ]
 
 export default function HoldingsTable({ stocks }) {
+  const navigate = useNavigate()
   const totalEval = stocks.reduce((sum, s) => sum + (Number(s.eval_amount) || 0), 0)
   const enriched = stocks.map((s) => ({
     ...s,
     _weight: totalEval > 0 ? (Number(s.eval_amount) || 0) / totalEval * 100 : null,
   }))
-  return <DataTable columns={COLUMNS} data={enriched} rowKey="code" />
+  return <DataTable columns={COLUMNS} data={enriched} rowKey="code" renderContext={{ navigate }} />
 }

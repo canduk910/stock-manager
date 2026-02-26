@@ -1,3 +1,4 @@
+import asyncio
 import os
 import uvicorn
 from contextlib import asynccontextmanager
@@ -20,8 +21,20 @@ async def lifespan(app: FastAPI):
         ("KIS_ACNT_PRDT_CD", os.getenv("KIS_ACNT_PRDT_CD")),
     ) if not val]
     if missing:
-        print(f"[경고] KIS 환경변수 누락: {', '.join(missing)} — 잔고 조회 비활성화")
+        print(f"[경고] KIS 환경변수 누락: {', '.join(missing)} — 잔고/주문 비활성화")
+
+    # 예약주문 스케줄러 백그라운드 시작
+    from services.reservation_service import start_scheduler, stop_scheduler
+    scheduler_task = asyncio.create_task(start_scheduler())
+
     yield
+
+    stop_scheduler()
+    scheduler_task.cancel()
+    try:
+        await scheduler_task
+    except asyncio.CancelledError:
+        pass
 
 
 app = FastAPI(title="Stock Manager API", lifespan=lifespan)
@@ -36,13 +49,14 @@ app.add_middleware(
 )
 
 # 라우터 등록
-from routers import screener, earnings, balance, watchlist, detail  # noqa: E402
+from routers import screener, earnings, balance, watchlist, detail, order  # noqa: E402
 
 app.include_router(screener.router)
 app.include_router(earnings.router)
 app.include_router(balance.router)
 app.include_router(watchlist.router)
 app.include_router(detail.router)
+app.include_router(order.router)
 
 
 # 프론트엔드 빌드 결과 정적 파일 서빙 (API 라우터 등록 이후에 마운트)

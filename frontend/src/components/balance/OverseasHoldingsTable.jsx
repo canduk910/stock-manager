@@ -1,4 +1,5 @@
 import DataTable from '../common/DataTable'
+import { useNavigate } from 'react-router-dom'
 
 const EXCHANGE_LABELS = {
   NASD: '나스닥',
@@ -73,6 +74,35 @@ function RoeCell({ value }) {
   if (isNaN(n)) return <span className="text-gray-400">-</span>
   const cls = n > 0 ? 'text-red-600' : n < 0 ? 'text-blue-600' : 'text-gray-600'
   return <span className={cls}>{n.toFixed(1)}%</span>
+}
+
+function OrderButtons({ row, navigate }) {
+  const sellParams = new URLSearchParams({
+    symbol: row.code,
+    symbol_name: row.name || '',
+    market: 'US',
+    side: 'sell',
+    quantity: row.quantity || '',
+  })
+  return (
+    <div className="flex gap-1">
+      <button
+        onClick={() => navigate(`/order?${sellParams.toString()}`)}
+        className="px-2 py-0.5 text-xs rounded border border-blue-300 text-blue-700 hover:bg-blue-50"
+      >
+        매도
+      </button>
+      <button
+        onClick={() => {
+          const buyParams = new URLSearchParams({ symbol: row.code, symbol_name: row.name || '', market: 'US', side: 'buy' })
+          navigate(`/order?${buyParams.toString()}`)
+        }}
+        className="px-2 py-0.5 text-xs rounded border border-red-300 text-red-700 hover:bg-red-50"
+      >
+        매수
+      </button>
+    </div>
+  )
 }
 
 const COLUMNS = [
@@ -175,14 +205,22 @@ const COLUMNS = [
     align: 'right',
     render: (v) => v != null ? Number(v).toFixed(2) + '배' : '-',
   },
+  {
+    key: '_actions',
+    label: '주문',
+    align: 'center',
+    sortable: false,
+    render: (_, row, { navigate }) => <OrderButtons row={row} navigate={navigate} />,
+  },
 ]
 
 export default function OverseasHoldingsTable({ stocks }) {
+  const navigate = useNavigate()
   // 투자비중: KRW 환산 평가금액 기준
   const totalEvalKRW = stocks.reduce((sum, s) => sum + (Number(s.eval_amount_krw) || 0), 0)
   const enriched = stocks.map((s) => ({
     ...s,
     _weight: totalEvalKRW > 0 ? (Number(s.eval_amount_krw) || 0) / totalEvalKRW * 100 : null,
   }))
-  return <DataTable columns={COLUMNS} data={enriched} />
+  return <DataTable columns={COLUMNS} data={enriched} renderContext={{ navigate }} />
 }

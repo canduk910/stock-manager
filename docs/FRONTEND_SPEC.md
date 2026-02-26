@@ -42,6 +42,7 @@ frontend/
 | `/balance` | BalancePage | 보유종목 + 평가금액 |
 | `/watchlist` | WatchlistPage | 관심종목 CRUD + 시세/재무 대시보드 |
 | `/detail/:symbol` | DetailPage | 탭 UI: 재무분석 / 밸류에이션 / 종합 리포트 |
+| `/order` | OrderPage | 탭 UI: 주문발송 / 미체결 / 체결내역 / 주문이력 / 예약주문 |
 
 ---
 
@@ -55,6 +56,7 @@ frontend/
 | `balance.js` | `fetchBalance()` | `GET /api/balance` |
 | `watchlist.js` | `fetchWatchlist()`, `addToWatchlist()`, `removeFromWatchlist()`, `updateMemo()`, `fetchDashboard()`, `fetchStockInfo()` | `/api/watchlist/*` |
 | `detail.js` | `fetchDetailFinancials()`, `fetchDetailValuation()`, `fetchDetailReport()` | `/api/detail/*` |
+| `order.js` | `placeOrder()`, `fetchBuyable()`, `fetchOpenOrders()`, `cancelOrder()`, `modifyOrder()`, `fetchExecutions()`, `fetchOrderHistory()`, `syncOrders()`, `createReservation()`, `fetchReservations()`, `deleteReservation()` | `/api/order/*` |
 
 ---
 
@@ -69,6 +71,8 @@ frontend/
 | | `useDashboard()` | `{ stocks, loading, error, load }` |
 | | `useStockInfo()` | `{ data, loading, error, load, reset }` |
 | `useDetail.js` | `useDetailReport()` | `{ data, loading, error, load }` — `load(symbol, years)` |
+| `useOrder.js` | `useOrderPlace()`, `useBuyable()`, `useOpenOrders()`, `useExecutions()`, `useOrderHistory()`, `useOrderSync()`, `useReservations()` | 각각 `{ loading, error, ... }` + 액션 함수 |
+| `useNotification.js` | `useNotification()` | `{ toasts, notify, dismiss }` — 토스트 상태 + 브라우저 Notification API |
 
 ---
 
@@ -78,7 +82,8 @@ frontend/
 
 | 컴포넌트 | 설명 |
 |---------|------|
-| `DataTable` | 범용 테이블. `columns` 배열과 `data` 배열을 받아 렌더링. 컬럼별 `render` 함수 지원. |
+| `DataTable` | 범용 테이블. `columns` 배열과 `data` 배열을 받아 렌더링. 컬럼별 `render` 함수 지원. `renderContext` prop으로 외부 의존성(`navigate` 등) 전달. `sortable: false`로 정렬 비활성화 가능. |
+| `ToastNotification` | 화면 우상단 고정 토스트 알림 컨테이너. `App.jsx`에서 `useNotification` 훅과 함께 마운트. success/error/info 타입 지원. |
 | `LoadingSpinner` | 로딩 스피너 |
 | `ErrorAlert` | 에러 메시지 배너 |
 | `EmptyState` | 데이터 없음 상태 메시지 |
@@ -87,7 +92,7 @@ frontend/
 
 | 컴포넌트 | 설명 |
 |---------|------|
-| `Header` | 상단 네비게이션 바. 로고 "DK STOCK". `NAV_ITEMS` 배열로 5개 메뉴 렌더링. `NavLink`의 `isActive`로 현재 페이지 강조. |
+| `Header` | 상단 네비게이션 바. 로고 "DK STOCK". `NAV_ITEMS` 배열로 6개 메뉴 렌더링 (대시보드/스크리너/공시/잔고/관심종목/주문). `NavLink`의 `isActive`로 현재 페이지 강조. |
 
 ### 스크리너 (`src/components/screener/`)
 
@@ -107,8 +112,8 @@ frontend/
 | 컴포넌트 | 설명 |
 |---------|------|
 | `PortfolioSummary` | 총평가금액/주식평가/예수금 카드. 해외주식·외화 보유 시 카드 하단에 국내/해외(원화환산) 세부 분류 표시. |
-| `HoldingsTable` | 국내주식 보유종목 테이블. 매입단가 소수점 절사(`Math.floor`). |
-| `OverseasHoldingsTable` | 해외주식 보유종목 테이블. 거래소·통화 컬럼 포함. 매입단가 소수점 2자리 고정. `평가손익(외화)` + `평가손익(원화)` 두 컬럼 표시. |
+| `HoldingsTable` | 국내주식 보유종목 테이블. 매입단가 소수점 절사(`Math.floor`). 마지막 컬럼에 매도/매수 버튼 — `/order?symbol=&market=KR&side=` URL로 이동. |
+| `OverseasHoldingsTable` | 해외주식 보유종목 테이블. 거래소·통화 컬럼 포함. 매입단가 소수점 2자리 고정. `평가손익(외화)` + `평가손익(원화)` 두 컬럼 표시. 마지막 컬럼에 매도/매수 버튼 — `/order?symbol=&market=US&side=` URL로 이동. |
 | `FuturesTable` | 국내선물옵션 포지션 테이블. 포지션 뱃지(매수=빨강, 매도=파랑). 미결제수량 표시. |
 
 ### 관심종목 (`src/components/watchlist/`)
@@ -118,6 +123,20 @@ frontend/
 | `AddStockForm` | 종목 추가 폼 (코드/종목명 + 메모). 인라인 에러 표시. |
 | `WatchlistDashboard` | 관심종목 시세/재무 테이블. 종목명 클릭 → `/detail/:symbol` 이동. CSV 다운로드. 인라인 메모 편집(`MemoCell`). 삭제 확인 팝업. |
 | `StockInfoModal` | 단일 종목 상세 모달. 기본정보 10칸 그리드 + 최대 10년 재무 테이블(연도 클릭 → DART 링크) + 메모 편집. ESC로 닫기. |
+
+### 주문 (`src/components/order/`)
+
+| 컴포넌트 | 설명 |
+|---------|------|
+| `OrderForm` | 시장/종목/매매구분/가격/수량 입력 폼. 잔고 페이지 URL 파라미터 기본값 반영. 매수가능 조회 버튼. |
+| `OrderConfirmModal` | 주문 확인 모달. 종목/수량/가격/매매구분 재확인 후 발송. |
+| `OpenOrdersTable` | 미체결 주문 테이블. `api_cancellable` 기준으로 API 주문은 정정/취소 버튼, HTS/MTS 주문은 "앱취소필요" 표시. |
+| `ModifyOrderModal` | 주문 정정 모달 (가격/수량 변경). |
+| `ExecutionsTable` | 당일 체결 내역 테이블. |
+| `OrderHistoryTable` | 로컬 DB 주문 이력 테이블. 날짜/종목/상태 필터 지원. |
+| `ReservationForm` | 예약주문 등록 폼. 조건 유형(가격 이하/이상/지정 시각) + 주문 정보 입력. |
+| `ReservationsTable` | 예약주문 목록. WAITING 상태만 삭제 가능. |
+| `SyncButton` | 대사 동기화 버튼. 클릭 시 `POST /api/order/sync` 호출, 갱신 건수 표시. |
 
 ### 종목 상세 (`src/components/detail/`)
 
@@ -160,6 +179,13 @@ frontend/
 - 탭 UI: 재무분석(FinancialTable) / 밸류에이션(ValuationChart) / 종합 리포트(ReportSummary)
 - "← 관심종목으로" 뒤로가기 링크
 
+### OrderPage (`/order`)
+- 5탭 UI: 주문발송 / 미체결 / 체결내역 / 주문이력 / 예약주문
+- URL 파라미터(`?symbol=&symbol_name=&market=&side=&quantity=`)로 잔고 페이지 매도/매수 버튼과 연계 → `OrderForm` 기본값 자동 채움
+- 미체결 탭: 국내/미국 탭 선택, 새로고침 버튼, 동기화 버튼(`SyncButton`)
+- 주문 발송 성공 시 토스트 알림 (`notify()`)
+- 예약주문 탭: 등록 폼 + 목록 (좌우 분할 레이아웃)
+
 ---
 
 ## UI 규칙
@@ -169,3 +195,5 @@ frontend/
 - 변동: 상승 시 `▲` + `+`, 하락 시 `▼`
 - DART 링크: `target="_blank"`, `rel="noopener noreferrer"`
 - 매입단가 포맷: 국내주식 `Math.floor()` 소수점 절사(정수), 해외주식 소수점 2자리 고정(`toFixed`)
+- 주문 취소 가능 여부: `api_cancellable === false`이면 정정/취소 버튼 대신 "앱취소필요" 텍스트 표시 (마우스 오버 시 안내 tooltip)
+- 잔고→주문 연계: HoldingsTable·OverseasHoldingsTable의 매도/매수 버튼 클릭 시 `/order?symbol=&market=&side=&quantity=` URL로 이동, OrderForm 기본값 자동 세팅

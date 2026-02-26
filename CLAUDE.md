@@ -96,7 +96,8 @@ standalone으로 사용 가능. `main.py`/`routers/`와는 독립적이다.
 ### `main.py` — FastAPI 서버
 
 - CORS 미들웨어: `localhost:5173` 허용 (Vite 개발 서버)
-- `routers/` 5개 라우터 등록 (screener, earnings, balance, watchlist, detail)
+- `routers/` 6개 라우터 등록 (screener, earnings, balance, watchlist, detail, order)
+- lifespan: `asyncio` 백그라운드 태스크로 예약주문 스케줄러 시작/종료 (`services/reservation_service.py`)
 - SPA 라우팅: `/assets` StaticFiles 마운트 + `/{full_path:path}` 캐치올로 index.html 반환
 - `frontend/dist/`가 존재하면 정적 파일 서빙 (라우터 등록 **이후** 마지막에 마운트)
 - `index.html` 응답에 `Cache-Control: no-cache, no-store, must-revalidate` 헤더 적용 — 도커 재빌드 후 브라우저가 반드시 최신 JS 번들을 로드하도록 강제
@@ -113,6 +114,8 @@ standalone으로 사용 가능. `main.py`/`routers/`와는 독립적이다.
 | `balance.py` | `GET /api/balance` | KIS 실전계좌 잔고 (국내주식 + 해외주식 + 국내선물옵션) |
 | `watchlist.py` | `/api/watchlist/*` | 관심종목 CRUD + 대시보드 + 종목정보 (국내/해외) |
 | `detail.py` | `/api/detail/*` | 10년 재무 + PER/PBR 히스토리 + 종합 리포트 |
+| `_kis_auth.py` | (내부 모듈) | KIS 인증 공통 모듈 (토큰 관리, hashkey 발급). `balance.py`와 `order.py` 공용 |
+| `order.py` | `/api/order/*` | 주문 발송 / 정정 / 취소 / 미체결 / 체결 내역 / 이력 / 예약주문 |
 
 - 모든 핸들러는 `def`(sync) — pykrx/requests가 동기 라이브러리이므로 FastAPI가 threadpool에서 자동 실행
 - KIS 키 미설정 시 `/api/balance`는 503 반환 (서버 시작은 정상)
@@ -120,6 +123,28 @@ standalone으로 사용 가능. `main.py`/`routers/`와는 독립적이다.
 - 해외 공시(`market=US`)는 OPENDART 키 불필요 (SEC EDGAR 무료 API)
 
 > 각 엔드포인트 상세 파라미터는 `docs/API_SPEC.md` 참조.
+
+#### `order.py` — 주문 관리
+
+```
+POST /api/order/place          국내/해외 주문 발송 (매수/매도, 지정가/시장가)
+GET  /api/order/buyable        매수가능 금액/수량 조회
+GET  /api/order/open           미체결 주문 목록 (KIS 실시간, market=KR|US)
+POST /api/order/{order_no}/modify   주문 정정
+POST /api/order/{order_no}/cancel   주문 취소
+GET  /api/order/executions     당일 체결 내역 (KIS)
+GET  /api/order/history        로컬 DB 주문 이력 (날짜/종목/상태 필터)
+POST /api/order/sync           KIS 체결 내역과 로컬 DB 대사(Reconciliation)
+POST /api/order/reserve        예약주문 등록
+GET  /api/order/reserves       예약주문 목록
+DELETE /api/order/reserve/{id} 예약주문 삭제
+```
+
+- KIS API 키 미설정 시 503 반환
+- 주문 발송 시 로컬 `orders.db`에 자동 기록 (status: PLACED)
+- 동기화 후 KIS 체결 내역 기준으로 PLACED → FILLED/PARTIAL/CANCELLED 갱신
+- `excg_id_dvsn_cd` 필드: `'KRX'`=API 주문(취소 가능), `'SOR'`=HTS/MTS 주문(API 취소 불가)
+- 주문번호 포맷: `TTTC8036R`은 10자리 제로패딩(`0039822900`), 취소/정정 API는 8자리 필요 → `_strip_leading_zeros()`로 자동 변환
 
 #### `earnings.py` — 공시 조회
 
@@ -158,6 +183,17 @@ GET /api/watchlist/info/{code}?market=KR
 | `TTTS3012R` / `JTTT3012R` | `/uapi/overseas-stock/v1/trading/inquire-balance` | 해외주식 잔고 (주간/야간) |
 | `CTRP6504R` | `/uapi/overseas-stock/v1/trading/inquire-present-balance` | 기준환율 + KRW 합계 |
 | `CTFO6118R` | `/uapi/domestic-futureoption/v1/trading/inquire-balance` | 국내선물옵션 잔고 |
+| `TTTC0802U` | `/uapi/domestic-stock/v1/trading/order-cash` | 국내주식 매수 주문 |
+| `TTTC0801U` | `/uapi/domestic-stock/v1/trading/order-cash` | 국내주식 매도 주문 |
+| `TTTC0803U` | `/uapi/domestic-stock/v1/trading/order-rvsecncl` | 국내주식 정정/취소 |
+| `TTTC8036R` | `/uapi/domestic-stock/v1/trading/inquire-psbl-rvsecncl` | 국내주식 미체결 조회 |
+| `TTTC8001R` | `/uapi/domestic-stock/v1/trading/inquire-daily-ccld` | 국내주식 당일 체결 내역 |
+| `TTTC8908R` | `/uapi/domestic-stock/v1/trading/inquire-psbl-order` | 국내주식 매수가능 조회 |
+| `JTTT1002U` | `/uapi/overseas-stock/v1/trading/order` | 해외주식 매수 주문 |
+| `JTTT1006U` | `/uapi/overseas-stock/v1/trading/order` | 해외주식 매도 주문 |
+| `TTTS3018R` | `/uapi/overseas-stock/v1/trading/inquire-nccs` | 해외주식 미체결 조회 |
+| `JTTT3001R` | `/uapi/overseas-stock/v1/trading/inquire-ccnl` | 해외주식 당일 체결 내역 |
+| `TTTS3007R` | `/uapi/overseas-stock/v1/trading/inquire-psamount` | 해외주식 매수가능 조회 |
 
 **KIS API 구조 주의사항 (잔고 관련)**
 
@@ -200,6 +236,8 @@ GET /api/watchlist/info/{code}?market=KR
 |------|------|
 | `watchlist_service.py` | 관심종목 대시보드 + 종목 상세. 국내=pykrx+DART, 해외=yfinance 분기. `resolve_symbol(name_or_code, market)` |
 | `detail_service.py` | 재무 테이블 + PER/PBR 히스토리 + CAGR 종합 리포트. 해외는 yfinance(최대 4년), 밸류에이션 차트 빈 데이터 반환. |
+| `order_service.py` | KIS API 직접 호출로 국내/해외 주문 발송·정정·취소·미체결 조회·당일 체결 내역·로컬 DB 대사. `_strip_leading_zeros()`로 10자리→8자리 주문번호 변환. `excg_id_dvsn_cd != 'SOR'` 조건으로 API 취소 가능 여부 판별. |
+| `reservation_service.py` | 예약주문 실행 엔진. `asyncio` 20초 간격 폴링. 가격 조건(`price_below`/`price_above`) + 시간 조건(`scheduled`) 체크 후 자동 주문 발송. |
 
 **국내/해외 분기 기준**: `stock/utils.py`의 `is_domestic(code)` — 6자리 숫자이면 국내(KRX), 아니면 해외.
 
@@ -235,6 +273,7 @@ CLI와 API 라우터 양쪽에서 공용으로 사용한다. 데이터는 `~/sto
 | 파일 | 역할 |
 |------|------|
 | `store.py` | 관심종목 CRUD. `~/stock-watchlist/watchlist.db` (SQLite). 복합 PK `(code, market)`. `market` 컬럼 자동 마이그레이션. |
+| `order_store.py` | 주문 이력 + 예약주문 CRUD. `~/stock-watchlist/orders.db` (SQLite). `orders` + `reservations` 테이블. |
 | `utils.py` | `is_domestic(code)` — 6자리 숫자=국내, 아니면 해외. 모든 모듈에서 국내/해외 분기에 사용. |
 | `symbol_map.py` | pykrx 기반 종목코드↔종목명 매핑 (7일 캐시). |
 | `market.py` | pykrx 기반 시세/시가총액/52주 고저/PER/PBR + 월별 밸류에이션 히스토리 + `fetch_period_returns()`(당일/3M/6M/1Y 수익률, 1시간 캐시). `fetch_market_metrics(code)` — 잔고 페이지용 단일 종목 시가총액·PER·PBR·ROE·KOSPI/KOSDAQ 구분 조회 (6시간 캐시). |
@@ -278,20 +317,25 @@ frontend/
       balance.js
       watchlist.js        addToWatchlist(code, memo, market) / removeFromWatchlist(code, market) 등
       detail.js           10년 재무 + 밸류에이션 + 종합 리포트
+      order.js            placeOrder / fetchOpenOrders / cancelOrder / modifyOrder / fetchExecutions 등
     hooks/
       useScreener.js      { data, loading, error, search }
       useEarnings.js      { data, loading, error, load(startDate, endDate, market) }
       useBalance.js       { data, loading, error, load }
       useWatchlist.js     useWatchlist (CRUD, market 파라미터) + useDashboard + useStockInfo
       useDetail.js        useDetailReport
+      useOrder.js         useOrderPlace / useBuyable / useOpenOrders / useExecutions / useOrderHistory / useOrderSync / useReservations
+      useNotification.js  토스트 상태 관리 + 브라우저 Notification API 래퍼
     components/
-      layout/Header.jsx   네비게이션 바 (5개 메뉴, 로고: "DK STOCK")
-      common/             LoadingSpinner, ErrorAlert, EmptyState, DataTable
+      layout/Header.jsx   네비게이션 바 (6개 메뉴, 로고: "DK STOCK")
+      common/             LoadingSpinner, ErrorAlert, EmptyState, DataTable, ToastNotification
       screener/           FilterPanel, StockTable
       earnings/           FilingsTable  (국내/미국 컬럼 분기, market prop)
       balance/            PortfolioSummary, HoldingsTable, OverseasHoldingsTable, FuturesTable
       watchlist/          AddStockForm (시장 선택 드롭다운), WatchlistDashboard (통화 표시), StockInfoModal
       detail/             StockHeader, FinancialTable, ValuationChart, ReportSummary
+      order/              OrderForm, OrderConfirmModal, OpenOrdersTable, ModifyOrderModal,
+                          ExecutionsTable, OrderHistoryTable, ReservationForm, ReservationsTable, SyncButton
     pages/
       DashboardPage.jsx   /         잔고 요약 + 오늘 공시 + 시총 상위
       ScreenerPage.jsx    /screener
@@ -299,6 +343,7 @@ frontend/
       BalancePage.jsx     /balance
       WatchlistPage.jsx   /watchlist
       DetailPage.jsx      /detail/:symbol  탭 UI (재무분석/밸류에이션/종합 리포트)
+      OrderPage.jsx       /order     탭 UI (주문발송/미체결/체결내역/주문이력/예약주문)
 ```
 
 **프론트엔드 규칙**
@@ -318,12 +363,15 @@ frontend/
 - OverseasHoldingsTable: 거래소·통화 컬럼 포함. `평가손익(외화)` + `평가손익(원화)` 두 컬럼 표시. 외화 소수점 포맷
 - 매입단가 포맷: 국내주식 `Math.floor()` 소수점 절사(정수 표시), 해외주식 소수점 2자리 고정
 - FuturesTable: 포지션 뱃지 (매수=빨강, 매도=파랑), 미결제수량 표시
-- DataTable: 모든 컬럼 헤더 클릭 시 정렬 (⇅ 아이콘, 재클릭 시 asc/desc 토글, 숫자/문자 자동 구분). 모든 잔고 테이블에 공통 적용.
-- HoldingsTable(국내주식): 거래소(KOSPI/KOSDAQ) → 종목코드 → 종목명 → 투자비중(%) → 보유수량 → 평가금액 → 매입단가 → 현재가 → 평가손익 → 수익률 → 시가총액 → PER → ROE → PBR 순서. 투자비중은 카테고리 내 eval_amount 기준.
-- OverseasHoldingsTable(해외주식): 거래소 → 종목코드 → 종목명 → 투자비중(%) → 통화 → 보유수량 → 평가금액(외화) → 매입단가 → 현재가 → 평가손익(외화) → 평가손익(원화) → 수익률 → 시가총액 → PER → ROE → PBR. 투자비중은 eval_amount_krw 기준.
+- DataTable: 모든 컬럼 헤더 클릭 시 정렬 (⇅ 아이콘, 재클릭 시 asc/desc 토글, 숫자/문자 자동 구분). 모든 잔고 테이블에 공통 적용. `renderContext` prop으로 `navigate` 등 외부 의존성 전달 지원. `sortable: false` 컬럼 설정 지원.
+- HoldingsTable(국내주식): 거래소(KOSPI/KOSDAQ) → 종목코드 → 종목명 → 투자비중(%) → 보유수량 → 평가금액 → 매입단가 → 현재가 → 평가손익 → 수익률 → 시가총액 → PER → ROE → PBR → 주문(매도/매수 버튼) 순서. 투자비중은 카테고리 내 eval_amount 기준.
+- OverseasHoldingsTable(해외주식): 거래소 → 종목코드 → 종목명 → 투자비중(%) → 통화 → 보유수량 → 평가금액(외화) → 매입단가 → 현재가 → 평가손익(외화) → 평가손익(원화) → 수익률 → 시가총액 → PER → ROE → PBR → 주문(매도/매수 버튼). 투자비중은 eval_amount_krw 기준.
 - FinancialTable: currency-aware 단위 표시. USD면 M USD 기준으로 1,000M 이상은 $B, 1,000,000M 이상은 $T. KRW는 억/조.
 - StockHeader: currency-aware 현재가/등락/시총 표시. PER·PBR은 `Math.floor()` 정수 표시.
 - StockInfoModal: PER·PBR `Math.floor()` 정수 표시.
+- OrderPage: 5탭 UI (주문발송 / 미체결 / 체결내역 / 주문이력 / 예약주문). URL 파라미터(`?symbol=&market=&side=&quantity=`)로 잔고 페이지 매도/매수 버튼과 연계.
+- OpenOrdersTable: `api_cancellable` 필드로 API 취소 가능 여부 판별. `excg_id_dvsn_cd === 'SOR'`(HTS/MTS 주문)은 정정/취소 버튼 대신 "앱취소필요" 안내 표시.
+- ToastNotification: 화면 우상단 고정 토스트 알림 컨테이너. `App.jsx`에서 `useNotification` 훅과 함께 마운트.
 
 > 상세 컴포넌트 설명은 `docs/FRONTEND_SPEC.md` 참조.
 
@@ -416,6 +464,7 @@ KIS API는 실전/모의투자에 따라 TR_ID 접두사가 다르다.
 | `screener_cache.db` (프로젝트 루트) | 스크리너 KRX/DART 데이터 캐시 | 만료 없음 (날짜키 기반) |
 | `~/stock-watchlist/cache.db` | 관심종목 시세/재무/종목코드/수익률 캐시 (국내+해외) | 키별 상이 |
 | `~/stock-watchlist/watchlist.db` | 관심종목 목록 (SQLite CRUD, 국내+해외) | 영구 |
+| `~/stock-watchlist/orders.db` | 주문 이력 + 예약주문 (SQLite). `orders` + `reservations` 테이블 | 영구 |
 
 `stock/` 캐시 TTL: `corpCode.xml` 30일, `symbol_map` 7일, 시세/재무 24시간, `market:period_returns:` 1시간, `yf:*` 1~24시간.
 

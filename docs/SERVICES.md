@@ -205,3 +205,65 @@ WatchlistService(broker=None)
 
 - 모든 데이터 수집 함수는 `stock/cache.py` 또는 `screener/cache.py`로 캐싱됨
 - 서비스 레이어는 캐시를 직접 관리하지 않음 (하위 모듈에 위임)
+
+---
+
+## `order_service.py` — 주문 서비스
+
+`routers/order.py`에서 사용. KIS REST API 직접 호출 + 로컬 `orders.db` 기록 + 대사 로직.
+
+### 주요 함수
+
+| 함수 | 설명 |
+|------|------|
+| `place_order(symbol, symbol_name, market, side, order_type, price, quantity, memo)` | 국내/해외 주문 발송. KIS API 호출 후 로컬 DB에 PLACED 상태로 기록. |
+| `get_buyable(symbol, market, price, order_type)` | 매수가능 금액/수량 조회 (국내: `TTTC8908R`, 해외: `TTTS3007R`). |
+| `get_open_orders(market)` | 미체결 주문 목록 (국내: `TTTC8036R`, 해외: `TTTS3018R`). `api_cancellable` 필드 포함. |
+| `modify_order(order_no, org_no, market, order_type, price, quantity, total)` | 주문 정정 (국내: `TTTC0803U`). |
+| `cancel_order(order_no, org_no, market, order_type, quantity, total)` | 주문 취소 (국내: `TTTC0803U`). |
+| `get_executions(market)` | 당일 체결 내역 (국내: `TTTC8001R`, 해외: `JTTT3001R`). |
+| `sync_orders()` | 로컬 PLACED/PARTIAL 주문을 KIS 체결 내역과 대사. FILLED/PARTIAL/CANCELLED로 상태 갱신. |
+
+### 주요 설계 결정
+
+**주문번호 포맷 (`_strip_leading_zeros`)**
+
+`TTTC8036R` 미체결 조회는 `odno` 필드를 10자리 제로패딩(`0039822900`)으로 반환하지만,
+`TTTC0803U` 정정/취소 API는 `ORGN_ODNO`에 8자리(`39822900`)를 요구한다.
+`_strip_leading_zeros(order_no)` 함수로 자동 변환한다.
+
+**채널 구분 (`api_cancellable`)**
+
+KIS는 주문 채널(API/HTS/MTS)별로 접근을 분리한다:
+- `TTTC8036R` (미체결 조회): 모든 채널 주문 반환
+- `TTTC0803U` (취소/정정): **동일 채널(API)로 발주한 주문만** 처리 가능
+- `excg_id_dvsn_cd: 'KRX'` → API 발주 → 취소 가능
+- `excg_id_dvsn_cd: 'SOR'` → HTS/MTS(Smart Order Routing) 발주 → API 취소 불가 (APBK0344 오류)
+
+`api_cancellable = (excg_id != "SOR")` 조건으로 프론트엔드에 전달.
+
+---
+
+## `reservation_service.py` — 예약주문 스케줄러
+
+`main.py` lifespan에서 `asyncio` 백그라운드 태스크로 실행. `orders.db`의 `WAITING` 예약주문을 20초마다 체크.
+
+### 주요 함수
+
+| 함수 | 설명 |
+|------|------|
+| `start_scheduler()` | `asyncio.create_task`로 폴링 루프 시작. `main.py` lifespan startup에서 호출. |
+| `stop_scheduler()` | 폴링 루프 종료. `main.py` lifespan shutdown에서 호출. |
+| `_check_reservations()` | WAITING 예약주문 전체 조회 → 조건 체크 → 충족 시 주문 발송. |
+
+### 조건 유형
+
+| `condition_type` | 발동 조건 | `condition_value` |
+|-----------------|----------|-------------------|
+| `price_below` | 현재가 ≤ 목표가 | 숫자 문자열 (원화 또는 외화) |
+| `price_above` | 현재가 ≥ 목표가 | 숫자 문자열 |
+| `scheduled` | 현재 시각 ≥ 지정 시각 | ISO 8601 datetime 문자열 |
+
+- 발동 시 `order_service.place_order()`로 자동 주문 발송
+- 발동 성공: `TRIGGERED` → `EXECUTED` 상태 갱신, `result_order_no` 기록
+- 발동 실패: `FAILED` 상태 갱신

@@ -11,7 +11,7 @@ function SortIcon({ active, dir }) {
   return <span className={`ml-1 text-xs ${active ? 'text-blue-500' : 'text-gray-300'}`}>{dir === 'asc' ? '▲' : '▼'}</span>
 }
 
-export default function DataTable({ columns, data, rowKey }) {
+export default function DataTable({ columns, data, rowKey, renderContext = {} }) {
   const [sortKey, setSortKey] = useState(null)
   const [sortDir, setSortDir] = useState('asc')
 
@@ -47,8 +47,10 @@ export default function DataTable({ columns, data, rowKey }) {
             {columns.map((col) => (
               <th
                 key={col.key}
-                onClick={() => handleSort(col.key)}
-                className={`px-4 py-2.5 font-semibold text-gray-600 whitespace-nowrap cursor-pointer select-none hover:bg-gray-100 transition-colors ${
+                onClick={() => col.sortable !== false && handleSort(col.key)}
+                className={`px-4 py-2.5 font-semibold text-gray-600 whitespace-nowrap select-none transition-colors ${
+                  col.sortable !== false ? 'cursor-pointer hover:bg-gray-100' : 'cursor-default'
+                } ${
                   col.align === 'right'
                     ? 'text-right'
                     : col.align === 'center'
@@ -57,7 +59,7 @@ export default function DataTable({ columns, data, rowKey }) {
                 }`}
               >
                 {col.label}
-                <SortIcon active={sortKey === col.key} dir={sortDir} />
+                {col.sortable !== false && <SortIcon active={sortKey === col.key} dir={sortDir} />}
               </th>
             ))}
           </tr>
@@ -79,7 +81,7 @@ export default function DataTable({ columns, data, rowKey }) {
                       : 'text-left'
                   }`}
                 >
-                  {col.render ? col.render(row[col.key], row, i) : (row[col.key] ?? '-')}
+                  {col.render ? col.render(row[col.key], row, renderContext) : (row[col.key] ?? '-')}
                 </td>
               ))}
             </tr>
