@@ -7,3 +7,5 @@ click
 rich
 pykrx
 yfinance
+websockets
+openai

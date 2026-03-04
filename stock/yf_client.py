@@ -256,3 +256,252 @@ def fetch_financials_multi_year_yf(code: str, years: int = 4) -> list[dict]:
     except Exception:
         set_cached(key, [], ttl_hours=24)
         return []
+
+
+# ── 대차대조표 ────────────────────────────────────────────────────────────────
+
+_YF_BS_MAP = {
+    "total_assets":        "Total Assets",
+    "current_assets":      "Current Assets",
+    "non_current_assets":  "Net PPE",          # 대체: non-current 직접 없음
+    "cash_and_equiv":      "Cash And Cash Equivalents",
+    "receivables":         "Accounts Receivable",
+    "inventories":         "Inventory",
+    "ppe":                 "Net PPE",
+    "total_liabilities":   "Total Liabilities Net Minority Interest",
+    "current_liabilities": "Current Liabilities",
+    "long_term_debt":      "Long Term Debt",
+    "total_equity":        "Stockholders Equity",
+    "retained_earnings":   "Retained Earnings",
+}
+
+
+def fetch_balance_sheet_yf(code: str, years: int = 5) -> list[dict]:
+    """yfinance 연간 대차대조표. [{year, total_assets, ...}] 과거→최신 순."""
+    key = f"yf:balance_sheet:{code.upper()}"
+    cached = get_cached(key)
+    if cached is not None:
+        return cached[-years:] if len(cached) > years else cached
+
+    try:
+        t = _ticker(code)
+        bs = t.balance_sheet
+        if bs is None or bs.empty:
+            set_cached(key, [], ttl_hours=24)
+            return []
+
+        rows = []
+        for col in sorted(bs.columns, reverse=False):
+            year = col.year
+            row: dict = {"year": year}
+            for field, yf_name in _YF_BS_MAP.items():
+                val = None
+                if yf_name in bs.index:
+                    val = _safe_int(bs.loc[yf_name, col])
+                row[field] = val
+
+            # 비유동자산 = 자산총계 - 유동자산
+            ta = row.get("total_assets") or 0
+            ca = row.get("current_assets") or 0
+            row["non_current_assets"] = (ta - ca) if (ta and ca) else None
+
+            # 부채비율, 유동비율
+            equity = row.get("total_equity") or 0
+            liab = row.get("total_liabilities") or 0
+            cur_a = row.get("current_assets") or 0
+            cur_l = row.get("current_liabilities") or 1
+            row["debt_ratio"] = round(liab / equity * 100, 1) if equity else None
+            row["current_ratio"] = round(cur_a / cur_l * 100, 1) if cur_l else None
+            rows.append(row)
+
+        set_cached(key, rows, ttl_hours=24)
+        return rows[-years:] if len(rows) > years else rows
+    except Exception:
+        set_cached(key, [], ttl_hours=24)
+        return []
+
+
+# ── 현금흐름표 ────────────────────────────────────────────────────────────────
+
+_YF_CF_MAP = {
+    "operating_cf":  "Operating Cash Flow",
+    "investing_cf":  "Investing Cash Flow",
+    "financing_cf":  "Financing Cash Flow",
+    "capex":         "Capital Expenditure",
+    "depreciation":  "Depreciation And Amortization",
+    "free_cf":       "Free Cash Flow",
+}
+
+
+def fetch_cashflow_yf(code: str, years: int = 5) -> list[dict]:
+    """yfinance 연간 현금흐름표. [{year, operating_cf, ...}] 과거→최신 순."""
+    key = f"yf:cashflow:{code.upper()}"
+    cached = get_cached(key)
+    if cached is not None:
+        return cached[-years:] if len(cached) > years else cached
+
+    try:
+        t = _ticker(code)
+        cf = t.cashflow
+        if cf is None or cf.empty:
+            set_cached(key, [], ttl_hours=24)
+            return []
+
+        rows = []
+        for col in sorted(cf.columns, reverse=False):
+            year = col.year
+            row: dict = {"year": year}
+            for field, yf_name in _YF_CF_MAP.items():
+                val = None
+                if yf_name in cf.index:
+                    val = _safe_int(cf.loc[yf_name, col])
+                row[field] = val
+
+            # free_cf 없으면 영업CF - |CAPEX| 계산
+            if row.get("free_cf") is None:
+                op_cf = row.get("operating_cf") or 0
+                capex = row.get("capex") or 0
+                row["free_cf"] = op_cf - abs(capex)
+
+            rows.append(row)
+
+        set_cached(key, rows, ttl_hours=24)
+        return rows[-years:] if len(rows) > years else rows
+    except Exception:
+        set_cached(key, [], ttl_hours=24)
+        return []
+
+
+# ── 손익계산서 세부 ────────────────────────────────────────────────────────────
+
+def fetch_income_detail_yf(code: str, years: int = 5) -> list[dict]:
+    """yfinance 손익계산서 세부. [{year, revenue, cogs, gross_profit, ...}]"""
+    key = f"yf:income_detail:{code.upper()}"
+    cached = get_cached(key)
+    if cached is not None:
+        return cached[-years:] if len(cached) > years else cached
+
+    try:
+        t = _ticker(code)
+        fin = t.financials
+        if fin is None or fin.empty:
+            set_cached(key, [], ttl_hours=24)
+            return []
+
+        rows = []
+        for col in sorted(fin.columns, reverse=False):
+            year = col.year
+
+            def _g(*names):
+                for n in names:
+                    if n in fin.index:
+                        return _safe_int(fin.loc[n, col])
+                return None
+
+            revenue = _g("Total Revenue", "Revenue")
+            cogs = _g("Cost Of Revenue")
+            gross = _g("Gross Profit")
+            sga = _g("Selling General And Administrative")
+            op_inc = _g("Operating Income", "EBIT")
+            interest_exp = _g("Interest Expense")
+            pretax = _g("Pretax Income")
+            tax = _g("Tax Provision")
+            net_inc = _g("Net Income", "Net Income Common Stockholders")
+            eps = _safe(fin.loc["Basic EPS", col]) if "Basic EPS" in fin.index else None
+
+            rev = revenue or 0
+            oi = op_inc or 0
+            ni = net_inc or 0
+            rows.append({
+                "year": year,
+                "revenue": revenue,
+                "cogs": cogs,
+                "gross_profit": gross,
+                "sga": sga,
+                "operating_income": op_inc,
+                "interest_income": None,
+                "interest_expense": interest_exp,
+                "pretax_income": pretax,
+                "tax_expense": tax,
+                "net_income": net_inc,
+                "eps": eps,
+                "oi_margin": round(oi / rev * 100, 1) if rev else None,
+                "net_margin": round(ni / rev * 100, 1) if rev else None,
+                "dart_url": "",
+            })
+
+        set_cached(key, rows, ttl_hours=24)
+        return rows[-years:] if len(rows) > years else rows
+    except Exception:
+        set_cached(key, [], ttl_hours=24)
+        return []
+
+
+# ── 계량지표 ──────────────────────────────────────────────────────────────────
+
+def fetch_metrics_yf(code: str) -> dict:
+    """계량지표: {per, pbr, psr, ev_ebitda, ev, market_cap, roe, roa, debt_to_equity, current_ratio}"""
+    key = f"yf:metrics:{code.upper()}"
+    cached = get_cached(key)
+    if cached is not None:
+        return cached
+
+    try:
+        t = _ticker(code)
+        info = t.info or {}
+
+        roe_raw = info.get("returnOnEquity")
+        roa_raw = info.get("returnOnAssets")
+        roe = _safe(round(roe_raw * 100, 2)) if roe_raw is not None else None
+        roa = _safe(round(roa_raw * 100, 2)) if roa_raw is not None else None
+
+        result = {
+            "per":             _safe(info.get("trailingPE") or info.get("forwardPE")),
+            "pbr":             _safe(info.get("priceToBook")),
+            "psr":             _safe(info.get("priceToSalesTrailing12Months")),
+            "ev_ebitda":       _safe(info.get("enterpriseToEbitda")),
+            "ev":              _safe(info.get("enterpriseValue")),
+            "market_cap":      _safe(info.get("marketCap")),
+            "shares":          _safe(info.get("sharesOutstanding")),
+            "roe":             roe,
+            "roa":             roa,
+            "debt_to_equity":  _safe(info.get("debtToEquity")),
+            "current_ratio":   _safe(info.get("currentRatio")),
+        }
+        set_cached(key, result, ttl_hours=6)
+        return result
+    except Exception:
+        empty: dict = {}
+        set_cached(key, empty, ttl_hours=1)
+        return empty
+
+
+# ── 사업별 매출비중 ────────────────────────────────────────────────────────────
+
+def fetch_segments_yf(code: str) -> list[dict]:
+    """사업별 매출비중 (best effort). [{segment, revenue_pct}]
+
+    yfinance .info 에서 추출 가능한 세그먼트 정보만 반환.
+    데이터 없으면 빈 리스트.
+    """
+    key = f"yf:segments:{code.upper()}"
+    cached = get_cached(key)
+    if cached is not None:
+        return cached
+
+    try:
+        t = _ticker(code)
+        info = t.info or {}
+
+        # yfinance에는 공식 세그먼트 API가 없음 → sector/industry 수준만 반환
+        sector = info.get("sector", "")
+        industry = info.get("industry", "")
+        segments: list[dict] = []
+        if sector:
+            segments.append({"segment": sector, "revenue_pct": 100.0, "note": "섹터"})
+
+        set_cached(key, segments, ttl_hours=24)
+        return segments
+    except Exception:
+        set_cached(key, [], ttl_hours=6)
+        return []

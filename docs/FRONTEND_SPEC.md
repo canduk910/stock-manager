@@ -23,7 +23,7 @@ React 19 + Vite + Tailwind CSS v4 + Recharts SPA. 네이티브 fetch 사용 (외
 frontend/
   index.html                 진입 HTML
   package.json
-  vite.config.js             /api/* → localhost:8000 프록시 설정
+  vite.config.js             /api/* → localhost:8000 프록시, /ws → ws://localhost:8000 (WebSocket 프록시)
   src/
     main.jsx                 ReactDOM.createRoot 진입점
     App.jsx                  BrowserRouter + Routes 정의
@@ -43,6 +43,7 @@ frontend/
 | `/watchlist` | WatchlistPage | 관심종목 CRUD + 시세/재무 대시보드 |
 | `/detail/:symbol` | DetailPage | 탭 UI: 재무분석 / 밸류에이션 / 종합 리포트 |
 | `/order` | OrderPage | 탭 UI: 주문발송 / 미체결 / 체결내역 / 주문이력 / 예약주문 |
+| `/advisory` | AdvisoryPage | AI자문 — 종목목록 + 기본적/기술적 분석 + AI 리포트 |
 
 ---
 
@@ -57,6 +58,7 @@ frontend/
 | `watchlist.js` | `fetchWatchlist()`, `addToWatchlist()`, `removeFromWatchlist()`, `updateMemo()`, `fetchDashboard()`, `fetchStockInfo()` | `/api/watchlist/*` |
 | `detail.js` | `fetchDetailFinancials()`, `fetchDetailValuation()`, `fetchDetailReport()` | `/api/detail/*` |
 | `order.js` | `placeOrder()`, `fetchBuyable()`, `fetchOpenOrders()`, `cancelOrder()`, `modifyOrder()`, `fetchExecutions()`, `fetchOrderHistory()`, `syncOrders()`, `createReservation()`, `fetchReservations()`, `deleteReservation()` | `/api/order/*` |
+| `advisory.js` | `fetchAdvisoryStocks()`, `addAdvisoryStock()`, `removeAdvisoryStock()`, `refreshAdvisoryData()`, `fetchAdvisoryData()`, `generateReport()`, `fetchReport()` | `/api/advisory/*` |
 
 ---
 
@@ -73,6 +75,10 @@ frontend/
 | `useDetail.js` | `useDetailReport()` | `{ data, loading, error, load }` — `load(symbol, years)` |
 | `useOrder.js` | `useOrderPlace()`, `useBuyable()`, `useOpenOrders()`, `useExecutions()`, `useOrderHistory()`, `useOrderSync()`, `useReservations()` | 각각 `{ loading, error, ... }` + 액션 함수 |
 | `useNotification.js` | `useNotification()` | `{ toasts, notify, dismiss }` — 토스트 상태 + 브라우저 Notification API |
+| `useQuote.js` | `useQuote(symbol)` | `{ price, change, changeRate, sign, asks, bids, totalAskVolume, totalBidVolume, connected }` — 실시간 호가 WebSocket. symbol 변경 시 재연결 + state 초기화. 비정상 종료 시 3초 후 자동 재연결. |
+| `useAdvisory.js` | `useAdvisoryStocks()` | `{ stocks, loading, error, load, add, remove }` — 자문종목 목록 CRUD |
+| | `useAdvisoryData()` | `{ data, loading, error, load, refresh }` — 분석 데이터 조회/새로고침 |
+| | `useAdvisoryReport()` | `{ report, loading, error, load, generate }` — AI 리포트 조회/생성 |
 
 ---
 
@@ -128,7 +134,8 @@ frontend/
 
 | 컴포넌트 | 설명 |
 |---------|------|
-| `OrderForm` | 시장/종목/매매구분/가격/수량 입력 폼. 잔고 페이지 URL 파라미터 기본값 반영. 매수가능 조회 버튼. |
+| `OrderForm` | 시장/종목/매매구분/가격/수량 입력 폼. 잔고 페이지 URL 파라미터 기본값 반영. 매수가능 조회 버튼. `externalPrice` prop → 지정가 자동 세팅(호가창 연동). `onSymbolChange` prop → 종목코드 변경 콜백. |
+| `OrderbookPanel` | 실시간 호가창. `symbol`+`market` prop. 국내=KIS WS 10호가(매도↑매수↓, 잔량 배경바), 해외=현재가만 표시(호가 미지원 안내). 호가 행 클릭 → `onPriceSelect(price)` 콜백. 연결 상태 배지(녹색/회색). symbol 없으면 플레이스홀더 표시. |
 | `OrderConfirmModal` | 주문 확인 모달. 종목/수량/가격/매매구분 재확인 후 발송. |
 | `OpenOrdersTable` | 미체결 주문 테이블. `api_cancellable` 기준으로 API 주문은 정정/취소 버튼, HTS/MTS 주문은 "앱취소필요" 표시. |
 | `ModifyOrderModal` | 주문 정정 모달 (가격/수량 변경). |
@@ -137,6 +144,14 @@ frontend/
 | `ReservationForm` | 예약주문 등록 폼. 조건 유형(가격 이하/이상/지정 시각) + 주문 정보 입력. |
 | `ReservationsTable` | 예약주문 목록. WAITING 상태만 삭제 가능. |
 | `SyncButton` | 대사 동기화 버튼. 클릭 시 `POST /api/order/sync` 호출, 갱신 건수 표시. |
+
+### AI자문 (`src/components/advisory/`)
+
+| 컴포넌트 | 설명 |
+|---------|------|
+| `FundamentalPanel` | 기본적 분석 탭. 계량지표 카드 그리드 (PER/PBR/PSR/EV·EBITDA/ROE/ROA/부채비율/유동비율) + 손익계산서 테이블 + BarChart (매출/영업이익/순이익) + 대차대조표 테이블 + 현금흐름표 테이블 + BarChart (영업CF vs FCF) + 사업별 매출비중 PieChart (KR: "AI추정" 배지). |
+| `TechnicalPanel` | 기술적 분석 탭. 시그널 배지 카드 (MACD/RSI/Stochastic/MA20 상회 + 변동성돌파 목표가) + ComposedChart (종가봉+MA5/20/60+BB) + 거래량 BarChart + MACD ComposedChart + RSI LineChart (70/30 기준선) + Stochastic LineChart (80/20 기준선). |
+| `AIReportPanel` | AI자문 탭. "AI 분석 생성" 버튼 + 최종 생성 시각 + 종합투자의견(등급 배지+요약+근거) + 기술적시그널(신호 배지+지표별) + 리스크 요인 + 투자 포인트. JSON 파싱 실패 시 원문 텍스트 fallback. |
 
 ### 종목 상세 (`src/components/detail/`)
 
@@ -181,7 +196,8 @@ frontend/
 
 ### OrderPage (`/order`)
 - 5탭 UI: 주문발송 / 미체결 / 체결내역 / 주문이력 / 예약주문
-- URL 파라미터(`?symbol=&symbol_name=&market=&side=&quantity=`)로 잔고 페이지 매도/매수 버튼과 연계 → `OrderForm` 기본값 자동 채움
+- URL 파라미터(`?symbol=&symbol_name=&market=&side=&quantity=`)로 잔고 페이지 매도/매수 버튼과 연계 → `OrderForm` 기본값 + `quoteSymbol` 자동 채움
+- **주문발송 탭**: xl 이상에서 2컬럼 grid. 왼쪽=`OrderbookPanel`(호가창), 오른쪽=`OrderForm`. 호가 클릭 → `selectedPrice` state → `OrderForm.externalPrice` prop 전달. 종목코드 입력 → `quoteSymbol` state → 호가창 자동 갱신.
 - 미체결 탭: 국내/미국 탭 선택, 새로고침 버튼, 동기화 버튼(`SyncButton`)
 - 주문 발송 성공 시 토스트 알림 (`notify()`)
 - 예약주문 탭: 등록 폼 + 목록 (좌우 분할 레이아웃)
@@ -196,4 +212,7 @@ frontend/
 - DART 링크: `target="_blank"`, `rel="noopener noreferrer"`
 - 매입단가 포맷: 국내주식 `Math.floor()` 소수점 절사(정수), 해외주식 소수점 2자리 고정(`toFixed`)
 - 주문 취소 가능 여부: `api_cancellable === false`이면 정정/취소 버튼 대신 "앱취소필요" 텍스트 표시 (마우스 오버 시 안내 tooltip)
-- 잔고→주문 연계: HoldingsTable·OverseasHoldingsTable의 매도/매수 버튼 클릭 시 `/order?symbol=&market=&side=&quantity=` URL로 이동, OrderForm 기본값 자동 세팅
+- 잔고→주문 연계: HoldingsTable·OverseasHoldingsTable의 매도/매수 버튼 클릭 시 `/order?symbol=&market=&side=&quantity=` URL로 이동, OrderForm 기본값 + 호가창 자동 세팅
+- **호가창 가격 포맷**: 국내 `Math.floor(price).toLocaleString()` (정수), 해외 `price.toFixed(2)` (소수점 2자리)
+- **호가창 잔량 배경바**: 최대 잔량 대비 비율로 `width: N%` 동적 인라인 스타일. 매도=파란 계열, 매수=빨간 계열.
+- **useQuote 재연결 패턴**: `mountedRef` 언마운트 가드 + `symbol` 변경 시 이전 WS `close(1000)` 후 즉시 재연결. 비정상 code 시 3초 후 retry. 언마운트 시 `clearTimeout` + `ws.close(1000)`.

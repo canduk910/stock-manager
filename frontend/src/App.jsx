@@ -8,6 +8,7 @@ import BalancePage from './pages/BalancePage'
 import WatchlistPage from './pages/WatchlistPage'
 import DetailPage from './pages/DetailPage'
 import OrderPage from './pages/OrderPage'
+import AdvisoryPage from './pages/AdvisoryPage'
 import ToastNotification from './components/common/ToastNotification'
 import { useNotification } from './hooks/useNotification'
 
@@ -42,6 +43,7 @@ export default function App() {
           <Route path="/watchlist" element={<WatchlistPage />} />
           <Route path="/detail/:symbol" element={<DetailPage />} />
           <Route path="/order" element={<OrderPage notify={notify} />} />
+          <Route path="/advisory" element={<AdvisoryPage notify={notify} />} />
         </Routes>
       </main>
       <ToastNotification toasts={toasts} removeToast={removeToast} />

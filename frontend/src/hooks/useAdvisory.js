@@ -1,0 +1,118 @@
+import { useState, useCallback } from 'react'
+import {
+  fetchAdvisoryStocks,
+  addAdvisoryStock,
+  removeAdvisoryStock,
+  refreshAdvisoryData,
+  fetchAdvisoryData,
+  generateReport,
+  fetchReport,
+} from '../api/advisory'
+
+/** 자문종목 목록 + CRUD */
+export function useAdvisoryStocks() {
+  const [stocks, setStocks] = useState([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState(null)
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const data = await fetchAdvisoryStocks()
+      setStocks(data)
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  const add = useCallback(async (code, market, memo = '') => {
+    const result = await addAdvisoryStock(code, market, memo)
+    await load()
+    return result
+  }, [load])
+
+  const remove = useCallback(async (code, market) => {
+    await removeAdvisoryStock(code, market)
+    await load()
+  }, [load])
+
+  return { stocks, loading, error, load, add, remove }
+}
+
+/** 분석 데이터 새로고침 + 조회 */
+export function useAdvisoryData() {
+  const [data, setData] = useState(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState(null)
+
+  const load = useCallback(async (code, market) => {
+    setLoading(true)
+    setError(null)
+    try {
+      const result = await fetchAdvisoryData(code, market)
+      setData(result)
+    } catch (e) {
+      setError(e.message)
+      setData(null)
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  const refresh = useCallback(async (code, market) => {
+    setLoading(true)
+    setError(null)
+    try {
+      const result = await refreshAdvisoryData(code, market)
+      setData(result)
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  return { data, loading, error, load, refresh }
+}
+
+/** AI 리포트 생성 + 조회 */
+export function useAdvisoryReport() {
+  const [report, setReport] = useState(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState(null)
+
+  const load = useCallback(async (code, market) => {
+    setLoading(true)
+    setError(null)
+    try {
+      const result = await fetchReport(code, market)
+      setReport(result)
+    } catch (e) {
+      if (e.status === 404) {
+        setReport(null)
+      } else {
+        setError(e.message)
+      }
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  const generate = useCallback(async (code, market) => {
+    setLoading(true)
+    setError(null)
+    try {
+      const result = await generateReport(code, market)
+      setReport(result)
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  return { report, loading, error, load, generate }
+}

@@ -10,6 +10,8 @@
 |------|------------|
 | `watchlist_service.py` | `WatchlistService` — 관심종목 대시보드 + 상세 조회 |
 | `detail_service.py` | `DetailService` — 종목 상세 분석 (재무/밸류에이션/리포트) |
+| `quote_service.py` | `KISQuoteManager` 싱글턴 — KIS WebSocket 단일 연결 + 심볼별 pub/sub |
+| `advisory_service.py` | 자문종목 데이터 수집 + OpenAI 리포트 생성 |
 
 ---
 
@@ -241,6 +243,108 @@ KIS는 주문 채널(API/HTS/MTS)별로 접근을 분리한다:
 - `excg_id_dvsn_cd: 'SOR'` → HTS/MTS(Smart Order Routing) 발주 → API 취소 불가 (APBK0344 오류)
 
 `api_cancellable = (excg_id != "SOR")` 조건으로 프론트엔드에 전달.
+
+---
+
+---
+
+## `quote_service.py` — KISQuoteManager
+
+`routers/quote.py`에서 사용. KIS WebSocket 단일 연결을 유지하며 여러 브라우저 클라이언트에 실시간 호가를 브로드캐스트한다.
+
+### 싱글턴 접근
+
+```python
+from services.quote_service import get_manager
+manager = get_manager()  # 프로세스 내 단일 인스턴스
+```
+
+### 생명주기
+
+```python
+await manager.start()   # FastAPI lifespan startup — KIS WS 연결 태스크 시작
+await manager.stop()    # FastAPI lifespan shutdown — WS 닫기 + 태스크 취소
+```
+
+- KIS 키(`KIS_APP_KEY`/`KIS_APP_SECRET`) 미설정 시 `start()`에서 경고 로그 후 즉시 반환(비활성화).
+- WS 오류 시 5초 대기 후 자동 재연결(`_connect_loop`). 재연결 시 Approval Key 캐시 초기화 + 기존 구독 심볼 재등록.
+
+### pub/sub API
+
+```python
+await manager.subscribe(symbol, queue)   # asyncio.Queue 등록 (최대 100 메시지 버퍼)
+manager.unsubscribe(symbol, queue)       # Queue 제거. 마지막 구독자 해제 시 심볼도 제거.
+```
+
+- 큐가 가득 찬 경우(`QueueFull`) 메시지 drop (느린 클라이언트 대응).
+- 동일 심볼에 여러 큐 등록 가능 (브라우저 탭 여러 개).
+
+### KIS 메시지 파싱
+
+#### `_parse_execution(raw)` — H0STCNT0
+
+| 필드 | 설명 |
+|------|------|
+| `symbol` | 종목코드 (items[0]) |
+| `price` | 현재가 (items[2]) |
+| `sign` | 전일대비부호 (items[3]) — '2'=상승, '3'=보합, '5'=하락 |
+| `change` | 전일대비 (items[4]) |
+| `change_rate` | 전일대비율(%) (items[5]) |
+
+#### `_parse_orderbook(raw)` — H0STASP0 (plaintext, AES 복호화 불필요)
+
+| 필드 | 설명 |
+|------|------|
+| `symbol` | 종목코드 (items[0]) |
+| `asks[0~9]` | 매도호가 01~10 `{price, volume}`. [0]=최우선(최저가) |
+| `bids[0~9]` | 매수호가 01~10 `{price, volume}`. [0]=최우선(최고가) |
+| `total_ask_volume` | 총매도잔량 (items[43]) |
+| `total_bid_volume` | 총매수잔량 (items[44]) |
+
+---
+
+## `advisory_service.py` — AI자문 서비스
+
+`routers/advisory.py`에서 사용. `stock/advisory_fetcher.py`와 `stock/dart_fin.py`/`stock/yf_client.py`를 조합해 분석 데이터를 수집하고, OpenAI GPT-4o로 종합 리포트를 생성한다.
+
+### 주요 함수
+
+#### `refresh_stock_data(code, market, name) → dict`
+
+전체 데이터 수집 → `advisory_cache` 저장 → 저장된 캐시 반환.
+
+| 항목 | KR (국내) | US (해외) |
+|------|-----------|-----------|
+| 손익계산서 | `dart_fin.fetch_income_detail_annual()` (5년) | `yf_client.fetch_income_detail_yf()` (4년) |
+| 대차대조표 | `dart_fin.fetch_bs_cf_annual()` (5년) | `yf_client.fetch_balance_sheet_yf()` (4년) |
+| 현금흐름표 | `dart_fin.fetch_bs_cf_annual()` (5년) | `yf_client.fetch_cashflow_yf()` (4년) |
+| 계량지표 | `market.fetch_market_metrics()` | `yf_client.fetch_metrics_yf()` |
+| 15분봉 OHLCV | `advisory_fetcher.fetch_15min_ohlcv_kr()` | `advisory_fetcher.fetch_15min_ohlcv_us()` |
+| 사업별 매출비중 | `advisory_fetcher.fetch_segments_kr()` (OpenAI 추론) | `yf_client.fetch_segments_yf()` |
+| 기술적지표 | `advisory_fetcher.calc_technical_indicators()` | 동일 |
+
+#### `generate_ai_report(code, market, name) → dict`
+
+저장된 캐시 데이터 → OpenAI GPT-4o 호출 → `advisory_reports` 저장.
+
+- `OPENAI_API_KEY` 미설정 → HTTPException(503)
+- 캐시 없음 → HTTPException(404)
+- OpenAI 크레딧 부족(429) → HTTPException(402, "OpenAI API 크레딧이 부족합니다.")
+- 기타 OpenAI 오류 → HTTPException(502)
+
+**GPT-4o 프롬프트 구성**: 최근 3년 손익/대차/현금흐름 요약 + 계량지표 + 기술적 시그널(`current_signals`)
+
+**반환 JSON 구조**:
+```json
+{
+  "종합투자의견": {"등급": "매수|중립|매도|관망", "요약": "...", "근거": ["..."]},
+  "기술적시그널": {"신호": "매수|관망|매도", "해석": "...", "지표별": {"macd":"...", "rsi":"...", "stoch":"..."}},
+  "리스크요인": [{"요인": "...", "설명": "..."}],
+  "투자포인트": [{"포인트": "...", "설명": "..."}]
+}
+```
+
+OpenAI 응답 JSON 파싱 실패 시 `raw` 필드에 원문 저장 → 프론트엔드에서 원문 텍스트로 표시.
 
 ---
 

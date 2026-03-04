@@ -583,6 +583,283 @@ KIS 당일 체결 내역과 로컬 DB 대사(Reconciliation). 로컬 `PLACED`/`P
 
 ---
 
+---
+
+## 실시간 호가 — `routers/quote.py`
+
+### `WS /ws/quote/{symbol}`
+
+실시간 현재가 + 10호가 WebSocket 스트림.
+
+- **국내(KR)**: KIS WebSocket(`ws://ops.koreainvestment.com:21000`) 브릿지. `H0STCNT0`(체결가) + `H0STASP0`(호가) 실시간 수신. KIS Approval Key 자동 발급 및 캐시.
+- **해외(US)**: yfinance `Ticker.fast_info` 2초 주기 polling.
+- KIS 키 미설정 시 연결은 수락되나 데이터 없음(ping만 수신).
+
+**메시지 타입**
+
+| `type` | 발생 조건 | 필드 |
+|--------|----------|------|
+| `price` | 체결 발생(국내) / 2초 주기(해외) | `symbol`, `price`, `change`, `change_rate`, `sign` |
+| `orderbook` | 호가 변동(국내만) | `symbol`, `asks[{price,volume}×10]`, `bids[{price,volume}×10]`, `total_ask_volume`, `total_bid_volume` |
+| `ping` | 30초간 데이터 없음 | (연결 유지용) |
+| `error` | 해외 시세 조회 실패 | `message` |
+
+**`sign` 값**: `'2'`=상승, `'3'`=보합, `'5'`=하락
+
+**`asks` / `bids` 인덱스 규칙**
+- `asks[0]` = 최우선(최저가) 매도호가. 프론트에서 `reverse()` 후 상단에 높은가격 표시.
+- `bids[0]` = 최우선(최고가) 매수호가. 그대로 표시(높은가격 → 낮은가격).
+
+**에러 처리**: 예외 발생 시 code=1011로 WS 종료. 클라이언트는 비정상 종료(code≠1000) 시 3초 후 재연결.
+
+---
+
+## AI자문 — `routers/advisory.py`
+
+자문종목 CRUD + 기본적/기술적 분석 데이터 수집 + OpenAI GPT-4o 리포트 생성.
+
+로컬 DB: `~/stock-watchlist/advisory.db`
+
+### `GET /api/advisory`
+
+자문종목 목록 (캐시 업데이트 시각 + AI리포트 존재 여부 포함).
+
+**응답**:
+```json
+[
+  {
+    "code": "005930",
+    "market": "KR",
+    "name": "삼성전자",
+    "added_date": "2026-03-04T01:29:14",
+    "memo": "반도체 대장",
+    "updated_at": "2026-03-04T07:12:20",
+    "has_report": true
+  }
+]
+```
+
+---
+
+### `POST /api/advisory`
+
+자문종목 추가. 종목명 자동 조회 (KR: pykrx, US: yfinance).
+
+**요청 바디**:
+```json
+{
+  "code": "005930",
+  "market": "KR",
+  "memo": ""
+}
+```
+
+- `market`: `KR` / `US`
+
+**에러**: 409 (이미 등록됨)
+
+---
+
+### `DELETE /api/advisory/{code}?market=KR`
+
+자문종목 삭제.
+
+**응답**: `{"ok": true}`
+
+**에러**: 404 (미등록 종목)
+
+---
+
+### `POST /api/advisory/{code}/refresh?market=KR`
+
+기본적/기술적 분석 데이터 전체 수집 후 캐시 저장. **30초 이상 소요**.
+
+수집 데이터:
+- **KR**: DART 손익계산서(5년) + 대차대조표(5년) + 현금흐름표(5년) + pykrx 계량지표 + KIS 15분봉 + OpenAI 사업부문 추론
+- **US**: yfinance 손익계산서(4년) + 대차대조표(4년) + 현금흐름표(4년) + yfinance 계량지표 + yfinance 15분봉
+
+**응답**: 수집된 분석 데이터 전체 (아래 `/data` 응답과 동일)
+
+**에러**: 404 (미등록 종목), 502 (데이터 수집 실패)
+
+---
+
+### `GET /api/advisory/{code}/data?market=KR`
+
+캐시된 분석 데이터 조회.
+
+**응답**:
+```json
+{
+  "code": "005930",
+  "market": "KR",
+  "updated_at": "2026-03-04T07:12:20",
+  "fundamental": {
+    "income_stmt": [
+      {
+        "year": 2024,
+        "revenue": null,
+        "cogs": null,
+        "gross_profit": null,
+        "operating_income": 327260000000000,
+        "net_income": 344514000000000,
+        "eps": null,
+        "oi_margin": 10.9,
+        "net_margin": 11.5,
+        "dart_url": "https://dart.fss.or.kr/..."
+      }
+    ],
+    "balance_sheet": [
+      {
+        "year": 2024,
+        "total_assets": null,
+        "total_liabilities": null,
+        "total_equity": null,
+        "debt_ratio": null,
+        "current_ratio": null
+      }
+    ],
+    "cashflow": [
+      {
+        "year": 2024,
+        "operating_cf": null,
+        "investing_cf": null,
+        "financing_cf": null,
+        "capex": null,
+        "free_cf": null,
+        "fcf_margin": null
+      }
+    ],
+    "metrics": {
+      "per": 12.5, "pbr": 1.2, "roe": 8.5, "roa": 5.2,
+      "market_cap": 102000000000000,
+      "market_type": "KOSPI",
+      "psr": null, "ev_ebitda": null,
+      "debt_to_equity": null, "current_ratio": null
+    },
+    "segments": [
+      {"segment": "반도체", "revenue_pct": 45.0, "note": "AI추정"}
+    ]
+  },
+  "technical": {
+    "ohlcv": [
+      {"time": "2026-03-04T15:00:00", "open": 175300, "high": 176300, "low": 172500, "close": 172800, "volume": 2962588}
+    ],
+    "indicators": {
+      "macd": {"macd": [...], "signal": [...], "histogram": [...], "times": [...]},
+      "rsi": {"values": [...], "times": [...]},
+      "stoch": {"k": [...], "d": [...], "times": [...]},
+      "bb": {"upper": [...], "mid": [...], "lower": [...], "times": [...]},
+      "ma": {"ma5": [...], "ma20": [...], "ma60": [...], "times": [...]},
+      "volatility_target": 173200,
+      "current_signals": {
+        "macd_cross": "golden",
+        "rsi_signal": "neutral",
+        "rsi_value": 54.7,
+        "stoch_signal": "oversold",
+        "stoch_k": 18.2,
+        "above_ma20": true,
+        "ma20": 170500,
+        "current_price": 172800
+      }
+    }
+  }
+}
+```
+
+**에러**: 404 (데이터 없음. 먼저 `/refresh` 호출 필요)
+
+---
+
+### `POST /api/advisory/{code}/analyze?market=KR`
+
+OpenAI GPT-4o로 종합 투자 의견 리포트 생성. **10~30초 소요**.
+
+캐시된 분석 데이터를 기반으로 프롬프트를 구성하여 GPT-4o 호출.
+
+**응답**:
+```json
+{
+  "id": 1,
+  "code": "005930",
+  "market": "KR",
+  "generated_at": "2026-03-04T09:10:52",
+  "model": "gpt-4o",
+  "report": {
+    "종합투자의견": {
+      "등급": "중립",
+      "요약": "...",
+      "근거": ["...", "..."]
+    },
+    "기술적시그널": {
+      "신호": "관망",
+      "해석": "...",
+      "지표별": {"macd": "...", "rsi": "...", "stoch": "..."}
+    },
+    "리스크요인": [
+      {"요인": "글로벌 경제 불확실성", "설명": "..."}
+    ],
+    "투자포인트": [
+      {"포인트": "재무성장성", "설명": "..."}
+    ]
+  }
+}
+```
+
+**에러**:
+- 402: OpenAI 크레딧 부족
+- 404: 분석 데이터 없음 (먼저 `/refresh` 필요)
+- 503: `OPENAI_API_KEY` 미설정
+- 502: OpenAI API 오류
+
+---
+
+### `GET /api/advisory/{code}/report?market=KR`
+
+최신 AI 리포트 조회.
+
+**응답**: `/analyze`와 동일 구조
+
+**에러**: 404 (생성된 리포트 없음)
+
+---
+
+### 로컬 DB 스키마 (`~/stock-watchlist/advisory.db`)
+
+```sql
+-- 자문종목 목록
+CREATE TABLE advisory_stocks (
+    code       TEXT NOT NULL,
+    market     TEXT NOT NULL DEFAULT 'KR',
+    name       TEXT NOT NULL,
+    added_date TEXT NOT NULL,
+    memo       TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (code, market)
+);
+
+-- 기본적/기술적 분석 캐시
+CREATE TABLE advisory_cache (
+    code       TEXT NOT NULL,
+    market     TEXT NOT NULL DEFAULT 'KR',
+    updated_at TEXT NOT NULL,
+    fundamental TEXT,   -- JSON
+    technical   TEXT,   -- JSON
+    PRIMARY KEY (code, market)
+);
+
+-- AI 리포트 이력
+CREATE TABLE advisory_reports (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    code         TEXT NOT NULL,
+    market       TEXT NOT NULL DEFAULT 'KR',
+    generated_at TEXT NOT NULL,
+    model        TEXT NOT NULL,
+    report       TEXT NOT NULL   -- JSON
+);
+```
+
+---
+
 ### 로컬 DB 스키마 (`~/stock-watchlist/orders.db`)
 
 ```sql

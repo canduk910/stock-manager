@@ -1,6 +1,7 @@
 """종목코드 ↔ 종목명 매핑 (pykrx 기반, 7일 캐싱)."""
 
 import re
+from datetime import datetime, timedelta
 from typing import Optional
 
 from .cache import delete_prefix, get_cached, set_cached
@@ -9,13 +10,31 @@ _CACHE_KEY = "symbol_map:v1"
 _TTL_HOURS = 24 * 7  # 7일
 
 
+def _find_latest_trading_day() -> str:
+    """오늘 또는 가장 최근 거래일 날짜 문자열(YYYYMMDD) 반환."""
+    from pykrx import stock as krx
+
+    dt = datetime.now()
+    for _ in range(10):
+        candidate = dt.strftime("%Y%m%d")
+        try:
+            tickers = krx.get_market_ticker_list(candidate, market="KOSPI")
+            if tickers:
+                return candidate
+        except Exception:
+            pass
+        dt -= timedelta(days=1)
+    return datetime.now().strftime("%Y%m%d")
+
+
 def _build_map() -> dict[str, dict]:
     """pykrx로 KOSPI + KOSDAQ 전 종목 코드/이름/시장 수집."""
     from pykrx import stock as krx
 
+    trading_date = _find_latest_trading_day()
     result: dict[str, dict] = {}
     for market in ("KOSPI", "KOSDAQ"):
-        for code in krx.get_market_ticker_list(market=market):
+        for code in krx.get_market_ticker_list(trading_date, market=market):
             name = krx.get_market_ticker_name(code)
             if name:
                 result[code] = {"name": name, "market": market}
@@ -37,7 +56,15 @@ def get_symbol_map(refresh: bool = False) -> dict[str, dict]:
 
 def code_to_name(code: str, refresh: bool = False) -> Optional[str]:
     entry = get_symbol_map(refresh).get(code)
-    return entry["name"] if entry else None
+    if entry:
+        return entry["name"]
+    # 심볼맵 빌드 실패(KRX 서버 이슈 등) 시 직접 조회 시도
+    try:
+        from pykrx import stock as krx
+        name = krx.get_market_ticker_name(code)
+        return name if name else None
+    except Exception:
+        return None
 
 
 def code_to_market(code: str, refresh: bool = False) -> Optional[str]:

@@ -21,7 +21,7 @@ const ORDER_TYPE_OPTIONS = [
   { value: '01', label: '시장가' },
 ]
 
-export default function OrderForm({ defaultValues = {}, onConfirm }) {
+export default function OrderForm({ defaultValues = {}, onConfirm, externalPrice = null, onSymbolChange }) {
   const [market, setMarket] = useState(defaultValues.market || 'KR')
   const [symbol, setSymbol] = useState(defaultValues.symbol || '')
   const [symbolName, setSymbolName] = useState(defaultValues.symbol_name || '')
@@ -49,6 +49,13 @@ export default function OrderForm({ defaultValues = {}, onConfirm }) {
     defaultValues.price,
     defaultValues.quantity,
   ])
+
+  // 호가창 가격 클릭 → 지정가 자동 세팅 (시장가일 때는 무시)
+  useEffect(() => {
+    if (externalPrice != null && orderType !== '01') {
+      setPrice(String(externalPrice))
+    }
+  }, [externalPrice])
 
   const handleBuyableCheck = () => {
     if (!symbol) return
@@ -123,7 +130,7 @@ export default function OrderForm({ defaultValues = {}, onConfirm }) {
           <input
             type="text"
             value={symbol}
-            onChange={(e) => setSymbol(e.target.value)}
+            onChange={(e) => { setSymbol(e.target.value); onSymbolChange?.(e.target.value) }}
             placeholder={market === 'US' ? 'AAPL, NVDA, TSLA' : '005930'}
             className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm"
             required

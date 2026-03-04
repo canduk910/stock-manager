@@ -118,6 +118,53 @@ _ACCOUNT_KEYS = {
     "net_income": ("당기순이익", "당기순이익(손실)", "당기순손익", "당기순손실"),
 }
 
+# ── 대차대조표 계정 매핑 ──────────────────────────────────────────────────────
+
+_BS_KEYS = {
+    "total_assets":               ("자산총계",),
+    "current_assets":             ("유동자산",),
+    "non_current_assets":         ("비유동자산",),
+    "cash_and_equiv":             ("현금및현금성자산",),
+    "receivables":                ("매출채권및기타채권", "매출채권", "단기매출채권"),
+    "inventories":                ("재고자산",),
+    "ppe":                        ("유형자산",),
+    "intangibles":                ("무형자산",),
+    "total_liabilities":          ("부채총계",),
+    "current_liabilities":        ("유동부채",),
+    "non_current_liabilities":    ("비유동부채",),
+    "short_term_debt":            ("단기차입금",),
+    "long_term_debt":             ("장기차입금", "장기차입금및사채"),
+    "total_equity":               ("자본총계",),
+    "retained_earnings":          ("이익잉여금", "결손금"),
+}
+
+# ── 현금흐름표 계정 매핑 ──────────────────────────────────────────────────────
+
+_CF_KEYS = {
+    "operating_cf":  ("영업활동현금흐름", "영업활동 현금흐름"),
+    "investing_cf":  ("투자활동현금흐름", "투자활동 현금흐름"),
+    "financing_cf":  ("재무활동현금흐름", "재무활동 현금흐름"),
+    "capex":         ("유형자산의취득", "유형자산 취득"),
+    "depreciation":  ("감가상각비",),
+    "cash_change":   ("현금및현금성자산의증가", "현금및현금성자산 증가감소"),
+}
+
+# ── 손익계산서 세부 계정 매핑 ─────────────────────────────────────────────────
+
+_IS_DETAIL_KEYS = {
+    "revenue":          ("매출액", "수익(매출액)", "영업수익", "매출"),
+    "cogs":             ("매출원가",),
+    "gross_profit":     ("매출총이익",),
+    "sga":              ("판매비와관리비", "판매비및관리비"),
+    "operating_income": ("영업이익", "영업이익(손실)", "영업손실"),
+    "interest_income":  ("이자수익",),
+    "interest_expense": ("이자비용",),
+    "pretax_income":    ("법인세비용차감전순이익", "세전이익"),
+    "tax_expense":      ("법인세비용",),
+    "net_income":       ("당기순이익", "당기순이익(손실)", "당기순손익", "당기순손실"),
+    "eps":              ("기본주당이익(손실)", "기본주당순이익"),
+}
+
 
 def _extract_accounts(items: list[dict]) -> dict:
     """IS/CIS 항목에서 매출/영업이익/순이익 추출. 단위: 원."""
@@ -322,5 +369,205 @@ def fetch_financials_multi_year(
     result = sorted(collected.values(), key=lambda x: x["year"])
     result = result[-years:]
 
+    set_cached(cache_key, result, ttl_hours=24)
+    return result
+
+
+# ── BS/CF 공용 헬퍼 ───────────────────────────────────────────────────────────
+
+def _extract_sheet_period(items: list[dict], sj_divs: tuple, keys: dict, period_key: str) -> dict:
+    """특정 재무제표(BS/CF)의 특정 기간 계정 금액 추출.
+
+    sj_divs: 필터할 sj_div 값 목록 (예: ('BS', 'CBS') or ('CF', 'CCF'))
+    keys: {field_name: (계정명1, 계정명2, ...)} 매핑
+    period_key: 'thstrm' | 'frmtrm' | 'bfefrmtrm'
+    """
+    filtered = [i for i in items if i.get("sj_div") in sj_divs]
+    amount_key = f"{period_key}_amount"
+    result: dict = {}
+    for field, keywords in keys.items():
+        result[field] = None
+        for item in filtered:
+            nm = item.get("account_nm", "").strip()
+            if nm in keywords:
+                result[field] = _parse_amount(item.get(amount_key))
+                break
+    return result
+
+
+def _extract_is_detail_period(items: list[dict], period_key: str) -> dict:
+    """IS 세부 계정 특정 기간 추출."""
+    is_items = [i for i in items if i.get("sj_div") in ("IS", "CIS")]
+    amount_key = f"{period_key}_amount"
+    result: dict = {}
+    for field, keywords in _IS_DETAIL_KEYS.items():
+        result[field] = None
+        for item in is_items:
+            nm = item.get("account_nm", "").strip()
+            if nm in keywords:
+                result[field] = _parse_amount(item.get(amount_key))
+                break
+    return result
+
+
+# ── 공개 API: 대차대조표 + 현금흐름표 ─────────────────────────────────────────
+
+def fetch_bs_cf_annual(stock_code: str, years: int = 5) -> dict:
+    """대차대조표 + 현금흐름표 연간 데이터 (최대 years년).
+
+    반환:
+        {
+            "balance_sheet": [{year, total_assets, current_assets, ...}],
+            "cashflow": [{year, operating_cf, investing_cf, ...}],
+        }
+    데이터 없으면 빈 리스트.
+    """
+    cache_key = f"dart:bs_cf:{stock_code}:{years}"
+    cached = get_cached(cache_key)
+    if cached is not None:
+        return cached
+
+    corp_code = _fetch_corp_code(stock_code)
+    if not corp_code:
+        empty = {"balance_sheet": [], "cashflow": []}
+        set_cached(cache_key, empty, ttl_hours=6)
+        return empty
+
+    today = date.today()
+    latest_year = today.year - 1 if today.month >= 4 else today.year - 2
+
+    num_batches = (years + 2) // 3
+    anchor_years = [latest_year - i * 3 for i in range(num_batches)]
+
+    bs_collected: dict[int, dict] = {}
+    cf_collected: dict[int, dict] = {}
+    fs_div_used: Optional[str] = None
+
+    for anchor in anchor_years:
+        if len(bs_collected) >= years and len(cf_collected) >= years:
+            break
+
+        fs_divs = [fs_div_used] if fs_div_used else ["CFS", "OFS"]
+        for fs_div in fs_divs:
+            try:
+                items = _call_fin_api(corp_code, anchor, fs_div)
+            except Exception:
+                continue
+            if not items:
+                continue
+
+            has_bs = any(i.get("sj_div") in ("BS", "CBS") for i in items)
+            has_cf = any(i.get("sj_div") in ("CF", "CCF") for i in items)
+            if not has_bs and not has_cf:
+                continue
+
+            for period_key, year_offset in [
+                ("thstrm", 0),
+                ("frmtrm", -1),
+                ("bfefrmtrm", -2),
+            ]:
+                target_year = anchor + year_offset
+
+                if target_year not in bs_collected and has_bs:
+                    bs_data = _extract_sheet_period(items, ("BS", "CBS"), _BS_KEYS, period_key)
+                    if bs_data.get("total_assets") is not None:
+                        # 부채비율, 유동비율 계산
+                        equity = bs_data.get("total_equity") or 0
+                        liab = bs_data.get("total_liabilities") or 0
+                        cur_a = bs_data.get("current_assets") or 0
+                        cur_l = bs_data.get("current_liabilities") or 1
+                        bs_data["debt_ratio"] = round(liab / equity * 100, 1) if equity else None
+                        bs_data["current_ratio"] = round(cur_a / cur_l * 100, 1) if cur_l else None
+                        bs_collected[target_year] = {"year": target_year, **bs_data}
+
+                if target_year not in cf_collected and has_cf:
+                    cf_data = _extract_sheet_period(items, ("CF", "CCF"), _CF_KEYS, period_key)
+                    if cf_data.get("operating_cf") is not None:
+                        op_cf = cf_data.get("operating_cf") or 0
+                        capex = cf_data.get("capex") or 0
+                        # capex는 음수로 기재되는 경우 있음 → abs
+                        free_cf = op_cf - abs(capex)
+                        cf_data["free_cf"] = free_cf
+                        cf_collected[target_year] = {"year": target_year, **cf_data}
+
+            if fs_div_used is None and (bs_collected or cf_collected):
+                fs_div_used = fs_div
+            break
+
+    bs_result = sorted(bs_collected.values(), key=lambda x: x["year"])[-years:]
+    cf_result = sorted(cf_collected.values(), key=lambda x: x["year"])[-years:]
+
+    result = {"balance_sheet": bs_result, "cashflow": cf_result}
+    set_cached(cache_key, result, ttl_hours=24)
+    return result
+
+
+def fetch_income_detail_annual(stock_code: str, years: int = 5) -> list[dict]:
+    """손익계산서 세부 연간 데이터 (매출원가/매출총이익/SGA/EPS 포함).
+
+    반환: [{year, revenue, cogs, gross_profit, sga, operating_income,
+             interest_income, interest_expense, pretax_income,
+             tax_expense, net_income, eps, oi_margin, net_margin}]
+    """
+    cache_key = f"dart:is_detail:{stock_code}:{years}"
+    cached = get_cached(cache_key)
+    if cached is not None:
+        return cached
+
+    corp_code = _fetch_corp_code(stock_code)
+    if not corp_code:
+        set_cached(cache_key, [], ttl_hours=6)
+        return []
+
+    today = date.today()
+    latest_year = today.year - 1 if today.month >= 4 else today.year - 2
+
+    num_batches = (years + 2) // 3
+    anchor_years = [latest_year - i * 3 for i in range(num_batches)]
+
+    collected: dict[int, dict] = {}
+    fs_div_used: Optional[str] = None
+
+    for anchor in anchor_years:
+        if len(collected) >= years:
+            break
+
+        fs_divs = [fs_div_used] if fs_div_used else ["CFS", "OFS"]
+        for fs_div in fs_divs:
+            try:
+                items = _call_fin_api(corp_code, anchor, fs_div)
+            except Exception:
+                continue
+            if not items:
+                continue
+
+            is_items = [i for i in items if i.get("sj_div") in ("IS", "CIS")]
+            if not is_items:
+                continue
+
+            for period_key, year_offset in [
+                ("thstrm", 0),
+                ("frmtrm", -1),
+                ("bfefrmtrm", -2),
+            ]:
+                target_year = anchor + year_offset
+                if target_year in collected:
+                    continue
+                row = _extract_is_detail_period(items, period_key)
+                if row.get("revenue") is None:
+                    continue
+                # 마진 계산
+                rev = row.get("revenue") or 0
+                oi = row.get("operating_income") or 0
+                ni = row.get("net_income") or 0
+                row["oi_margin"] = round(oi / rev * 100, 1) if rev else None
+                row["net_margin"] = round(ni / rev * 100, 1) if rev else None
+                collected[target_year] = {"year": target_year, **row}
+
+            if fs_div_used is None and collected:
+                fs_div_used = fs_div
+            break
+
+    result = sorted(collected.values(), key=lambda x: x["year"])[-years:]
     set_cached(cache_key, result, ttl_hours=24)
     return result

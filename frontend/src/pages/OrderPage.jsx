@@ -7,6 +7,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import OrderForm from '../components/order/OrderForm'
+import OrderbookPanel from '../components/order/OrderbookPanel'
 import OrderConfirmModal from '../components/order/OrderConfirmModal'
 import OpenOrdersTable from '../components/order/OpenOrdersTable'
 import ExecutionsTable from '../components/order/ExecutionsTable'
@@ -53,6 +54,10 @@ export default function OrderPage({ notify }) {
     price: searchParams.get('price') || '',
     quantity: searchParams.get('quantity') || '',
   }
+
+  // 호가창 연동 상태
+  const [quoteSymbol, setQuoteSymbol] = useState(searchParams.get('symbol') || '')
+  const [selectedPrice, setSelectedPrice] = useState(null)
 
   const { loading: placing, error: placeError, place } = useOrderPlace()
   const { orders: openOrders, loading: openLoading, error: openError, load: loadOpen, modify, cancel } = useOpenOrders()
@@ -170,12 +175,23 @@ export default function OrderPage({ notify }) {
 
       {/* 주문 발송 탭 */}
       {activeTab === 'order' && (
-        <div className="max-w-lg">
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+          {/* 왼쪽: 호가창 */}
+          <div className="min-h-[400px]">
+            <OrderbookPanel
+              symbol={quoteSymbol}
+              market={/^\d{6}$/.test(quoteSymbol) ? 'KR' : 'US'}
+              onPriceSelect={(p) => setSelectedPrice(p)}
+            />
+          </div>
+          {/* 오른쪽: 주문폼 */}
           <div className="bg-white rounded-xl border border-gray-200 p-6">
             <h2 className="text-base font-semibold text-gray-900 mb-4">주문 입력</h2>
             <OrderForm
               defaultValues={defaultValues}
               onConfirm={(body) => setPendingOrder(body)}
+              externalPrice={selectedPrice}
+              onSymbolChange={(sym) => { setQuoteSymbol(sym); setSelectedPrice(null) }}
             />
             {placeError && <ErrorAlert message={placeError} className="mt-3" />}
           </div>
