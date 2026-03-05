@@ -19,6 +19,17 @@ if [ -z "${OPENDART_API_KEY:-}" ]; then
   echo "[경고] OPENDART_API_KEY 미설정 — 공시 조회(/api/earnings/filings) 비활성화" >&2
 fi
 
+# KRX 로그인: 없으면 스크리너 비활성화 (2026-02-27 이후 필수)
+if [ -z "${KRX_ID:-}" ] || [ -z "${KRX_PASSWORD:-}" ]; then
+  echo "[경고] KRX_ID / KRX_PASSWORD 미설정 — 종목 스크리너(/api/screener/stocks) 비활성화" >&2
+  echo "[경고]         KRX 회원가입: https://data.krx.co.kr" >&2
+fi
+
+# OpenAI API 키: 없으면 AI자문 리포트 생성 불가
+if [ -z "${OPENAI_API_KEY:-}" ]; then
+  echo "[경고] OPENAI_API_KEY 미설정 — AI자문 리포트 생성(/api/advisory/*/analyze) 비활성화" >&2
+fi
+
 # ── 프론트엔드 빌드 확인 ─────────────────────────────────────
 if [ -d "/app/frontend/dist" ]; then
   echo "[정보] frontend/dist 감지 — FastAPI가 정적 파일을 서빙합니다 (http://0.0.0.0:${PORT})"

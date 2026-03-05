@@ -28,7 +28,17 @@ def _find_latest_trading_day() -> str:
 
 
 def _build_map() -> dict[str, dict]:
-    """pykrx로 KOSPI + KOSDAQ 전 종목 코드/이름/시장 수집."""
+    """pykrx로 KOSPI + KOSDAQ 전 종목 코드/이름/시장 수집.
+
+    KRX_ID / KRX_PASSWORD 환경변수가 설정된 경우 인증 세션을 사용한다.
+    """
+    # KRX 인증 세션 주입 시도 (실패해도 계속 진행)
+    try:
+        from screener.krx_auth import ensure_krx_session
+        ensure_krx_session()
+    except Exception:
+        pass
+
     from pykrx import stock as krx
 
     trading_date = _find_latest_trading_day()

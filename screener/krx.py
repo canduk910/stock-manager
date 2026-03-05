@@ -2,6 +2,11 @@
 
 pykrx 라이브러리를 사용하여 전종목 시세, 시가총액, PER/PBR/EPS/BPS를 수집한다.
 ROE는 EPS/BPS로 산출한다.
+
+인증:
+    2026-02-27부터 KRX 서버가 로그인 필수로 전환됨.
+    KRX_ID / KRX_PASSWORD 환경변수를 설정하면 자동 로그인 후 정상 동작.
+    미설정 시 스크리닝 불가 (친절한 안내 메시지 반환).
 """
 
 from datetime import datetime, timedelta
@@ -9,13 +14,20 @@ from datetime import datetime, timedelta
 from pykrx import stock
 
 from .cache import get_cached, set_cached
+from .krx_auth import ensure_krx_session, is_krx_configured
 
 
-_KRX_DOWN_MSG = (
-    "KRX 데이터 서비스가 일시적으로 이용 불가합니다.\n"
-    "2026년 2월 27일부터 한국거래소(KRX)가 데이터 서비스를 회원제로 전환하여 "
-    "pykrx 기반 스크리닝이 현재 동작하지 않습니다.\n"
-    "pykrx 라이브러리 업데이트를 기다려 주세요: https://github.com/sharebook-kr/pykrx/issues/276"
+_KRX_NO_AUTH_MSG = (
+    "KRX 로그인 정보가 설정되지 않았습니다.\n"
+    "2026년 2월 27일부터 한국거래소(KRX)가 데이터 서비스를 로그인 필수로 전환했습니다.\n"
+    "환경변수 KRX_ID / KRX_PASSWORD 를 설정하면 스크리닝이 정상 동작합니다.\n"
+    "(KRX 회원가입: https://data.krx.co.kr)"
+)
+
+_KRX_LOGIN_FAIL_MSG = (
+    "KRX 로그인에 실패했습니다.\n"
+    "KRX_ID / KRX_PASSWORD 환경변수가 올바른지 확인해주세요.\n"
+    "(KRX 회원가입: https://data.krx.co.kr)"
 )
 
 
@@ -47,7 +59,16 @@ def get_all_stocks(date_str: str) -> list[dict]:
     Returns:
         list of dict with keys:
             code, name, market, per, pbr, roe, mktcap
+
+    Raises:
+        RuntimeError: KRX 미인증 또는 로그인 실패 시.
     """
+    # KRX 인증 확인
+    if not is_krx_configured():
+        raise RuntimeError(_KRX_NO_AUTH_MSG)
+    if not ensure_krx_session():
+        raise RuntimeError(_KRX_LOGIN_FAIL_MSG)
+
     # 실제 사용할 거래일 결정 (주말/공휴일이면 이전 거래일로 소급)
     trading_date = _find_latest_trading_day(date_str)
 
@@ -61,16 +82,16 @@ def get_all_stocks(date_str: str) -> list[dict]:
         kospi_tickers = set(stock.get_market_ticker_list(trading_date, market="KOSPI"))
         kosdaq_tickers = set(stock.get_market_ticker_list(trading_date, market="KOSDAQ"))
     except Exception as e:
-        raise RuntimeError(_KRX_DOWN_MSG) from e
+        raise RuntimeError(f"KRX 종목 목록 조회 실패: {e}") from e
 
     if not kospi_tickers and not kosdaq_tickers:
-        raise RuntimeError(_KRX_DOWN_MSG)
+        raise RuntimeError("KRX에서 종목 목록을 가져올 수 없습니다. 로그인 세션을 확인해주세요.")
 
     # 펀더멘털 데이터 (PER, PBR, EPS, BPS)
     try:
         fund_df = stock.get_market_fundamental(trading_date, market="ALL")
     except Exception as e:
-        raise RuntimeError(_KRX_DOWN_MSG) from e
+        raise RuntimeError(f"KRX 펀더멘탈 데이터 조회 실패: {e}") from e
 
     # 시가총액 데이터
     try:
