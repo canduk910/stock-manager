@@ -1,4 +1,13 @@
-"""pykrx 기반 시세 · 시가총액 · 52주 고저 조회."""
+"""국내 주식 시세 · 시가총액 · 52주 고저 조회 — yfinance 기반.
+
+pykrx KRX 스크래핑이 2026-02-27 이후 KRX 서버 변경(로그인 필수화)으로
+동작 불가해짐. yfinance (.KS KOSPI / .KQ KOSDAQ suffix)로 대체.
+
+제약사항:
+  - PER / PBR: yfinance 국내 주식 미지원 → None 반환
+  - 밸류에이션 히스토리: 미지원 → 빈 배열 반환
+  - 섹터명: 영문 반환
+"""
 
 from datetime import date, timedelta
 from typing import Optional
@@ -8,78 +17,103 @@ import pandas as pd
 from .cache import delete_prefix, get_cached, set_cached
 
 
-def _latest_trading_date() -> str:
-    """실제 체결 데이터가 있는 가장 최근 거래일 반환 (YYYYMMDD).
+# ── yfinance ticker 헬퍼 ──────────────────────────────────────────────────────
 
-    get_market_ticker_list는 비거래일도 반환하므로 삼성전자(005930) 종가가
-    0이 아닌 날을 기준으로 거래일을 판별한다.
+def _kr_yf_ticker_str(code: str) -> Optional[str]:
+    """국내 종목코드 → yfinance ticker 문자열 ('XXXXXX.KS' 또는 'XXXXXX.KQ').
+
+    양쪽 suffix 모두 조회한 후 market_cap + shares가 있는 것을 우선 선택.
+    (일부 코드가 .KS/.KQ 양쪽에 존재할 수 있으므로 데이터 완전성으로 판별)
+    결과 7일 캐시.
     """
-    cache_key = "market:trading_date"
+    cache_key = f"market:kr_yf_ticker:{code}"
     cached = get_cached(cache_key)
-    if cached:
-        return cached
+    if cached is not None:
+        return cached or None  # 빈 문자열 '' → None
 
-    from pykrx import stock as krx
+    import yfinance as yf
 
-    d = date.today() - timedelta(days=1)
-    for _ in range(14):  # 공휴일 연속 최대 10일 이상 여유
-        ds = d.strftime("%Y%m%d")
+    best: Optional[str] = None
+    best_score = -1  # 0=가격만, 1=가격+시총, 2=가격+시총+shares
+
+    for suffix in [".KS", ".KQ"]:
         try:
-            df = krx.get_market_ohlcv_by_ticker(ds, market="KOSPI")
-            if "005930" in df.index and int(df.loc["005930", "종가"]) > 0:
-                set_cached(cache_key, ds, ttl_hours=6)
-                return ds
+            fi = yf.Ticker(f"{code}{suffix}").fast_info
+            price = fi.last_price
+            if not price or price <= 0:
+                continue
+            score = 0
+            if fi.market_cap:
+                score += 1
+            if fi.shares:
+                score += 1
+            if score > best_score:
+                best = f"{code}{suffix}"
+                best_score = score
         except Exception:
             pass
-        d -= timedelta(days=1)
 
-    fallback = (date.today() - timedelta(days=1)).strftime("%Y%m%d")
-    return fallback
+    if best:
+        set_cached(cache_key, best, ttl_hours=24 * 7)
+    else:
+        set_cached(cache_key, "", ttl_hours=1)
+    return best
 
+
+def _market_type(ticker_str: str) -> str:
+    """ticker suffix → KOSPI / KOSDAQ 구분."""
+    return "KOSPI" if ticker_str.endswith(".KS") else "KOSDAQ"
+
+
+# ── 공개 API ──────────────────────────────────────────────────────────────────
 
 def fetch_price(code: str, refresh: bool = False) -> Optional[dict]:
-    """
-    현재가, 전일대비(%), 시가총액, 상장주식수 조회.
+    """현재가, 전일대비(%), 시가총액, 상장주식수 조회.
+
     반환: dict 또는 None (종목 없음)
     """
     cache_key = f"market:price:{code}"
     if refresh:
         delete_prefix(f"market:price:{code}")
+        delete_prefix(f"market:kr_yf_ticker:{code}")
     else:
         cached = get_cached(cache_key)
         if cached is not None:
             return cached
 
-    from pykrx import stock as krx
+    import yfinance as yf
 
-    trading_date = _latest_trading_date()
+    ticker_str = _kr_yf_ticker_str(code)
+    if not ticker_str:
+        return None
 
     try:
-        df_ohlcv = krx.get_market_ohlcv_by_ticker(trading_date, market="ALL")
-        if code not in df_ohlcv.index:
+        fi = yf.Ticker(ticker_str).fast_info
+
+        close = fi.last_price
+        prev_close = fi.previous_close
+
+        if not close or close <= 0:
             return None
 
-        row = df_ohlcv.loc[code]
-        close = int(row["종가"])
-        change_pct = float(row.get("등락률", 0))
+        change = round(close - prev_close) if prev_close else 0
+        change_pct = (
+            round((close - prev_close) / prev_close * 100, 2) if prev_close else 0.0
+        )
 
-        df_cap = krx.get_market_cap_by_ticker(trading_date, market="ALL")
-        mktcap = int(df_cap.loc[code, "시가총액"]) if code in df_cap.index else None
-        shares = int(df_cap.loc[code, "상장주식수"]) if code in df_cap.index else None
-
-        # 절대 등락액: close * change_pct / (100 + change_pct)
-        change = round(close * change_pct / (100 + change_pct)) if (100 + change_pct) != 0 else 0
+        mktcap = fi.market_cap
+        shares = fi.shares
 
         result = {
             "code": code,
-            "close": close,
-            "change": change,
+            "close": int(close),
+            "change": int(change),
             "change_pct": change_pct,
-            "mktcap": mktcap,
-            "shares": shares,
-            "trading_date": trading_date,
+            "mktcap": int(mktcap) if mktcap else None,
+            "shares": int(shares) if shares else None,
+            "trading_date": date.today().strftime("%Y%m%d"),
         }
-        set_cached(cache_key, result)
+        set_cached(cache_key, result, ttl_hours=1)
         return result
 
     except Exception as e:
@@ -87,156 +121,104 @@ def fetch_price(code: str, refresh: bool = False) -> Optional[dict]:
 
 
 def fetch_detail(code: str, refresh: bool = False) -> Optional[dict]:
-    """
-    info 커맨드용 상세정보: 시장구분, 업종, 52주 고저 추가.
-    """
+    """info 커맨드용 상세정보: 시장구분, 업종, 52주 고저, PER, PBR 추가."""
     cache_key = f"market:detail:{code}"
     if refresh:
         delete_prefix(f"market:detail:{code}")
+        delete_prefix(f"market:kr_yf_ticker:{code}")
     else:
         cached = get_cached(cache_key)
         if cached is not None:
             return cached
 
-    from pykrx import stock as krx
+    import yfinance as yf
+
+    ticker_str = _kr_yf_ticker_str(code)
+    if not ticker_str:
+        return None
 
     price = fetch_price(code, refresh=refresh)
     if price is None:
         return None
 
-    trading_date = price["trading_date"]
-
-    # 52주 고저
-    one_year_ago = (date.today() - timedelta(days=365)).strftime("%Y%m%d")
     try:
-        df_year = krx.get_market_ohlcv_by_date(one_year_ago, trading_date, code)
-        high_52 = int(df_year["고가"].max()) if not df_year.empty else None
-        low_52 = int(df_year["저가"].min()) if not df_year.empty else None
-    except Exception:
-        high_52 = low_52 = None
+        t = yf.Ticker(ticker_str)
+        fi = t.fast_info
+        info = t.info
 
-    # 시장구분 + 업종
-    market_type = None
-    sector = None
-    try:
-        kospi_tickers = krx.get_market_ticker_list(trading_date, market="KOSPI")
-        market_type = "KOSPI" if code in kospi_tickers else "KOSDAQ"
-        sector_df = krx.get_market_sector_classifications(trading_date, market=market_type)
-        if code in sector_df.index:
-            sector = sector_df.loc[code, "업종명"]
-    except Exception:
-        pass
+        market_type = _market_type(ticker_str)
+        sector = info.get("sector")  # 영문
+        high_52 = fi.year_high
+        low_52 = fi.year_low
+        per_raw = info.get("trailingPE") or info.get("forwardPE")
+        pbr_raw = info.get("priceToBook")
 
-    # PER / PBR
-    per, pbr = None, None
-    try:
-        df_fund = krx.get_market_fundamental_by_ticker(trading_date, market="ALL")
-        if code in df_fund.index:
-            per_raw = float(df_fund.loc[code, "PER"])
-            pbr_raw = float(df_fund.loc[code, "PBR"])
-            per = per_raw if per_raw > 0 else None
-            pbr = pbr_raw if pbr_raw > 0 else None
-    except Exception:
-        pass
+        result = {
+            **price,
+            "market_type": market_type,
+            "sector": sector,
+            "high_52": int(high_52) if high_52 else None,
+            "low_52": int(low_52) if low_52 else None,
+            "per": round(per_raw, 2) if per_raw else None,
+            "pbr": round(pbr_raw, 2) if pbr_raw else None,
+        }
+        set_cached(cache_key, result, ttl_hours=6)
+        return result
 
-    result = {
-        **price,
-        "market_type": market_type,
-        "sector": sector,
-        "high_52": high_52,
-        "low_52": low_52,
-        "per": per,
-        "pbr": pbr,
-    }
-    set_cached(cache_key, result)
-    return result
+    except Exception as e:
+        raise RuntimeError(f"상세정보 조회 실패 ({code}): {e}") from e
 
 
 def fetch_valuation_history(code: str, years: int = 10) -> list[dict]:
     """월말 기준 PER/PBR 히스토리 반환.
 
-    반환: [{"date": "2024-01", "per": 12.5, "pbr": 1.2}, ...]  # 과거 → 최신 순
+    yfinance 국내 주식 미지원 → 빈 배열 반환.
+    (KRX 스크래핑 불가 상태)
     """
-    cache_key = f"market:valuation_hist:{code}:{years}"
-    cached = get_cached(cache_key)
-    if cached is not None:
-        return cached
-
-    from pykrx import stock as krx
-
-    end_dt = date.today()
-    start_dt = end_dt.replace(year=end_dt.year - years)
-    end_str = end_dt.strftime("%Y%m%d")
-    start_str = start_dt.strftime("%Y%m%d")
-
-    try:
-        df = krx.get_market_fundamental_by_date(start_str, end_str, code)
-    except Exception:
-        return []
-
-    if df.empty:
-        return []
-
-    df.index = pd.to_datetime(df.index)
-    # 월말 마지막 거래일 기준으로 리샘플
-    df_monthly = df.resample("ME").last()
-
-    result = []
-    for dt, row in df_monthly.iterrows():
-        per_val = float(row.get("PER", 0) or 0)
-        pbr_val = float(row.get("PBR", 0) or 0)
-        if per_val <= 0 and pbr_val <= 0:
-            continue
-        result.append({
-            "date": dt.strftime("%Y-%m"),
-            "per": round(per_val, 2) if per_val > 0 else None,
-            "pbr": round(pbr_val, 2) if pbr_val > 0 else None,
-        })
-
-    set_cached(cache_key, result, ttl_hours=24)
-    return result
+    return []
 
 
 def fetch_market_metrics(code: str) -> dict:
-    """잔고 페이지용 시가총액·PER·PBR·ROE 단일 종목 조회 (52주 고저 없음, 가볍고 빠름).
+    """잔고 페이지용 시가총액·PER·PBR·ROE 단일 종목 조회 (52주 고저 없음).
 
-    반환: {mktcap(원), per, pbr, roe(%, None 가능)}
+    반환: {mktcap(원), per, pbr, roe(%, None 가능), market_type}
     """
     cache_key = f"market:metrics:{code}"
     cached = get_cached(cache_key)
     if cached is not None:
         return cached
 
-    from pykrx import stock as krx
+    import yfinance as yf
 
-    trading_date = _latest_trading_date()
-    result: dict = {"market_type": None, "mktcap": None, "per": None, "pbr": None, "roe": None}
+    ticker_str = _kr_yf_ticker_str(code)
+    result: dict = {
+        "market_type": None,
+        "mktcap": None,
+        "per": None,
+        "pbr": None,
+        "roe": None,
+    }
 
-    try:
-        kospi_tickers = set(krx.get_market_ticker_list(trading_date, market="KOSPI"))
-        result["market_type"] = "KOSPI" if code in kospi_tickers else "KOSDAQ"
-    except Exception:
-        pass
-
-    try:
-        df_cap = krx.get_market_cap_by_ticker(trading_date, market="ALL")
-        if code in df_cap.index:
-            result["mktcap"] = int(df_cap.loc[code, "시가총액"])
-    except Exception:
-        pass
+    if not ticker_str:
+        set_cached(cache_key, result, ttl_hours=1)
+        return result
 
     try:
-        df_fund = krx.get_market_fundamental_by_ticker(trading_date, market="ALL")
-        if code in df_fund.index:
-            row = df_fund.loc[code]
-            per_raw = float(row.get("PER", 0))
-            pbr_raw = float(row.get("PBR", 0))
-            eps_raw = float(row.get("EPS", 0))
-            bps_raw = float(row.get("BPS", 0))
-            result["per"] = per_raw if per_raw > 0 else None
-            result["pbr"] = pbr_raw if pbr_raw > 0 else None
-            if bps_raw != 0:
-                result["roe"] = round(eps_raw / bps_raw * 100, 2)
+        t = yf.Ticker(ticker_str)
+        fi = t.fast_info
+        info = t.info
+
+        result["market_type"] = _market_type(ticker_str)
+        result["mktcap"] = int(fi.market_cap) if fi.market_cap else None
+
+        per_raw = info.get("trailingPE") or info.get("forwardPE")
+        pbr_raw = info.get("priceToBook")
+        roe_raw = info.get("returnOnEquity")
+
+        result["per"] = round(per_raw, 2) if per_raw else None
+        result["pbr"] = round(pbr_raw, 2) if pbr_raw else None
+        result["roe"] = round(roe_raw * 100, 2) if roe_raw else None
+
     except Exception:
         pass
 
@@ -255,37 +237,48 @@ def fetch_period_returns(code: str) -> dict:
     if cached is not None:
         return cached
 
-    from pykrx import stock as krx
+    import yfinance as yf
 
-    today = date.today()
-    one_year_ago = today - timedelta(days=370)  # 여유 있게 370일
-    end_str = today.strftime("%Y%m%d")
-    start_str = one_year_ago.strftime("%Y%m%d")
+    ticker_str = _kr_yf_ticker_str(code)
+    empty = {
+        "change_pct": None,
+        "return_3m": None,
+        "return_6m": None,
+        "return_1y": None,
+    }
+
+    if not ticker_str:
+        return empty
 
     try:
-        df = krx.get_market_ohlcv_by_date(start_str, end_str, code)
+        hist = yf.Ticker(ticker_str).history(period="14mo")
     except Exception:
-        return {"change_pct": None, "return_3m": None, "return_6m": None, "return_1y": None}
+        return empty
 
-    if df is None or df.empty:
-        return {"change_pct": None, "return_3m": None, "return_6m": None, "return_1y": None}
+    if hist is None or hist.empty:
+        return empty
 
-    df.index = pd.to_datetime(df.index)
-    df = df.sort_index()
+    # tz-aware 인덱스를 tz-naive로 변환
+    try:
+        hist.index = hist.index.tz_convert(None)
+    except Exception:
+        hist.index = hist.index.tz_localize(None)
 
-    current_close = float(df["종가"].iloc[-1])
+    df = hist[["Close"]].copy().sort_index()
+    current_close = float(df["Close"].iloc[-1])
 
-    # 당일 등락률: 최근 2 거래일 비교
     if len(df) >= 2:
-        prev_close = float(df["종가"].iloc[-2])
-        day_pct = round((current_close - prev_close) / prev_close * 100, 2) if prev_close else None
+        prev_val = float(df["Close"].iloc[-2])
+        day_pct = round((current_close - prev_val) / prev_val * 100, 2) if prev_val else None
     else:
         day_pct = None
 
+    today = pd.Timestamp.today().normalize()
+
     def get_past_close(days: int) -> Optional[float]:
-        target = pd.Timestamp(today - timedelta(days=days))
+        target = today - pd.Timedelta(days=days)
         subset = df[df.index <= target]
-        return float(subset["종가"].iloc[-1]) if not subset.empty else None
+        return float(subset["Close"].iloc[-1]) if not subset.empty else None
 
     def pct(past: Optional[float]) -> Optional[float]:
         if past is None or past == 0:

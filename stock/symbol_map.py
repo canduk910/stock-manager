@@ -58,11 +58,19 @@ def code_to_name(code: str, refresh: bool = False) -> Optional[str]:
     entry = get_symbol_map(refresh).get(code)
     if entry:
         return entry["name"]
-    # 심볼맵 빌드 실패(KRX 서버 이슈 등) 시 직접 조회 시도
+    # 심볼맵 빌드 실패(KRX 서버 이슈 등) 시 pykrx 직접 조회 시도
     try:
         from pykrx import stock as krx
         name = krx.get_market_ticker_name(code)
-        return name if name else None
+        if name:
+            return name
+    except Exception:
+        pass
+    # pykrx도 실패하면 DART corpCode.xml에서 종목명 조회
+    try:
+        from .dart_fin import _load_corp_name_map
+        name_map = _load_corp_name_map()
+        return name_map.get(code)
     except Exception:
         return None
 

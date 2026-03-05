@@ -63,6 +63,45 @@ def _load_corp_map() -> dict[str, str]:
     return corp_map
 
 
+def _load_corp_name_map() -> dict[str, str]:
+    """전체 기업명 맵 (stock_code → corp_name) 반환.
+
+    DART corpCode.xml에서 corp_name도 포함해 파싱. 30일 캐싱.
+    pykrx KRX 서버 이슈 시 종목명 대체 소스로 활용.
+    """
+    cache_key = "dart:corp_name_map:v1"
+    cached = get_cached(cache_key)
+    if cached:
+        return cached
+
+    import io
+    import xml.etree.ElementTree as ET
+    import zipfile
+
+    try:
+        resp = requests.get(
+            f"{_BASE_URL}/corpCode.xml",
+            params={"crtfc_key": _api_key()},
+            timeout=60,
+        )
+        resp.raise_for_status()
+    except Exception:
+        return {}
+
+    name_map: dict[str, str] = {}
+    with zipfile.ZipFile(io.BytesIO(resp.content)) as z:
+        with z.open(z.namelist()[0]) as f:
+            root = ET.parse(f).getroot()
+            for child in root:
+                stock_code = (child.findtext("stock_code") or "").strip()
+                corp_name = (child.findtext("corp_name") or "").strip()
+                if stock_code and corp_name:
+                    name_map[stock_code] = corp_name
+
+    set_cached(cache_key, name_map, ttl_hours=24 * 30)
+    return name_map
+
+
 def _fetch_corp_code(stock_code: str) -> Optional[str]:
     """종목코드 → OpenDart 기업고유번호(8자리)."""
     # 개별 캐시 우선
@@ -115,7 +154,10 @@ def _parse_amount(s) -> Optional[int]:
 _ACCOUNT_KEYS = {
     "revenue": ("매출액", "수익(매출액)", "영업수익", "매출"),
     "operating_income": ("영업이익", "영업이익(손실)", "영업손실"),
-    "net_income": ("당기순이익", "당기순이익(손실)", "당기순손익", "당기순손실"),
+    "net_income": (
+        "당기순이익", "당기순이익(손실)", "당기순손익", "당기순손실",
+        "연결당기순이익",  # 골프존 등 CIS 방식 기업
+    ),
 }
 
 # ── 대차대조표 계정 매핑 ──────────────────────────────────────────────────────
@@ -161,8 +203,11 @@ _IS_DETAIL_KEYS = {
     "interest_expense": ("이자비용",),
     "pretax_income":    ("법인세비용차감전순이익", "세전이익"),
     "tax_expense":      ("법인세비용",),
-    "net_income":       ("당기순이익", "당기순이익(손실)", "당기순손익", "당기순손실"),
-    "eps":              ("기본주당이익(손실)", "기본주당순이익"),
+    "net_income":       (
+        "당기순이익", "당기순이익(손실)", "당기순손익", "당기순손실",
+        "연결당기순이익",  # 골프존 등 CIS 방식 기업
+    ),
+    "eps":              ("기본주당이익(손실)", "기본주당순이익", "기본주당이익"),
 }
 
 

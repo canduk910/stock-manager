@@ -11,6 +11,14 @@ from pykrx import stock
 from .cache import get_cached, set_cached
 
 
+_KRX_DOWN_MSG = (
+    "KRX 데이터 서비스가 일시적으로 이용 불가합니다.\n"
+    "2026년 2월 27일부터 한국거래소(KRX)가 데이터 서비스를 회원제로 전환하여 "
+    "pykrx 기반 스크리닝이 현재 동작하지 않습니다.\n"
+    "pykrx 라이브러리 업데이트를 기다려 주세요: https://github.com/sharebook-kr/pykrx/issues/276"
+)
+
+
 def _find_latest_trading_day(date_str: str) -> str:
     """주어진 날짜 또는 그 이전의 가장 최근 거래일(데이터 있는 날)을 반환.
 
@@ -53,19 +61,16 @@ def get_all_stocks(date_str: str) -> list[dict]:
         kospi_tickers = set(stock.get_market_ticker_list(trading_date, market="KOSPI"))
         kosdaq_tickers = set(stock.get_market_ticker_list(trading_date, market="KOSDAQ"))
     except Exception as e:
-        raise RuntimeError(f"KRX 종목 목록 조회 실패: {e}") from e
+        raise RuntimeError(_KRX_DOWN_MSG) from e
 
     if not kospi_tickers and not kosdaq_tickers:
-        raise RuntimeError(
-            f"{trading_date} 날짜의 KRX 데이터가 없습니다. "
-            "거래일이 맞는지 확인해주세요."
-        )
+        raise RuntimeError(_KRX_DOWN_MSG)
 
     # 펀더멘털 데이터 (PER, PBR, EPS, BPS)
     try:
         fund_df = stock.get_market_fundamental(trading_date, market="ALL")
     except Exception as e:
-        raise RuntimeError(f"KRX 펀더멘털 데이터 조회 실패: {e}") from e
+        raise RuntimeError(_KRX_DOWN_MSG) from e
 
     # 시가총액 데이터
     try:
