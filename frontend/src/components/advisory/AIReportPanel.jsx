@@ -68,7 +68,7 @@ export default function AIReportPanel({ report, loading, error, onGenerate }) {
       {loading && (
         <div className="text-center py-10 text-gray-400 text-sm">
           <div className="animate-spin inline-block w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full mb-2" />
-          <p>GPT-4o가 분석 중입니다... (10~30초 소요)</p>
+          <p>GPT가 분석 중입니다... (10~30초 소요)</p>
         </div>
       )}
 

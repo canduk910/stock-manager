@@ -191,7 +191,7 @@ export default function WatchlistDashboard({
               <tr>
                 {[
                   '종목코드','종목명','현재가','전일대비','시가총액',
-                  '매출액','영업이익','순이익','영업이익률','보고서기준','메모','',
+                  '매출액','영업이익','순이익','영업이익률','배당수익률','보고서기준','메모','',
                 ].map((h) => (
                   <th key={h} className="px-3 py-2.5 text-left text-xs font-semibold text-gray-600 whitespace-nowrap">
                     {h}
@@ -238,6 +238,7 @@ export default function WatchlistDashboard({
                       {s.net_income != null && <span className="text-gray-400 ml-0.5">{currency === 'USD' ? 'M' : '억'}</span>}
                     </td>
                     <td className="px-3 py-2.5 text-right">{fmtPct(s.oi_margin)}</td>
+                    <td className="px-3 py-2.5 text-right">{s.dividend_yield != null ? fmtPct(s.dividend_yield, 2) : '-'}</td>
                     <td className="px-3 py-2.5 text-center text-xs text-gray-500">{s.report_date || '-'}</td>
                     <td className="px-3 py-2.5">
                       <MemoCell code={s.code} market={mkt} memo={s.memo} onSave={onMemoSave} />

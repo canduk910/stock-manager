@@ -32,24 +32,41 @@ _KRX_LOGIN_FAIL_MSG = (
 
 
 def _find_latest_trading_day(date_str: str) -> str:
-    """주어진 날짜 또는 그 이전의 가장 최근 거래일(데이터 있는 날)을 반환.
+    """주어진 날짜 이전의 가장 최근 거래일(데이터 있는 날)을 반환.
 
-    최대 10일 전까지 소급하여 탐색한다.
+    1단계: 주말(토·일)은 API 없이 즉시 건너뜀.
+    2단계: 공휴일은 pykrx API로 확인 (데이터 없으면 하루씩 소급).
+    API가 모두 실패하면 주말만 제거한 날짜를 fallback으로 반환.
     """
     dt = datetime.strptime(date_str, "%Y%m%d")
+
+    # 1단계: 주말 스킵 (API 불필요)
+    for _ in range(7):
+        if dt.weekday() < 5:  # 0=월 ~ 4=금
+            break
+        dt -= timedelta(days=1)
+
+    weekday_fallback = dt.strftime("%Y%m%d")
+
+    # 2단계: 공휴일 확인 (API 활용)
+    cur = dt
     for _ in range(10):
-        candidate = dt.strftime("%Y%m%d")
+        candidate = cur.strftime("%Y%m%d")
         try:
             tickers = stock.get_market_ticker_list(candidate, market="KOSPI")
             if tickers:
                 return candidate
         except Exception:
             pass
-        dt -= timedelta(days=1)
-    return date_str  # fallback: 원래 날짜 그대로
+        cur -= timedelta(days=1)
+        # 주말 스킵
+        while cur.weekday() >= 5:
+            cur -= timedelta(days=1)
+
+    return weekday_fallback  # API 실패 시 주말만 제거한 날짜 반환
 
 
-def get_all_stocks(date_str: str) -> list[dict]:
+def get_all_stocks(date_str: str) -> tuple[list[dict], str]:
     """전종목 시세 + 펀더멘털 통합 데이터 반환.
 
     Args:
@@ -57,8 +74,7 @@ def get_all_stocks(date_str: str) -> list[dict]:
                   해당 날짜에 데이터가 없으면(주말/공휴일) 가장 최근 거래일로 자동 소급.
 
     Returns:
-        list of dict with keys:
-            code, name, market, per, pbr, roe, mktcap
+        (stocks, actual_date): 종목 목록 + 실제 조회된 거래일(YYYYMMDD)
 
     Raises:
         RuntimeError: KRX 미인증 또는 로그인 실패 시.
@@ -75,7 +91,7 @@ def get_all_stocks(date_str: str) -> list[dict]:
     cache_key = f"stocks_merged:{trading_date}"
     cached = get_cached(cache_key)
     if cached is not None:
-        return cached
+        return cached, trading_date
 
     # 시장별 종목코드 집합
     try:
@@ -148,4 +164,4 @@ def get_all_stocks(date_str: str) -> list[dict]:
         )
 
     set_cached(cache_key, stocks)
-    return stocks
+    return stocks, trading_date

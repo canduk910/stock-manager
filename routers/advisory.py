@@ -42,11 +42,47 @@ def list_stocks():
 @router.post("")
 def add_stock(body: AddStockBody):
     """자문종목 추가."""
-    code = body.code.strip().upper()
+    raw = body.code.strip()
     market = body.market.upper()
 
-    # 종목명 조회
-    name = _resolve_name(code, market)
+    # KR 종목: 종목명 입력 시 symbol_map으로 코드 변환
+    if market == "KR":
+        import re as _re
+        if not _re.match(r"^\d{6}$", raw):
+            # 6자리 코드가 아닌 경우 → 종목명으로 검색
+            try:
+                from stock.symbol_map import name_to_results
+                results = name_to_results(raw)
+                # 정확히 이름이 일치하는 항목 우선
+                exact = [r for r in results if r[1] == raw]
+                if len(exact) == 1:
+                    code, name = exact[0][0], exact[0][1]
+                elif len(results) == 1:
+                    code, name = results[0][0], results[0][1]
+                elif results:
+                    candidates = ", ".join(f"{r[1]}({r[0]})" for r in results[:3])
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"'{raw}' 검색 결과가 여러 개입니다: {candidates}. 6자리 종목코드로 입력해주세요.",
+                    )
+                else:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"'{raw}' 종목을 찾을 수 없습니다. 6자리 종목코드로 입력해주세요.",
+                    )
+            except HTTPException:
+                raise
+            except Exception:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"'{raw}' 종목을 찾을 수 없습니다. 6자리 종목코드로 입력해주세요.",
+                )
+        else:
+            code = raw
+            name = _resolve_name(code, market)
+    else:
+        code = raw.upper()
+        name = _resolve_name(code, market)
 
     ok = advisory_store.add_stock(code, market, name, body.memo)
     if not ok:

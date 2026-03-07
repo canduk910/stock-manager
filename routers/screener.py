@@ -50,7 +50,7 @@ def get_stocks(
 
     # KRX 데이터 수집 (동기 — threadpool에서 실행됨)
     try:
-        stocks = get_all_stocks(target_date)
+        stocks, actual_date = get_all_stocks(target_date)
     except RuntimeError as e:
         raise HTTPException(status_code=502, detail=str(e))
 
@@ -82,7 +82,7 @@ def get_stocks(
         stocks = stocks[:top]
 
     return {
-        "date": target_date,
+        "date": actual_date,
         "total": len(stocks),
         "stocks": stocks,
     }

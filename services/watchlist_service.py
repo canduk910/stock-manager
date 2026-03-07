@@ -9,7 +9,7 @@ from typing import Optional
 
 from stock import store, symbol_map
 from stock.dart_fin import fetch_financials, fetch_financials_multi_year
-from stock.market import fetch_detail, fetch_price
+from stock.market import fetch_detail, fetch_price, fetch_market_metrics
 from stock.utils import is_domestic
 import stock.yf_client as yf_client
 
@@ -101,6 +101,8 @@ class WatchlistService:
                 "net_income": None,
                 "oi_margin": None,
                 "report_date": None,
+                # 배당
+                "dividend_yield": None,
             }
 
             if domestic:
@@ -111,6 +113,12 @@ class WatchlistService:
                         row["change"] = price.get("change")
                         row["change_pct"] = price.get("change_pct")
                         row["market_cap"] = _awk(price.get("mktcap"))
+                except Exception:
+                    pass
+
+                try:
+                    metrics = fetch_market_metrics(code)
+                    row["dividend_yield"] = metrics.get("dividend_yield")
                 except Exception:
                     pass
 
@@ -139,6 +147,13 @@ class WatchlistService:
                         row["change_pct"] = price.get("change_pct")
                         mktcap = price.get("mktcap")
                         row["market_cap"] = _usd_m(mktcap)  # M USD
+                except Exception:
+                    pass
+
+                try:
+                    detail = yf_client.fetch_detail_yf(code)
+                    if detail:
+                        row["dividend_yield"] = detail.get("dividend_yield")
                 except Exception:
                     pass
 

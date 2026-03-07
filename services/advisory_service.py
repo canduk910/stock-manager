@@ -53,13 +53,14 @@ def generate_ai_report(code: str, market: str, name: str) -> dict:
     fundamental = cache.get("fundamental") or {}
     technical = cache.get("technical") or {}
 
+    model = os.getenv("OPENAI_MODEL", "gpt-5-mini")
     prompt = _build_prompt(code, market, name, fundamental, technical)
 
     try:
         from openai import OpenAI
         client = OpenAI(api_key=api_key)
         resp = client.chat.completions.create(
-            model="gpt-4o",
+            model=model,
             messages=[
                 {
                     "role": "system",
@@ -71,7 +72,7 @@ def generate_ai_report(code: str, market: str, name: str) -> dict:
                 },
                 {"role": "user", "content": prompt},
             ],
-            max_tokens=1500,
+            max_completion_tokens=1500,
             response_format={"type": "json_object"},
         )
         content = resp.choices[0].message.content or "{}"
@@ -87,7 +88,7 @@ def generate_ai_report(code: str, market: str, name: str) -> dict:
             )
         raise HTTPException(status_code=502, detail=f"OpenAI 호출 실패: {err_str}")
 
-    report_id = advisory_store.save_report(code, market, "gpt-4o", report)
+    report_id = advisory_store.save_report(code, market, model, report)
     return advisory_store.get_latest_report(code, market) or {}
 
 
@@ -112,9 +113,9 @@ def _collect_fundamental_kr(code: str, name: str) -> dict:
     balance_sheet = bs_cf.get("balance_sheet", [])
     cashflow = bs_cf.get("cashflow", [])
 
-    # 계량지표 (시가총액, PER, PBR, ROE)
+    # 계량지표 (시가총액, PER, PBR, ROE) — balance_sheet/income_stmt도 전달해 추가 지표 계산
     metrics_raw = fetch_market_metrics(code)
-    metrics = _build_metrics_kr(metrics_raw)
+    metrics = _build_metrics_kr(metrics_raw, balance_sheet, income_stmt)
 
     # 사업별 매출비중 (OpenAI 추론)
     segments = advisory_fetcher.fetch_segments_kr(code, name)
@@ -152,21 +153,67 @@ def _collect_fundamental_us(code: str) -> dict:
     }
 
 
-def _build_metrics_kr(raw: Optional[dict]) -> dict:
-    """stock/market.py fetch_market_metrics 결과 → advisory 표준 형식."""
-    if not raw:
-        return {}
+def _build_metrics_kr(
+    raw: Optional[dict],
+    balance_sheet: list | None = None,
+    income_stmt: list | None = None,
+) -> dict:
+    """stock/market.py fetch_market_metrics + 재무데이터 → advisory 표준 형식.
+
+    balance_sheet/income_stmt에서 ROA, 부채비율, 유동비율, PSR, PBR(대안) 계산.
+    """
+    base = raw or {}
+    per = base.get("per")
+    pbr = base.get("pbr")
+    roe = base.get("roe")
+    mktcap = base.get("mktcap")
+    market_type = base.get("market_type")
+
+    # 대차대조표 최신 연도 값
+    bs_latest = (balance_sheet or [])[-1] if balance_sheet else None
+    debt_to_equity = None
+    current_ratio = None
+    total_assets = None
+    total_equity = None
+    if bs_latest:
+        debt_to_equity = bs_latest.get("debt_ratio")
+        current_ratio = bs_latest.get("current_ratio")
+        total_assets = bs_latest.get("total_assets")
+        total_equity = bs_latest.get("total_equity")
+
+    # 손익계산서 최신 연도 값
+    is_latest = (income_stmt or [])[-1] if income_stmt else None
+    revenue = None
+    net_income = None
+    if is_latest:
+        revenue = is_latest.get("revenue")
+        net_income = is_latest.get("net_income")
+
+    # ROA = 순이익 / 총자산 × 100
+    roa = None
+    if net_income is not None and total_assets and total_assets > 0:
+        roa = round(net_income / total_assets * 100, 2)
+
+    # PSR = 시가총액 / 매출액
+    psr = None
+    if mktcap and revenue and revenue > 0:
+        psr = round(mktcap / revenue, 2)
+
+    # PBR: yfinance에서 None이면 시가총액/자본총계로 대체 계산
+    if pbr is None and mktcap and total_equity and total_equity > 0:
+        pbr = round(mktcap / total_equity, 2)
+
     return {
-        "per": raw.get("per"),
-        "pbr": raw.get("pbr"),
-        "roe": raw.get("roe"),
-        "market_cap": raw.get("mktcap"),
-        "market_type": raw.get("market_type"),
-        "psr": None,
-        "ev_ebitda": None,
-        "roa": None,
-        "debt_to_equity": None,
-        "current_ratio": None,
+        "per": per,
+        "pbr": pbr,
+        "roe": roe,
+        "market_cap": mktcap,
+        "market_type": market_type,
+        "psr": psr,
+        "ev_ebitda": None,  # 순부채 데이터 필요, 추후 지원
+        "roa": roa,
+        "debt_to_equity": debt_to_equity,
+        "current_ratio": current_ratio,
     }
 
 
@@ -186,7 +233,7 @@ def _collect_technical(code: str, market: str) -> dict:
 
 
 def _build_prompt(code: str, market: str, name: str, fundamental: dict, technical: dict) -> str:
-    """GPT-4o 프롬프트 구성."""
+    """GPT 프롬프트 구성."""
     currency = "KRW(억원)" if market == "KR" else "USD(백만달러)"
 
     # 최근 3년 손익 요약

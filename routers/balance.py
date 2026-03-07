@@ -320,7 +320,7 @@ def get_balance():
     except Exception:
         futures_list = []
 
-    # 국내주식 시가총액·PER·PBR·ROE 보강 (캐시 기반, 실패 시 None)
+    # 국내주식 시가총액·PER·PBR·ROE·배당수익률 보강 (캐시 기반, 실패 시 None)
     for s in stocks:
         try:
             m = fetch_market_metrics(s["code"])
@@ -329,10 +329,11 @@ def get_balance():
             s["per"] = m.get("per")
             s["pbr"] = m.get("pbr")
             s["roe"] = m.get("roe")
+            s["dividend_yield"] = m.get("dividend_yield")
         except Exception:
-            s["exchange"] = s["mktcap"] = s["per"] = s["pbr"] = s["roe"] = None
+            s["exchange"] = s["mktcap"] = s["per"] = s["pbr"] = s["roe"] = s["dividend_yield"] = None
 
-    # 해외주식 시가총액·PER·PBR·ROE 보강 (yfinance, 캐시 기반, 실패 시 None)
+    # 해외주식 시가총액·PER·PBR·ROE·배당수익률 보강 (yfinance, 캐시 기반, 실패 시 None)
     for s in overseas_list:
         try:
             d = fetch_detail_yf(s["code"])
@@ -341,10 +342,11 @@ def get_balance():
                 s["per"] = d.get("per")
                 s["pbr"] = d.get("pbr")
                 s["roe"] = d.get("roe")
+                s["dividend_yield"] = d.get("dividend_yield")
             else:
-                s["mktcap"] = s["per"] = s["pbr"] = s["roe"] = None
+                s["mktcap"] = s["per"] = s["pbr"] = s["roe"] = s["dividend_yield"] = None
         except Exception:
-            s["mktcap"] = s["per"] = s["pbr"] = s["roe"] = None
+            s["mktcap"] = s["per"] = s["pbr"] = s["roe"] = s["dividend_yield"] = None
 
     return {
         # 합산 총계

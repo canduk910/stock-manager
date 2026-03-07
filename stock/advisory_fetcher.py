@@ -59,25 +59,62 @@ def _get_kis_token() -> str | None:
 
 # ── KIS 1분봉 → 15분봉 리샘플 ────────────────────────────────────────────────
 
+def _fetch_15min_ohlcv_kr_yf(code: str) -> list[dict]:
+    """yfinance 기반 국내 15분봉 (5일치). .KS/.KQ suffix 사용."""
+    try:
+        from stock.market import _kr_yf_ticker_str
+        import yfinance as yf
+
+        ticker_str = _kr_yf_ticker_str(code)
+        if not ticker_str:
+            return []
+
+        hist = yf.Ticker(ticker_str).history(period="5d", interval="15m")
+        if hist is None or hist.empty:
+            return []
+
+        result = []
+        for ts, row in hist.iterrows():
+            try:
+                ts_str = ts.strftime("%Y-%m-%dT%H:%M:%S")
+            except Exception:
+                continue
+            c = float(row.get("Close", 0) or 0)
+            if c == 0:
+                continue
+            result.append({
+                "time": ts_str,
+                "open": float(row.get("Open", c)),
+                "high": float(row.get("High", c)),
+                "low": float(row.get("Low", c)),
+                "close": c,
+                "volume": int(row.get("Volume", 0) or 0),
+            })
+
+        return result[-50:]
+    except Exception:
+        return []
+
+
 def fetch_15min_ohlcv_kr(code: str) -> list[dict]:
     """KIS REST API FHKST03010200 (1분봉) 수집 후 15분봉으로 리샘플.
 
-    KIS 키 미설정 시 빈 리스트 반환.
-    반환: [{time, open, high, low, close, volume}] 최근 50봉 이내.
+    하루치가 부족(< 30봉)하면 yfinance .KS/.KQ fallback으로 5일치 수집.
+    KIS 키 미설정 시 즉시 yfinance fallback.
+    반환: [{time, open, high, low, close, volume}] 최근 50봉.
     """
     app_key = os.getenv("KIS_APP_KEY")
     app_secret = os.getenv("KIS_APP_SECRET")
     base_url = os.getenv("KIS_BASE_URL") or "https://openapi.koreainvestment.com:9443"
 
     if not app_key or not app_secret:
-        return []
+        return _fetch_15min_ohlcv_kr_yf(code)
 
     try:
         token = _get_kis_token()
         if not token:
-            return []
+            return _fetch_15min_ohlcv_kr_yf(code)
 
-        # 1분봉 조회 (최근 390분 ≈ 하루치)
         headers = {
             "content-type": "application/json",
             "authorization": f"Bearer {token}",
@@ -86,81 +123,94 @@ def fetch_15min_ohlcv_kr(code: str) -> list[dict]:
             "tr_id": "FHKST03010200",
             "custtype": "P",
         }
-        params = {
-            "fid_cond_mrkt_div_code": "J",
-            "fid_input_iscd": code,
-            "fid_input_hour_1": "153000",   # 당일 마감 시각 기준 (장 전/후 모두 수집)
-            "fid_pw_data_incu_yn": "Y",
-            "fid_etc_cls_code": "",          # KIS 필수 파라미터
-        }
-        resp = requests.get(
-            f"{base_url}/uapi/domestic-stock/v1/quotations/inquire-time-itemchartprice",
-            headers=headers,
-            params=params,
-            timeout=20,
-        )
-        if resp.status_code != 200:
-            return []
 
-        data = resp.json()
-        output2 = data.get("output2") or []
-        if not output2:
-            return []
-
-        # KIS 1분봉: stck_bsop_date(날짜), stck_cntg_hour(HHMMSS), stck_oprc, stck_hgpr, stck_lwpr, stck_prpr, cntg_vol
-        raw_bars = []
-        for item in output2:
-            t_str = item.get("stck_cntg_hour", "")
-            date_str = item.get("stck_bsop_date", "")
-            if not t_str or not date_str:
-                continue
-            dt_str = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:8]}T{t_str[:2]}:{t_str[2:4]}:{t_str[4:6]}"
+        # 여러 시간대 호출로 하루 전체 데이터 수집 (각 30봉씩, 총 120봉 ≈ 2시간치 1분봉)
+        raw_bars_all: list[dict] = []
+        for hour_str in ["153000", "143000", "133000", "123000"]:
+            params = {
+                "fid_cond_mrkt_div_code": "J",
+                "fid_input_iscd": code,
+                "fid_input_hour_1": hour_str,
+                "fid_pw_data_incu_yn": "Y",
+                "fid_etc_cls_code": "",
+            }
             try:
-                o = float(item.get("stck_oprc") or 0)
-                h = float(item.get("stck_hgpr") or 0)
-                lw = float(item.get("stck_lwpr") or 0)
-                c = float(item.get("stck_prpr") or 0)
-                v = int(item.get("cntg_vol") or 0)
-                if c == 0:
+                resp = requests.get(
+                    f"{base_url}/uapi/domestic-stock/v1/quotations/inquire-time-itemchartprice",
+                    headers=headers,
+                    params=params,
+                    timeout=20,
+                )
+                if resp.status_code != 200:
                     continue
-                raw_bars.append({"time": dt_str, "open": o, "high": h, "low": lw, "close": c, "volume": v})
-            except (ValueError, TypeError):
+                output2 = resp.json().get("output2") or []
+                for item in output2:
+                    t_str = item.get("stck_cntg_hour", "")
+                    date_str = item.get("stck_bsop_date", "")
+                    if not t_str or not date_str:
+                        continue
+                    dt_str = (
+                        f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:8]}"
+                        f"T{t_str[:2]}:{t_str[2:4]}:{t_str[4:6]}"
+                    )
+                    c = float(item.get("stck_prpr") or 0)
+                    if c == 0:
+                        continue
+                    raw_bars_all.append({
+                        "time": dt_str,
+                        "open": float(item.get("stck_oprc") or c),
+                        "high": float(item.get("stck_hgpr") or c),
+                        "low": float(item.get("stck_lwpr") or c),
+                        "close": c,
+                        "volume": int(item.get("cntg_vol") or 0),
+                    })
+            except Exception:
                 continue
 
-        # 시간순 정렬
+        # 중복 제거 + 시간순 정렬
+        seen: set[str] = set()
+        raw_bars: list[dict] = []
+        for bar in raw_bars_all:
+            if bar["time"] not in seen:
+                seen.add(bar["time"])
+                raw_bars.append(bar)
         raw_bars.sort(key=lambda x: x["time"])
 
         # 15분 리샘플 (pandas)
-        if not raw_bars:
-            return []
+        result: list[dict] = []
+        if raw_bars:
+            import pandas as pd
+            df = pd.DataFrame(raw_bars)
+            df["time"] = pd.to_datetime(df["time"])
+            df = df.set_index("time")
+            df15 = df.resample("15min").agg({
+                "open": "first",
+                "high": "max",
+                "low": "min",
+                "close": "last",
+                "volume": "sum",
+            }).dropna(subset=["close"])
 
-        import pandas as pd
-        df = pd.DataFrame(raw_bars)
-        df["time"] = pd.to_datetime(df["time"])
-        df = df.set_index("time")
-        df15 = df.resample("15min").agg({
-            "open": "first",
-            "high": "max",
-            "low": "min",
-            "close": "last",
-            "volume": "sum",
-        }).dropna(subset=["close"])
+            for ts, row in df15.iterrows():
+                result.append({
+                    "time": ts.strftime("%Y-%m-%dT%H:%M:%S"),
+                    "open": float(row["open"]),
+                    "high": float(row["high"]),
+                    "low": float(row["low"]),
+                    "close": float(row["close"]),
+                    "volume": int(row["volume"]),
+                })
 
-        result = []
-        for ts, row in df15.iterrows():
-            result.append({
-                "time": ts.strftime("%Y-%m-%dT%H:%M:%S"),
-                "open": float(row["open"]),
-                "high": float(row["high"]),
-                "low": float(row["low"]),
-                "close": float(row["close"]),
-                "volume": int(row["volume"]),
-            })
+        # KIS 데이터 30봉 미만이면 yfinance로 5일치 수집 (기술지표 계산에 충분한 데이터 확보)
+        if len(result) < 30:
+            yf_result = _fetch_15min_ohlcv_kr_yf(code)
+            if yf_result:
+                return yf_result
 
-        return result[-50:]  # 최근 50봉
+        return result[-50:]
 
     except Exception:
-        return []
+        return _fetch_15min_ohlcv_kr_yf(code)
 
 
 def fetch_15min_ohlcv_us(code: str) -> list[dict]:
@@ -437,7 +487,7 @@ def calc_technical_indicators(ohlcv: list[dict]) -> dict:
 # ── 사업별 매출비중 (KR — OpenAI 추론) ───────────────────────────────────────
 
 def fetch_segments_kr(code: str, name: str) -> list[dict]:
-    """KR: OpenAI GPT-4o에게 사업부문 매출비중 추론 요청.
+    """KR: OpenAI GPT에게 사업부문 매출비중 추론 요청.
 
     OPENAI_API_KEY 미설정 시 빈 리스트 반환.
     반환: [{segment, revenue_pct, note}] (note: "AI추정")
@@ -457,9 +507,9 @@ def fetch_segments_kr(code: str, name: str) -> list[dict]:
         )
 
         resp = client.chat.completions.create(
-            model="gpt-4o",
+            model=os.getenv("OPENAI_MODEL", "gpt-5-mini"),
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=400,
+            max_completion_tokens=400,
             response_format={"type": "json_object"},
         )
 

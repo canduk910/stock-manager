@@ -129,6 +129,9 @@ def fetch_detail_yf(code: str) -> Optional[dict]:
         roe_raw = info.get("returnOnEquity")
         roe = _safe(round(roe_raw * 100, 2)) if roe_raw is not None else None
 
+        div_yield_raw = info.get("trailingAnnualDividendYield")
+        dividend_yield = _safe(round(div_yield_raw * 100, 2)) if div_yield_raw else None
+
         result = {
             "code": code.upper(),
             "name": info.get("longName") or info.get("shortName") or code.upper(),
@@ -144,6 +147,7 @@ def fetch_detail_yf(code: str) -> Optional[dict]:
             "per": _safe(info.get("trailingPE") or info.get("forwardPE")),
             "pbr": _safe(info.get("priceToBook")),
             "roe": roe,
+            "dividend_yield": dividend_yield,
         }
         set_cached(key, result, ttl_hours=1)
         return result

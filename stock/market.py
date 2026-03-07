@@ -172,16 +172,68 @@ def fetch_detail(code: str, refresh: bool = False) -> Optional[dict]:
 def fetch_valuation_history(code: str, years: int = 10) -> list[dict]:
     """월말 기준 PER/PBR 히스토리 반환.
 
-    yfinance 국내 주식 미지원 → 빈 배열 반환.
-    (KRX 스크래핑 불가 상태)
+    pykrx get_market_fundamental 사용. KRX 인증(KRX_ID/KRX_PASSWORD) 필요.
+    미인증 또는 조회 실패 시 빈 배열 반환.
     """
-    return []
+    cache_key = f"market:val_hist:{code}:{years}"
+    cached = get_cached(cache_key)
+    if cached is not None:
+        return cached
+
+    # KRX 인증 시도
+    try:
+        from screener.krx_auth import ensure_krx_session
+        if not ensure_krx_session():
+            return []
+    except Exception:
+        return []
+
+    from pykrx import stock as krx
+    import pandas as pd
+
+    end = date.today()
+    start = date(end.year - years, end.month, end.day)
+
+    try:
+        df = krx.get_market_fundamental(
+            start.strftime("%Y%m%d"),
+            end.strftime("%Y%m%d"),
+            code,
+        )
+    except Exception:
+        return []
+
+    if df is None or df.empty:
+        return []
+
+    # 월말 기준 리샘플 (pandas 2.2+: "ME", 이전: "M")
+    try:
+        df = df.resample("ME").last()
+    except Exception:
+        df = df.resample("M").last()
+
+    result = []
+    for dt, row in df.iterrows():
+        per_val = row.get("PER", 0)
+        pbr_val = row.get("PBR", 0)
+        per = round(float(per_val), 2) if per_val and float(per_val) not in (0.0,) else None
+        pbr = round(float(pbr_val), 2) if pbr_val and float(pbr_val) not in (0.0,) else None
+        if per is None and pbr is None:
+            continue
+        result.append({
+            "date": dt.strftime("%Y-%m"),
+            "per": per,
+            "pbr": pbr,
+        })
+
+    set_cached(cache_key, result, ttl_hours=24)
+    return result
 
 
 def fetch_market_metrics(code: str) -> dict:
-    """잔고 페이지용 시가총액·PER·PBR·ROE 단일 종목 조회 (52주 고저 없음).
+    """잔고 페이지용 시가총액·PER·PBR·ROE·배당수익률 단일 종목 조회 (52주 고저 없음).
 
-    반환: {mktcap(원), per, pbr, roe(%, None 가능), market_type}
+    반환: {mktcap(원), per, pbr, roe(%, None 가능), market_type, dividend_yield(%)}
     """
     cache_key = f"market:metrics:{code}"
     cached = get_cached(cache_key)
@@ -197,6 +249,7 @@ def fetch_market_metrics(code: str) -> dict:
         "per": None,
         "pbr": None,
         "roe": None,
+        "dividend_yield": None,
     }
 
     if not ticker_str:
@@ -214,10 +267,12 @@ def fetch_market_metrics(code: str) -> dict:
         per_raw = info.get("trailingPE") or info.get("forwardPE")
         pbr_raw = info.get("priceToBook")
         roe_raw = info.get("returnOnEquity")
+        div_yield_raw = info.get("trailingAnnualDividendYield")
 
         result["per"] = round(per_raw, 2) if per_raw else None
         result["pbr"] = round(pbr_raw, 2) if pbr_raw else None
         result["roe"] = round(roe_raw * 100, 2) if roe_raw else None
+        result["dividend_yield"] = round(div_yield_raw * 100, 2) if div_yield_raw else None
 
     except Exception:
         pass

@@ -123,11 +123,13 @@ def screen(
     # KRX 데이터 수집
     console.print(f"[cyan]{formatted}[/cyan] 전종목 데이터를 수집합니다...")
     try:
-        stocks = get_all_stocks(target_date)
+        stocks, actual_date = get_all_stocks(target_date)
     except RuntimeError as e:
         console.print(f"[red]오류:[/red] {e}")
         raise SystemExit(1)
 
+    if actual_date != target_date:
+        console.print(f"  [yellow]→ 거래일 자동 소급: {target_date} → {actual_date}[/yellow]")
     console.print(f"  전종목 {len(stocks)}개 로드 완료")
 
     # 당일 실적발표 종목 필터

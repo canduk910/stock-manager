@@ -206,6 +206,12 @@ const COLUMNS = [
     render: (v) => v != null ? Number(v).toFixed(2) + '배' : '-',
   },
   {
+    key: 'dividend_yield',
+    label: '배당수익률',
+    align: 'right',
+    render: (v) => v != null ? `${Number(v).toFixed(2)}%` : '-',
+  },
+  {
     key: '_actions',
     label: '주문',
     align: 'center',
