@@ -136,18 +136,34 @@ KIS API의 토큰 발급 분당 1회 제한에 대응하기 위해 모듈 수준
 
 | 함수 | 설명 |
 |------|------|
-| `fetch_15min_ohlcv_kr(code)` | KIS `FHKST03010200` 1분봉 수집 → pandas 15분 resample. KIS 키 미설정 시 `[]` 반환 |
+| `fetch_15min_ohlcv_kr(code)` | KIS 1분봉 4회 호출 → 15분 resample. 30봉 미만 시 yfinance fallback |
 | `fetch_15min_ohlcv_us(code)` | yfinance `.history(period='5d', interval='15m')`. 최근 50봉 반환 |
 | `calc_technical_indicators(ohlcv)` | 기술적 지표 계산. 데이터 부족 시 None 처리 |
 | `fetch_segments_kr(code, name)` | OpenAI로 국내 기업 사업부문 추론 (AI추정 표시) |
 
-#### `fetch_15min_ohlcv_kr` 필수 파라미터
+#### `fetch_15min_ohlcv_kr` 동작 방식
+
+KIS `FHKST03010200` (1분봉) API를 시간대별로 4회 호출하여 하루 전체 데이터를 수집한다.
+수집 후 pandas `resample("15min")`으로 15분봉으로 변환.
+
+| 호출 순서 | `fid_input_hour_1` | 설명 |
+|----------|---------------------|------|
+| 1 | `"153000"` | 장 마감 기준 (장중 + 오후 데이터) |
+| 2 | `"143000"` | 오후 2시 이전 |
+| 3 | `"133000"` | 오후 1시 이전 |
+| 4 | `"123000"` | 오후 12시 이전 |
+
+결과 30봉 미만이면 yfinance fallback (`_fetch_15min_ohlcv_kr_yf`):
+- `yfinance Ticker(code.KS/.KQ).history(period="5d", interval="15m")` 사용
+
+필수 파라미터:
 
 | 파라미터 | 값 | 설명 |
 |---------|-----|------|
-| `fid_input_hour_1` | `"153000"` | 장 마감 시각 기준 (당일 전체 수집) |
 | `fid_etc_cls_code` | `""` | KIS 필수 파라미터 (누락 시 EGW00131 오류) |
 | `fid_pw_data_incu_yn` | `"Y"` | 이전 데이터 포함 |
+
+KIS 키 미설정 시 즉시 yfinance fallback 시도. yfinance도 실패 시 `[]` 반환.
 
 #### `calc_technical_indicators` 반환 구조
 
@@ -203,16 +219,22 @@ pykrx로 KOSPI + KOSDAQ 전 종목 코드/이름/시장을 수집하고 7일간 
 
 ## `market.py` — 시세/펀더멘털
 
-pykrx를 사용하여 종목별 시세, 상세 정보, 밸류에이션 히스토리를 수집한다.
+> **2026-02 변경**: KRX 서버가 로그인 필수로 변경됨에 따라 pykrx 스크래핑 전면 중단.
+> yfinance `.KS`(KOSPI) / `.KQ`(KOSDAQ) suffix 기반으로 완전 전환.
 
 ### 함수
 
 | 함수 | 설명 | 캐시 TTL |
 |------|------|---------|
 | `fetch_price(code, refresh)` | 현재가/등락/시가총액 | 1시간 |
-| `fetch_detail(code, refresh)` | 시세 + 52주 고저 + PER/PBR + 업종/시장 | 1시간 |
-| `fetch_valuation_history(code, years)` | 월말 PER/PBR 시계열 | 24시간 |
+| `fetch_detail(code, refresh)` | 시세 + 52주 고저 + PER/PBR + 업종/시장 | 6시간 |
+| `fetch_valuation_history(code, years)` | 월말 PER/PBR 시계열 (KRX 인증 필요, 미인증 시 빈 배열) | 24시간 |
 | `fetch_period_returns(code)` | 당일/3개월/6개월/1년 주가 수익률 (%) | 1시간 |
+| `fetch_market_metrics(code)` | 잔고/AI자문용 계량지표 (시가총액·PER·PBR·ROE·배당수익률) | 6시간 |
+
+#### yfinance ticker 선택 (`_kr_yf_ticker_str`)
+
+국내 종목코드로 `.KS`와 `.KQ` 양쪽을 시도해 market_cap + shares 점수가 높은 suffix를 선택. 결과 7일 캐시.
 
 ### `fetch_price()` 반환값
 
@@ -222,7 +244,8 @@ pykrx를 사용하여 종목별 시세, 상세 정보, 밸류에이션 히스토
     "change": 1000,       # 전일대비 (원)
     "change_pct": 1.45,   # 등락률 (%)
     "mktcap": 418000000000000,  # 시가총액 (원)
-    "volume": 12345678,   # 거래량
+    "shares": 5969782550, # 상장주식수
+    "trading_date": "20260307",
 }
 ```
 
@@ -233,30 +256,48 @@ pykrx를 사용하여 종목별 시세, 상세 정보, 밸류에이션 히스토
 ```python
 {
     ...fetch_price 필드,
+    "market_type": "KOSPI",  # or "KOSDAQ"
+    "sector": "Technology",  # yfinance 영문 반환
+    "high_52": 80000,        # 52주 최고가
+    "low_52": 50000,         # 52주 최저가
+    "per": 12.5,             # yfinance 국내 주식 미지원 → None 가능
+    "pbr": 1.2,              # 동일
+}
+```
+
+### `fetch_market_metrics()` 반환값
+
+잔고 페이지 + AI자문 계량지표용. `t.info` 기반 (6시간 캐시).
+
+```python
+{
     "market_type": "KOSPI",
-    "sector": "전기·전자",
-    "high_52": 80000,     # 52주 최고가
-    "low_52": 50000,      # 52주 최저가
+    "mktcap": 418000000000000,  # 원
     "per": 12.5,
     "pbr": 1.2,
-    "shares": 5969782550, # 상장주식수
+    "roe": 8.5,              # returnOnEquity × 100 (%)
+    "dividend_yield": 2.14,  # trailingAnnualDividendYield × 100 (%). 무배당 시 None
 }
 ```
 
 ### `fetch_valuation_history()` 반환값
 
-pykrx `get_market_fundamental_by_date`로 일별 데이터를 가져온 후 `pandas.resample("ME")`로 월말 리샘플링.
+KRX 인증(KRX_ID/KRX_PASSWORD) 필요. 미인증 시 빈 배열 반환.
 
 ```python
 [
     {"date": "2016-02", "per": 7.69, "pbr": 1.24},
-    {"date": "2016-03", "per": 8.12, "pbr": 1.30},
     ...
 ]
 ```
 
-- PER/PBR이 모두 0 이하인 월은 제외
-- PER > 0일 때만 포함, PBR > 0일 때만 포함
+### 제약사항
+
+| 항목 | 상태 |
+|------|------|
+| PER/PBR | yfinance 국내 주식 미지원 → None 반환 가능 |
+| 섹터명 | 영문 반환 (한국어 변환 미지원) |
+| 밸류에이션 히스토리 | KRX 로그인 필수 → 일반적으로 빈 배열 |
 
 ---
 

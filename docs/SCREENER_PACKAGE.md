@@ -52,24 +52,39 @@ pykrx 라이브러리를 사용하여 전종목 시세/펀더멘털 데이터를
 
 | 함수 | 설명 |
 |------|------|
-| `get_all_stocks(date_str)` | YYYYMMDD → 전종목 통합 데이터 리스트 |
+| `get_all_stocks(date_str)` | YYYYMMDD → `(전종목 데이터 리스트, 실제 거래일)` 반환 |
 
 ### `get_all_stocks()` 반환값
 
 ```python
-[
-    {
-        "code": "005930",
-        "name": "삼성전자",
-        "market": "KOSPI",
-        "per": 12.5,      # 0이면 None
-        "pbr": 1.2,       # 0이면 None
-        "roe": 10.0,      # EPS/BPS*100, BPS=0이면 None
-        "mktcap": 418000000000000,  # 시가총액 (원)
-    },
-    ...
-]
+(
+    [
+        {
+            "code": "005930",
+            "name": "삼성전자",
+            "market": "KOSPI",
+            "per": 12.5,      # 0이면 None
+            "pbr": 1.2,       # 0이면 None
+            "roe": 10.0,      # EPS/BPS*100, BPS=0이면 None
+            "mktcap": 418000000000000,  # 시가총액 (원)
+        },
+        ...
+    ],
+    "20260306"  # 실제 조회된 거래일 (주말/공휴일 소급 후)
+)
 ```
+
+> 반환 타입이 `list` → `tuple[list, str]`로 변경됨. 호출부에서 반드시 언패킹 필요.
+
+### 거래일 자동 소급 (`_find_latest_trading_day`)
+
+입력 날짜가 주말/공휴일인 경우 가장 가까운 과거 거래일로 자동 소급한다.
+
+1. **Step 1 (API 없음)**: `datetime.weekday() < 5` 조건으로 주말 제거
+2. **Step 2 (API 검증)**: pykrx로 공휴일 감지. 빈 결과면 하루씩 소급
+3. **Fallback**: pykrx API 오류 시 Step 1 결과(평일) 반환
+
+`routers/screener.py`는 `actual_date`를 응답에 포함하고, `screener/cli.py`는 소급 시 메시지 출력.
 
 ### 내부 동작
 

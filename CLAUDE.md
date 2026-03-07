@@ -301,12 +301,12 @@ CLI와 API 라우터 양쪽에서 공용으로 사용한다. 데이터는 `~/sto
 | `store.py` | 관심종목 CRUD. `~/stock-watchlist/watchlist.db` (SQLite). 복합 PK `(code, market)`. `market` 컬럼 자동 마이그레이션. |
 | `order_store.py` | 주문 이력 + 예약주문 CRUD. `~/stock-watchlist/orders.db` (SQLite). `orders` + `reservations` 테이블. |
 | `advisory_store.py` | AI자문 DB CRUD. `~/stock-watchlist/advisory.db` (SQLite). `advisory_stocks`(자문종목) + `advisory_cache`(분석데이터) + `advisory_reports`(AI리포트) 3테이블. |
-| `advisory_fetcher.py` | AI자문 데이터 수집. KIS 1분봉→15분 resample(국내) / yfinance 15분봉(해외). `calc_technical_indicators()` — MACD/RSI(Wilder)/Stochastic/%K%D/볼린저밴드/MA5·20·60 순수 pandas 구현. 모듈 레벨 KIS 토큰 캐시(`_kis_token_cache`)로 분당 1회 발급 제한 우회. `fetch_segments_kr()` — OpenAI 기반 사업부문 추론. |
+| `advisory_fetcher.py` | AI자문 데이터 수집. KIS 1분봉 4회 호출(시간대별) → 15분 resample, 30봉 미만 시 yfinance fallback(국내) / yfinance 15분봉(해외). `calc_technical_indicators()` — MACD/RSI(Wilder)/Stochastic/%K%D/볼린저밴드/MA5·20·60 순수 pandas 구현. 모듈 레벨 KIS 토큰 캐시(`_kis_token_cache`)로 분당 1회 발급 제한 우회. `fetch_segments_kr()` — OpenAI 기반 사업부문 추론. |
 | `utils.py` | `is_domestic(code)` — 6자리 숫자=국내, 아니면 해외. 모든 모듈에서 국내/해외 분기에 사용. |
 | `symbol_map.py` | pykrx 기반 종목코드↔종목명 매핑 (7일 캐시). `_find_latest_trading_day()`로 최근 거래일 자동 탐색. `code_to_name()` — 맵 빌드 실패 시 `get_market_ticker_name()` 직접 호출 fallback. |
-| `market.py` | pykrx 기반 시세/시가총액/52주 고저/PER/PBR + 월별 밸류에이션 히스토리 + `fetch_period_returns()`(당일/3M/6M/1Y 수익률, 1시간 캐시). `fetch_market_metrics(code)` — 잔고 페이지용 단일 종목 시가총액·PER·PBR·ROE·KOSPI/KOSDAQ 구분 조회 (6시간 캐시). |
+| `market.py` | **yfinance 기반** 시세/시가총액/52주 고저/PER/PBR + 기간별 수익률 (2026-02 KRX 서버 변경으로 pykrx 전면 yfinance 전환). `_kr_yf_ticker_str(code)` — `.KS`/`.KQ` suffix 자동 선택 (7일 캐시). `fetch_market_metrics(code)` — 잔고·관심종목·AI자문용 시가총액·PER·PBR·ROE·**배당수익률** 조회 (6시간 캐시). |
 | `dart_fin.py` | OpenDart `fnlttSinglAcntAll` API 기반 재무제표 조회. 3년 단위 배치 호출로 최대 10년치 수집. DART 사업보고서 링크(`dart_url`) 포함. `_ACCOUNT_KEYS`에 적자 기업 변형 계정명(`영업손실`, `당기순손실`, `매출` 등) 포함. `fetch_income_detail_annual()` — 매출원가/SGA/이자비용/EPS 세부 손익. `fetch_bs_cf_annual()` — 대차대조표(자산/부채/자본) + 현금흐름표(영업/투자/재무 CF, CAPEX, FCF). |
-| `yf_client.py` | yfinance 기반 해외주식 데이터. `validate_ticker`, `fetch_price_yf`, `fetch_detail_yf`(ROE 포함), `fetch_period_returns_yf`, `fetch_financials_multi_year_yf`. NaN → None 자동 정제. `fetch_financials_multi_year_yf`는 캐시에 전체 연도를 저장하고 반환 시점에 슬라이싱 (부분 캐시 버그 방지). AI자문용 추가 함수: `fetch_income_detail_yf()` / `fetch_balance_sheet_yf()` / `fetch_cashflow_yf()` / `fetch_metrics_yf()`(PER·PBR·PSR·EV/EBITDA·ROE·ROA) / `fetch_segments_yf()`(사업부문, best-effort). |
+| `yf_client.py` | yfinance 기반 해외주식 데이터. `validate_ticker`, `fetch_price_yf`, `fetch_detail_yf`(ROE+**배당수익률** 포함), `fetch_period_returns_yf`, `fetch_financials_multi_year_yf`. NaN → None 자동 정제. `fetch_financials_multi_year_yf`는 캐시에 전체 연도를 저장하고 반환 시점에 슬라이싱 (부분 캐시 버그 방지). AI자문용 추가 함수: `fetch_income_detail_yf()` / `fetch_balance_sheet_yf()` / `fetch_cashflow_yf()` / `fetch_metrics_yf()`(PER·PBR·PSR·EV/EBITDA·ROE·ROA) / `fetch_segments_yf()`(사업부문, best-effort). |
 | `sec_filings.py` | SEC EDGAR EFTS API 기반 미국 10-K/10-Q 공시 조회. 키 불필요. 국내 공시와 동일한 필드 구조 반환. |
 | `display.py` | Rich 테이블 출력 + CSV 내보내기. |
 | `cache.py` | SQLite TTL 캐시 (`~/stock-watchlist/cache.db`). `set_cached`/`get_cached` 모두 NaN/Inf → None 자동 sanitize. |
@@ -403,8 +403,8 @@ frontend/
 - 매입단가 포맷: 국내주식 `Math.floor()` 소수점 절사(정수 표시), 해외주식 소수점 2자리 고정
 - FuturesTable: 포지션 뱃지 (매수=빨강, 매도=파랑), 미결제수량 표시
 - DataTable: 모든 컬럼 헤더 클릭 시 정렬 (⇅ 아이콘, 재클릭 시 asc/desc 토글, 숫자/문자 자동 구분). 모든 잔고 테이블에 공통 적용. `renderContext` prop으로 `navigate` 등 외부 의존성 전달 지원. `sortable: false` 컬럼 설정 지원.
-- HoldingsTable(국내주식): 거래소(KOSPI/KOSDAQ) → 종목코드 → 종목명 → 투자비중(%) → 보유수량 → 평가금액 → 매입단가 → 현재가 → 평가손익 → 수익률 → 시가총액 → PER → ROE → PBR → 주문(매도/매수 버튼) 순서. 투자비중은 카테고리 내 eval_amount 기준.
-- OverseasHoldingsTable(해외주식): 거래소 → 종목코드 → 종목명 → 투자비중(%) → 통화 → 보유수량 → 평가금액(외화) → 매입단가 → 현재가 → 평가손익(외화) → 평가손익(원화) → 수익률 → 시가총액 → PER → ROE → PBR → 주문(매도/매수 버튼). 투자비중은 eval_amount_krw 기준.
+- HoldingsTable(국내주식): 거래소(KOSPI/KOSDAQ) → 종목코드 → 종목명 → 투자비중(%) → 보유수량 → 평가금액 → 매입단가 → 현재가 → 평가손익 → 수익률 → 시가총액 → PER → ROE → PBR → **배당수익률** → 주문(매도/매수 버튼) 순서. 투자비중은 카테고리 내 eval_amount 기준.
+- OverseasHoldingsTable(해외주식): 거래소 → 종목코드 → 종목명 → 투자비중(%) → 통화 → 보유수량 → 평가금액(외화) → 매입단가 → 현재가 → 평가손익(외화) → 평가손익(원화) → 수익률 → 시가총액 → PER → ROE → PBR → **배당수익률** → 주문(매도/매수 버튼). 투자비중은 eval_amount_krw 기준.
 - FinancialTable: currency-aware 단위 표시. USD면 M USD 기준으로 1,000M 이상은 $B, 1,000,000M 이상은 $T. KRW는 억/조.
 - StockHeader: currency-aware 현재가/등락/시총 표시. PER·PBR은 `Math.floor()` 정수 표시.
 - StockInfoModal: PER·PBR `Math.floor()` 정수 표시.
@@ -466,6 +466,7 @@ Stage 2  python:3.11-slim → pip install + 앱 소스 + COPY --from Stage 1
 | `KIS_BASE_URL` | 선택 | 기본값: `https://openapi.koreainvestment.com:9443` |
 | `OPENDART_API_KEY` | 국내 공시/재무 조회 시 필수 | https://opendart.fss.or.kr 에서 발급 |
 | `OPENAI_API_KEY` | AI자문 리포트 생성 시 필수 | https://platform.openai.com 에서 발급. 미설정 시 `/analyze` → 503. 크레딧 부족 시 402 반환. |
+| `OPENAI_MODEL` | 선택 | AI자문 리포트 생성 모델. 기본값: `gpt-4o`. 예: `gpt-4o`, `gpt-4o-mini`, `gpt-4-turbo`, `o3-mini`. `max_completion_tokens` 사용 (신규 모델 호환). |
 | `TEST_KIS_*` | 선택 | 모의계좌용 (`test.py`에서 사용) |
 
 모의투자 BASE_URL: `https://openapivts.koreainvestment.com:29443`
@@ -502,7 +503,7 @@ KIS API는 실전/모의투자에 따라 TR_ID 접두사가 다르다.
 | **SEC EDGAR** | 미국 10-K/10-Q 공시. EFTS API 무료 사용. 키 불필요 | `stock/sec_filings.py` |
 | **KIS OpenAPI** | 잔고 조회, 현재가, 주문 등. `KIS_APP_KEY`/`KIS_APP_SECRET` 필요 | `wrapper.py`, `routers/balance.py` |
 | **KIS 마스터파일** | `fetch_symbols()`로 다운로드. 연간 정적 데이터 → 일별 스크리닝에 부적합 | `wrapper.py` |
-| **OpenAI API** | GPT-4o 종합 투자 의견 생성. `OPENAI_API_KEY` 필요. `response_format={"type":"json_object"}` 사용 | `services/advisory_service.py` |
+| **OpenAI API** | 종합 투자 의견 생성. `OPENAI_API_KEY` 필요. 모델은 `OPENAI_MODEL` env (기본 `gpt-4o`). `response_format={"type":"json_object"}` 사용. `max_completion_tokens` 사용 (신규 모델 호환). | `services/advisory_service.py` |
 
 ---
 
@@ -522,7 +523,7 @@ KIS API는 실전/모의투자에 따라 TR_ID 접두사가 다르다.
 
 **시작 시 캐시 초기화**: `entrypoint.sh`에서 uvicorn 시작 직전 `cache.db` 전체를 삭제한다. 코드 배포 후 구버전 캐시(필드 구조 변경, NaN 등)로 인한 오류를 원천 차단. `watchlist.db`(관심종목 목록)는 별개 파일이므로 영향 없음.
 
-**`market:metrics:` 캐시**: `fetch_market_metrics(code)` — `{market_type, mktcap, per, pbr, roe}` 저장. TTL 6시간. 잔고 페이지에서 각 보유 종목에 대해 호출.
+**`market:metrics:` 캐시**: `fetch_market_metrics(code)` — `{market_type, mktcap, per, pbr, roe, dividend_yield}` 저장. TTL 6시간. 잔고·관심종목·AI자문에서 각 종목에 대해 호출.
 
 ---
 

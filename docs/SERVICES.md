@@ -39,7 +39,7 @@ WatchlistService(broker=None)
 
 #### `get_dashboard_data(items) → list[dict]`
 
-관심종목 목록을 받아 시세 + 재무 데이터를 조합한 대시보드 행 리스트를 반환한다.
+관심종목 목록을 받아 시세 + 재무 + 배당 데이터를 조합한 대시보드 행 리스트를 반환한다.
 
 반환 필드:
 
@@ -48,16 +48,20 @@ WatchlistService(broker=None)
 | `code` | str | | 종목코드 |
 | `name` | str | | 종목명 |
 | `memo` | str | | 메모 |
-| `price` | int \| None | 원 | 현재가 |
-| `change` | int \| None | 원 | 전일대비 |
+| `currency` | str | | `"KRW"` 또는 `"USD"` |
+| `price` | int \| None | 원/달러 | 현재가 |
+| `change` | int \| None | 원/달러 | 전일대비 |
 | `change_pct` | float \| None | % | 등락률 |
-| `market_cap` | int \| None | 억원 | 시가총액 |
-| `revenue` | int \| None | 억원 | 매출액 |
-| `operating_profit` | int \| None | 억원 | 영업이익 |
-| `net_income` | int \| None | 억원 | 당기순이익 |
+| `market_cap` | int \| None | 억원/M USD | 시가총액 |
+| `revenue` | int \| None | 억원/M USD | 매출액 |
+| `operating_profit` | int \| None | 억원/M USD | 영업이익 |
+| `net_income` | int \| None | 억원/M USD | 당기순이익 |
 | `oi_margin` | float \| None | % | 영업이익률 |
 | `report_date` | str | | 보고서 기준 (예: "2024/12") |
+| `dividend_yield` | float \| None | % | 배당수익률 (trailing 12개월, 무배당 시 None) |
 
+- KR 배당수익률: `fetch_market_metrics(code)` → `trailingAnnualDividendYield × 100`
+- US 배당수익률: `fetch_detail_yf(code)` → `trailingAnnualDividendYield × 100`
 - 종목당 0.05초 sleep (rate limit)
 - 개별 종목 오류는 무시하고 None 필드로 처리
 
@@ -325,14 +329,23 @@ manager.unsubscribe(symbol, queue)       # Queue 제거. 마지막 구독자 해
 
 #### `generate_ai_report(code, market, name) → dict`
 
-저장된 캐시 데이터 → OpenAI GPT-4o 호출 → `advisory_reports` 저장.
+저장된 캐시 데이터 → OpenAI 모델 호출 → `advisory_reports` 저장.
 
 - `OPENAI_API_KEY` 미설정 → HTTPException(503)
 - 캐시 없음 → HTTPException(404)
 - OpenAI 크레딧 부족(429) → HTTPException(402, "OpenAI API 크레딧이 부족합니다.")
 - 기타 OpenAI 오류 → HTTPException(502)
 
-**GPT-4o 프롬프트 구성**: 최근 3년 손익/대차/현금흐름 요약 + 계량지표 + 기술적 시그널(`current_signals`)
+**사용 모델**: `OPENAI_MODEL` 환경변수로 설정 (기본값: `gpt-4o`). `max_completion_tokens=1500` 사용 (신규 모델 호환).
+
+**프롬프트 구성**: 최근 3년 손익/대차/현금흐름 요약 + 계량지표 + 기술적 시그널(`current_signals`)
+
+**KR 계량지표 계산 방식** (`_build_metrics_kr`):
+- `per`, `pbr`, `roe`, `mktcap`: `fetch_market_metrics()` yfinance 값
+- `psr`: mktcap / revenue (revenue는 income_stmt 최신 연도)
+- `roa`: net_income / total_assets × 100 (balance_sheet 최신 연도)
+- `debt_to_equity` / `current_ratio`: balance_sheet의 `debt_ratio` / `current_ratio`
+- `pbr` fallback: yfinance None이면 mktcap / total_equity로 계산
 
 **반환 JSON 구조**:
 ```json
