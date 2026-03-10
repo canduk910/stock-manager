@@ -41,9 +41,8 @@ frontend/
 | `/earnings` | EarningsPage | 기간 선택 + 공시 목록 |
 | `/balance` | BalancePage | 보유종목 + 평가금액 |
 | `/watchlist` | WatchlistPage | 관심종목 CRUD + 시세/재무 대시보드 |
-| `/detail/:symbol` | DetailPage | 탭 UI: 재무분석 / 밸류에이션 / 종합 리포트 |
+| `/detail/:symbol` | DetailPage | 탭 UI: 재무분석 / 밸류에이션 / 종합 리포트 (서브탭: CAGR요약 / 기본적분석 / 기술적분석 / AI자문) |
 | `/order` | OrderPage | 탭 UI: 주문발송 / 미체결 / 체결내역 / 주문이력 / 예약주문 |
-| `/advisory` | AdvisoryPage | AI자문 — 종목목록 + 기본적/기술적 분석 + AI 리포트 |
 
 ---
 
@@ -58,7 +57,7 @@ frontend/
 | `watchlist.js` | `fetchWatchlist()`, `addToWatchlist()`, `removeFromWatchlist()`, `updateMemo()`, `fetchDashboard()`, `fetchStockInfo()` | `/api/watchlist/*` |
 | `detail.js` | `fetchDetailFinancials()`, `fetchDetailValuation()`, `fetchDetailReport()` | `/api/detail/*` |
 | `order.js` | `placeOrder()`, `fetchBuyable()`, `fetchOpenOrders()`, `cancelOrder()`, `modifyOrder()`, `fetchExecutions()`, `fetchOrderHistory()`, `syncOrders()`, `createReservation()`, `fetchReservations()`, `deleteReservation()` | `/api/order/*` |
-| `advisory.js` | `fetchAdvisoryStocks()`, `addAdvisoryStock()`, `removeAdvisoryStock()`, `refreshAdvisoryData()`, `fetchAdvisoryData()`, `generateReport()`, `fetchReport()` | `/api/advisory/*` |
+| `advisory.js` | `fetchAdvisoryStocks()`, `addAdvisoryStock()`, `removeAdvisoryStock()`, `refreshAdvisoryData(code, market, name)`, `fetchAdvisoryData()`, `generateReport()`, `fetchReport()`, `fetchAdvisoryOhlcv(code, market, interval, period)` | `/api/advisory/*` |
 
 ---
 
@@ -77,8 +76,9 @@ frontend/
 | `useNotification.js` | `useNotification()` | `{ toasts, notify, dismiss }` — 토스트 상태 + 브라우저 Notification API |
 | `useQuote.js` | `useQuote(symbol)` | `{ price, change, changeRate, sign, asks, bids, totalAskVolume, totalBidVolume, connected }` — 실시간 호가 WebSocket. symbol 변경 시 재연결 + state 초기화. 비정상 종료 시 3초 후 자동 재연결. |
 | `useAdvisory.js` | `useAdvisoryStocks()` | `{ stocks, loading, error, load, add, remove }` — 자문종목 목록 CRUD |
-| | `useAdvisoryData()` | `{ data, loading, error, load, refresh }` — 분석 데이터 조회/새로고침 |
+| | `useAdvisoryData()` | `{ data, loading, error, load, refresh }` — 분석 데이터 조회/새로고침. `refresh(code, market, name)` |
 | | `useAdvisoryReport()` | `{ report, loading, error, load, generate }` — AI 리포트 조회/생성 |
+| | `useAdvisoryOhlcv()` | `{ result, loading, error, load }` — 타임프레임별 OHLCV+지표 조회. `load(code, market, interval, period)` → `{ ohlcv, indicators, interval, period }` |
 
 ---
 
@@ -98,7 +98,7 @@ frontend/
 
 | 컴포넌트 | 설명 |
 |---------|------|
-| `Header` | 상단 네비게이션 바. 로고 "DK STOCK". `NAV_ITEMS` 배열로 6개 메뉴 렌더링 (대시보드/스크리너/공시/잔고/관심종목/주문). `NavLink`의 `isActive`로 현재 페이지 강조. |
+| `Header` | 상단 네비게이션 바. 로고 "DK STOCK". `NAV_ITEMS` 배열로 6개 메뉴 렌더링 (대시보드/스크리너/공시/잔고/관심종목/주문). AI자문 메뉴는 DetailPage 내 탭으로 통합되어 제거됨. `NavLink`의 `isActive`로 현재 페이지 강조. |
 
 ### 스크리너 (`src/components/screener/`)
 
@@ -150,7 +150,7 @@ frontend/
 | 컴포넌트 | 설명 |
 |---------|------|
 | `FundamentalPanel` | 기본적 분석 탭. 계량지표 카드 그리드 (PER/PBR/PSR/EV·EBITDA/ROE/ROA/부채비율/유동비율) + 손익계산서 테이블 + BarChart (매출/영업이익/순이익) + 대차대조표 테이블 + 현금흐름표 테이블 + BarChart (영업CF vs FCF) + 사업별 매출비중 PieChart (KR: "AI추정" 배지). |
-| `TechnicalPanel` | 기술적 분석 탭. 시그널 배지 카드 (MACD/RSI/Stochastic/MA20 상회 + 변동성돌파 목표가) + ComposedChart (종가봉+MA5/20/60+BB) + 거래량 BarChart + MACD ComposedChart + RSI LineChart (70/30 기준선) + Stochastic LineChart (80/20 기준선). |
+| `TechnicalPanel` | 기술적 분석 탭. `data`, `symbol`, `market` props. 타임프레임 선택(15분/60분/1일/1주) + 기간 선택(타임프레임별 허용 기간 목록). interval/period 변경 시 `fetchAdvisoryOhlcv()` 자동 호출. 초기 데이터는 `data.technical.ohlcv` 캐시 사용. 시그널 배지 카드 (MACD/RSI/Stochastic/MA20 상회 + 변동성돌파 목표가) + ComposedChart (종가봉+MA5/20/60+BB) + 거래량 BarChart + MACD ComposedChart + RSI LineChart (70/30 기준선) + Stochastic LineChart (80/20 기준선). |
 | `AIReportPanel` | AI자문 탭. "AI 분석 생성" 버튼 + 최종 생성 시각 + 종합투자의견(등급 배지+요약+근거) + 기술적시그널(신호 배지+지표별) + 리스크 요인 + 투자 포인트. JSON 파싱 실패 시 원문 텍스트 fallback. |
 
 ### 종목 상세 (`src/components/detail/`)
@@ -191,7 +191,14 @@ frontend/
 
 ### DetailPage (`/detail/:symbol`)
 - 마운트 시 `/api/detail/report/{symbol}` 호출
-- 탭 UI: 재무분석(FinancialTable) / 밸류에이션(ValuationChart) / 종합 리포트(ReportSummary)
+- 상위 탭 UI: 재무분석(FinancialTable) / 밸류에이션(ValuationChart) / 종합 리포트
+- 종합 리포트 탭 내 서브탭 4개:
+  - **CAGR 요약**: ReportSummary (기존과 동일, advisory 데이터 불필요)
+  - **기본적 분석**: FundamentalPanel (재무제표 3종 + 계량지표 + 파이차트)
+  - **기술적 분석**: TechnicalPanel (타임프레임 선택 + 차트 묶음)
+  - **AI 자문**: AIReportPanel (GPT-4o 리포트)
+- advisory 데이터: cagr 외 서브탭 최초 진입 시 lazy load (loadAdvData + loadReport 동시 호출)
+- cagr 서브탭에서는 [새로고침] 버튼 숨김. AI자문 서브탭에서만 [AI분석 생성] 버튼 표시.
 - "← 관심종목으로" 뒤로가기 링크
 
 ### OrderPage (`/order`)

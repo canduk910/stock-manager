@@ -670,17 +670,23 @@ KIS 당일 체결 내역과 로컬 DB 대사(Reconciliation). 로컬 `PLACED`/`P
 
 ---
 
-### `POST /api/advisory/{code}/refresh?market=KR`
+### `POST /api/advisory/{code}/refresh?market=KR&name=`
 
 기본적/기술적 분석 데이터 전체 수집 후 캐시 저장. **30초 이상 소요**.
 
+**쿼리 파라미터**:
+- `market`: `KR` (기본값) / `US`
+- `name`: 종목명 (선택). advisory_stocks 미등록 종목에서 사용. 없으면 `code` 값으로 대체.
+
+advisory_stocks에 등록되지 않은 종목도 호출 가능 (DetailPage에서 직접 호출 지원).
+
 수집 데이터:
-- **KR**: DART 손익계산서(5년) + 대차대조표(5년) + 현금흐름표(5년) + pykrx 계량지표 + KIS 15분봉 + OpenAI 사업부문 추론
+- **KR**: DART 손익계산서(5년) + 대차대조표(5년) + 현금흐름표(5년) + pykrx 계량지표 + KIS 15분봉(yfinance fallback 포함) + OpenAI 사업부문 추론
 - **US**: yfinance 손익계산서(4년) + 대차대조표(4년) + 현금흐름표(4년) + yfinance 계량지표 + yfinance 15분봉
 
 **응답**: 수집된 분석 데이터 전체 (아래 `/data` 응답과 동일)
 
-**에러**: 404 (미등록 종목), 502 (데이터 수집 실패)
+**에러**: 502 (데이터 수집 실패)
 
 ---
 
@@ -768,6 +774,58 @@ KIS 당일 체결 내역과 로컬 DB 대사(Reconciliation). 로컬 `PLACED`/`P
 ```
 
 **에러**: 404 (데이터 없음. 먼저 `/refresh` 호출 필요)
+
+---
+
+### `GET /api/advisory/{code}/ohlcv?market=KR&interval=15m&period=60d`
+
+타임프레임/기간을 지정하여 OHLCV 데이터 + 기술적 지표를 조회. 기술지표는 매 호출마다 재계산 (캐시 없음).
+
+**쿼리 파라미터**:
+
+| 파라미터 | 기본값 | 허용값 | 설명 |
+|---------|--------|--------|------|
+| `market` | `KR` | `KR` / `US` | 시장 구분 |
+| `interval` | `15m` | `15m` / `60m` / `1d` / `1wk` | 봉 단위 |
+| `period` | `60d` | `5d`, `1mo`, `60d`, `3mo`, `6mo`, `1y`, `2y`, `3y`, `5y`, `10y` | 조회 기간 |
+
+**yfinance interval 제한**:
+- `15m`: 최대 `60d`
+- `60m`: 최대 `2y`
+- `1d` / `1wk`: 최대 `10y`
+
+period가 interval 허용 최대치를 초과하면 자동으로 최대값으로 조정.
+
+**응답**:
+```json
+{
+  "ohlcv": [
+    {"time": "2026-03-04T15:00:00", "open": 175300, "high": 176300, "low": 172500, "close": 172800, "volume": 2962588}
+  ],
+  "indicators": {
+    "macd": {"macd": [...], "signal": [...], "histogram": [...], "times": [...]},
+    "rsi": {"values": [...], "times": [...]},
+    "stoch": {"k": [...], "d": [...], "times": [...]},
+    "bb": {"upper": [...], "mid": [...], "lower": [...], "times": [...]},
+    "ma": {"ma5": [...], "ma20": [...], "ma60": [...], "times": [...]},
+    "volatility_target": 173200,
+    "current_signals": {
+      "macd_cross": "golden",
+      "rsi_signal": "neutral",
+      "rsi_value": 54.7,
+      "stoch_signal": "oversold",
+      "stoch_k": 18.2,
+      "above_ma20": true,
+      "ma20": 170500,
+      "current_price": 172800
+    }
+  },
+  "interval": "15m",
+  "period": "60d"
+}
+```
+
+**에러**: 500 (데이터 수집 실패)
 
 ---
 

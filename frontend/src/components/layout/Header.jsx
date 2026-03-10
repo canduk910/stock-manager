@@ -7,7 +7,6 @@ const NAV_ITEMS = [
   { to: '/balance', label: '잔고 조회' },
   { to: '/watchlist', label: '관심종목' },
   { to: '/order', label: '주문' },
-  { to: '/advisory', label: 'AI자문' },
 ]
 
 const WIDTH_OPTIONS = [

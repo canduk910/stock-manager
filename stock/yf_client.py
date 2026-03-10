@@ -129,8 +129,16 @@ def fetch_detail_yf(code: str) -> Optional[dict]:
         roe_raw = info.get("returnOnEquity")
         roe = _safe(round(roe_raw * 100, 2)) if roe_raw is not None else None
 
-        div_yield_raw = info.get("trailingAnnualDividendYield")
-        dividend_yield = _safe(round(div_yield_raw * 100, 2)) if div_yield_raw else None
+        # dividendYield: 이미 % 형태 (0.4, 1.3), KR/US 공통 → 우선 사용
+        # trailingAnnualDividendYield: 소수점 형태이나 외국 ADR에서 오계산 가능 → fallback
+        div_yield_pct  = info.get("dividendYield")
+        trailing_yield = info.get("trailingAnnualDividendYield")
+        if div_yield_pct is not None:
+            dividend_yield = _safe(round(float(div_yield_pct), 2))
+        elif trailing_yield is not None:
+            dividend_yield = _safe(round(trailing_yield * 100, 2))
+        else:
+            dividend_yield = None
 
         result = {
             "code": code.upper(),

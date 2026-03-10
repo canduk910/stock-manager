@@ -1,15 +1,26 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useDetailReport } from '../hooks/useDetail'
+import { useAdvisoryData, useAdvisoryReport } from '../hooks/useAdvisory'
 import StockHeader from '../components/detail/StockHeader'
 import FinancialTable from '../components/detail/FinancialTable'
 import ValuationChart from '../components/detail/ValuationChart'
 import ReportSummary from '../components/detail/ReportSummary'
+import FundamentalPanel from '../components/advisory/FundamentalPanel'
+import TechnicalPanel from '../components/advisory/TechnicalPanel'
+import AIReportPanel from '../components/advisory/AIReportPanel'
 
 const TABS = [
   { id: 'financials', label: '재무분석' },
   { id: 'valuation', label: '밸류에이션' },
   { id: 'report', label: '종합 리포트' },
+]
+
+const REPORT_SUB_TABS = [
+  { id: 'cagr',        label: 'CAGR 요약' },
+  { id: 'fundamental', label: '기본적 분석' },
+  { id: 'technical',   label: '기술적 분석' },
+  { id: 'ai',          label: 'AI 자문' },
 ]
 
 function TabBtn({ id, active, onClick, children }) {
@@ -27,14 +38,56 @@ function TabBtn({ id, active, onClick, children }) {
   )
 }
 
+function SubTabBtn({ id, active, onClick, children }) {
+  return (
+    <button
+      onClick={() => onClick(id)}
+      className={`px-3 py-2 text-xs font-medium border-b-2 transition-colors ${
+        active
+          ? 'border-indigo-500 text-indigo-600'
+          : 'border-transparent text-gray-400 hover:text-gray-600 hover:border-gray-300'
+      }`}
+    >
+      {children}
+    </button>
+  )
+}
+
 export default function DetailPage() {
   const { symbol } = useParams()
   const [activeTab, setActiveTab] = useState('financials')
+  const [subTab, setSubTab] = useState('cagr')
   const { data, loading, error, load } = useDetailReport()
+
+  const { data: advData, loading: advLoading, error: advError, load: loadAdvData, refresh: refreshAdvData } = useAdvisoryData()
+  const { report, loading: reportLoading, error: reportError, load: loadReport, generate } = useAdvisoryReport()
+
+  // advisory 데이터 lazy load: 종합리포트 탭 + cagr 외 서브탭 최초 진입 시
+  const advLoadedRef = useState(false)
 
   useEffect(() => {
     if (symbol) load(symbol)
   }, [symbol, load])
+
+  useEffect(() => {
+    if (activeTab === 'report' && subTab !== 'cagr' && symbol && !advData && !advLoading && !advLoadedRef[0]) {
+      const market = /^\d{6}$/.test(symbol) ? 'KR' : 'US'
+      advLoadedRef[0] = true
+      loadAdvData(symbol, market)
+      loadReport(symbol, market)
+    }
+  }, [activeTab, subTab, symbol]) // eslint-disable-line
+
+  const market = /^\d{6}$/.test(symbol) ? 'KR' : 'US'
+
+  const handleRefresh = useCallback(() => {
+    advLoadedRef[0] = true
+    refreshAdvData(symbol, market, data?.basic?.name)
+  }, [symbol, market, data, refreshAdvData]) // eslint-disable-line
+
+  const handleGenerate = useCallback(async () => {
+    await generate(symbol, market)
+  }, [symbol, market, generate])
 
   return (
     <div className="space-y-5">
@@ -99,7 +152,98 @@ export default function DetailPage() {
               <ValuationChart data={data.valuation} />
             )}
             {activeTab === 'report' && (
-              <ReportSummary data={data} />
+              <div>
+                {/* 서브탭 네비게이션 + 액션 버튼 */}
+                <div className="flex items-center border-b border-gray-100 bg-white px-3 mb-4">
+                  {REPORT_SUB_TABS.map((s) => (
+                    <SubTabBtn
+                      key={s.id}
+                      id={s.id}
+                      active={subTab === s.id}
+                      onClick={setSubTab}
+                    >
+                      {s.label}
+                    </SubTabBtn>
+                  ))}
+
+                  {/* 새로고침/AI분석 버튼: cagr 탭에서는 숨김 */}
+                  {subTab !== 'cagr' && (
+                    <div className="ml-auto flex gap-2 py-1">
+                      <button
+                        onClick={handleRefresh}
+                        disabled={advLoading}
+                        className="px-3 py-1.5 text-xs font-medium rounded border border-gray-300 text-gray-600 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {advLoading ? '수집 중...' : '새로고침'}
+                      </button>
+                      {subTab === 'ai' && (
+                        <button
+                          onClick={handleGenerate}
+                          disabled={reportLoading}
+                          className="px-3 py-1.5 text-xs font-medium rounded bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {reportLoading ? 'AI 분석 중...' : 'AI분석 생성'}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* 서브탭 콘텐츠 */}
+                {subTab === 'cagr' && (
+                  <ReportSummary data={data} />
+                )}
+                {subTab === 'fundamental' && (
+                  <div className="bg-white rounded-xl border border-gray-200 p-5">
+                    {advLoading && (
+                      <div className="flex items-center gap-3 py-8 justify-center text-gray-500">
+                        <div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+                        <span className="text-sm">데이터 수집 중...</span>
+                      </div>
+                    )}
+                    {!advLoading && advError && (
+                      <p className="text-sm text-red-500 text-center py-8">{advError}</p>
+                    )}
+                    {!advLoading && !advData && !advError && (
+                      <p className="text-sm text-gray-400 text-center py-8">
+                        [새로고침] 버튼을 눌러 데이터를 수집해주세요. (30초+ 소요)
+                      </p>
+                    )}
+                    {!advLoading && advData && (
+                      <FundamentalPanel data={advData} market={market} />
+                    )}
+                  </div>
+                )}
+                {subTab === 'technical' && (
+                  <div className="bg-white rounded-xl border border-gray-200 p-5">
+                    {advLoading && (
+                      <div className="flex items-center gap-3 py-8 justify-center text-gray-500">
+                        <div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+                        <span className="text-sm">데이터 수집 중...</span>
+                      </div>
+                    )}
+                    {!advLoading && advError && (
+                      <p className="text-sm text-red-500 text-center py-8">{advError}</p>
+                    )}
+                    {!advLoading && !advData && !advError && (
+                      <p className="text-sm text-gray-400 text-center py-8">
+                        [새로고침] 버튼을 눌러 데이터를 수집해주세요. (30초+ 소요)
+                      </p>
+                    )}
+                    {!advLoading && advData && (
+                      <TechnicalPanel data={advData} symbol={symbol} market={market} />
+                    )}
+                  </div>
+                )}
+                {subTab === 'ai' && (
+                  <AIReportPanel
+                    report={report}
+                    loading={reportLoading}
+                    error={reportError}
+                    onGenerate={handleGenerate}
+                  />
+                )}
+              </div>
             )}
           </div>
         </>

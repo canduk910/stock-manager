@@ -60,7 +60,7 @@ def _get_kis_token() -> str | None:
 # ── KIS 1분봉 → 15분봉 리샘플 ────────────────────────────────────────────────
 
 def _fetch_15min_ohlcv_kr_yf(code: str) -> list[dict]:
-    """yfinance 기반 국내 15분봉 (5일치). .KS/.KQ suffix 사용."""
+    """yfinance 기반 국내 15분봉 (최대 60일치). .KS/.KQ suffix 사용."""
     try:
         from stock.market import _kr_yf_ticker_str
         import yfinance as yf
@@ -69,7 +69,7 @@ def _fetch_15min_ohlcv_kr_yf(code: str) -> list[dict]:
         if not ticker_str:
             return []
 
-        hist = yf.Ticker(ticker_str).history(period="5d", interval="15m")
+        hist = yf.Ticker(ticker_str).history(period="60d", interval="15m")
         if hist is None or hist.empty:
             return []
 
@@ -91,7 +91,7 @@ def _fetch_15min_ohlcv_kr_yf(code: str) -> list[dict]:
                 "volume": int(row.get("Volume", 0) or 0),
             })
 
-        return result[-50:]
+        return result[-300:]
     except Exception:
         return []
 
@@ -101,7 +101,7 @@ def fetch_15min_ohlcv_kr(code: str) -> list[dict]:
 
     하루치가 부족(< 30봉)하면 yfinance .KS/.KQ fallback으로 5일치 수집.
     KIS 키 미설정 시 즉시 yfinance fallback.
-    반환: [{time, open, high, low, close, volume}] 최근 50봉.
+    반환: [{time, open, high, low, close, volume}] 최근 300봉.
     """
     app_key = os.getenv("KIS_APP_KEY")
     app_secret = os.getenv("KIS_APP_SECRET")
@@ -207,18 +207,18 @@ def fetch_15min_ohlcv_kr(code: str) -> list[dict]:
             if yf_result:
                 return yf_result
 
-        return result[-50:]
+        return result[-300:]
 
     except Exception:
         return _fetch_15min_ohlcv_kr_yf(code)
 
 
 def fetch_15min_ohlcv_us(code: str) -> list[dict]:
-    """yfinance 15분봉 (최근 5일). 최근 50봉 반환."""
+    """yfinance 15분봉 (최대 60일치). 최근 300봉 반환."""
     try:
         import yfinance as yf
         t = yf.Ticker(code.upper())
-        hist = t.history(period="5d", interval="15m")
+        hist = t.history(period="60d", interval="15m")
         if hist is None or hist.empty:
             return []
 
@@ -241,7 +241,7 @@ def fetch_15min_ohlcv_us(code: str) -> list[dict]:
                 "volume": int(row.get("Volume", 0) or 0),
             })
 
-        return result[-50:]
+        return result[-300:]
     except Exception:
         return []
 
@@ -482,6 +482,95 @@ def calc_technical_indicators(ohlcv: list[dict]) -> dict:
             "current_price": _safe_val(cur_close),
         },
     }
+
+
+# ── 타임프레임별 OHLCV 수집 ──────────────────────────────────────────────────
+
+def _yf_hist_to_ohlcv_list(hist, max_bars: int = 500) -> list[dict]:
+    """yfinance history DataFrame → OHLCV list (최근 max_bars봉)."""
+    if hist is None or hist.empty:
+        return []
+    result = []
+    for ts, row in hist.iterrows():
+        try:
+            ts_str = ts.strftime("%Y-%m-%dT%H:%M:%S")
+        except Exception:
+            continue
+        c = float(row.get("Close", 0) or 0)
+        if c == 0:
+            continue
+        result.append({
+            "time": ts_str,
+            "open": float(row.get("Open", c)),
+            "high": float(row.get("High", c)),
+            "low": float(row.get("Low", c)),
+            "close": c,
+            "volume": int(row.get("Volume", 0) or 0),
+        })
+    return result[-max_bars:]
+
+
+def _fetch_ohlcv_kr_yf(code: str, interval: str = "15m", period: str = "60d") -> list[dict]:
+    """yfinance 기반 국내 OHLCV (interval/period 지정). .KS/.KQ suffix 사용."""
+    try:
+        from stock.market import _kr_yf_ticker_str
+        import yfinance as yf
+
+        ticker_str = _kr_yf_ticker_str(code)
+        if not ticker_str:
+            return []
+
+        hist = yf.Ticker(ticker_str).history(period=period, interval=interval)
+        return _yf_hist_to_ohlcv_list(hist)
+    except Exception:
+        return []
+
+
+def _fetch_ohlcv_us_yf(code: str, interval: str = "15m", period: str = "60d") -> list[dict]:
+    """yfinance 기반 해외 OHLCV (interval/period 지정)."""
+    try:
+        import yfinance as yf
+        hist = yf.Ticker(code.upper()).history(period=period, interval=interval)
+        return _yf_hist_to_ohlcv_list(hist)
+    except Exception:
+        return []
+
+
+# yfinance interval별 최대 period 매핑
+_YF_INTERVAL_MAP = {
+    "15m":  "15m",
+    "60m":  "60m",
+    "1d":   "1d",
+    "1wk":  "1wk",
+}
+
+_MAX_PERIOD = {
+    "15m":  "60d",
+    "60m":  "2y",
+    "1d":   "10y",
+    "1wk":  "10y",
+}
+
+
+def fetch_ohlcv_by_interval(code: str, market: str, interval: str = "15m", period: str = "60d") -> dict:
+    """interval/period 지정 OHLCV 수집 + 기술지표 계산.
+
+    interval: '15m' | '60m' | '1d' | '1wk'
+    period: yfinance period string ('5d', '1mo', '60d', '6mo', '1y', '3y', '5y', '10y' 등)
+    반환: {"ohlcv": [...], "indicators": {...}}
+    """
+    if interval not in _YF_INTERVAL_MAP:
+        interval = "15m"
+
+    yf_interval = _YF_INTERVAL_MAP[interval]
+
+    if market == "KR":
+        ohlcv = _fetch_ohlcv_kr_yf(code, interval=yf_interval, period=period)
+    else:
+        ohlcv = _fetch_ohlcv_us_yf(code, interval=yf_interval, period=period)
+
+    indicators = calc_technical_indicators(ohlcv)
+    return {"ohlcv": ohlcv, "indicators": indicators}
 
 
 # ── 사업별 매출비중 (KR — OpenAI 추론) ───────────────────────────────────────

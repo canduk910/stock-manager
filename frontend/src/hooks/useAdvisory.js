@@ -7,6 +7,7 @@ import {
   fetchAdvisoryData,
   generateReport,
   fetchReport,
+  fetchAdvisoryOhlcv,
 } from '../api/advisory'
 
 /** 자문종목 목록 + CRUD */
@@ -62,11 +63,11 @@ export function useAdvisoryData() {
     }
   }, [])
 
-  const refresh = useCallback(async (code, market) => {
+  const refresh = useCallback(async (code, market, name = null) => {
     setLoading(true)
     setError(null)
     try {
-      const result = await refreshAdvisoryData(code, market)
+      const result = await refreshAdvisoryData(code, market, name)
       setData(result)
     } catch (e) {
       setError(e.message)
@@ -115,4 +116,26 @@ export function useAdvisoryReport() {
   }, [])
 
   return { report, loading, error, load, generate }
+}
+
+/** OHLCV 타임프레임별 데이터 조회 */
+export function useAdvisoryOhlcv() {
+  const [result, setResult] = useState(null)  // { ohlcv, indicators, interval, period }
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState(null)
+
+  const load = useCallback(async (code, market, interval, period) => {
+    setLoading(true)
+    setError(null)
+    try {
+      const data = await fetchAdvisoryOhlcv(code, market, interval, period)
+      setResult(data)
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  return { result, loading, error, load }
 }

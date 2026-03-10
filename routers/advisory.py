@@ -100,16 +100,19 @@ def remove_stock(code: str, market: str = Query("KR")):
 
 
 @router.post("/{code}/refresh")
-def refresh_data(code: str, market: str = Query("KR")):
-    """데이터 새로고침 (30초+ 소요). 기본적/기술적 분석 전체 수집."""
+def refresh_data(code: str, market: str = Query("KR"), name: str = Query(None)):
+    """데이터 새로고침 (30초+ 소요). 기본적/기술적 분석 전체 수집.
+
+    advisory_stocks 미등록 종목도 허용 (DetailPage에서 직접 호출 가능).
+    name 파라미터로 종목명 전달 가능; 미등록 & name 없으면 code를 사용.
+    """
     code = code.upper()
     market = market.upper()
 
     stock = advisory_store.get_stock(code, market)
-    if not stock:
-        raise HTTPException(status_code=404, detail="자문종목 목록에 없는 종목입니다.")
+    stock_name = stock["name"] if stock else (name or code)
 
-    result = advisory_service.refresh_stock_data(code, market, stock["name"])
+    result = advisory_service.refresh_stock_data(code, market, stock_name)
     return result
 
 
@@ -137,6 +140,23 @@ def analyze(code: str, market: str = Query("KR")):
 
     result = advisory_service.generate_ai_report(code, market, name)
     return result
+
+
+@router.get("/{code}/ohlcv")
+def get_ohlcv(
+    code: str,
+    market: str = Query("KR"),
+    interval: str = Query("15m"),
+    period: str = Query("60d"),
+):
+    """타임프레임/기간 지정 OHLCV + 기술지표 조회.
+
+    interval: '15m' | '60m' | '1d' | '1wk'
+    period: yfinance period 문자열
+    """
+    from stock.advisory_fetcher import fetch_ohlcv_by_interval
+    result = fetch_ohlcv_by_interval(code.upper(), market.upper(), interval, period)
+    return {**result, "interval": interval, "period": period}
 
 
 @router.get("/{code}/report")

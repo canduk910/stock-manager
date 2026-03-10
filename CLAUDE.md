@@ -155,18 +155,21 @@ DELETE /api/order/reserve/{id} 예약주문 삭제
 #### `advisory.py` — AI자문 관리
 
 ```
-GET    /api/advisory                        자문종목 목록 (캐시 업데이트 시각 포함)
-POST   /api/advisory                        종목 추가 {code, market, memo}
-DELETE /api/advisory/{code}?market=KR       종목 삭제
-POST   /api/advisory/{code}/refresh?market  전체 데이터 수집 → advisory_cache 저장 (30초+)
-GET    /api/advisory/{code}/data?market     캐시된 분석 데이터 조회 (fundamental + technical)
-POST   /api/advisory/{code}/analyze?market  OpenAI GPT-4o 리포트 생성 (10-30초)
-GET    /api/advisory/{code}/report?market   최신 AI 리포트 조회
+GET    /api/advisory                                  자문종목 목록 (캐시 업데이트 시각 포함)
+POST   /api/advisory                                  종목 추가 {code, market, memo}
+DELETE /api/advisory/{code}?market=KR                 종목 삭제
+POST   /api/advisory/{code}/refresh?market&name=      전체 데이터 수집 → advisory_cache 저장 (30초+)
+GET    /api/advisory/{code}/data?market               캐시된 분석 데이터 조회 (fundamental + technical)
+GET    /api/advisory/{code}/ohlcv?market&interval&period  타임프레임별 OHLCV + 기술지표 조회
+POST   /api/advisory/{code}/analyze?market            OpenAI GPT-4o 리포트 생성 (10-30초)
+GET    /api/advisory/{code}/report?market             최신 AI 리포트 조회
 ```
 
+- `/refresh`: `name` 쿼리 파라미터 추가. advisory_stocks 미등록 종목도 허용 (name 없으면 code 사용)
+- `/ohlcv`: interval(`15m`/`60m`/`1d`/`1wk`), period(`60d`/`6mo`/`1y` 등) 파라미터. 기술지표 자동 계산 포함. TTL 캐시 없음(매 호출 계산).
 - `/refresh`, `/analyze`는 처리 시간이 길어 프론트에서 loading 처리 필수
 - `OPENAI_API_KEY` 미설정 시 `/analyze` → 503 반환
-- KIS 키 미설정 시 국내 15분봉 빈 배열 반환 (재무 데이터는 정상)
+- KIS 키 미설정 시 국내 15분봉 yfinance fallback 사용 (재무 데이터는 정상)
 - OpenAI 크레딧 부족(429) 시 `/analyze` → 402 반환 (한국어 안내 메시지)
 - `advisory_store.py` → `advisory_fetcher.py` → `advisory_service.py` 레이어 분리
 
@@ -301,10 +304,10 @@ CLI와 API 라우터 양쪽에서 공용으로 사용한다. 데이터는 `~/sto
 | `store.py` | 관심종목 CRUD. `~/stock-watchlist/watchlist.db` (SQLite). 복합 PK `(code, market)`. `market` 컬럼 자동 마이그레이션. |
 | `order_store.py` | 주문 이력 + 예약주문 CRUD. `~/stock-watchlist/orders.db` (SQLite). `orders` + `reservations` 테이블. |
 | `advisory_store.py` | AI자문 DB CRUD. `~/stock-watchlist/advisory.db` (SQLite). `advisory_stocks`(자문종목) + `advisory_cache`(분석데이터) + `advisory_reports`(AI리포트) 3테이블. |
-| `advisory_fetcher.py` | AI자문 데이터 수집. KIS 1분봉 4회 호출(시간대별) → 15분 resample, 30봉 미만 시 yfinance fallback(국내) / yfinance 15분봉(해외). `calc_technical_indicators()` — MACD/RSI(Wilder)/Stochastic/%K%D/볼린저밴드/MA5·20·60 순수 pandas 구현. 모듈 레벨 KIS 토큰 캐시(`_kis_token_cache`)로 분당 1회 발급 제한 우회. `fetch_segments_kr()` — OpenAI 기반 사업부문 추론. |
+| `advisory_fetcher.py` | AI자문 데이터 수집. `fetch_15min_ohlcv_kr()` — KIS 1분봉 4회 호출(시간대별) → 15분 resample, 30봉 미만 시 yfinance fallback. `fetch_ohlcv_by_interval(code, market, interval, period)` — 타임프레임/기간 지정 OHLCV 수집 + 기술지표 자동 계산 반환 (`{ohlcv, indicators}`). yfinance interval/period 제한 자동 적용(`15m` max 60d, `60m` max 2y). `calc_technical_indicators()` — MACD/RSI(Wilder)/Stochastic/%K%D/볼린저밴드/MA5·20·60 순수 pandas 구현, 최대 300봉. 모듈 레벨 KIS 토큰 캐시(`_kis_token_cache`)로 분당 1회 발급 제한 우회. `fetch_segments_kr()` — OpenAI 기반 사업부문 추론. |
 | `utils.py` | `is_domestic(code)` — 6자리 숫자=국내, 아니면 해외. 모든 모듈에서 국내/해외 분기에 사용. |
 | `symbol_map.py` | pykrx 기반 종목코드↔종목명 매핑 (7일 캐시). `_find_latest_trading_day()`로 최근 거래일 자동 탐색. `code_to_name()` — 맵 빌드 실패 시 `get_market_ticker_name()` 직접 호출 fallback. |
-| `market.py` | **yfinance 기반** 시세/시가총액/52주 고저/PER/PBR + 기간별 수익률 (2026-02 KRX 서버 변경으로 pykrx 전면 yfinance 전환). `_kr_yf_ticker_str(code)` — `.KS`/`.KQ` suffix 자동 선택 (7일 캐시). `fetch_market_metrics(code)` — 잔고·관심종목·AI자문용 시가총액·PER·PBR·ROE·**배당수익률** 조회 (6시간 캐시). |
+| `market.py` | **yfinance 기반** 시세/시가총액/52주 고저/PER/PBR + 기간별 수익률 (2026-02 KRX 서버 변경으로 pykrx 전면 yfinance 전환). `_kr_yf_ticker_str(code)` — `.KS`/`.KQ` suffix 자동 선택 (7일 캐시). `fetch_market_metrics(code)` — 잔고·관심종목·AI자문용 시가총액·PER·PBR·ROE·**배당수익률** 조회 (6시간 캐시). 배당수익률: `dividendYield`(이미 % 형태, KR/US 공통) 우선 사용, 없으면 `trailingAnnualDividendYield × 100` fallback (ADR 환율 오류 방지). |
 | `dart_fin.py` | OpenDart `fnlttSinglAcntAll` API 기반 재무제표 조회. 3년 단위 배치 호출로 최대 10년치 수집. DART 사업보고서 링크(`dart_url`) 포함. `_ACCOUNT_KEYS`에 적자 기업 변형 계정명(`영업손실`, `당기순손실`, `매출` 등) 포함. `fetch_income_detail_annual()` — 매출원가/SGA/이자비용/EPS 세부 손익. `fetch_bs_cf_annual()` — 대차대조표(자산/부채/자본) + 현금흐름표(영업/투자/재무 CF, CAPEX, FCF). |
 | `yf_client.py` | yfinance 기반 해외주식 데이터. `validate_ticker`, `fetch_price_yf`, `fetch_detail_yf`(ROE+**배당수익률** 포함), `fetch_period_returns_yf`, `fetch_financials_multi_year_yf`. NaN → None 자동 정제. `fetch_financials_multi_year_yf`는 캐시에 전체 연도를 저장하고 반환 시점에 슬라이싱 (부분 캐시 버그 방지). AI자문용 추가 함수: `fetch_income_detail_yf()` / `fetch_balance_sheet_yf()` / `fetch_cashflow_yf()` / `fetch_metrics_yf()`(PER·PBR·PSR·EV/EBITDA·ROE·ROA) / `fetch_segments_yf()`(사업부문, best-effort). |
 | `sec_filings.py` | SEC EDGAR EFTS API 기반 미국 10-K/10-Q 공시 조회. 키 불필요. 국내 공시와 동일한 필드 구조 반환. |
@@ -349,7 +352,8 @@ frontend/
       detail.js           10년 재무 + 밸류에이션 + 종합 리포트
       order.js            placeOrder / fetchOpenOrders / cancelOrder / modifyOrder / fetchExecutions 등
       advisory.js         fetchAdvisoryStocks / addAdvisoryStock / removeAdvisoryStock /
-                          refreshAdvisoryData / fetchAdvisoryData / analyzeAdvisory / fetchAdvisoryReport
+                          refreshAdvisoryData(code, market, name) / fetchAdvisoryData / generateReport /
+                          fetchReport / fetchAdvisoryOhlcv(code, market, interval, period)
     hooks/
       useScreener.js      { data, loading, error, search }
       useEarnings.js      { data, loading, error, load(startDate, endDate, market) }
@@ -359,9 +363,10 @@ frontend/
       useOrder.js         useOrderPlace / useBuyable / useOpenOrders / useExecutions / useOrderHistory / useOrderSync / useReservations
       useNotification.js  토스트 상태 관리 + 브라우저 Notification API 래퍼
       useQuote.js         실시간 호가 WebSocket 훅. { price, change, changeRate, sign, asks, bids, totalAskVolume, totalBidVolume, connected }
-      useAdvisory.js      useAdvisoryStocks (CRUD + 선택 관리) / useAdvisoryData (refresh + 캐시 조회) / useAdvisoryReport (analyze + 리포트 조회)
+      useAdvisory.js      useAdvisoryStocks (CRUD) / useAdvisoryData (load + refresh) / useAdvisoryReport (load + generate) /
+                          useAdvisoryOhlcv (load(code, market, interval, period) → { ohlcv, indicators, interval, period })
     components/
-      layout/Header.jsx   네비게이션 바 (7개 메뉴, 로고: "DK STOCK")
+      layout/Header.jsx   네비게이션 바 (6개 메뉴, 로고: "DK STOCK")
       common/             LoadingSpinner, ErrorAlert, EmptyState, DataTable, ToastNotification
       screener/           FilterPanel, StockTable
       earnings/           FilingsTable  (국내/미국 컬럼 분기, market prop)
@@ -372,7 +377,7 @@ frontend/
                           ExecutionsTable, OrderHistoryTable, ReservationForm, ReservationsTable, SyncButton,
                           OrderbookPanel (실시간 호가창)
       advisory/           FundamentalPanel (재무제표 3종 + 계량지표 + 파이차트)
-                          TechnicalPanel (캔들스틱+MA+BB / 거래량 / MACD / RSI / Stochastic)
+                          TechnicalPanel (타임프레임/기간 선택 + 캔들스틱+MA+BB / 거래량 / MACD / RSI / Stochastic)
                           AIReportPanel (GPT-4o 종합의견 + 기술적시그널 + 리스크/투자포인트)
     pages/
       DashboardPage.jsx   /         잔고 요약 + 오늘 공시 + 시총 상위
@@ -380,9 +385,8 @@ frontend/
       EarningsPage.jsx    /earnings  국내/미국 탭 선택 + 기간 조회
       BalancePage.jsx     /balance
       WatchlistPage.jsx   /watchlist
-      DetailPage.jsx      /detail/:symbol  탭 UI (재무분석/밸류에이션/종합 리포트)
+      DetailPage.jsx      /detail/:symbol  탭 UI (재무분석/밸류에이션/종합 리포트[서브탭: CAGR요약/기본적분석/기술적분석/AI자문])
       OrderPage.jsx       /order     탭 UI (주문발송/미체결/체결내역/주문이력/예약주문)
-      AdvisoryPage.jsx    /advisory  2패널 레이아웃 (종목목록 | 탭: 기본적분석/기술적분석/AI자문)
 ```
 
 **프론트엔드 규칙**
@@ -413,9 +417,9 @@ frontend/
 - OrderForm: `externalPrice` prop → 지정가일 때 가격 자동 세팅(시장가 무시). `onSymbolChange` prop → 종목코드 변경 시 호가창 동기화.
 - OpenOrdersTable: `api_cancellable` 필드로 API 취소 가능 여부 판별. `excg_id_dvsn_cd === 'SOR'`(HTS/MTS 주문)은 정정/취소 버튼 대신 "앱취소필요" 안내 표시.
 - ToastNotification: 화면 우상단 고정 토스트 알림 컨테이너. `App.jsx`에서 `useNotification` 훅과 함께 마운트.
-- AdvisoryPage: 2패널 레이아웃. 왼쪽=자문종목 목록 + 종목 추가 폼. 오른쪽=탭(기본적분석/기술적분석/AI자문). [새로고침] → `POST /refresh`, [AI분석 생성] → `POST /analyze`.
-- FundamentalPanel: ① 계량지표 카드(PER/PBR/PSR/EV·EBITDA/ROE/ROA) ② 손익계산서 테이블+막대차트 ③ 대차대조표 테이블 ④ 현금흐름표 테이블+막대차트 ⑤ 사업별 매출비중 파이차트. KR 사업부문에는 "AI추정" 배지 표시.
-- TechnicalPanel: 시그널 요약 카드(MACD/RSI/Stochastic/MA20/변동성돌파 목표가) → 캔들스틱+MA+볼린저밴드 → 거래량 → MACD → RSI(70/30 기준선) → Stochastic(80/20 기준선) 차트 순서.
+- DetailPage: 종합 리포트 탭에 4개 서브탭 (CAGR 요약 / 기본적 분석 / 기술적 분석 / AI 자문). cagr 외 서브탭에서만 [새로고침] 버튼 표시, AI자문 서브탭에서 [AI분석 생성] 버튼 추가. advisory 데이터는 최초 서브탭 진입 시 lazy load.
+- FundamentalPanel: `data`, `market` props. ① 계량지표 카드(PER/PBR/PSR/EV·EBITDA/ROE/ROA) ② 손익계산서 테이블+막대차트 ③ 대차대조표 테이블 ④ 현금흐름표 테이블+막대차트 ⑤ 사업별 매출비중 파이차트. KR 사업부문에는 "AI추정" 배지 표시.
+- TechnicalPanel: `data`, `symbol`, `market` props. 타임프레임 선택 UI (15분/60분/1일/1주) + 기간 선택 (타임프레임별 허용 범위). interval 변경 시 `GET /api/advisory/{code}/ohlcv?interval=&period=` 자동 호출. 초기 데이터는 `data.technical.ohlcv` 캐시 사용. 시그널 요약 카드(MACD/RSI/Stochastic/MA20/변동성돌파 목표가) → 캔들스틱+MA+볼린저밴드 → 거래량 → MACD → RSI(70/30 기준선) → Stochastic(80/20 기준선) 차트 순서.
 - AIReportPanel: [AI분석 생성] 버튼 → 종합투자의견(매수/중립/매도 배지) → 기술적시그널 → 리스크요인 목록 → 투자포인트 목록. OPENAI_API_KEY 미설정 시 503 안내, 크레딧 부족(402) 시 한국어 안내.
 
 > 상세 컴포넌트 설명은 `docs/FRONTEND_SPEC.md` 참조.
@@ -540,6 +544,6 @@ KIS API는 실전/모의투자에 따라 TR_ID 접두사가 다르다.
 | 공시 조회 (SEC) | ✅ | 10-K/10-Q, 수익률 포함 |
 | 스크리너 | ❌ | 미지원 (국내 전용) |
 | 종목명 검색 | ❌ | 티커 코드만 가능 |
-| AI자문 (국내 KR) | ✅ | DART 재무 3종 + pykrx 계량지표 + KIS 15분봉 + GPT-4o |
-| AI자문 (해외 US) | ✅ | yfinance 재무 3종 + yfinance 계량지표 + yfinance 15분봉 + GPT-4o |
+| AI자문 (국내 KR) | ✅ | DART 재무 3종 + pykrx 계량지표 + KIS 15분봉(yfinance fallback) + GPT-4o. DetailPage 종합리포트 탭에서 접근. |
+| AI자문 (해외 US) | ✅ | yfinance 재무 3종 + yfinance 계량지표 + yfinance 15분봉 + GPT-4o. DetailPage 종합리포트 탭에서 접근. |
 | 지원 시장 | US | NASDAQ/NYSE/AMEX. 일본·홍콩 등 추후 확장 가능 구조 |

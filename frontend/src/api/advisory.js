@@ -18,10 +18,12 @@ export const removeAdvisoryStock = (code, market = 'KR') =>
   })
 
 // ── 데이터 새로고침 ────────────────────────────────────────────────────────
-export const refreshAdvisoryData = (code, market = 'KR') =>
-  apiFetch(`/api/advisory/${encodeURIComponent(code)}/refresh?market=${market}`, {
+export const refreshAdvisoryData = (code, market = 'KR', name = null) => {
+  const q = name ? `&name=${encodeURIComponent(name)}` : ''
+  return apiFetch(`/api/advisory/${encodeURIComponent(code)}/refresh?market=${market}${q}`, {
     method: 'POST',
   })
+}
 
 // ── 분석 데이터 조회 ───────────────────────────────────────────────────────
 export const fetchAdvisoryData = (code, market = 'KR') =>
@@ -36,3 +38,7 @@ export const generateReport = (code, market = 'KR') =>
 // ── 최신 AI 리포트 조회 ────────────────────────────────────────────────────
 export const fetchReport = (code, market = 'KR') =>
   apiFetch(`/api/advisory/${encodeURIComponent(code)}/report?market=${market}`)
+
+// ── OHLCV 타임프레임별 조회 ────────────────────────────────────────────────
+export const fetchAdvisoryOhlcv = (code, market = 'KR', interval = '15m', period = '60d') =>
+  apiFetch(`/api/advisory/${encodeURIComponent(code)}/ohlcv?market=${market}&interval=${interval}&period=${period}`)
