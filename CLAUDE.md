@@ -98,7 +98,7 @@ standalone으로 사용 가능. `main.py`/`routers/`와는 독립적이다.
 ### `main.py` — FastAPI 서버
 
 - CORS 미들웨어: `localhost:5173` 허용 (Vite 개발 서버)
-- `routers/` 8개 라우터 등록 (screener, earnings, balance, watchlist, detail, order, quote, advisory)
+- `routers/` 9개 라우터 등록 (screener, earnings, balance, watchlist, detail, order, quote, advisory, search)
 - lifespan: ① `quote_manager.start()` (KIS WebSocket 관리자) ② 예약주문 스케줄러 시작 — 종료 시 역순 정리
 - `services/quote_service.py`: `KISQuoteManager` 싱글턴. KIS WS 단일 연결 + 심볼별 asyncio.Queue pub/sub
 - SPA 라우팅: `/assets` StaticFiles 마운트 + `/{full_path:path}` 캐치올로 index.html 반환
@@ -121,6 +121,7 @@ standalone으로 사용 가능. `main.py`/`routers/`와는 독립적이다.
 | `order.py` | `/api/order/*` | 주문 발송 / 정정 / 취소 / 미체결 / 체결 내역 / 이력 / 예약주문 |
 | `quote.py` | `WS /ws/quote/{symbol}` | 실시간 호가 WebSocket. 국내=KIS WS 브릿지, 해외=yfinance 2초 polling |
 | `advisory.py` | `/api/advisory/*` | AI자문 종목 관리 + 데이터 수집/조회 + GPT-4o AI 리포트 생성 |
+| `search.py` | `GET /api/search` | 종목 검색. KR=이름/코드 자동완성(최대 10건), US=티커 유효성 검증 |
 
 - 모든 핸들러는 `def`(sync) — pykrx/requests가 동기 라이브러리이므로 FastAPI가 threadpool에서 자동 실행
 - KIS 키 미설정 시 `/api/balance`는 503 반환 (서버 시작은 정상)
@@ -354,6 +355,7 @@ frontend/
       advisory.js         fetchAdvisoryStocks / addAdvisoryStock / removeAdvisoryStock /
                           refreshAdvisoryData(code, market, name) / fetchAdvisoryData / generateReport /
                           fetchReport / fetchAdvisoryOhlcv(code, market, interval, period)
+      search.js           searchStocks(q, market) → GET /api/search
     hooks/
       useScreener.js      { data, loading, error, search }
       useEarnings.js      { data, loading, error, load(startDate, endDate, market) }
@@ -414,7 +416,7 @@ frontend/
 - StockInfoModal: PER·PBR `Math.floor()` 정수 표시. ROE(%), 배당수익률(%), 주당배당금(DPS, 국내=원/해외=$) InfoCard 추가. 재무 테이블에 `MarginRow`(영업이익률·순이익률 %) 추가.
 - OrderPage: 5탭 UI (주문발송 / 미체결 / 체결내역 / 주문이력 / 예약주문). URL 파라미터(`?symbol=&market=&side=&quantity=`)로 잔고 페이지 매도/매수 버튼과 연계. 주문발송 탭은 xl 이상에서 2컬럼(왼쪽=호가창, 오른쪽=주문폼).
 - OrderbookPanel: `symbol` + `market` prop. 국내=KIS WS 10호가, 해외=현재가만(호가 미지원 안내). 호가 클릭 → `onPriceSelect(price)` 콜백. `connected` 배지(초록/회색).
-- OrderForm: `externalPrice` prop → 지정가일 때 가격 자동 세팅(시장가 무시). `onSymbolChange` prop → 종목코드 변경 시 호가창 동기화.
+- OrderForm: `externalPrice` prop → 지정가일 때 가격 자동 세팅(시장가 무시). `onSymbolChange` prop → 종목코드 변경 시 호가창 동기화. **종목 검색 UI**: KR=자동완성 드롭다운(300ms debounce, 2글자 이상 입력 시 `GET /api/search?market=KR` 호출, 클릭 선택 시 code+name 자동 세팅), US=티커 검증(500ms debounce, `✓ Apple Inc.` / `✗ 종목 없음` 인라인 표시). `search.js`의 `searchStocks()` 사용.
 - OpenOrdersTable: `api_cancellable` 필드로 API 취소 가능 여부 판별. `excg_id_dvsn_cd === 'SOR'`(HTS/MTS 주문)은 정정/취소 버튼 대신 "앱취소필요" 안내 표시.
 - ToastNotification: 화면 우상단 고정 토스트 알림 컨테이너. `App.jsx`에서 `useNotification` 훅과 함께 마운트.
 - DetailPage: 종합 리포트 탭에 4개 서브탭 (CAGR 요약 / 기본적 분석 / 기술적 분석 / AI 자문). cagr 외 서브탭에서만 [새로고침] 버튼 표시, AI자문 서브탭에서 [AI분석 생성] 버튼 추가. advisory 데이터는 최초 서브탭 진입 시 lazy load.

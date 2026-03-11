@@ -58,6 +58,7 @@ frontend/
 | `detail.js` | `fetchDetailFinancials()`, `fetchDetailValuation()`, `fetchDetailReport()` | `/api/detail/*` |
 | `order.js` | `placeOrder()`, `fetchBuyable()`, `fetchOpenOrders()`, `cancelOrder()`, `modifyOrder()`, `fetchExecutions()`, `fetchOrderHistory()`, `syncOrders()`, `createReservation()`, `fetchReservations()`, `deleteReservation()` | `/api/order/*` |
 | `advisory.js` | `fetchAdvisoryStocks()`, `addAdvisoryStock()`, `removeAdvisoryStock()`, `refreshAdvisoryData(code, market, name)`, `fetchAdvisoryData()`, `generateReport()`, `fetchReport()`, `fetchAdvisoryOhlcv(code, market, interval, period)` | `/api/advisory/*` |
+| `search.js` | `searchStocks(q, market)` | `GET /api/search` |
 
 ---
 
@@ -134,7 +135,7 @@ frontend/
 
 | 컴포넌트 | 설명 |
 |---------|------|
-| `OrderForm` | 시장/종목/매매구분/가격/수량 입력 폼. 잔고 페이지 URL 파라미터 기본값 반영. 매수가능 조회 버튼. `externalPrice` prop → 지정가 자동 세팅(호가창 연동). `onSymbolChange` prop → 종목코드 변경 콜백. |
+| `OrderForm` | 시장/종목/매매구분/가격/수량 입력 폼. 잔고 페이지 URL 파라미터 기본값 반영. 매수가능 조회 버튼. `externalPrice` prop → 지정가 자동 세팅(호가창 연동). `onSymbolChange` prop → 종목코드 변경 콜백. **종목 검색 UI**: KR=자동완성 드롭다운(300ms debounce, 2글자 이상, 클릭 선택 시 code+name 자동 세팅), US=티커 검증(500ms debounce, `✓ 종목명` / `✗ 종목 없음` 인라인 표시). `searchStocks()` API 사용. |
 | `OrderbookPanel` | 실시간 호가창. `symbol`+`market` prop. 국내=KIS WS 10호가(매도↑매수↓, 잔량 배경바), 해외=현재가만 표시(호가 미지원 안내). 호가 행 클릭 → `onPriceSelect(price)` 콜백. 연결 상태 배지(녹색/회색). symbol 없으면 플레이스홀더 표시. |
 | `OrderConfirmModal` | 주문 확인 모달. 종목/수량/가격/매매구분 재확인 후 발송. |
 | `OpenOrdersTable` | 미체결 주문 테이블. `api_cancellable` 기준으로 API 주문은 정정/취소 버튼, HTS/MTS 주문은 "앱취소필요" 표시. |

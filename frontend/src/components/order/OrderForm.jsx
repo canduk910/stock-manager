@@ -3,8 +3,9 @@
  * 시장/종목/매매방향/주문유형/가격/수량 입력.
  * defaultValues prop으로 잔고 페이지에서 종목 자동 입력 가능.
  */
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useBuyable } from '../../hooks/useOrder'
+import { searchStocks } from '../../api/search'
 
 const MARKET_OPTIONS = [
   { value: 'KR', label: '국내 KRX' },
@@ -31,12 +32,30 @@ export default function OrderForm({ defaultValues = {}, onConfirm, externalPrice
   const [quantity, setQuantity] = useState(defaultValues.quantity || '')
   const [memo, setMemo] = useState('')
 
+  // 검색 관련 상태
+  const [searchQuery, setSearchQuery] = useState(defaultValues.symbol || '')
+  const [suggestions, setSuggestions] = useState([])
+  const [showDropdown, setShowDropdown] = useState(false)
+  const [validating, setValidating] = useState(false)
+  const [validResult, setValidResult] = useState(null) // null | false | { name }
+
+  const dropdownRef = useRef(null)
+  const debounceTimer = useRef(null)
+
   const { data: buyable, loading: buyableLoading, load: loadBuyable } = useBuyable()
 
   // defaultValues 변경 시 반영 (잔고 연계)
   useEffect(() => {
-    if (defaultValues.symbol) setSymbol(defaultValues.symbol)
-    if (defaultValues.symbol_name) setSymbolName(defaultValues.symbol_name)
+    if (defaultValues.symbol) {
+      setSymbol(defaultValues.symbol)
+      setSearchQuery(defaultValues.symbol)
+    }
+    if (defaultValues.symbol_name) {
+      setSymbolName(defaultValues.symbol_name)
+      if (defaultValues.market === 'US') {
+        setValidResult({ name: defaultValues.symbol_name })
+      }
+    }
     if (defaultValues.market) setMarket(defaultValues.market)
     if (defaultValues.side) setSide(defaultValues.side)
     if (defaultValues.price) setPrice(String(defaultValues.price))
@@ -56,6 +75,87 @@ export default function OrderForm({ defaultValues = {}, onConfirm, externalPrice
       setPrice(String(externalPrice))
     }
   }, [externalPrice])
+
+  // 시장 변경 시 검색 상태 초기화
+  useEffect(() => {
+    setSuggestions([])
+    setShowDropdown(false)
+    setValidResult(null)
+  }, [market])
+
+  // 드롭다운 외부 클릭 닫기
+  useEffect(() => {
+    const handler = (e) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
+        setShowDropdown(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
+  // KR 검색 debounce
+  const handleKRSearch = useCallback((q) => {
+    clearTimeout(debounceTimer.current)
+    if (!q || q.length < 2) {
+      setSuggestions([])
+      setShowDropdown(false)
+      return
+    }
+    debounceTimer.current = setTimeout(async () => {
+      const results = await searchStocks(q, 'KR')
+      setSuggestions(results)
+      setShowDropdown(results.length > 0)
+    }, 300)
+  }, [])
+
+  // US 검증 debounce
+  const handleUSValidate = useCallback((q) => {
+    clearTimeout(debounceTimer.current)
+    if (!q) {
+      setValidResult(null)
+      return
+    }
+    setValidating(true)
+    setValidResult(null)
+    debounceTimer.current = setTimeout(async () => {
+      const results = await searchStocks(q.toUpperCase(), 'US')
+      setValidating(false)
+      if (results.length > 0) {
+        setValidResult({ name: results[0].name })
+        setSymbolName(results[0].name)
+      } else {
+        setValidResult(false)
+        setSymbolName('')
+      }
+    }, 500)
+  }, [])
+
+  const handleSearchChange = (e) => {
+    const q = e.target.value
+    setSearchQuery(q)
+
+    if (market === 'KR') {
+      // 6자리 숫자 입력 시 symbol만 업데이트, 드롭다운은 검색어로 처리
+      setSymbol(q)
+      onSymbolChange?.(q)
+      handleKRSearch(q)
+    } else {
+      const ticker = q.toUpperCase()
+      setSymbol(ticker)
+      onSymbolChange?.(ticker)
+      handleUSValidate(ticker)
+    }
+  }
+
+  const handleSelectSuggestion = (item) => {
+    setSymbol(item.code)
+    setSymbolName(item.name)
+    setSearchQuery(`${item.name} (${item.code})`)
+    setShowDropdown(false)
+    setSuggestions([])
+    onSymbolChange?.(item.code)
+  }
 
   const handleBuyableCheck = () => {
     if (!symbol) return
@@ -121,31 +221,61 @@ export default function OrderForm({ defaultValues = {}, onConfirm, externalPrice
         </div>
       </div>
 
-      {/* 종목코드 / 종목명 */}
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <label className="block text-xs font-medium text-gray-600 mb-1">
-            종목코드 {market === 'US' ? '(티커)' : '(6자리)'}
-          </label>
+      {/* 종목 검색 입력 */}
+      <div>
+        <label className="block text-xs font-medium text-gray-600 mb-1">
+          {market === 'KR' ? '종목 검색 (코드 또는 이름)' : '티커 코드'}
+        </label>
+        <div className="relative" ref={dropdownRef}>
           <input
             type="text"
-            value={symbol}
-            onChange={(e) => { setSymbol(e.target.value); onSymbolChange?.(e.target.value) }}
-            placeholder={market === 'US' ? 'AAPL, NVDA, TSLA' : '005930'}
-            className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm"
+            value={searchQuery}
+            onChange={handleSearchChange}
+            onFocus={() => market === 'KR' && suggestions.length > 0 && setShowDropdown(true)}
+            onKeyDown={(e) => e.key === 'Escape' && setShowDropdown(false)}
+            placeholder={market === 'KR' ? '삼성전자 또는 005930' : 'AAPL, NVDA, TSLA'}
+            className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm pr-24"
             required
           />
+
+          {/* US 검증 상태 표시 */}
+          {market === 'US' && searchQuery && (
+            <span className={`absolute right-2 top-1/2 -translate-y-1/2 text-xs whitespace-nowrap ${
+              validating ? 'text-gray-400' :
+              validResult ? 'text-green-600' : 'text-red-500'
+            }`}>
+              {validating ? '검증 중...' :
+               validResult ? `✓ ${validResult.name}` : searchQuery ? '✗ 종목 없음' : ''}
+            </span>
+          )}
+
+          {/* KR 자동완성 드롭다운 */}
+          {market === 'KR' && showDropdown && (
+            <ul className="absolute z-50 w-full bg-white border border-gray-200 rounded shadow-lg mt-1 max-h-52 overflow-y-auto">
+              {suggestions.length === 0 ? (
+                <li className="px-3 py-2 text-xs text-gray-400">검색 결과 없음</li>
+              ) : (
+                suggestions.map((item) => (
+                  <li
+                    key={item.code}
+                    onMouseDown={() => handleSelectSuggestion(item)}
+                    className="px-3 py-2 text-sm cursor-pointer hover:bg-blue-50 flex items-center justify-between"
+                  >
+                    <span className="font-medium">{item.name}</span>
+                    <span className="text-xs text-gray-400 ml-2">
+                      {item.code} <span className="text-gray-300">·</span> {item.market}
+                    </span>
+                  </li>
+                ))
+              )}
+            </ul>
+          )}
         </div>
-        <div>
-          <label className="block text-xs font-medium text-gray-600 mb-1">종목명 (선택)</label>
-          <input
-            type="text"
-            value={symbolName}
-            onChange={(e) => setSymbolName(e.target.value)}
-            placeholder="자동 입력 또는 직접 입력"
-            className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm"
-          />
-        </div>
+
+        {/* KR: 선택된 종목명 표시 */}
+        {market === 'KR' && symbolName && !showDropdown && (
+          <p className="text-xs text-green-600 mt-1">✓ {symbolName} ({symbol})</p>
+        )}
       </div>
 
       {/* 주문 유형 */}

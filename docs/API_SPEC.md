@@ -6,6 +6,43 @@ Swagger UI: `http://localhost:8000/docs`
 
 ---
 
+## 종목 검색 — `routers/search.py`
+
+### `GET /api/search`
+
+종목 검색 자동완성 (KR) 및 티커 검증 (US).
+
+| 파라미터 | 타입 | 기본값 | 설명 |
+|---------|------|--------|------|
+| `q` | string | `""` | 검색어 (종목명, 코드, 티커) |
+| `market` | string | `KR` | `KR` / `US` |
+
+**KR 응답** (최대 10건):
+```json
+[
+  { "code": "005930", "name": "삼성전자", "market": "KOSPI" },
+  { "code": "018260", "name": "삼성에스디에스", "market": "KOSPI" }
+]
+```
+
+**KR 검색 로직**:
+- 6자리 숫자 입력 → `symbol_map.resolve()` 로 코드→이름 변환
+- 2글자 미만 → 빈 배열 반환
+- 2글자 이상 → `symbol_map.name_to_results()` 부분일치 검색 (정확일치 우선), 최대 10건
+
+**US 응답**:
+```json
+[{ "code": "AAPL", "name": "Apple Inc.", "market": "NMS" }]
+```
+- 유효 티커: 단일 항목 배열
+- 무효 티커 또는 빈 쿼리: `[]`
+
+**US 검색 로직**: `yf_client.validate_ticker()` 호출 (1시간 캐시). 무효 티커는 1시간 캐시 후 `[]` 반환.
+
+**에러**: 없음 (검색 실패 시 빈 배열 반환)
+
+---
+
 ## 스크리너 — `routers/screener.py`
 
 ### `GET /api/screener/stocks`
