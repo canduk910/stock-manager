@@ -285,7 +285,7 @@ pykrx로 KOSPI + KOSDAQ 전 종목 코드/이름/시장을 수집하고 7일간 
 
 ### `fetch_market_metrics()` 반환값
 
-잔고 페이지 + AI자문 계량지표용. `t.info` 기반 (6시간 캐시).
+잔고 페이지 + AI자문 계량지표 + 관심종목 상세용. `t.info` 기반 (6시간 캐시).
 
 ```python
 {
@@ -295,6 +295,7 @@ pykrx로 KOSPI + KOSDAQ 전 종목 코드/이름/시장을 수집하고 7일간 
     "pbr": 1.2,
     "roe": 8.5,              # returnOnEquity × 100 (%)
     "dividend_yield": 2.14,  # dividendYield (이미 % 형태) 우선. 없으면 trailingAnnualDividendYield × 100 fallback. 무배당 시 None
+    "dividend_per_share": 1444,  # dividendRate (연간 주당배당금, 원). 무배당 시 None
 }
 ```
 

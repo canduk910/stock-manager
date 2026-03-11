@@ -8,7 +8,7 @@ from typing import Optional
 
 from stock import symbol_map
 from stock.dart_fin import fetch_financials_multi_year
-from stock.market import fetch_detail, fetch_valuation_history
+from stock.market import fetch_detail, fetch_valuation_history, fetch_market_metrics
 from stock.utils import is_domestic
 import stock.yf_client as yf_client
 
@@ -171,6 +171,9 @@ class DetailService:
             "market_cap": None,
             "per": None,
             "pbr": None,
+            "roe": None,
+            "dividend_yield": None,
+            "dividend_per_share": None,
             "high_52": None,
             "low_52": None,
             "market": None,
@@ -190,6 +193,13 @@ class DetailService:
                 "market": detail.get("market_type"),
                 "sector": detail.get("sector"),
             })
+        try:
+            metrics = fetch_market_metrics(code)
+            basic["roe"] = metrics.get("roe")
+            basic["dividend_yield"] = metrics.get("dividend_yield")
+            basic["dividend_per_share"] = metrics.get("dividend_per_share")
+        except Exception:
+            pass
 
         return self._build_report(basic, financials, valuation)
 
@@ -208,6 +218,9 @@ class DetailService:
             "market_cap": None,
             "per": None,
             "pbr": None,
+            "roe": None,
+            "dividend_yield": None,
+            "dividend_per_share": None,
             "high_52": None,
             "low_52": None,
             "market": None,
@@ -223,6 +236,9 @@ class DetailService:
                 "market_cap": _usd_m(mktcap),
                 "per": detail.get("per"),
                 "pbr": detail.get("pbr"),
+                "roe": detail.get("roe"),
+                "dividend_yield": detail.get("dividend_yield"),
+                "dividend_per_share": detail.get("dividend_per_share"),
                 "high_52": detail.get("high_52"),
                 "low_52": detail.get("low_52"),
                 "market": detail.get("market_type"),

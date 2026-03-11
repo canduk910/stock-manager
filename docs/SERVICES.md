@@ -60,8 +60,8 @@ WatchlistService(broker=None)
 | `report_date` | str | | 보고서 기준 (예: "2024/12") |
 | `dividend_yield` | float \| None | % | 배당수익률 (trailing 12개월, 무배당 시 None) |
 
-- KR 배당수익률: `fetch_market_metrics(code)` → `trailingAnnualDividendYield × 100`
-- US 배당수익률: `fetch_detail_yf(code)` → `trailingAnnualDividendYield × 100`
+- KR 배당수익률: `fetch_market_metrics(code)` → `dividendYield`(이미 % 형태) 우선, 없으면 `trailingAnnualDividendYield × 100` fallback
+- US 배당수익률: `fetch_detail_yf(code)` → 동일 우선순위 로직
 - 종목당 0.05초 sleep (rate limit)
 - 개별 종목 오류는 무시하고 None 필드로 처리
 
@@ -81,6 +81,9 @@ WatchlistService(broker=None)
         "market_cap": 4200000,   # 억원
         "per": 12.5,
         "pbr": 1.2,
+        "roe": 15.3,             # % (fetch_market_metrics, KR) / fetch_detail_yf (US)
+        "dividend_yield": 2.5,   # % (무배당 시 null)
+        "dividend_per_share": 1444,  # 주당배당금 원/달러 (yfinance dividendRate)
         "high_52": 80000,
         "low_52": 50000,
         "market": "KOSPI",
@@ -93,6 +96,8 @@ WatchlistService(broker=None)
             "revenue": 2006535,  # 억원
             "operating_profit": 264134,
             "net_income": 190601,
+            "oi_margin": 13.2,   # 영업이익률 % (null 가능)
+            "net_margin": 9.5,   # 순이익률 % (null 가능)
             "yoy_revenue": null,
             "yoy_op": null,
             "dart_url": "https://dart.fss.or.kr/...",
@@ -103,8 +108,11 @@ WatchlistService(broker=None)
 }
 ```
 
-- `fetch_financials_multi_year(code, 10)` 사용
+- `fetch_financials_multi_year(code, 10)` 사용 (KR), `fetch_financials_multi_year_yf(code, 4)` (US)
+- KR `roe`/`dividend_yield`/`dividend_per_share`: `fetch_market_metrics(code)` 추가 호출
+- US `roe`/`dividend_yield`/`dividend_per_share`: `fetch_detail_yf(code)` 에서 직접 포함
 - YoY 증감률은 전년도 대비 계산 (첫 해는 null)
+- `oi_margin` / `net_margin`: 서비스 레이어에서 원본값으로 계산 후 포함
 
 ---
 

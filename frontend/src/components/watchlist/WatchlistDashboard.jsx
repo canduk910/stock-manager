@@ -205,8 +205,14 @@ export default function WatchlistDashboard({
                 const mkt = s.market || 'KR'
                 return (
                   <tr key={`${mkt}:${s.code}`} className="border-b border-gray-100 hover:bg-gray-50">
-                    <td className="px-3 py-2.5 text-gray-500 font-mono text-xs">
-                      {s.code}
+                    <td className="px-3 py-2.5 font-mono text-xs">
+                      <button
+                        onClick={() => onShowInfo && onShowInfo(s.code, s.name, mkt)}
+                        className="text-blue-600 hover:underline hover:text-blue-800"
+                        title="재무 상세보기"
+                      >
+                        {s.code}
+                      </button>
                       <MarketBadge market={mkt !== 'KR' ? mkt : null} />
                     </td>
                     <td className="px-3 py-2.5">

@@ -33,13 +33,17 @@ Swagger UI: `http://localhost:8000/docs`
   "stocks": [
     {
       "code": "005930", "name": "삼성전자", "market": "KOSPI",
-      "per": 12.5, "pbr": 1.2, "eps": 5000, "bps": 50000,
-      "roe": 10.0, "mktcap": 3000000000000, "close": 70000,
-      "change_pct": 1.5
+      "per": 12.5, "pbr": 1.2, "roe": 10.0, "mktcap": 3000000000000,
+      "prev_close": 75000, "current_price": 76000, "change_pct": 1.33,
+      "return_3m": 5.2, "return_6m": -2.1, "return_1y": 12.4,
+      "dividend_yield": 2.5
     }
   ]
 }
 ```
+
+- `prev_close`, `current_price`, `change_pct`, `return_3m`, `return_6m`, `return_1y`, `dividend_yield`: yfinance enrichment (ThreadPoolExecutor 병렬). 조회 실패 시 `null`.
+- enrichment는 필터·정렬·top 슬라이싱 **이후** 적용 (불필요한 API 호출 최소화).
 
 **에러**: 422 (파라미터 오류), 502 (KRX/DART 호출 실패)
 

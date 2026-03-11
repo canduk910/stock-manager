@@ -250,6 +250,7 @@ def fetch_market_metrics(code: str) -> dict:
         "pbr": None,
         "roe": None,
         "dividend_yield": None,
+        "dividend_per_share": None,
     }
 
     if not ticker_str:
@@ -278,10 +279,12 @@ def fetch_market_metrics(code: str) -> dict:
         else:
             div_yield = None
 
+        div_per_share_raw = info.get("dividendRate")  # 연간 주당배당금 (원)
         result["per"] = round(per_raw, 2) if per_raw else None
         result["pbr"] = round(pbr_raw, 2) if pbr_raw else None
         result["roe"] = round(roe_raw * 100, 2) if roe_raw else None
         result["dividend_yield"] = div_yield
+        result["dividend_per_share"] = round(float(div_per_share_raw)) if div_per_share_raw else None
 
     except Exception:
         pass

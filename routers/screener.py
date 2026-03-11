@@ -1,5 +1,7 @@
 """스크리닝 API 라우터."""
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
 from fastapi import APIRouter, HTTPException, Query
 
 from screener.dart import fetch_filings
@@ -11,8 +13,49 @@ from screener.service import (
     parse_sort_spec,
     sort_stocks,
 )
+from stock.market import fetch_market_metrics, fetch_period_returns, fetch_price
 
 router = APIRouter(prefix="/api/screener", tags=["screener"])
+
+
+def _enrich_stock(stock: dict) -> dict:
+    """종목별 현재가·수익률·배당수익률 추가 (캐시 활용)."""
+    code = stock["code"]
+    enriched = {**stock}
+
+    try:
+        price = fetch_price(code)
+        if price:
+            enriched["current_price"] = price["close"]
+            prev = price["close"] - price["change"]
+            enriched["prev_close"] = int(prev) if prev else None
+            enriched["change_pct"] = price["change_pct"]
+        else:
+            enriched["current_price"] = None
+            enriched["prev_close"] = None
+            enriched["change_pct"] = None
+    except Exception:
+        enriched["current_price"] = None
+        enriched["prev_close"] = None
+        enriched["change_pct"] = None
+
+    try:
+        returns = fetch_period_returns(code)
+        enriched["return_3m"] = returns.get("return_3m")
+        enriched["return_6m"] = returns.get("return_6m")
+        enriched["return_1y"] = returns.get("return_1y")
+    except Exception:
+        enriched["return_3m"] = None
+        enriched["return_6m"] = None
+        enriched["return_1y"] = None
+
+    try:
+        metrics = fetch_market_metrics(code)
+        enriched["dividend_yield"] = metrics.get("dividend_yield")
+    except Exception:
+        enriched["dividend_yield"] = None
+
+    return enriched
 
 
 @router.get("/stocks")
@@ -80,6 +123,15 @@ def get_stocks(
     # 상위 N개 제한
     if top is not None and top > 0:
         stocks = stocks[:top]
+
+    # 현재가 · 수익률 · 배당수익률 병렬 enrichment
+    if stocks:
+        enriched: list[dict | None] = [None] * len(stocks)
+        with ThreadPoolExecutor(max_workers=min(20, len(stocks))) as ex:
+            futures = {ex.submit(_enrich_stock, s): i for i, s in enumerate(stocks)}
+            for fut in as_completed(futures):
+                enriched[futures[fut]] = fut.result()
+        stocks = enriched
 
     return {
         "date": actual_date,

@@ -208,6 +208,14 @@ class WatchlistService:
                     }
                 )
 
+            try:
+                metrics = fetch_market_metrics(code)
+                basic["roe"] = metrics.get("roe")
+                basic["dividend_yield"] = metrics.get("dividend_yield")
+                basic["dividend_per_share"] = metrics.get("dividend_per_share")
+            except Exception:
+                pass
+
             financials_ny = []
             for i, row in enumerate(multi_rows):
                 prev = multi_rows[i - 1] if i > 0 else None
@@ -216,12 +224,16 @@ class WatchlistService:
                 net = row["net_income"]
                 prev_rev = prev["revenue"] if prev else None
                 prev_op = prev["operating_income"] if prev else None
+                oi_margin = round(op / rev * 100, 1) if rev and op and rev != 0 else None
+                net_margin = round(net / rev * 100, 1) if rev and net and rev != 0 else None
                 financials_ny.append(
                     {
                         "year": row["year"],
                         "revenue": _awk(rev),
                         "operating_profit": _awk(op),
                         "net_income": _awk(net),
+                        "oi_margin": oi_margin,
+                        "net_margin": net_margin,
                         "yoy_revenue": _growth(rev, prev_rev),
                         "yoy_op": _growth(op, prev_op),
                         "dart_url": row.get("dart_url", ""),
@@ -249,6 +261,9 @@ class WatchlistService:
                         "low_52": detail.get("low_52"),
                         "market": detail.get("market_type"),
                         "sector": detail.get("sector"),
+                        "roe": detail.get("roe"),
+                        "dividend_yield": detail.get("dividend_yield"),
+                        "dividend_per_share": detail.get("dividend_per_share"),
                     }
                 )
 
@@ -260,12 +275,16 @@ class WatchlistService:
                 net = row["net_income"]
                 prev_rev = prev["revenue"] if prev else None
                 prev_op = prev["operating_income"] if prev else None
+                oi_margin = round(op / rev * 100, 1) if rev and op and rev != 0 else None
+                net_margin = round(net / rev * 100, 1) if rev and net and rev != 0 else None
                 financials_ny.append(
                     {
                         "year": row["year"],
                         "revenue": _usd_m(rev),
                         "operating_profit": _usd_m(op),
                         "net_income": _usd_m(net),
+                        "oi_margin": oi_margin,
+                        "net_margin": net_margin,
                         "yoy_revenue": _growth(rev, prev_rev),
                         "yoy_op": _growth(op, prev_op),
                         "dart_url": "",

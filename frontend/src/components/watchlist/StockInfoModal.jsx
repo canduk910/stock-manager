@@ -120,6 +120,21 @@ export default function StockInfoModal({ code, name, market = 'KR', onClose, onM
                 {currency === 'KRW' && <InfoCard label="상장주식수" value={b.shares?.toLocaleString() ?? '-'} />}
                 <InfoCard label="PER" value={b.per != null ? `${Math.floor(b.per)}배` : '-'} />
                 <InfoCard label="PBR" value={b.pbr != null ? `${Math.floor(b.pbr)}배` : '-'} />
+                <InfoCard label="ROE" value={b.roe != null ? `${b.roe.toFixed(1)}%` : '-'} />
+                <InfoCard
+                  label="배당수익률"
+                  value={b.dividend_yield != null ? `${b.dividend_yield.toFixed(2)}%` : '-'}
+                />
+                <InfoCard
+                  label="주당배당금(DPS)"
+                  value={
+                    b.dividend_per_share != null
+                      ? currency === 'USD'
+                        ? `$${b.dividend_per_share.toFixed(2)}`
+                        : `${b.dividend_per_share.toLocaleString()}원`
+                      : '-'
+                  }
+                />
                 <InfoCard label="52주 고가" value={fmtPrice(b.high_52, currency)} />
                 <InfoCard label="52주 저가" value={fmtPrice(b.low_52, currency)} />
                 <InfoCard label="시장/거래소" value={b.market ?? '-'} />
@@ -162,7 +177,9 @@ export default function StockInfoModal({ code, name, market = 'KR', onClose, onM
                       <tbody>
                         <FinRow label="매출액" rows={data.financials_3y} field="revenue" yoyField="yoy_revenue" />
                         <FinRow label="영업이익" rows={data.financials_3y} field="operating_profit" yoyField="yoy_op" />
+                        <MarginRow label="영업이익률" rows={data.financials_3y} field="oi_margin" />
                         <FinRow label="당기순이익" rows={data.financials_3y} field="net_income" />
+                        <MarginRow label="순이익률" rows={data.financials_3y} field="net_margin" />
                       </tbody>
                     </table>
                   </div>
@@ -214,6 +231,28 @@ function InfoCard({ label, value }) {
       <p className="text-xs text-gray-400 mb-0.5">{label}</p>
       <p className="text-sm font-semibold text-gray-800">{value}</p>
     </div>
+  )
+}
+
+function MarginRow({ label, rows, field }) {
+  return (
+    <tr className="border-t border-gray-100 bg-gray-50/50">
+      <td className="px-4 py-1.5 text-gray-500 text-xs font-medium pl-6">{label}</td>
+      {rows.map((f) => {
+        const v = f[field]
+        return (
+          <td key={f.year} className="px-4 py-1.5 text-right">
+            {v != null ? (
+              <span className={`text-xs font-medium ${v >= 15 ? 'text-red-600' : v >= 5 ? 'text-gray-700' : 'text-blue-600'}`}>
+                {v.toFixed(1)}%
+              </span>
+            ) : (
+              <span className="text-gray-300 text-xs">-</span>
+            )}
+          </td>
+        )
+      })}
+    </tr>
   )
 }
 

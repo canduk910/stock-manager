@@ -140,6 +140,9 @@ def fetch_detail_yf(code: str) -> Optional[dict]:
         else:
             dividend_yield = None
 
+        div_per_share_raw = info.get("dividendRate")  # 연간 주당배당금 (현지통화)
+        dividend_per_share = _safe(round(float(div_per_share_raw), 4)) if div_per_share_raw else None
+
         result = {
             "code": code.upper(),
             "name": info.get("longName") or info.get("shortName") or code.upper(),
@@ -156,6 +159,7 @@ def fetch_detail_yf(code: str) -> Optional[dict]:
             "pbr": _safe(info.get("priceToBook")),
             "roe": roe,
             "dividend_yield": dividend_yield,
+            "dividend_per_share": dividend_per_share,
         }
         set_cached(key, result, ttl_hours=1)
         return result

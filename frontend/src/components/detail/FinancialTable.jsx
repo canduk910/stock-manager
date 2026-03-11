@@ -63,7 +63,17 @@ function DataRow({ label, rows, field, yoyField, currency }) {
   )
 }
 
-export default function FinancialTable({ data }) {
+function MetricCard({ label, value, sub }) {
+  return (
+    <div className="bg-gray-50 rounded-lg px-4 py-3 flex flex-col gap-0.5">
+      <span className="text-xs text-gray-500">{label}</span>
+      <span className="text-sm font-semibold text-gray-800">{value ?? '-'}</span>
+      {sub && <span className="text-xs text-gray-400">{sub}</span>}
+    </div>
+  )
+}
+
+export default function FinancialTable({ data, basic }) {
   const currency = data?.currency || 'KRW'
   if (!data) {
     return (
@@ -83,7 +93,34 @@ export default function FinancialTable({ data }) {
     )
   }
 
+  const roe = basic?.roe
+  const divYield = basic?.dividend_yield
+  const dps = basic?.dividend_per_share
+  const showMetrics = roe != null || divYield != null || dps != null
+
   return (
+    <div className="space-y-3">
+      {/* 현재 주요 지표 카드 */}
+      {showMetrics && (
+        <div className="grid grid-cols-3 gap-3">
+          <MetricCard
+            label="ROE (자기자본이익률)"
+            value={roe != null ? `${roe.toFixed(1)}%` : null}
+          />
+          <MetricCard
+            label="배당수익률"
+            value={divYield != null ? `${divYield.toFixed(2)}%` : null}
+          />
+          <MetricCard
+            label="주당배당금 (DPS)"
+            value={dps != null
+              ? (currency === 'USD' ? `$${dps.toFixed(2)}` : `${dps.toLocaleString()}원`)
+              : null}
+            sub={currency === 'USD' ? '연간 (USD)' : '연간 (KRW)'}
+          />
+        </div>
+      )}
+
     <div className="bg-white rounded-xl border border-gray-200">
       <div className="px-5 py-3 border-b border-gray-100">
         <h2 className="text-sm font-semibold text-gray-700">
@@ -135,6 +172,7 @@ export default function FinancialTable({ data }) {
           : '* 연도 클릭 시 DART 사업보고서로 이동합니다. YoY는 전년도 대비 증감률입니다.'
         }
       </p>
+    </div>
     </div>
   )
 }

@@ -146,7 +146,7 @@ export default function DetailPage() {
           {/* 탭 컨텐츠 */}
           <div className="mt-0">
             {activeTab === 'financials' && (
-              <FinancialTable data={data.financials} />
+              <FinancialTable data={data.financials} basic={data.basic} />
             )}
             {activeTab === 'valuation' && (
               <ValuationChart data={data.valuation} />

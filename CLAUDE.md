@@ -112,7 +112,7 @@ standalone으로 사용 가능. `main.py`/`routers/`와는 독립적이다.
 
 | 파일 | 엔드포인트 | 설명 |
 |------|-----------|------|
-| `screener.py` | `GET /api/screener/stocks` | 멀티팩터 스크리닝 |
+| `screener.py` | `GET /api/screener/stocks` | 멀티팩터 스크리닝. 필터·정렬·top 슬라이싱 후 yfinance enrichment(ThreadPoolExecutor 병렬): `prev_close`, `current_price`, `change_pct`, `return_3m`, `return_6m`, `return_1y`, `dividend_yield` 추가. |
 | `earnings.py` | `GET /api/earnings/filings` | 정기보고서 목록 (국내 DART / 미국 SEC EDGAR) |
 | `balance.py` | `GET /api/balance` | KIS 실전계좌 잔고 (국내주식 + 해외주식 + 국내선물옵션) |
 | `watchlist.py` | `/api/watchlist/*` | 관심종목 CRUD + 대시보드 + 종목정보 (국내/해외) |
@@ -261,7 +261,7 @@ GET /api/watchlist/info/{code}?market=KR
 
 | 파일 | 역할 |
 |------|------|
-| `watchlist_service.py` | 관심종목 대시보드 + 종목 상세. 국내=pykrx+DART, 해외=yfinance 분기. `resolve_symbol(name_or_code, market)` |
+| `watchlist_service.py` | 관심종목 대시보드 + 종목 상세. 국내=pykrx+DART, 해외=yfinance 분기. `resolve_symbol(name_or_code, market)`. `get_stock_detail()` basic에 `roe`, `dividend_yield`, `dividend_per_share` 포함. financial rows에 `oi_margin`(영업이익률), `net_margin`(순이익률) 포함. |
 | `detail_service.py` | 재무 테이블 + PER/PBR 히스토리 + CAGR 종합 리포트. 해외는 yfinance(최대 4년), 밸류에이션 차트 빈 데이터 반환. |
 | `order_service.py` | KIS API 직접 호출로 국내/해외 주문 발송·정정·취소·미체결 조회·당일 체결 내역·로컬 DB 대사. `_strip_leading_zeros()`로 10자리→8자리 주문번호 변환. `excg_id_dvsn_cd != 'SOR'` 조건으로 API 취소 가능 여부 판별. |
 | `reservation_service.py` | 예약주문 실행 엔진. `asyncio` 20초 간격 폴링. 가격 조건(`price_below`/`price_above`) + 시간 조건(`scheduled`) 체크 후 자동 주문 발송. |
@@ -307,9 +307,9 @@ CLI와 API 라우터 양쪽에서 공용으로 사용한다. 데이터는 `~/sto
 | `advisory_fetcher.py` | AI자문 데이터 수집. `fetch_15min_ohlcv_kr()` — KIS 1분봉 4회 호출(시간대별) → 15분 resample, 30봉 미만 시 yfinance fallback. `fetch_ohlcv_by_interval(code, market, interval, period)` — 타임프레임/기간 지정 OHLCV 수집 + 기술지표 자동 계산 반환 (`{ohlcv, indicators}`). yfinance interval/period 제한 자동 적용(`15m` max 60d, `60m` max 2y). `calc_technical_indicators()` — MACD/RSI(Wilder)/Stochastic/%K%D/볼린저밴드/MA5·20·60 순수 pandas 구현, 최대 300봉. 모듈 레벨 KIS 토큰 캐시(`_kis_token_cache`)로 분당 1회 발급 제한 우회. `fetch_segments_kr()` — OpenAI 기반 사업부문 추론. |
 | `utils.py` | `is_domestic(code)` — 6자리 숫자=국내, 아니면 해외. 모든 모듈에서 국내/해외 분기에 사용. |
 | `symbol_map.py` | pykrx 기반 종목코드↔종목명 매핑 (7일 캐시). `_find_latest_trading_day()`로 최근 거래일 자동 탐색. `code_to_name()` — 맵 빌드 실패 시 `get_market_ticker_name()` 직접 호출 fallback. |
-| `market.py` | **yfinance 기반** 시세/시가총액/52주 고저/PER/PBR + 기간별 수익률 (2026-02 KRX 서버 변경으로 pykrx 전면 yfinance 전환). `_kr_yf_ticker_str(code)` — `.KS`/`.KQ` suffix 자동 선택 (7일 캐시). `fetch_market_metrics(code)` — 잔고·관심종목·AI자문용 시가총액·PER·PBR·ROE·**배당수익률** 조회 (6시간 캐시). 배당수익률: `dividendYield`(이미 % 형태, KR/US 공통) 우선 사용, 없으면 `trailingAnnualDividendYield × 100` fallback (ADR 환율 오류 방지). |
+| `market.py` | **yfinance 기반** 시세/시가총액/52주 고저/PER/PBR + 기간별 수익률 (2026-02 KRX 서버 변경으로 pykrx 전면 yfinance 전환). `_kr_yf_ticker_str(code)` — `.KS`/`.KQ` suffix 자동 선택 (7일 캐시). `fetch_market_metrics(code)` — 잔고·관심종목·AI자문용 시가총액·PER·PBR·ROE·**배당수익률·주당배당금** 조회 (6시간 캐시). 배당수익률: `dividendYield`(이미 % 형태, KR/US 공통) 우선 사용, 없으면 `trailingAnnualDividendYield × 100` fallback (ADR 환율 오류 방지). 주당배당금: `dividendRate`(연간, 원). |
 | `dart_fin.py` | OpenDart `fnlttSinglAcntAll` API 기반 재무제표 조회. 3년 단위 배치 호출로 최대 10년치 수집. DART 사업보고서 링크(`dart_url`) 포함. `_ACCOUNT_KEYS`에 적자 기업 변형 계정명(`영업손실`, `당기순손실`, `매출` 등) 포함. `fetch_income_detail_annual()` — 매출원가/SGA/이자비용/EPS 세부 손익. `fetch_bs_cf_annual()` — 대차대조표(자산/부채/자본) + 현금흐름표(영업/투자/재무 CF, CAPEX, FCF). |
-| `yf_client.py` | yfinance 기반 해외주식 데이터. `validate_ticker`, `fetch_price_yf`, `fetch_detail_yf`(ROE+**배당수익률** 포함), `fetch_period_returns_yf`, `fetch_financials_multi_year_yf`. NaN → None 자동 정제. `fetch_financials_multi_year_yf`는 캐시에 전체 연도를 저장하고 반환 시점에 슬라이싱 (부분 캐시 버그 방지). AI자문용 추가 함수: `fetch_income_detail_yf()` / `fetch_balance_sheet_yf()` / `fetch_cashflow_yf()` / `fetch_metrics_yf()`(PER·PBR·PSR·EV/EBITDA·ROE·ROA) / `fetch_segments_yf()`(사업부문, best-effort). |
+| `yf_client.py` | yfinance 기반 해외주식 데이터. `validate_ticker`, `fetch_price_yf`, `fetch_detail_yf`(ROE+**배당수익률+주당배당금** 포함), `fetch_period_returns_yf`, `fetch_financials_multi_year_yf`. NaN → None 자동 정제. `fetch_financials_multi_year_yf`는 캐시에 전체 연도를 저장하고 반환 시점에 슬라이싱 (부분 캐시 버그 방지). AI자문용 추가 함수: `fetch_income_detail_yf()` / `fetch_balance_sheet_yf()` / `fetch_cashflow_yf()` / `fetch_metrics_yf()`(PER·PBR·PSR·EV/EBITDA·ROE·ROA) / `fetch_segments_yf()`(사업부문, best-effort). `fetch_detail_yf()` 반환: `dividend_per_share` 필드 포함 (`dividendRate`, USD). |
 | `sec_filings.py` | SEC EDGAR EFTS API 기반 미국 10-K/10-Q 공시 조회. 키 불필요. 국내 공시와 동일한 필드 구조 반환. |
 | `display.py` | Rich 테이블 출력 + CSV 내보내기. |
 | `cache.py` | SQLite TTL 캐시 (`~/stock-watchlist/cache.db`). `set_cached`/`get_cached` 모두 NaN/Inf → None 자동 sanitize. |
@@ -368,7 +368,7 @@ frontend/
     components/
       layout/Header.jsx   네비게이션 바 (6개 메뉴, 로고: "DK STOCK")
       common/             LoadingSpinner, ErrorAlert, EmptyState, DataTable, ToastNotification
-      screener/           FilterPanel, StockTable
+      screener/           FilterPanel, StockTable (WatchlistButton 포함 — 관심종목 즉시 추가)
       earnings/           FilingsTable  (국내/미국 컬럼 분기, market prop)
       balance/            PortfolioSummary, HoldingsTable, OverseasHoldingsTable, FuturesTable
       watchlist/          AddStockForm (시장 선택 드롭다운), WatchlistDashboard (통화 표시), StockInfoModal
@@ -411,7 +411,7 @@ frontend/
 - OverseasHoldingsTable(해외주식): 거래소 → 종목코드 → 종목명 → 투자비중(%) → 통화 → 보유수량 → 평가금액(외화) → 매입단가 → 현재가 → 평가손익(외화) → 평가손익(원화) → 수익률 → 시가총액 → PER → ROE → PBR → **배당수익률** → 주문(매도/매수 버튼). 투자비중은 eval_amount_krw 기준.
 - FinancialTable: currency-aware 단위 표시. USD면 M USD 기준으로 1,000M 이상은 $B, 1,000,000M 이상은 $T. KRW는 억/조.
 - StockHeader: currency-aware 현재가/등락/시총 표시. PER·PBR은 `Math.floor()` 정수 표시.
-- StockInfoModal: PER·PBR `Math.floor()` 정수 표시.
+- StockInfoModal: PER·PBR `Math.floor()` 정수 표시. ROE(%), 배당수익률(%), 주당배당금(DPS, 국내=원/해외=$) InfoCard 추가. 재무 테이블에 `MarginRow`(영업이익률·순이익률 %) 추가.
 - OrderPage: 5탭 UI (주문발송 / 미체결 / 체결내역 / 주문이력 / 예약주문). URL 파라미터(`?symbol=&market=&side=&quantity=`)로 잔고 페이지 매도/매수 버튼과 연계. 주문발송 탭은 xl 이상에서 2컬럼(왼쪽=호가창, 오른쪽=주문폼).
 - OrderbookPanel: `symbol` + `market` prop. 국내=KIS WS 10호가, 해외=현재가만(호가 미지원 안내). 호가 클릭 → `onPriceSelect(price)` 콜백. `connected` 배지(초록/회색).
 - OrderForm: `externalPrice` prop → 지정가일 때 가격 자동 세팅(시장가 무시). `onSymbolChange` prop → 종목코드 변경 시 호가창 동기화.
@@ -527,7 +527,7 @@ KIS API는 실전/모의투자에 따라 TR_ID 접두사가 다르다.
 
 **시작 시 캐시 초기화**: `entrypoint.sh`에서 uvicorn 시작 직전 `cache.db` 전체를 삭제한다. 코드 배포 후 구버전 캐시(필드 구조 변경, NaN 등)로 인한 오류를 원천 차단. `watchlist.db`(관심종목 목록)는 별개 파일이므로 영향 없음.
 
-**`market:metrics:` 캐시**: `fetch_market_metrics(code)` — `{market_type, mktcap, per, pbr, roe, dividend_yield}` 저장. TTL 6시간. 잔고·관심종목·AI자문에서 각 종목에 대해 호출.
+**`market:metrics:` 캐시**: `fetch_market_metrics(code)` — `{market_type, mktcap, per, pbr, roe, dividend_yield, dividend_per_share}` 저장. TTL 6시간. 잔고·관심종목·AI자문에서 각 종목에 대해 호출.
 
 ---
 
