@@ -121,14 +121,19 @@ class DetailService:
     def get_valuation_chart(self, code: str, years: int = 10) -> dict:
         """월별 PER/PBR 히스토리 + 기간 평균 반환.
 
-        해외주식은 히스토리 미지원 → 빈 데이터 반환.
+        해외주식: 분기 EPS/BPS + 일별 주가 조합으로 추정 히스토리 산출.
         """
         if not is_domestic(code):
+            history = yf_client.fetch_valuation_history_yf(code, min(years, 5))
+            pers = [h["per"] for h in history if h.get("per") and 0 < h["per"] < 500]
+            pbrs = [h["pbr"] for h in history if h.get("pbr") and h["pbr"] > 0]
+            avg_per = round(sum(pers) / len(pers), 1) if pers else None
+            avg_pbr = round(sum(pbrs) / len(pbrs), 2) if pbrs else None
             return {
-                "history": [],
-                "avg_per": None,
-                "avg_pbr": None,
-                "note": "해외주식 PER/PBR 히스토리 미지원",
+                "history": history,
+                "avg_per": avg_per,
+                "avg_pbr": avg_pbr,
+                "note": "분기 EPS/BPS + 일별 주가 추정" if history else None,
             }
 
         history = fetch_valuation_history(code, years)

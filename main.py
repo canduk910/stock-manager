@@ -1,5 +1,6 @@
 import asyncio
 import os
+import threading
 import uvicorn
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
@@ -22,6 +23,16 @@ async def lifespan(app: FastAPI):
     ) if not val]
     if missing:
         print(f"[경고] KIS 환경변수 누락: {', '.join(missing)} — 잔고/주문 비활성화")
+
+    # 종목 심볼맵 pre-warm (Docker 재시작 후 캐시 초기화 → 첫 검색 지연 방지)
+    def _prewarm_symbol_map():
+        try:
+            from stock.symbol_map import get_symbol_map
+            get_symbol_map()
+            print("[정보] 종목 심볼맵 로딩 완료")
+        except Exception as e:
+            print(f"[경고] 종목 심볼맵 로딩 실패: {e}")
+    threading.Thread(target=_prewarm_symbol_map, daemon=True).start()
 
     # 실시간 호가 WebSocket 관리자 시작
     from services.quote_service import get_manager as get_quote_manager

@@ -14,10 +14,10 @@
 | `order_store.py` | 주문 이력 + 예약주문 CRUD (SQLite, `orders.db`) |
 | `advisory_store.py` | AI자문 종목/캐시/리포트 CRUD (SQLite, `advisory.db`) |
 | `advisory_fetcher.py` | 15분봉 OHLCV 수집 + 기술적 지표 계산 + 사업부문 추론 |
-| `symbol_map.py` | 종목코드 ↔ 종목명 매핑 (pykrx 기반, fallback 포함) |
-| `market.py` | pykrx 시세/펀더멘털 수집 |
+| `symbol_map.py` | 종목코드 ↔ 종목명 매핑 (pykrx 기반, fallback 포함). 서버 시작 시 background thread로 pre-warm. |
+| `market.py` | yfinance 기반 국내 시세/펀더멘털 수집 (2026-02 KRX 서버 변경으로 pykrx 대체) |
 | `dart_fin.py` | OpenDart 재무데이터 수집 (IS + BS + CF) |
-| `yf_client.py` | yfinance 해외주식 데이터 수집 |
+| `yf_client.py` | yfinance 해외주식 데이터 수집 + 밸류에이션 히스토리 추정 |
 | `sec_filings.py` | SEC EDGAR 미국 공시 조회 |
 | `utils.py` | `is_domestic(code)` 국내/해외 구분 |
 | `display.py` | Rich 테이블 렌더링 + CSV 내보내기 |
@@ -294,10 +294,15 @@ pykrx로 KOSPI + KOSDAQ 전 종목 코드/이름/시장을 수집하고 7일간 
     "per": 12.5,
     "pbr": 1.2,
     "roe": 8.5,              # returnOnEquity × 100 (%)
-    "dividend_yield": 2.14,  # dividendYield (이미 % 형태) 우선. 없으면 trailingAnnualDividendYield × 100 fallback. 무배당 시 None
+    "dividend_yield": 2.14,  # 우선순위: dividendYield(이미 %) → trailingAnnualDividendYield×100 → dividendRate/price×100. 무배당 시 None
     "dividend_per_share": 1444,  # dividendRate (연간 주당배당금, 원). 무배당 시 None
 }
 ```
+
+**배당수익률 fallback 우선순위** (NVO 등 ADR 오류 방지):
+1. `dividendYield` — 이미 % 형태 (0.4 → 0.4%)
+2. `trailingAnnualDividendYield × 100` — 소수점 형태 (0.004 → 0.4%)
+3. `dividendRate / last_price × 100` — 연간 주당배당금으로 직접 계산 (0 < computed < 50% sanity check)
 
 ### `fetch_valuation_history()` 반환값
 
@@ -317,6 +322,56 @@ KRX 인증(KRX_ID/KRX_PASSWORD) 필요. 미인증 시 빈 배열 반환.
 | PER/PBR | yfinance 국내 주식 미지원 → None 반환 가능 |
 | 섹터명 | 영문 반환 (한국어 변환 미지원) |
 | 밸류에이션 히스토리 | KRX 로그인 필수 → 일반적으로 빈 배열 |
+
+---
+
+## `yf_client.py` — 해외주식 데이터 수집
+
+yfinance 기반 해외주식 데이터 수집. 일부 함수는 국내주식(`.KS`/`.KQ` suffix)에도 사용.
+
+### 주요 함수
+
+| 함수 | 설명 |
+|------|------|
+| `validate_ticker(code)` | ticker 유효성 확인 (price > 0 체크) |
+| `fetch_price_yf(code)` | 현재가/등락/시가총액 조회 |
+| `fetch_detail_yf(code)` | 시세 + 52주 고저 + PER/PBR/ROE + 배당수익률/주당배당금 |
+| `fetch_period_returns_yf(code)` | 당일/3개월/6개월/1년 수익률 (%) |
+| `fetch_financials_multi_year_yf(code, years)` | 최대 years개 연간 재무 (최대 4년) |
+| `fetch_valuation_history_yf(code, years=5)` | 월별 PER/PBR 히스토리 추정 (신규) |
+| `fetch_income_detail_yf(code, years)` | 손익계산서 세부 (AI자문용) |
+| `fetch_balance_sheet_yf(code, years)` | 대차대조표 (AI자문용) |
+| `fetch_cashflow_yf(code, years)` | 현금흐름표 (AI자문용) |
+| `fetch_metrics_yf(code)` | PER/PBR/PSR/EV·EBITDA/ROE/ROA (AI자문 계량지표) |
+| `fetch_segments_yf(code)` | 사업부문 매출비중 (best-effort) |
+
+#### `fetch_valuation_history_yf(code, years=5)` — 해외주식 PER/PBR 추정
+
+분기 재무 데이터와 일별 주가를 조합하여 월별 PER/PBR을 추정한다.
+
+**알고리즘**:
+1. `t.quarterly_financials` → 분기 EPS (Net Income / Diluted Shares 또는 Basic EPS 행)
+2. `t.quarterly_balance_sheet` → 분기 BPS (Stockholders Equity / shares_outstanding)
+3. `t.history(period)` → 일별 종가
+4. 각 날짜의 TTM EPS: 직전 4분기 EPS 합산
+5. 월말 기준 리샘플 → `PER = price / ttm_eps`, `PBR = price / bps`
+6. 이상치 제거: PER > 500 또는 PER < 0, PBR < 0 제외
+
+반환:
+```python
+[{"date": "2021-03", "per": 35.2, "pbr": 8.7}, ...]  # 과거 → 최신 순
+```
+
+#### `fetch_detail_yf()` — 배당수익률 fallback
+
+```python
+div_yield_pct  = info.get("dividendYield")        # 이미 % 형태 우선
+trailing_yield = info.get("trailingAnnualDividendYield")
+div_rate       = info.get("dividendRate")          # 연간 주당배당금(USD)
+# 1순위: dividendYield
+# 2순위: trailingAnnualDividendYield × 100
+# 3순위: dividendRate / close × 100 (0 < computed < 50% sanity check)
+```
 
 ---
 

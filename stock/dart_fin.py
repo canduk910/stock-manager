@@ -4,6 +4,7 @@
 """
 
 import os
+import time
 from datetime import date
 from typing import Optional
 
@@ -13,6 +14,26 @@ from .cache import delete_prefix, get_cached, set_cached
 
 _BASE_URL = "https://opendart.fss.or.kr/api"
 _REPRT_CODE = "11011"  # 사업보고서
+
+
+_DART_HEADERS = {"Connection": "close"}  # keep-alive 재사용 방지 → RemoteDisconnected 방지
+
+
+def _dart_get(url: str, params: dict, timeout: int = 20) -> requests.Response:
+    """DART API GET 요청.
+
+    Connection: close 헤더로 keep-alive 재사용을 끊어 RemoteDisconnected를 방지.
+    ConnectionError 발생 시 최대 3회 재시도 (1s / 2s 간격).
+    """
+    last_exc: Exception = RuntimeError("no attempt")
+    for attempt in range(3):
+        try:
+            return requests.get(url, params=params, timeout=timeout, headers=_DART_HEADERS)
+        except requests.exceptions.ConnectionError as e:
+            last_exc = e
+            if attempt < 2:
+                time.sleep(2 ** attempt)
+    raise last_exc
 
 
 def _api_key() -> str:
@@ -42,7 +63,7 @@ def _load_corp_map() -> dict[str, str]:
     import xml.etree.ElementTree as ET
     import zipfile
 
-    resp = requests.get(
+    resp = _dart_get(
         f"{_BASE_URL}/corpCode.xml",
         params={"crtfc_key": _api_key()},
         timeout=60,
@@ -79,7 +100,7 @@ def _load_corp_name_map() -> dict[str, str]:
     import zipfile
 
     try:
-        resp = requests.get(
+        resp = _dart_get(
             f"{_BASE_URL}/corpCode.xml",
             params={"crtfc_key": _api_key()},
             timeout=60,
@@ -121,7 +142,7 @@ def _fetch_corp_code(stock_code: str) -> Optional[str]:
 
 def _call_fin_api(corp_code: str, bsns_year: int, fs_div: str) -> list[dict]:
     """fnlttSinglAcntAll 원시 응답 반환."""
-    resp = requests.get(
+    resp = _dart_get(
         f"{_BASE_URL}/fnlttSinglAcntAll.json",
         params={
             "crtfc_key": _api_key(),

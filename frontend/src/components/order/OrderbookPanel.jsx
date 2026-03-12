@@ -28,7 +28,7 @@ function calcPct(volume, maxVolume) {
   return Math.min((volume / maxVolume) * 100, 100)
 }
 
-export default function OrderbookPanel({ symbol, market = 'KR', onPriceSelect }) {
+export default function OrderbookPanel({ symbol, market = 'KR', onPriceSelect, onSideSelect }) {
   const { price, change, changeRate, sign, asks, bids, totalAskVolume, totalBidVolume, connected } = useQuote(symbol)
 
   const isDomestic = market === 'KR'
@@ -113,7 +113,7 @@ export default function OrderbookPanel({ symbol, market = 'KR', onPriceSelect })
             return (
               <div
                 key={`ask-${i}`}
-                onClick={() => row.price > 0 && onPriceSelect?.(row.price)}
+                onClick={() => row.price > 0 && onPriceSelect?.(row.price, 'sell')}
                 className="grid grid-cols-3 text-center py-1 hover:bg-blue-50 cursor-pointer border-b border-gray-50 relative"
               >
                 {/* 잔량 배경바 (왼쪽 정렬) */}
@@ -153,7 +153,7 @@ export default function OrderbookPanel({ symbol, market = 'KR', onPriceSelect })
             return (
               <div
                 key={`bid-${i}`}
-                onClick={() => row.price > 0 && onPriceSelect?.(row.price)}
+                onClick={() => row.price > 0 && onPriceSelect?.(row.price, 'buy')}
                 className="grid grid-cols-3 text-center py-1 hover:bg-red-50 cursor-pointer border-b border-gray-50 relative"
               >
                 <div />

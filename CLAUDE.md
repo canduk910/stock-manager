@@ -99,7 +99,7 @@ standalone으로 사용 가능. `main.py`/`routers/`와는 독립적이다.
 
 - CORS 미들웨어: `localhost:5173` 허용 (Vite 개발 서버)
 - `routers/` 9개 라우터 등록 (screener, earnings, balance, watchlist, detail, order, quote, advisory, search)
-- lifespan: ① `quote_manager.start()` (KIS WebSocket 관리자) ② 예약주문 스케줄러 시작 — 종료 시 역순 정리
+- lifespan: ① `quote_manager.start()` (KIS WebSocket 관리자) ② 예약주문 스케줄러 시작 ③ `symbol_map` background pre-warm thread 시작 (Docker 재기동 후 cold-start 지연 방지) — 종료 시 역순 정리
 - `services/quote_service.py`: `KISQuoteManager` 싱글턴. KIS WS 단일 연결 + 심볼별 asyncio.Queue pub/sub
 - SPA 라우팅: `/assets` StaticFiles 마운트 + `/{full_path:path}` 캐치올로 index.html 반환
 - `frontend/dist/`가 존재하면 정적 파일 서빙 (라우터 등록 **이후** 마지막에 마운트)
@@ -398,7 +398,7 @@ frontend/
 - ScreenerPage: "조회하기" 버튼 클릭 시 API 호출 (onChange 즉시 호출 안 함)
 - WatchlistDashboard: 종목명 클릭 → `/detail/:symbol` 페이지로 이동
 - StockInfoModal: 재무 테이블 연도 클릭 → DART 사업보고서 링크 (국내만)
-- DetailPage: Recharts로 PER/PBR 시계열 차트 렌더링 (국내만, 해외는 빈 차트)
+- DetailPage: Recharts로 PER/PBR 시계열 차트 렌더링. 국내=KRX 인증 기반(일반적으로 빈 배열), 해외=분기 EPS/BPS + 일별 주가 추정 (`fetch_valuation_history_yf`)
 - EarningsPage: 국내/미국 탭 선택 → 조회 시 필터 초기화. 종목명/종목코드 클라이언트 사이드 필터.
 - FilingsTable: `market` prop으로 국내/미국 분기. 미국은 10-K/10-Q 배지 + SEC 링크. `WatchlistButton`은 market 파라미터 포함.
 - WatchlistDashboard: 통화 배지 (US 종목은 `[US]`), 금액 단위 (KRW=억, USD=M). 삭제/메모 편집 시 market 파라미터 포함.
@@ -414,9 +414,11 @@ frontend/
 - FinancialTable: currency-aware 단위 표시. USD면 M USD 기준으로 1,000M 이상은 $B, 1,000,000M 이상은 $T. KRW는 억/조.
 - StockHeader: currency-aware 현재가/등락/시총 표시. PER·PBR은 `Math.floor()` 정수 표시.
 - StockInfoModal: PER·PBR `Math.floor()` 정수 표시. ROE(%), 배당수익률(%), 주당배당금(DPS, 국내=원/해외=$) InfoCard 추가. 재무 테이블에 `MarginRow`(영업이익률·순이익률 %) 추가.
-- OrderPage: 5탭 UI (주문발송 / 미체결 / 체결내역 / 주문이력 / 예약주문). URL 파라미터(`?symbol=&market=&side=&quantity=`)로 잔고 페이지 매도/매수 버튼과 연계. 주문발송 탭은 xl 이상에서 2컬럼(왼쪽=호가창, 오른쪽=주문폼).
-- OrderbookPanel: `symbol` + `market` prop. 국내=KIS WS 10호가, 해외=현재가만(호가 미지원 안내). 호가 클릭 → `onPriceSelect(price)` 콜백. `connected` 배지(초록/회색).
-- OrderForm: `externalPrice` prop → 지정가일 때 가격 자동 세팅(시장가 무시). `onSymbolChange` prop → 종목코드 변경 시 호가창 동기화. **종목 검색 UI**: KR=자동완성 드롭다운(300ms debounce, 2글자 이상 입력 시 `GET /api/search?market=KR` 호출, 클릭 선택 시 code+name 자동 세팅), US=티커 검증(500ms debounce, `✓ Apple Inc.` / `✗ 종목 없음` 인라인 표시). `search.js`의 `searchStocks()` 사용.
+- OrderPage: 5탭 UI (주문발송 / 미체결 / 체결내역 / 주문이력 / 예약주문). URL 파라미터(`?symbol=&market=&side=&quantity=`)로 잔고 페이지 매도/매수 버튼과 연계. **공유 상태**(symbol/symbolName/market)를 최상단에서 관리. 주문발송 탭: 상단 `SymbolSearchBar` → [신규주문|정정취소] 서브탭 → 2컬럼(호가창/주문폼) → 하단 `PriceChartPanel`. `isMounted` ref로 mount 시 중복 API 호출 방지.
+- SymbolSearchBar: 주문 페이지 공용 종목 검색 컴포넌트(신규). 시장+종목 선택. 시장 변경 시 debounce 취소+상태 초기화. `marketRef`로 async race condition 방지(US→KR 먹통 방지).
+- OrderbookPanel: `symbol` + `market` prop. 국내=KIS WS 10호가, 해외=현재가만(호가 미지원 안내). **매도호가(asks) 클릭 → `onPriceSelect(price, 'sell')`, 매수호가(bids) 클릭 → `onPriceSelect(price, 'buy')`**. `connected` 배지(초록/회색).
+- OrderForm: `symbol`, `symbolName`, `market` props로 외부 제어. `externalPrice` prop → 지정가 자동 세팅. `externalSide` prop → 매매방향 자동 세팅(호가 클릭 연동). 종목/시장 선택 로직은 `SymbolSearchBar`로 이전.
+- PriceChartPanel: 가격 차트 패널(신규). `useAdvisoryOhlcv` 훅 재사용. 타임프레임(15m/60m/1d/1wk)+기간 선택. 캔들+MA5/20+볼린저밴드+거래량. 500ms debounce로 symbol 변경 감지.
 - OpenOrdersTable: `api_cancellable` 필드로 API 취소 가능 여부 판별. `excg_id_dvsn_cd === 'SOR'`(HTS/MTS 주문)은 정정/취소 버튼 대신 "앱취소필요" 안내 표시.
 - ToastNotification: 화면 우상단 고정 토스트 알림 컨테이너. `App.jsx`에서 `useNotification` 훅과 함께 마운트.
 - DetailPage: 종합 리포트 탭에 4개 서브탭 (CAGR 요약 / 기본적 분석 / 기술적 분석 / AI 자문). cagr 외 서브탭에서만 [새로고침] 버튼 표시, AI자문 서브탭에서 [AI분석 생성] 버튼 추가. advisory 데이터는 최초 서브탭 진입 시 lazy load.
@@ -542,7 +544,7 @@ KIS API는 실전/모의투자에 따라 TR_ID 접두사가 다르다.
 | 대시보드 재무 | ✅ | USD, M 단위, 최대 4년 |
 | 종목 상세 재무 | ✅ | yfinance 최대 4년 |
 | CAGR 종합 리포트 | ✅ | yfinance 재무 기반 |
-| PER/PBR 히스토리 차트 | ❌ | 미지원 (빈 데이터 반환) |
+| PER/PBR 히스토리 차트 | ✅ | 분기 EPS/BPS + 일별 주가 기반 추정 (`fetch_valuation_history_yf`). 최대 5년. |
 | 공시 조회 (SEC) | ✅ | 10-K/10-Q, 수익률 포함 |
 | 스크리너 | ❌ | 미지원 (국내 전용) |
 | 종목명 검색 | ❌ | 티커 코드만 가능 |

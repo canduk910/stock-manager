@@ -129,14 +129,19 @@ def fetch_detail_yf(code: str) -> Optional[dict]:
         roe_raw = info.get("returnOnEquity")
         roe = _safe(round(roe_raw * 100, 2)) if roe_raw is not None else None
 
-        # dividendYield: 이미 % 형태 (0.4, 1.3), KR/US 공통 → 우선 사용
-        # trailingAnnualDividendYield: 소수점 형태이나 외국 ADR에서 오계산 가능 → fallback
+        # dividendYield: 이미 % 형태 (0.4, 1.3) → 우선 사용
+        # trailingAnnualDividendYield: 소수점 형태 → ×100 변환 (ADR 오계산 가능)
+        # dividendRate(연간 주당배당금) ÷ 현재가 → 마지막 fallback
         div_yield_pct  = info.get("dividendYield")
         trailing_yield = info.get("trailingAnnualDividendYield")
+        div_rate       = info.get("dividendRate")
         if div_yield_pct is not None:
             dividend_yield = _safe(round(float(div_yield_pct), 2))
         elif trailing_yield is not None:
             dividend_yield = _safe(round(trailing_yield * 100, 2))
+        elif div_rate and close and close > 0:
+            computed = float(div_rate) / float(close) * 100
+            dividend_yield = _safe(round(computed, 2)) if 0 < computed < 50 else None
         else:
             dividend_yield = None
 
@@ -490,6 +495,108 @@ def fetch_metrics_yf(code: str) -> dict:
         empty: dict = {}
         set_cached(key, empty, ttl_hours=1)
         return empty
+
+
+# ── 밸류에이션 히스토리 ───────────────────────────────────────────────────────
+
+def fetch_valuation_history_yf(code: str, years: int = 5) -> list[dict]:
+    """분기 재무 + 일별 주가를 조합해 월별 PER/PBR 히스토리 반환.
+
+    - PER: 월말 종가 ÷ TTM EPS (해당 날짜 이전 최근 4분기 EPS 합산)
+    - PBR: 월말 종가 ÷ BPS (해당 날짜 이전 최근 분기 equity ÷ shares)
+
+    반환: [{date: "YYYY-MM", per: float|None, pbr: float|None}, ...]  오래된순
+    """
+    key = f"yf:valuation_hist:{code.upper()}:{years}"
+    cached = get_cached(key)
+    if cached is not None:
+        return cached
+
+    try:
+        import pandas as pd
+
+        t = _ticker(code)
+
+        # 1. 분기 손익계산서 → EPS 시계열
+        qfin = t.quarterly_financials
+        eps_series = None
+        if qfin is not None and not qfin.empty:
+            for name in ("Basic EPS", "Diluted EPS"):
+                if name in qfin.index:
+                    eps_series = qfin.loc[name].sort_index()  # 오래된→최신
+                    break
+
+        # 2. 분기 대차대조표 → equity 시계열
+        qbs = t.quarterly_balance_sheet
+        eq_series = None
+        if qbs is not None and not qbs.empty:
+            for name in ("Stockholders Equity", "Common Stock Equity"):
+                if name in qbs.index:
+                    eq_series = qbs.loc[name].sort_index()
+                    break
+
+        # 3. 발행주식수 (BPS 계산용)
+        shares = None
+        try:
+            shares = _safe(t.fast_info.shares)
+        except Exception:
+            pass
+        if not shares:
+            shares = _safe((t.info or {}).get("sharesOutstanding"))
+
+        # 4. 일별 주가 → 월별 마지막 종가
+        hist = t.history(period=f"{years}y")
+        if hist.empty:
+            set_cached(key, [], ttl_hours=24)
+            return []
+
+        monthly = hist["Close"].resample("ME").last().dropna()
+
+        result = []
+        for ts, price in monthly.items():
+            price_val = _safe(float(price))
+            if price_val is None or price_val <= 0:
+                continue
+
+            date_label = ts.strftime("%Y-%m")
+
+            # PER: TTM EPS (해당 날짜 이전 최근 4분기 합산)
+            per = None
+            if eps_series is not None:
+                past = eps_series[eps_series.index <= ts]
+                if len(past) >= 4:
+                    ttm = _safe(float(past.iloc[-4:].sum()))
+                    if ttm and ttm > 0:
+                        per = _safe(round(price_val / ttm, 1))
+                elif len(past) >= 1:
+                    # 4분기 미만이면 최근값 × 4로 연환산
+                    latest = _safe(float(past.iloc[-1]))
+                    if latest and latest > 0:
+                        per = _safe(round(price_val / (latest * 4), 1))
+
+            # PBR: BPS = equity ÷ shares
+            pbr = None
+            if eq_series is not None and shares:
+                past_eq = eq_series[eq_series.index <= ts]
+                if len(past_eq) >= 1:
+                    eq = _safe(float(past_eq.iloc[-1]))
+                    if eq and eq > 0:
+                        bps = eq / shares
+                        if bps > 0:
+                            pbr = _safe(round(price_val / bps, 2))
+
+            # PER 이상치 제거 (0 이하 또는 500 초과)
+            if per is not None and (per <= 0 or per > 500):
+                per = None
+
+            result.append({"date": date_label, "per": per, "pbr": pbr})
+
+        set_cached(key, result, ttl_hours=24)
+        return result
+
+    except Exception:
+        set_cached(key, [], ttl_hours=24)
+        return []
 
 
 # ── 사업별 매출비중 ────────────────────────────────────────────────────────────

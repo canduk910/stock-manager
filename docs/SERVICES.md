@@ -150,6 +150,9 @@ WatchlistService(broker=None)
 
 월별 PER/PBR 히스토리 + 기간 평균.
 
+- **국내**: `fetch_valuation_history()` (KRX 인증 필요, 미인증 시 빈 배열)
+- **해외**: `yf_client.fetch_valuation_history_yf(code, min(years, 5))` — 분기 EPS/BPS + 일별 주가 조합으로 월별 PER/PBR 추정. PER > 500 이상치 제외.
+
 반환:
 ```python
 {
@@ -159,6 +162,7 @@ WatchlistService(broker=None)
     ],
     "avg_per": 15.2,    # PER > 500 이상치 제외
     "avg_pbr": 1.62,
+    "note": "분기 EPS/BPS + 일별 주가 추정",  # 해외주식만, 데이터 있을 때
 }
 ```
 

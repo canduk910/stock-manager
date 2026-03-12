@@ -4,17 +4,20 @@
  *
  * URL 파라미터: ?symbol=&market=&side= (잔고 페이지에서 연계)
  */
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import OrderForm from '../components/order/OrderForm'
 import OrderbookPanel from '../components/order/OrderbookPanel'
 import OrderConfirmModal from '../components/order/OrderConfirmModal'
 import OpenOrdersTable from '../components/order/OpenOrdersTable'
+import ModifyOrderModal from '../components/order/ModifyOrderModal'
 import ExecutionsTable from '../components/order/ExecutionsTable'
 import OrderHistoryTable from '../components/order/OrderHistoryTable'
 import ReservationForm from '../components/order/ReservationForm'
 import ReservationsTable from '../components/order/ReservationsTable'
 import SyncButton from '../components/order/SyncButton'
+import PriceChartPanel from '../components/order/PriceChartPanel'
+import SymbolSearchBar from '../components/order/SymbolSearchBar'
 import ErrorAlert from '../components/common/ErrorAlert'
 import LoadingSpinner from '../components/common/LoadingSpinner'
 import {
@@ -42,22 +45,38 @@ const MARKET_TABS = [
 export default function OrderPage({ notify }) {
   const [searchParams] = useSearchParams()
   const [activeTab, setActiveTab] = useState('order')
-  const [market, setMarket] = useState('KR')
+  const [market, setMarket] = useState(searchParams.get('market') || 'KR')
   const [pendingOrder, setPendingOrder] = useState(null)
 
-  // 잔고 페이지 연계: URL 파라미터에서 기본값 읽기
+  // ── 공유 종목 상태 (검색바 + 호가창 + 주문폼 + 차트 공통) ──────────────
+  const [symbol, setSymbol] = useState(searchParams.get('symbol') || '')
+  const [symbolName, setSymbolName] = useState(searchParams.get('symbol_name') || '')
+
+  // 잔고 페이지 연계: URL 파라미터에서 기본값 읽기 (주문폼 초기값용)
   const defaultValues = {
-    symbol: searchParams.get('symbol') || '',
-    symbol_name: searchParams.get('symbol_name') || '',
-    market: searchParams.get('market') || 'KR',
     side: searchParams.get('side') || 'buy',
     price: searchParams.get('price') || '',
     quantity: searchParams.get('quantity') || '',
   }
 
-  // 호가창 연동 상태
-  const [quoteSymbol, setQuoteSymbol] = useState(searchParams.get('symbol') || '')
+  // 호가창 → 주문폼 연동 상태
   const [selectedPrice, setSelectedPrice] = useState(null)
+  const [selectedSide, setSelectedSide] = useState(null)
+  const [orderSubTab, setOrderSubTab] = useState('new') // 'new' | 'modify'
+  const [modifyTarget, setModifyTarget] = useState(null)
+
+  // 종목/시장 변경 핸들러 (검색바에서 호출)
+  const handleSymbolSelect = ({ code, name, market: mkt }) => {
+    setSymbol(code)
+    setSymbolName(name)
+    if (mkt) setMarket(mkt)
+  }
+
+  const handleMarketChange = (newMarket) => {
+    setMarket(newMarket)
+    setSymbol('')
+    setSymbolName('')
+  }
 
   const { loading: placing, error: placeError, place } = useOrderPlace()
   const { orders: openOrders, loading: openLoading, error: openError, load: loadOpen, modify, cancel } = useOpenOrders()
@@ -66,13 +85,23 @@ export default function OrderPage({ notify }) {
   const { result: syncResult, loading: syncLoading, sync } = useOrderSync()
   const { reservations, loading: resLoading, error: resError, load: loadReservations, create: createRes, remove: removeRes } = useReservations()
 
+  // 초기 마운트 여부 추적 (quoteSymbol 변경 useEffect 중복 호출 방지)
+  const isMounted = useRef(false)
+
   // 탭 변경 시 데이터 로드
   useEffect(() => {
+    if (activeTab === 'order') loadOpen(market)
     if (activeTab === 'open') loadOpen(market)
     if (activeTab === 'executions') loadExec(market)
     if (activeTab === 'history') loadHistory({})
     if (activeTab === 'reservation') loadReservations()
   }, [activeTab, market])
+
+  // 주문발송 탭에서 symbol 변경 시 미체결 재조회 (마운트 시 중복 호출 방지)
+  useEffect(() => {
+    if (!isMounted.current) { isMounted.current = true; return }
+    if (activeTab === 'order') loadOpen(market)
+  }, [symbol]) // eslint-disable-line
 
   // 주문 확인 모달 → 발송
   const handleConfirmOrder = async (order) => {
@@ -175,25 +204,95 @@ export default function OrderPage({ notify }) {
 
       {/* 주문 발송 탭 */}
       {activeTab === 'order' && (
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 xl:grid-cols-[1fr_1fr] gap-6">
           {/* 왼쪽: 호가창 */}
           <div className="min-h-[400px]">
             <OrderbookPanel
-              symbol={quoteSymbol}
-              market={/^\d{6}$/.test(quoteSymbol) ? 'KR' : 'US'}
-              onPriceSelect={(p) => setSelectedPrice(p)}
+              symbol={symbol}
+              market={market}
+              onPriceSelect={(p, side) => {
+                setSelectedPrice(p)
+                setSelectedSide(side ?? null)
+                if (side) setOrderSubTab('new')
+              }}
             />
           </div>
-          {/* 오른쪽: 주문폼 */}
-          <div className="bg-white rounded-xl border border-gray-200 p-6">
-            <h2 className="text-base font-semibold text-gray-900 mb-4">주문 입력</h2>
-            <OrderForm
-              defaultValues={defaultValues}
-              onConfirm={(body) => setPendingOrder(body)}
-              externalPrice={selectedPrice}
-              onSymbolChange={(sym) => { setQuoteSymbol(sym); setSelectedPrice(null) }}
+
+          {/* 오른쪽: 검색바 + 서브탭 + 주문폼/미체결 + 차트 */}
+          <div className="space-y-3">
+            {/* 공유 종목 검색바 */}
+            <SymbolSearchBar
+              market={market}
+              onMarketChange={handleMarketChange}
+              symbol={symbol}
+              symbolName={symbolName}
+              onSymbolSelect={handleSymbolSelect}
+              defaultQuery={searchParams.get('symbol_name') || searchParams.get('symbol') || ''}
             />
-            {placeError && <ErrorAlert message={placeError} className="mt-3" />}
+
+            {/* 서브탭 */}
+            <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+              <div className="flex border-b border-gray-100">
+                <button
+                  onClick={() => setOrderSubTab('new')}
+                  className={`flex-1 px-4 py-2.5 text-sm font-medium transition-colors ${
+                    orderSubTab === 'new'
+                      ? 'bg-white text-blue-600 border-b-2 border-blue-600'
+                      : 'bg-gray-50 text-gray-500 hover:text-gray-700'
+                  }`}
+                >
+                  신규 주문
+                </button>
+                <button
+                  onClick={() => setOrderSubTab('modify')}
+                  className={`flex-1 px-4 py-2.5 text-sm font-medium transition-colors ${
+                    orderSubTab === 'modify'
+                      ? 'bg-white text-blue-600 border-b-2 border-blue-600'
+                      : 'bg-gray-50 text-gray-500 hover:text-gray-700'
+                  }`}
+                >
+                  정정/취소
+                  {openOrders && openOrders.length > 0 && (
+                    <span className="ml-1.5 inline-flex items-center justify-center w-4 h-4 rounded-full bg-orange-500 text-white text-xs font-bold">
+                      {openOrders.length > 9 ? '9+' : openOrders.length}
+                    </span>
+                  )}
+                </button>
+              </div>
+
+              {/* 신규 주문 서브탭 */}
+              {orderSubTab === 'new' && (
+                <div className="p-5">
+                  <OrderForm
+                    symbol={symbol}
+                    symbolName={symbolName}
+                    market={market}
+                    defaultValues={defaultValues}
+                    onConfirm={(body) => setPendingOrder(body)}
+                    externalPrice={selectedPrice}
+                    externalSide={selectedSide}
+                  />
+                  {placeError && <ErrorAlert message={placeError} className="mt-3" />}
+                </div>
+              )}
+
+              {/* 정정/취소 서브탭 */}
+              {orderSubTab === 'modify' && (
+                <div className="p-4">
+                  <OrderPanelOpenOrders
+                    orders={openOrders}
+                    quoteSymbol={symbol}
+                    market={market}
+                    onModifyTarget={setModifyTarget}
+                    onCancel={handleCancelOrder}
+                    onRefresh={() => loadOpen(market)}
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* 가격 차트 */}
+            <PriceChartPanel symbol={symbol} market={market} />
           </div>
         </div>
       )}
@@ -284,6 +383,115 @@ export default function OrderPage({ notify }) {
           loading={placing}
         />
       )}
+
+      {/* 정정 모달 (주문발송 탭 정정/취소 서브탭에서 사용) */}
+      {modifyTarget && (
+        <ModifyOrderModal
+          order={modifyTarget}
+          onClose={() => setModifyTarget(null)}
+          onModify={(orderNo, body) => {
+            handleModifyOrder(orderNo, body)
+            setModifyTarget(null)
+          }}
+        />
+      )}
+    </div>
+  )
+}
+
+// ── 주문발송 탭 인라인 정정/취소 컴포넌트 ────────────────────────────────────
+function OrderPanelOpenOrders({ orders, quoteSymbol, market, onModifyTarget, onCancel, onRefresh }) {
+  // quoteSymbol이 있으면 해당 종목만 필터링, 없으면 전체 표시
+  const filtered = quoteSymbol
+    ? (orders || []).filter(o => o.symbol === quoteSymbol)
+    : (orders || [])
+
+  if (!filtered.length) {
+    return (
+      <div className="text-center py-6 text-gray-400 text-sm">
+        {quoteSymbol ? `${quoteSymbol} 미체결 주문이 없습니다` : '미체결 주문이 없습니다'}
+        <div className="mt-2">
+          <button
+            onClick={onRefresh}
+            className="text-xs text-blue-500 hover:text-blue-700"
+          >
+            새로고침
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  const handleCancel = (order) => {
+    if (!window.confirm(
+      `주문을 취소하시겠습니까?\n[${order.symbol_name || order.symbol}] ${order.side_label} ${order.quantity}주`
+    )) return
+    onCancel(order)
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-xs text-gray-500">{filtered.length}건</span>
+        <button
+          onClick={onRefresh}
+          className="text-xs text-blue-500 hover:text-blue-700"
+        >
+          새로고침
+        </button>
+      </div>
+      {filtered.map((order) => {
+        const isBuy = order.side === 'buy'
+        return (
+          <div
+            key={order.order_no}
+            className="border border-gray-100 rounded-lg p-3 space-y-1.5"
+          >
+            {/* 종목 + 배지 */}
+            <div className="flex items-center gap-2">
+              <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-bold ${
+                isBuy ? 'bg-red-500 text-white' : 'bg-blue-500 text-white'
+              }`}>
+                {isBuy ? '매수' : '매도'}
+              </span>
+              <span className="text-sm font-medium text-gray-800">
+                {order.symbol_name || order.symbol}
+              </span>
+              <span className="text-xs text-gray-400">{order.symbol}</span>
+            </div>
+            {/* 주문 정보 */}
+            <div className="flex items-center gap-3 text-xs text-gray-600">
+              <span>주문가: <span className="font-mono font-medium">{Number(order.price).toLocaleString()}</span></span>
+              <span>수량: <span className="font-mono">{Number(order.quantity).toLocaleString()}</span></span>
+              <span className="text-orange-600">잔량: <span className="font-mono font-medium">{Number(order.remaining_qty).toLocaleString()}</span></span>
+            </div>
+            {/* 버튼 */}
+            {order.api_cancellable === false ? (
+              <span
+                className="text-xs text-gray-400 italic"
+                title="HTS/MTS(증권사 앱)로 접수된 주문은 해당 앱에서 취소하세요"
+              >
+                앱취소필요
+              </span>
+            ) : (
+              <div className="flex gap-1.5">
+                <button
+                  onClick={() => onModifyTarget(order)}
+                  className="px-3 py-1 text-xs rounded border border-gray-300 text-gray-600 hover:bg-gray-100"
+                >
+                  정정
+                </button>
+                <button
+                  onClick={() => handleCancel(order)}
+                  className="px-3 py-1 text-xs rounded border border-red-300 text-red-600 hover:bg-red-50"
+                >
+                  취소
+                </button>
+              </div>
+            )}
+          </div>
+        )
+      })}
     </div>
   )
 }

@@ -10,6 +10,26 @@ import requests
 
 from .cache import get_cached, set_cached
 
+
+_DART_HEADERS = {"Connection": "close"}  # keep-alive 재사용 방지 → RemoteDisconnected 방지
+
+
+def _dart_get(url: str, params: dict, timeout: int = 30) -> requests.Response:
+    """DART API GET 요청.
+
+    Connection: close 헤더로 keep-alive 재사용을 끊어 RemoteDisconnected를 방지.
+    ConnectionError 발생 시 최대 3회 재시도 (1s / 2s 간격).
+    """
+    last_exc: Exception = RuntimeError("no attempt")
+    for attempt in range(3):
+        try:
+            return requests.get(url, params=params, timeout=timeout, headers=_DART_HEADERS)
+        except requests.exceptions.ConnectionError as e:
+            last_exc = e
+            if attempt < 2:
+                time.sleep(2 ** attempt)
+    raise last_exc
+
 _DART_LIST_URL = "https://opendart.fss.or.kr/api/list.json"
 
 # report_nm에 포함되는 키워드 → 보고서 종류 분류
@@ -74,7 +94,7 @@ def fetch_filings(start_date: str, end_date: str) -> list[dict]:
         }
 
         try:
-            resp = requests.get(_DART_LIST_URL, params=params, timeout=30)
+            resp = _dart_get(_DART_LIST_URL, params=params, timeout=30)
             resp.raise_for_status()
         except requests.RequestException as e:
             raise RuntimeError(f"DART API 호출 실패: {e}") from e

@@ -169,11 +169,26 @@ def fetch_detail(code: str, refresh: bool = False) -> Optional[dict]:
         raise RuntimeError(f"상세정보 조회 실패 ({code}): {e}") from e
 
 
+def _fetch_valuation_history_yf_kr(code: str, years: int) -> list[dict]:
+    """KRX 인증 없을 때 yfinance로 국내 종목 PER/PBR 히스토리 추정.
+
+    fetch_valuation_history_yf()와 동일한 로직. .KS/.KQ ticker 자동 선택.
+    """
+    ticker_str = _kr_yf_ticker_str(code)
+    if not ticker_str:
+        return []
+    try:
+        from stock.yf_client import fetch_valuation_history_yf
+        return fetch_valuation_history_yf(ticker_str, min(years, 5))
+    except Exception:
+        return []
+
+
 def fetch_valuation_history(code: str, years: int = 10) -> list[dict]:
     """월말 기준 PER/PBR 히스토리 반환.
 
     pykrx get_market_fundamental 사용. KRX 인증(KRX_ID/KRX_PASSWORD) 필요.
-    미인증 또는 조회 실패 시 빈 배열 반환.
+    미인증 또는 조회 실패 시 yfinance(분기 EPS/BPS + 일별 주가)로 fallback.
     """
     cache_key = f"market:val_hist:{code}:{years}"
     cached = get_cached(cache_key)
@@ -184,9 +199,9 @@ def fetch_valuation_history(code: str, years: int = 10) -> list[dict]:
     try:
         from screener.krx_auth import ensure_krx_session
         if not ensure_krx_session():
-            return []
+            return _fetch_valuation_history_yf_kr(code, years)
     except Exception:
-        return []
+        return _fetch_valuation_history_yf_kr(code, years)
 
     from pykrx import stock as krx
     import pandas as pd
@@ -268,14 +283,20 @@ def fetch_market_metrics(code: str) -> dict:
         per_raw = info.get("trailingPE") or info.get("forwardPE")
         pbr_raw = info.get("priceToBook")
         roe_raw = info.get("returnOnEquity")
-        # dividendYield: 이미 % 형태 (0.4, 1.3), KR/US 공통 → 우선 사용
-        # trailingAnnualDividendYield: 소수점 형태이나 외국 ADR에서 오계산 가능 → fallback
+        # dividendYield: 이미 % 형태 (0.4, 1.3) → 우선 사용
+        # trailingAnnualDividendYield: 소수점 형태 → ×100 변환 (ADR 오계산 가능)
+        # dividendRate(연간 주당배당금) ÷ 현재가 → 마지막 fallback
         div_yield_pct  = info.get("dividendYield")
         trailing_yield = info.get("trailingAnnualDividendYield")
+        div_rate       = info.get("dividendRate")
+        price_now      = fi.last_price
         if div_yield_pct is not None:
             div_yield = round(float(div_yield_pct), 2)
         elif trailing_yield is not None:
             div_yield = round(trailing_yield * 100, 2)
+        elif div_rate and price_now and price_now > 0:
+            computed = float(div_rate) / float(price_now) * 100
+            div_yield = round(computed, 2) if 0 < computed < 50 else None
         else:
             div_yield = None
 
