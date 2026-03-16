@@ -10,6 +10,7 @@ import math
 from typing import Optional
 
 from stock.cache import get_cached, set_cached
+from stock.market import _is_us_trading_hours
 
 
 def _ticker(code: str):
@@ -92,7 +93,8 @@ def fetch_price_yf(code: str) -> Optional[dict]:
             "mktcap": mktcap,
             "currency": fi.currency or "USD",
         }
-        set_cached(key, result, ttl_hours=1)
+        ttl = 2 / 60 if _is_us_trading_hours() else 0.5  # 장중 2분, 장외 30분
+        set_cached(key, result, ttl_hours=ttl)
         return result
     except Exception:
         set_cached(key, {}, ttl_hours=1)
@@ -166,7 +168,8 @@ def fetch_detail_yf(code: str) -> Optional[dict]:
             "dividend_yield": dividend_yield,
             "dividend_per_share": dividend_per_share,
         }
-        set_cached(key, result, ttl_hours=1)
+        ttl = 0.5 if _is_us_trading_hours() else 6  # 장중 30분, 장외 6시간
+        set_cached(key, result, ttl_hours=ttl)
         return result
     except Exception:
         set_cached(key, {}, ttl_hours=1)
@@ -207,7 +210,8 @@ def fetch_period_returns_yf(code: str) -> dict:
             "return_6m": _ret(126),
             "return_1y": _ret(252),
         }
-        set_cached(key, result, ttl_hours=1)
+        ttl = 0.25 if _is_us_trading_hours() else 6  # 장중 15분, 장외 6시간
+        set_cached(key, result, ttl_hours=ttl)
         return result
     except Exception:
         return {}
@@ -489,7 +493,8 @@ def fetch_metrics_yf(code: str) -> dict:
             "debt_to_equity":  _safe(info.get("debtToEquity")),
             "current_ratio":   _safe(info.get("currentRatio")),
         }
-        set_cached(key, result, ttl_hours=6)
+        ttl = 0.5 if _is_us_trading_hours() else 6  # 장중 30분, 장외 6시간
+        set_cached(key, result, ttl_hours=ttl)
         return result
     except Exception:
         empty: dict = {}

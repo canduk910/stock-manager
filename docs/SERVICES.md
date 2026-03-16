@@ -264,38 +264,55 @@ KIS는 주문 채널(API/HTS/MTS)별로 접근을 분리한다:
 
 ---
 
-## `quote_service.py` — KISQuoteManager
+## `quote_service.py` — KISQuoteManager + OverseasQuoteManager
 
-`routers/quote.py`에서 사용. KIS WebSocket 단일 연결을 유지하며 여러 브라우저 클라이언트에 실시간 호가를 브로드캐스트한다.
+`routers/quote.py`에서 사용. 국내는 KIS WebSocket 단일 연결, 해외는 Finnhub WS 또는 yfinance 폴링으로 심볼별 `asyncio.Queue` pub/sub 브로드캐스트.
 
 ### 싱글턴 접근
 
 ```python
-from services.quote_service import get_manager
-manager = get_manager()  # 프로세스 내 단일 인스턴스
+from services.quote_service import get_manager, get_overseas_manager
+manager = get_manager()                   # KISQuoteManager (국내)
+overseas = get_overseas_manager()         # OverseasQuoteManager (해외)
 ```
 
-### 생명주기
+### KISQuoteManager — 생명주기
 
 ```python
-await manager.start()   # FastAPI lifespan startup — KIS WS 연결 태스크 시작
-await manager.stop()    # FastAPI lifespan shutdown — WS 닫기 + 태스크 취소
+await manager.start()   # FastAPI lifespan startup
+await manager.stop()    # FastAPI lifespan shutdown
 ```
 
-- KIS 키(`KIS_APP_KEY`/`KIS_APP_SECRET`) 미설정 시 `start()`에서 경고 로그 후 즉시 반환(비활성화).
-- WS 오류 시 5초 대기 후 자동 재연결(`_connect_loop`). 재연결 시 Approval Key 캐시 초기화 + 기존 구독 심볼 재등록.
+- KIS 키(`KIS_APP_KEY`/`KIS_APP_SECRET`) 미설정 시 `start()`에서 경고 후 즉시 반환 (비활성화)
+- WS 오류 시 지수 백오프 재연결 (1초 → 최대 30초). 재연결 성공 시 리셋.
+- WS 끊김 시 `{"type": "disconnected"}` 브로드캐스트 → 클라이언트 즉시 인식
+- WS 끊김 시 **REST fallback 자동 시작** (`FHKST01010100` 5초 폴링, 심볼 간 0.2초 throttle)
+- WS 재연결 성공 시 REST fallback 자동 종료
 
-### pub/sub API
+### KISQuoteManager — pub/sub API
 
 ```python
 await manager.subscribe(symbol, queue)   # asyncio.Queue 등록 (최대 100 메시지 버퍼)
 manager.unsubscribe(symbol, queue)       # Queue 제거. 마지막 구독자 해제 시 심볼도 제거.
 ```
 
-- 큐가 가득 찬 경우(`QueueFull`) 메시지 drop (느린 클라이언트 대응).
-- 동일 심볼에 여러 큐 등록 가능 (브라우저 탭 여러 개).
+- Queue Full 시 오래된 메시지 제거 후 새 메시지 삽입 (느린 클라이언트 대응)
+- 동일 심볼에 여러 큐 등록 가능 (브라우저 탭 여러 개)
 
-### KIS 메시지 파싱
+### KISQuoteManager — REST fallback (`_rest_fallback_loop`)
+
+WS 연결 끊김 감지 시 자동으로 KIS REST API를 폴링합니다.
+
+| 항목 | 내용 |
+|------|------|
+| TR_ID | `FHKST01010100` |
+| 경로 | `GET /uapi/domestic-stock/v1/quotations/inquire-price` |
+| 폴링 주기 | 5초 (심볼 간 0.2초 간격으로 throttle) |
+| 응답 필드 | `stck_prpr`(현재가), `prdy_vrss_sign`(부호), `prdy_vrss`(전일대비), `prdy_ctrt`(대비율) |
+| 토큰 관리 | `_get_rest_token_sync()` 모듈 레벨 캐시. 401 응답 시 자동 갱신. |
+| 종료 조건 | WS 재연결 성공 시 `_fallback_mode = False` → 루프 자연 종료 |
+
+### KISQuoteManager — KIS 메시지 파싱
 
 #### `_parse_execution(raw)` — H0STCNT0
 
@@ -316,6 +333,44 @@ manager.unsubscribe(symbol, queue)       # Queue 제거. 마지막 구독자 해
 | `bids[0~9]` | 매수호가 01~10 `{price, volume}`. [0]=최우선(최고가) |
 | `total_ask_volume` | 총매도잔량 (items[43]) |
 | `total_bid_volume` | 총매수잔량 (items[44]) |
+
+---
+
+### OverseasQuoteManager — 생명주기
+
+```python
+await overseas.start()   # FastAPI lifespan startup
+await overseas.stop()    # FastAPI lifespan shutdown
+```
+
+- `FINNHUB_API_KEY` 환경변수 설정 시 Finnhub WS 활성화 (최대 30 심볼 실시간)
+- 미설정 시 yfinance 2초 폴링 모드 (15분 지연)
+
+### OverseasQuoteManager — pub/sub API
+
+```python
+await overseas.subscribe(symbol, queue)   # Queue 등록. 즉시 최신 시세 전송 (있을 경우).
+overseas.unsubscribe(symbol, queue)       # Queue 제거. 구독자 0이면 폴러/WS 구독 자동 cancel.
+```
+
+### OverseasQuoteManager — Finnhub WS 모드
+
+`FINNHUB_API_KEY` 설정 시 `FinnhubWSClient`를 내부에서 관리합니다.
+
+| 항목 | 내용 |
+|------|------|
+| WS URL | `wss://ws.finnhub.io?token=<API_KEY>` |
+| 무료 플랜 한도 | 30 심볼 |
+| 초과 심볼 | yfinance 2초 폴링으로 자동 fallback |
+| 초기 시세 | 구독 시 yfinance `fast_info`로 전일종가(prev_close) + 현재가 prefetch → change/rate 즉시 계산 |
+| 재연결 | 지수 백오프 (1→30초) |
+| PINGPONG | websockets 라이브러리 `ping_interval=20, ping_timeout=10`으로 자동 처리 |
+
+### OverseasQuoteManager — yfinance 폴링 모드
+
+- `run_in_executor`로 블로킹 yfinance 호출을 asyncio 이벤트 루프와 분리
+- 구독자 0이면 태스크 자동 cancel (on-demand)
+- `_latest[symbol]`: 새 구독자에게 즉시 최신 시세 전송
 
 ---
 

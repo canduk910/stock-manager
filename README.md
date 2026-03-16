@@ -67,6 +67,7 @@ cp .env.example .env
 | `OPENDART_API_KEY` | 국내 공시·재무 조회 시 필수 | [OpenDART](https://opendart.fss.or.kr) 에서 발급 |
 | `OPENAI_API_KEY` | AI자문 리포트 생성 시 필수 | [OpenAI Platform](https://platform.openai.com) 에서 발급 |
 | `OPENAI_MODEL` | 선택 | 기본값: `gpt-4o`. `gpt-4o-mini`, `o3-mini` 등 지원 |
+| `FINNHUB_API_KEY` | 선택 | 해외주식 실시간 시세. [Finnhub](https://finnhub.io) 무료 플랜. 미설정 시 yfinance 2초 폴링(15분 지연) |
 | `KIS_BASE_URL` | 선택 | 기본값: `https://openapi.koreainvestment.com:9443` |
 
 > 스크리너·공시는 `OPENDART_API_KEY`만 있으면 됩니다. KIS 계정 없이 사용 가능합니다.
@@ -264,7 +265,8 @@ KIS 실전계좌 잔고 조회. KIS API 키 미설정 시 503 반환.
 | 재무제표 (국내) | [OpenDART API](https://opendart.fss.or.kr) `fnlttSinglAcntAll` | `OPENDART_API_KEY` 필요. 최대 10년 |
 | 정기보고서 공시 (미국) | [SEC EDGAR](https://www.sec.gov) EFTS API | 키 불필요 |
 | 미국 주식 시세·재무·배당수익률·주당배당금 | [yfinance](https://github.com/ranaroussi/yfinance) | 15분 지연, 최대 4년 재무 |
-| 계좌 잔고·주문·실시간 호가 | 한국투자증권 OpenAPI | KIS API 키 필요 |
+| 계좌 잔고·주문·국내 실시간 호가 | 한국투자증권 OpenAPI | KIS API 키 필요. WS 끊김 시 REST 자동 fallback |
+| 해외주식 실시간 시세 | [Finnhub](https://finnhub.io) WS | `FINNHUB_API_KEY` 설정 시 활성화. 무료 30 심볼. 미설정 시 yfinance 폴링 |
 | AI 투자의견 | [OpenAI API](https://platform.openai.com) (GPT-4o) | `OPENAI_API_KEY` 필요. 모델 변경 가능 |
 
 ---
@@ -304,7 +306,7 @@ frontend/         React 19 SPA (Vite + Tailwind CSS v4 + Recharts)
 | 파일 | 용도 | TTL |
 |------|------|-----|
 | `screener_cache.db` | 스크리너 KRX/DART 데이터 | 영구 (날짜키 기반) |
-| `~/stock-watchlist/cache.db` | 시세·재무·배당·수익률 캐시 | 1~24시간 |
+| `~/stock-watchlist/cache.db` | 시세·재무·배당·수익률 캐시 | 장중 2분~1시간 / 장외 30분~12시간 |
 | `~/stock-watchlist/watchlist.db` | 관심종목 목록 | 영구 |
 | `~/stock-watchlist/orders.db` | 주문 이력 + 예약주문 | 영구 |
 | `~/stock-watchlist/advisory.db` | AI자문 데이터·리포트 | 영구 |
@@ -320,3 +322,5 @@ frontend/         React 19 SPA (Vite + Tailwind CSS v4 + Recharts)
 - 국내 시세·펀더멘털(관심종목·잔고·AI자문용)은 yfinance 기반이며 15분 지연됩니다
 - 스크리너 첫 조회: KRX 전종목 수집 + yfinance enrichment로 수십 초 소요. 이후 캐시로 빠르게 응답
 - 미국 주식 재무 데이터는 yfinance 기준 최대 4년치만 제공됩니다
+- `FINNHUB_API_KEY` 미설정 시 해외주식 호가는 yfinance 2초 폴링(15분 지연)으로 동작합니다
+- KIS WebSocket 끊김 시 REST API 자동 fallback으로 국내 시세를 5초 간격으로 유지합니다

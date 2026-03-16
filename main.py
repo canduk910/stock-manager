@@ -24,6 +24,9 @@ async def lifespan(app: FastAPI):
     if missing:
         print(f"[경고] KIS 환경변수 누락: {', '.join(missing)} — 잔고/주문 비활성화")
 
+    if not os.getenv("FINNHUB_API_KEY"):
+        print("[정보] FINNHUB_API_KEY 미설정 — 해외주식 시세 yfinance 폴링 모드 (15분 지연)")
+
     # 종목 심볼맵 pre-warm (Docker 재시작 후 캐시 초기화 → 첫 검색 지연 방지)
     def _prewarm_symbol_map():
         try:
@@ -35,9 +38,13 @@ async def lifespan(app: FastAPI):
     threading.Thread(target=_prewarm_symbol_map, daemon=True).start()
 
     # 실시간 호가 WebSocket 관리자 시작
-    from services.quote_service import get_manager as get_quote_manager
+    from services.quote_service import get_manager as get_quote_manager, get_overseas_manager
     quote_manager = get_quote_manager()
     await quote_manager.start()
+
+    # 해외주식 시세 폴링 관리자 시작
+    overseas_manager = get_overseas_manager()
+    await overseas_manager.start()
 
     # 예약주문 스케줄러 백그라운드 시작
     from services.reservation_service import start_scheduler, stop_scheduler
@@ -52,6 +59,7 @@ async def lifespan(app: FastAPI):
     except asyncio.CancelledError:
         pass
 
+    await overseas_manager.stop()
     await quote_manager.stop()
 
 

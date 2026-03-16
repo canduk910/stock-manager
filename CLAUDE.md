@@ -100,7 +100,7 @@ standalone으로 사용 가능. `main.py`/`routers/`와는 독립적이다.
 - CORS 미들웨어: `localhost:5173` 허용 (Vite 개발 서버)
 - `routers/` 9개 라우터 등록 (screener, earnings, balance, watchlist, detail, order, quote, advisory, search)
 - lifespan: ① `quote_manager.start()` (KIS WebSocket 관리자) ② 예약주문 스케줄러 시작 ③ `symbol_map` background pre-warm thread 시작 (Docker 재기동 후 cold-start 지연 방지) — 종료 시 역순 정리
-- `services/quote_service.py`: `KISQuoteManager` 싱글턴. KIS WS 단일 연결 + 심볼별 asyncio.Queue pub/sub
+- `services/quote_service.py`: `KISQuoteManager` + `OverseasQuoteManager` + `FinnhubWSClient`. WS 끊김 시 REST fallback 자동 전환
 - SPA 라우팅: `/assets` StaticFiles 마운트 + `/{full_path:path}` 캐치올로 index.html 반환
 - `frontend/dist/`가 존재하면 정적 파일 서빙 (라우터 등록 **이후** 마지막에 마운트)
 - `index.html` 응답에 `Cache-Control: no-cache, no-store, must-revalidate` 헤더 적용 — 도커 재빌드 후 브라우저가 반드시 최신 JS 번들을 로드하도록 강제
@@ -266,7 +266,7 @@ GET /api/watchlist/info/{code}?market=KR
 | `detail_service.py` | 재무 테이블 + PER/PBR 히스토리 + CAGR 종합 리포트. 해외는 yfinance(최대 4년), 밸류에이션 차트 빈 데이터 반환. |
 | `order_service.py` | KIS API 직접 호출로 국내/해외 주문 발송·정정·취소·미체결 조회·당일 체결 내역·로컬 DB 대사. `_strip_leading_zeros()`로 10자리→8자리 주문번호 변환. `excg_id_dvsn_cd != 'SOR'` 조건으로 API 취소 가능 여부 판별. |
 | `reservation_service.py` | 예약주문 실행 엔진. `asyncio` 20초 간격 폴링. 가격 조건(`price_below`/`price_above`) + 시간 조건(`scheduled`) 체크 후 자동 주문 발송. |
-| `quote_service.py` | **KISQuoteManager** 싱글턴. KIS WebSocket 단일 연결 유지. 심볼별 `asyncio.Queue` pub/sub. `H0STCNT0`(체결가)·`H0STASP0`(호가) 파싱. 비정상 종료 시 5초 후 자동 재연결. KIS 키 미설정 시 비활성화(경고만). |
+| `quote_service.py` | **KISQuoteManager** + **OverseasQuoteManager** + **FinnhubWSClient**. 국내: KIS WS 단일 연결 + 심볼별 `asyncio.Queue` pub/sub. WS 끊김 시 REST fallback(`FHKST01010100`) 자동 전환, 재연결 시 자동 해제. 재연결 지수 백오프(1→30초). 해외: `FINNHUB_API_KEY` 있으면 Finnhub WS(30 심볼), 없으면 yfinance 2초 폴링. 구독자 0이면 on-demand cancel. |
 | `advisory_service.py` | AI자문 서비스. `refresh_stock_data()` — 기본적/기술적 분석 수집 후 `advisory_cache` 저장. `generate_ai_report()` — 캐시 데이터 기반 OpenAI GPT-4o 호출 후 리포트 저장. |
 
 **국내/해외 분기 기준**: `stock/utils.py`의 `is_domestic(code)` — 6자리 숫자이면 국내(KRX), 아니면 해외.
@@ -475,6 +475,7 @@ Stage 2  python:3.11-slim → pip install + 앱 소스 + COPY --from Stage 1
 | `OPENDART_API_KEY` | 국내 공시/재무 조회 시 필수 | https://opendart.fss.or.kr 에서 발급 |
 | `OPENAI_API_KEY` | AI자문 리포트 생성 시 필수 | https://platform.openai.com 에서 발급. 미설정 시 `/analyze` → 503. 크레딧 부족 시 402 반환. |
 | `OPENAI_MODEL` | 선택 | AI자문 리포트 생성 모델. 기본값: `gpt-4o`. 예: `gpt-4o`, `gpt-4o-mini`, `gpt-4-turbo`, `o3-mini`. `max_completion_tokens` 사용 (신규 모델 호환). |
+| `FINNHUB_API_KEY` | 선택 | 해외주식 실시간 시세 (Finnhub WS). 미설정 시 yfinance 2초 폴링(15분 지연). https://finnhub.io 무료 플랜, 30 심볼 한도. |
 | `TEST_KIS_*` | 선택 | 모의계좌용 (`test.py`에서 사용) |
 
 모의투자 BASE_URL: `https://openapivts.koreainvestment.com:29443`
@@ -551,3 +552,25 @@ KIS API는 실전/모의투자에 따라 TR_ID 접두사가 다르다.
 | AI자문 (국내 KR) | ✅ | DART 재무 3종 + pykrx 계량지표 + KIS 15분봉(yfinance fallback) + GPT-4o. DetailPage 종합리포트 탭에서 접근. |
 | AI자문 (해외 US) | ✅ | yfinance 재무 3종 + yfinance 계량지표 + yfinance 15분봉 + GPT-4o. DetailPage 종합리포트 탭에서 접근. |
 | 지원 시장 | US | NASDAQ/NYSE/AMEX. 일본·홍콩 등 추후 확장 가능 구조 |
+
+---
+
+## 시세 수신 개선 이력 (Phase 1 → Phase 2)
+
+### Phase 1 (2026-03 완료)
+- rAF throttle (`useQuote.js`): 고빈도 WS 메시지 → 최대 60fps 렌더링
+- OrderbookPanel `useMemo` + `memo`: asks/bids/maxVolume 재계산 방지
+- 지수 백오프 재연결 (클라이언트 500ms→10초, KIS WS 1→30초)
+- `visibilitychange` 탭 복귀 즉시 재연결
+- `OverseasQuoteManager`: 심볼당 단일 yfinance 폴링 태스크 (N 클라이언트 → 1 호출)
+- 100ms 메시지 병합: 국내 WS 고빈도 메시지 → 최대 10건/초
+- 장중/장외 TTL 분리 (`stock/market.py`): 국내 `fetch_price` 6분/6시간, `fetch_market_metrics` 1시간/12시간
+
+### Phase 2 (2026-03 완료)
+- `_is_us_trading_hours()` (`stock/market.py`): DST 자동 반영 (zoneinfo)
+- `stock/yf_client.py` 장중 TTL 분리: `fetch_price_yf` 2분/30분, `fetch_detail_yf` 30분/6시간, `fetch_metrics_yf` 30분/6시간, `fetch_period_returns_yf` 15분/6시간
+- **KIS REST fallback** (`KISQuoteManager`): WS 끊김 시 `FHKST01010100` 5초 폴링 자동 전환, WS 재연결 시 자동 해제. `_rest_fallback_loop()` + `_fetch_rest_price()`. 심볼 간 0.2초 throttle.
+- **Finnhub WS** (`FinnhubWSClient` + `OverseasQuoteManager`): `FINNHUB_API_KEY` 설정 시 해외주식 실시간 체결가 수신 (무료 플랜 30 심볼). 한도 초과 심볼은 yfinance 폴링 fallback. 전일종가 prefetch로 change 계산.
+
+### 환경변수 추가
+- `FINNHUB_API_KEY`: 해외주식 실시간 시세 (선택). 미설정 시 yfinance 2초 폴링(15분 지연) 유지.

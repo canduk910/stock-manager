@@ -15,7 +15,7 @@
 | `advisory_store.py` | AI자문 종목/캐시/리포트 CRUD (SQLite, `advisory.db`) |
 | `advisory_fetcher.py` | 15분봉 OHLCV 수집 + 기술적 지표 계산 + 사업부문 추론 |
 | `symbol_map.py` | 종목코드 ↔ 종목명 매핑 (pykrx 기반, fallback 포함). 서버 시작 시 background thread로 pre-warm. |
-| `market.py` | yfinance 기반 국내 시세/펀더멘털 수집 (2026-02 KRX 서버 변경으로 pykrx 대체) |
+| `market.py` | yfinance 기반 국내 시세/펀더멘털 수집. `_is_kr_trading_hours()` / `_is_us_trading_hours()` 장중판별 헬퍼 포함. TTL 장중/장외 자동 분리. |
 | `dart_fin.py` | OpenDart 재무데이터 수집 (IS + BS + CF) |
 | `yf_client.py` | yfinance 해외주식 데이터 수집 + 밸류에이션 히스토리 추정 |
 | `sec_filings.py` | SEC EDGAR 미국 공시 조회 |
@@ -322,6 +322,23 @@ KRX 인증(KRX_ID/KRX_PASSWORD) 필요. 미인증 시 빈 배열 반환.
 | PER/PBR | yfinance 국내 주식 미지원 → None 반환 가능 |
 | 섹터명 | 영문 반환 (한국어 변환 미지원) |
 | 밸류에이션 히스토리 | KRX 로그인 필수 → 일반적으로 빈 배열 |
+
+### 장중/장외 TTL 분리
+
+`_is_kr_trading_hours()` (KST 09:00~15:30) / `_is_us_trading_hours()` (ET 09:30~16:00, DST 자동 반영) 두 헬퍼로 캐시 TTL을 자동 조정합니다.
+
+| 함수 | 장중 TTL | 장외 TTL |
+|------|---------|---------|
+| `fetch_price` (국내) | 6분 | 6시간 |
+| `fetch_period_returns` (국내) | 15분 | 6시간 |
+| `fetch_market_metrics` (국내) | 1시간 | 12시간 |
+| `fetch_price_yf` (해외) | 2분 | 30분 |
+| `fetch_period_returns_yf` (해외) | 15분 | 6시간 |
+| `fetch_detail_yf` (해외) | 30분 | 6시간 |
+| `fetch_metrics_yf` (해외) | 30분 | 6시간 |
+
+- `_is_us_trading_hours()`: `zoneinfo.ZoneInfo("America/New_York")` 사용 (Python 3.9+ 기본 내장). DST(서머타임) 자동 반영. ImportError 시 UTC-5 고정 fallback.
+- 미국 공휴일은 판별 불가이나 yfinance가 빈 데이터를 반환하므로 기능 오류 없음.
 
 ---
 

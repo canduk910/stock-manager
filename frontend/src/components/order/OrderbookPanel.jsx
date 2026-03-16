@@ -8,6 +8,7 @@
  *   market      - 'KR' | 'US'
  *   onPriceSelect(price) - 호가 클릭 시 가격 전달 콜백
  */
+import { memo, useMemo } from 'react'
 import { useQuote } from '../../hooks/useQuote'
 
 function formatPrice(price, market) {
@@ -28,7 +29,7 @@ function calcPct(volume, maxVolume) {
   return Math.min((volume / maxVolume) * 100, 100)
 }
 
-export default function OrderbookPanel({ symbol, market = 'KR', onPriceSelect, onSideSelect }) {
+function OrderbookPanel({ symbol, market = 'KR', onPriceSelect, onSideSelect }) {
   const { price, change, changeRate, sign, asks, bids, totalAskVolume, totalBidVolume, connected } = useQuote(symbol)
 
   const isDomestic = market === 'KR'
@@ -49,12 +50,13 @@ export default function OrderbookPanel({ symbol, market = 'KR', onPriceSelect, o
   ) : null
 
   // asks[0]은 최우선(최저) 매도호가 → UI 상단은 높은가격 → reverse
-  const displayAsks = isDomestic ? [...asks].reverse() : []
-  const displayBids = isDomestic ? bids : []
-
-  // 잔량 배경바 최대값 (매도/매수 통합)
-  const allVolumes = [...displayAsks, ...displayBids].map((r) => r.volume).filter(Boolean)
-  const maxVolume = allVolumes.length > 0 ? Math.max(...allVolumes) : 1
+  const { displayAsks, displayBids, maxVolume } = useMemo(() => {
+    const da = isDomestic ? [...asks].reverse() : []
+    const db = isDomestic ? bids : []
+    const allVolumes = [...da, ...db].map((r) => r.volume).filter(Boolean)
+    const mv = allVolumes.length > 0 ? Math.max(...allVolumes) : 1
+    return { displayAsks: da, displayBids: db, maxVolume: mv }
+  }, [asks, bids, isDomestic])
 
   // 종목 없음 플레이스홀더
   if (!symbol) {
@@ -199,3 +201,5 @@ export default function OrderbookPanel({ symbol, market = 'KR', onPriceSelect, o
     </div>
   )
 }
+
+export default memo(OrderbookPanel)
