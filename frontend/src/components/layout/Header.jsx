@@ -6,6 +6,7 @@ const NAV_ITEMS = [
   { to: '/earnings', label: '공시 조회' },
   { to: '/balance', label: '잔고 조회' },
   { to: '/watchlist', label: '관심종목' },
+  { to: '/market-board', label: '시세판' },
   { to: '/order', label: '주문' },
 ]
 
