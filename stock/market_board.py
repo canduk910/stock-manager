@@ -13,7 +13,11 @@ from .market import _kr_yf_ticker_str, _is_kr_trading_hours
 
 def _fetch_hi_lo_info(code: str) -> Optional[dict]:
     """단일 종목 신고가/신저가 판단용 데이터 수집.
-    반환: {code, name, market_type, price, change_pct, mktcap, year_high, year_low} 또는 None
+    반환: {price, change_pct, mktcap, year_high, year_low, market_type} 또는 None
+
+    필터:
+    - 3개월 평균 거래량 0 → 매매정지/거래정지 종목 제외
+    - 연간 변동폭(year_high/year_low) < 3% → 사실상 정지 종목 제외
     """
     import yfinance as yf
 
@@ -26,12 +30,23 @@ def _fetch_hi_lo_info(code: str) -> Optional[dict]:
         price = fi.last_price
         if not price or price <= 0:
             return None
+
+        # 매매정지 필터: 3개월 평균 거래량 0
+        avg_vol = fi.three_month_average_volume
+        if avg_vol is not None and avg_vol == 0:
+            return None
+
         prev_close = fi.previous_close
         mktcap = fi.market_cap
         year_high = fi.year_high
         year_low = fi.year_low
-        if not year_high or not year_low:
+        if not year_high or not year_low or year_low <= 0:
             return None
+
+        # 연간 변동폭 3% 미만 → 저유동성/매매정지 종목 제외
+        if (year_high - year_low) / year_low < 0.03:
+            return None
+
         change_pct = round((price - prev_close) / prev_close * 100, 2) if prev_close else 0.0
         market_type = "KOSPI" if ticker_str.endswith(".KS") else "KOSDAQ"
         return {
@@ -106,9 +121,22 @@ def fetch_new_highs_lows(top_n: int = 10, candidate_limit: int = 200) -> dict:
     highs, lows = [], []
     for r in results:
         price, year_high, year_low = r["price"], r["year_high"], r["year_low"]
-        if year_high and price >= year_high * 0.99:
+        is_high = year_high and price >= year_high * 0.99
+        is_low  = year_low  and price <= year_low  * 1.01
+
+        if is_high and is_low:
+            # 신고가/신저가 모두 해당 → 현재가가 어느 쪽에 더 가까운지 판별
+            spread = year_high - year_low
+            if spread > 0:
+                ratio = (price - year_low) / spread  # 1에 가까울수록 고가, 0에 가까울수록 저가
+                if ratio >= 0.5:
+                    highs.append(r)
+                else:
+                    lows.append(r)
+            # spread == 0 (year_high == year_low) 이면 변동폭 0 → 둘 다 제외 (이미 3% 필터로 걸러지지만 방어)
+        elif is_high:
             highs.append(r)
-        if year_low and price <= year_low * 1.01:
+        elif is_low:
             lows.append(r)
 
     # 이미 mktcap 정렬되어 있으므로 순서 유지하며 Top N
