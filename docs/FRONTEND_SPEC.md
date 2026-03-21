@@ -58,7 +58,7 @@ frontend/
 | `watchlist.js` | `fetchWatchlist()`, `addToWatchlist()`, `removeFromWatchlist()`, `updateMemo()`, `fetchDashboard()`, `fetchStockInfo()` | `/api/watchlist/*` |
 | `detail.js` | `fetchDetailFinancials()`, `fetchDetailValuation()`, `fetchDetailReport()` | `/api/detail/*` |
 | `order.js` | `placeOrder()`, `fetchBuyable()`, `fetchOpenOrders()`, `cancelOrder()`, `modifyOrder()`, `fetchExecutions()`, `fetchOrderHistory()`, `syncOrders()`, `createReservation()`, `fetchReservations()`, `deleteReservation()` | `/api/order/*` |
-| `advisory.js` | `fetchAdvisoryStocks()`, `addAdvisoryStock()`, `removeAdvisoryStock()`, `refreshAdvisoryData(code, market, name)`, `fetchAdvisoryData()`, `generateReport()`, `fetchReport()`, `fetchAdvisoryOhlcv(code, market, interval, period)` | `/api/advisory/*` |
+| `advisory.js` | `fetchAdvisoryStocks()`, `addAdvisoryStock()`, `removeAdvisoryStock()`, `refreshAdvisoryData(code, market, name)`, `fetchAdvisoryData()`, `generateReport()`, `fetchReport()`, `fetchReportHistory(code, market, limit)`, `fetchReportById(code, reportId, market)`, `fetchAdvisoryOhlcv(code, market, interval, period)` | `/api/advisory/*` |
 | `search.js` | `searchStocks(q, market)` | `GET /api/search` |
 | `marketBoard.js` | `fetchNewHighsLows(top)`, `fetchSparklines(items)` | `GET /api/market-board/new-highs-lows`, `POST /api/market-board/sparklines` |
 
@@ -77,13 +77,14 @@ frontend/
 | `useDetail.js` | `useDetailReport()` | `{ data, loading, error, load }` — `load(symbol, years)` |
 | `useOrder.js` | `useOrderPlace()`, `useBuyable()`, `useOpenOrders()`, `useExecutions()`, `useOrderHistory()`, `useOrderSync()`, `useReservations()` | 각각 `{ loading, error, ... }` + 액션 함수 |
 | `useNotification.js` | `useNotification()` | `{ toasts, notify, dismiss }` — 토스트 상태 + 브라우저 Notification API |
-| `useQuote.js` | `useQuote(symbol)` | `{ price, change, changeRate, sign, asks, bids, totalAskVolume, totalBidVolume, connected }` — 실시간 호가 WebSocket. symbol 변경 시 재연결 + state 초기화. rAF throttle: `pendingRef`에 데이터 축적 → `requestAnimationFrame`으로 flush (최대 60fps 리렌더링). 재연결: 지수 백오프 (초기 500ms → 최대 10초), 연결 성공 시 리셋. `visibilitychange` 이벤트 감지 → 탭 복귀 시 WS 끊겼으면 즉시 재연결. 서버 `{"type":"disconnected"}` 메시지 수신 시 `connected=false` 즉시 반영. unmount 시 `cancelAnimationFrame` + WS `close(1000)`. |
+| `useWebSocket.js` | `useWebSocket(url, { onMessage, onOpen })` | `{ connected, sendMessage }` — 공용 WS 연결 수명주기. 지수 백오프 재연결(500ms→10초), visibilitychange 탭 복귀 재연결. url=null이면 연결 안 함. `buildWsUrl(path)` 헬퍼도 export. |
+| `useQuote.js` | `useQuote(symbol)` | `{ price, change, changeRate, sign, asks, bids, totalAskVolume, totalBidVolume, connected }` — `useWebSocket` 기반. 자체 rAF throttle(pendingRef + rafRef)으로 60fps 렌더링 제어. symbol 변경 시 state 초기화. |
 | `useAdvisory.js` | `useAdvisoryStocks()` | `{ stocks, loading, error, load, add, remove }` — 자문종목 목록 CRUD |
 | | `useAdvisoryData()` | `{ data, loading, error, load, refresh }` — 분석 데이터 조회/새로고침. `refresh(code, market, name)` |
-| | `useAdvisoryReport()` | `{ report, loading, error, load, generate }` — AI 리포트 조회/생성 |
+| | `useAdvisoryReport()` | `{ report, history, loading, error, load, generate, loadById }` — AI 리포트 조회/생성/히스토리. `history`: 목록(본문 제외). `loadById(code, id, market)`: 특정 리포트 로드. |
 | | `useAdvisoryOhlcv()` | `{ result, loading, error, load }` — 타임프레임별 OHLCV+지표 조회. `load(code, market, interval, period)` → `{ ohlcv, indicators, interval, period }` |
 | `useMarketBoard.js` | `useMarketBoard()` | `{ data, sparklines, loading, error, load, loadSparklines }` — 신고가/신저가 REST 로드 + sparkline 배치 로드 |
-| `useMarketBoardWS.js` | `useMarketBoardWS()` | `{ prices, connected, subscribe, unsubscribe }` — `/ws/market-board` 다중심볼 WS. subscribe(symbols[]) / unsubscribe(symbols[]) 제공. rAF throttle + 지수 백오프 + visibilitychange (useQuote.js 동일 패턴). 재연결 시 기존 구독 자동 복원. prices 상태: `{ [symbol]: { price, change_pct, sign } }` |
+| `useMarketBoardWS.js` | `useMarketBoardWS()` | `{ prices, connected, subscribe, unsubscribe }` — `useWebSocket` 기반. subscribe/unsubscribe 시 WS 구독 메시지 전송. 재연결 시 기존 구독 자동 복원. prices: `{ [symbol]: { price, change_pct, sign } }` |
 
 ---
 
@@ -95,6 +96,8 @@ frontend/
 |---------|------|
 | `DataTable` | 범용 테이블. `columns` 배열과 `data` 배열을 받아 렌더링. 컬럼별 `render` 함수 지원. `renderContext` prop으로 외부 의존성(`navigate` 등) 전달. `sortable: false`로 정렬 비활성화 가능. |
 | `ToastNotification` | 화면 우상단 고정 토스트 알림 컨테이너. `App.jsx`에서 `useNotification` 훅과 함께 마운트. success/error/info 타입 지원. |
+| `WatchlistButton` | 관심종목 추가/표시 버튼. Props: `code`, `market`(기본 'KR'), `alreadyAdded`. 이미 추가된 종목이면 `★ 관심종목` 표시, 미추가 시 `+ 관심` 버튼. `StockTable`, `FilingsTable`에서 공용으로 import. |
+| `CandlestickChart` | 캔들스틱 차트 공용 컴포넌트. Props: `ohlcv`, `indicators`, `interval`, `height`, `volumeHeight`, `showMA60`, `showVolume`, `extraChartData`, `xTickDivisor`. 캔들+MA5/MA20/MA60+볼린저밴드+거래량 렌더링. `INTERVAL_OPTS`, `PERIOD_OPTIONS`, `makeTickFormatter` 상수/유틸도 export. `PriceChartPanel`, `TechnicalPanel`에서 공용으로 import. |
 | `LoadingSpinner` | 로딩 스피너 |
 | `ErrorAlert` | 에러 메시지 배너 |
 | `EmptyState` | 데이터 없음 상태 메시지 |
@@ -142,7 +145,7 @@ frontend/
 | `SymbolSearchBar` | 주문 페이지 공용 종목 검색 바 (신규 컴포넌트). 시장 드롭다운(KR/US) + 종목 검색 입력 + 자동완성. Props: `market`, `onMarketChange`, `symbol`, `symbolName`, `onSymbolSelect`, `defaultQuery`. KR=자동완성 드롭다운(400ms debounce, 2글자 이상, `GET /api/search`), US=티커 검증(500ms debounce). 시장 변경 시 검색 상태 완전 초기화(대기 중 debounce 취소 포함). `marketRef`로 async 완료 시점 시장 변경 감지(US→KR 먹통 방지). |
 | `OrderForm` | 매매구분/가격/수량 입력 폼. `symbol`, `symbolName`, `market` props로 종목/시장을 외부에서 제어. 잔고 페이지 URL 파라미터 `defaultValues` prop으로 반영. 매수가능 조회 버튼. `externalPrice` prop → 지정가 자동 세팅(호가창 연동). `externalSide` prop → 매매방향 자동 세팅(호가 클릭 연동). |
 | `OrderbookPanel` | 실시간 호가창. `symbol`+`market` prop. 국내=KIS WS 10호가(매도↑매수↓, 잔량 배경바), 해외=현재가만 표시(호가 미지원 안내). **매도호가(asks) 클릭 → `onPriceSelect(price, 'sell')`, 매수호가(bids) 클릭 → `onPriceSelect(price, 'buy')`**. 연결 상태 배지(녹색/회색). symbol 없으면 플레이스홀더 표시. `useMemo([asks, bids, isDomestic])`으로 `displayAsks` / `displayBids` / `maxVolume` 재계산 방지. `export default memo(OrderbookPanel)`으로 props 미변경 시 리렌더 차단. |
-| `PriceChartPanel` | 가격 차트 패널 (신규 컴포넌트). Props: `symbol`, `market`. `useAdvisoryOhlcv` 훅 사용 (`/api/advisory/{code}/ohlcv` 재사용). 타임프레임(15m/60m/1d/1wk) + 기간 선택 UI. 캔들스틱+MA5/MA20+볼린저밴드 차트(높이 240px) + 거래량 바 차트(높이 55px). symbol 변경 시 500ms debounce로 API 호출 (과도한 요청 방지). Recharts `ComposedChart` + 커스텀 `candleShape`/`volumeShape`. |
+| `PriceChartPanel` | 가격 차트 패널. Props: `symbol`, `market`. `useAdvisoryOhlcv` 훅 사용. 타임프레임(15m/60m/1d/1wk) + 기간 선택 UI. `CandlestickChart` 컴포넌트로 차트 렌더링. symbol 변경 시 500ms debounce. |
 | `OrderConfirmModal` | 주문 확인 모달. 종목/수량/가격/매매구분 재확인 후 발송. |
 | `OpenOrdersTable` | 미체결 주문 테이블. `api_cancellable` 기준으로 API 주문은 정정/취소 버튼, HTS/MTS 주문은 "앱취소필요" 표시. |
 | `ModifyOrderModal` | 주문 정정 모달 (가격/수량 변경). |
@@ -169,7 +172,7 @@ frontend/
 |---------|------|
 | `FundamentalPanel` | 기본적 분석 탭. 계량지표 카드 그리드 (PER/PBR/PSR/EV·EBITDA/ROE/ROA/부채비율/유동비율) + 손익계산서 테이블 + BarChart (매출/영업이익/순이익) + 대차대조표 테이블 + 현금흐름표 테이블 + BarChart (영업CF vs FCF) + 사업별 매출비중 PieChart (KR: "AI추정" 배지). |
 | `TechnicalPanel` | 기술적 분석 탭. `data`, `symbol`, `market` props. 타임프레임 선택(15분/60분/1일/1주) + 기간 선택(타임프레임별 허용 기간 목록). interval/period 변경 시 `fetchAdvisoryOhlcv()` 자동 호출. 초기 데이터는 `data.technical.ohlcv` 캐시 사용. 시그널 배지 카드 (MACD/RSI/Stochastic/MA20 상회 + 변동성돌파 목표가) + ComposedChart (종가봉+MA5/20/60+BB) + 거래량 BarChart + MACD ComposedChart + RSI LineChart (70/30 기준선) + Stochastic LineChart (80/20 기준선). |
-| `AIReportPanel` | AI자문 탭. "AI 분석 생성" 버튼 + 최종 생성 시각 + 종합투자의견(등급 배지+요약+근거) + 기술적시그널(신호 배지+지표별) + 리스크 요인 + 투자 포인트. JSON 파싱 실패 시 원문 텍스트 fallback. |
+| `AIReportPanel` | AI자문 탭. Props: `report`, `history`, `loading`, `error`, `onGenerate`, `onSelectHistory`. "AI 분석 생성" 버튼 + 리포트 2개 이상 시 날짜 드롭다운(과거 리포트 선택) + 종합투자의견(등급 배지+요약+근거) + 기술적시그널(신호 배지+지표별) + 리스크 요인 + 투자 포인트. JSON 파싱 실패 시 원문 텍스트 fallback. |
 
 ### 종목 상세 (`src/components/detail/`)
 

@@ -73,12 +73,15 @@ python test.py                      # 삼성전자 현재가 조회
 ### 레이어 구성
 
 ```
+config.py           환경변수 중앙 관리 (os.getenv 단일 진입점)
 wrapper.py          KIS API 완전 래퍼 (standalone)
 main.py             FastAPI 서버 진입점 (라우터 등록 + SPA 정적 파일 서빙)
 routers/            API 라우터 패키지 (10개, quote/market_board는 WebSocket 포함)
 services/           서비스 레이어 (watchlist_service, detail_service, quote_service, advisory_service)
+services/exceptions.py  서비스 레이어 공용 예외 계층 (ServiceError / NotFoundError / ExternalAPIError / ConfigError / PaymentRequiredError)
 screener/           스크리너 패키지 (CLI + API 공용, pykrx + OpenDart)
 stock/              관심종목 패키지 (CLI + API 공용, pykrx + OpenDart + yfinance + advisory_store/fetcher)
+stock/db_base.py    SQLite 공용 유틸 (connect contextmanager + row_to_dict, 4개 store 공용)
 frontend/           React SPA (Vite + Tailwind + Recharts)
 ```
 
@@ -165,6 +168,8 @@ GET    /api/advisory/{code}/data?market               캐시된 분석 데이터
 GET    /api/advisory/{code}/ohlcv?market&interval&period  타임프레임별 OHLCV + 기술지표 조회
 POST   /api/advisory/{code}/analyze?market            OpenAI GPT-4o 리포트 생성 (10-30초)
 GET    /api/advisory/{code}/report?market             최신 AI 리포트 조회
+GET    /api/advisory/{code}/reports?market&limit=20   AI 리포트 히스토리 목록 (본문 제외, 최신순)
+GET    /api/advisory/{code}/reports/{id}?market       특정 ID의 AI 리포트 상세 조회
 ```
 
 - `/refresh`: `name` 쿼리 파라미터 추가. advisory_stocks 미등록 종목도 허용 (name 없으면 code 사용)
@@ -263,12 +268,13 @@ GET /api/watchlist/info/{code}?market=KR
 
 | 파일 | 역할 |
 |------|------|
+| `exceptions.py` | 서비스 레이어 공용 예외. `ServiceError`(기본 400) 상속: `NotFoundError`(404), `ExternalAPIError`(502), `ConfigError`(503), `PaymentRequiredError`(402). `main.py`에서 `@app.exception_handler(ServiceError)`로 일괄 HTTP 변환. |
 | `watchlist_service.py` | 관심종목 대시보드 + 종목 상세. 국내=pykrx+DART, 해외=yfinance 분기. `resolve_symbol(name_or_code, market)`. `get_stock_detail()` basic에 `roe`, `dividend_yield`, `dividend_per_share` 포함. financial rows에 `oi_margin`(영업이익률), `net_margin`(순이익률) 포함. |
 | `detail_service.py` | 재무 테이블 + PER/PBR 히스토리 + CAGR 종합 리포트. 해외는 yfinance(최대 4년), 밸류에이션 차트 빈 데이터 반환. |
 | `order_service.py` | KIS API 직접 호출로 국내/해외 주문 발송·정정·취소·미체결 조회·당일 체결 내역·로컬 DB 대사. `_strip_leading_zeros()`로 10자리→8자리 주문번호 변환. `excg_id_dvsn_cd != 'SOR'` 조건으로 API 취소 가능 여부 판별. |
 | `reservation_service.py` | 예약주문 실행 엔진. `asyncio` 20초 간격 폴링. 가격 조건(`price_below`/`price_above`) + 시간 조건(`scheduled`) 체크 후 자동 주문 발송. |
 | `quote_service.py` | **KISQuoteManager** + **OverseasQuoteManager** + **FinnhubWSClient**. 국내: KIS WS 단일 연결 + 심볼별 `asyncio.Queue` pub/sub. WS 끊김 시 REST fallback(`FHKST01010100`) 자동 전환, 재연결 시 자동 해제. 재연결 지수 백오프(1→30초). **비개장일 대응**: 구독 즉시 `_push_initial_price()`로 yfinance 직전 거래일 가격 push. REST fallback `price=0` 시 yfinance fallback. 해외: `FINNHUB_API_KEY` 있으면 Finnhub WS(30 심볼), 없으면 yfinance 2초 폴링. `fast_info.last_price or previous_close` 패턴으로 비개장일에도 직전 종가 표시. 구독자 0이면 on-demand cancel. |
-| `advisory_service.py` | AI자문 서비스. `refresh_stock_data()` — 기본적/기술적 분석 수집 후 `advisory_cache` 저장. `generate_ai_report()` — 캐시 데이터 기반 OpenAI GPT-4o 호출 후 리포트 저장. |
+| `advisory_service.py` | AI자문 서비스. `refresh_stock_data()` — 기본적/기술적 분석 수집 후 `advisory_cache` 저장. `generate_ai_report()` — 캐시 데이터 기반 OpenAI GPT-4o 호출 후 리포트 저장. ServiceError 계층 사용 (HTTPException 직접 raise 없음). |
 
 **국내/해외 분기 기준**: `stock/utils.py`의 `is_domestic(code)` — 6자리 숫자이면 국내(KRX), 아니면 해외.
 
@@ -303,9 +309,10 @@ CLI와 API 라우터 양쪽에서 공용으로 사용한다. 데이터는 `~/sto
 
 | 파일 | 역할 |
 |------|------|
+| `db_base.py` | SQLite 공용 유틸. `connect(db_name, init_fn)` contextmanager — DB 생성/init 중복 방지(`_initialized` set). `row_to_dict()`. 4개 store(store/order_store/advisory_store/market_board_store)에서 공용 사용. |
 | `store.py` | 관심종목 CRUD. `~/stock-watchlist/watchlist.db` (SQLite). 복합 PK `(code, market)`. `market` 컬럼 자동 마이그레이션. |
 | `order_store.py` | 주문 이력 + 예약주문 CRUD. `~/stock-watchlist/orders.db` (SQLite). `orders` + `reservations` 테이블. |
-| `advisory_store.py` | AI자문 DB CRUD. `~/stock-watchlist/advisory.db` (SQLite). `advisory_stocks`(자문종목) + `advisory_cache`(분석데이터) + `advisory_reports`(AI리포트) 3테이블. |
+| `advisory_store.py` | AI자문 DB CRUD. `~/stock-watchlist/advisory.db` (SQLite). `advisory_stocks`(자문종목) + `advisory_cache`(분석데이터) + `advisory_reports`(AI리포트 히스토리) 3테이블. `get_report_history(code, market, limit=20)` — 히스토리 목록(본문 제외, 최신순). `get_report_by_id(id)` — 특정 리포트 조회. |
 | `advisory_fetcher.py` | AI자문 데이터 수집. `fetch_15min_ohlcv_kr()` — KIS 1분봉 4회 호출(시간대별) → 15분 resample, 30봉 미만 시 yfinance fallback. `fetch_ohlcv_by_interval(code, market, interval, period)` — 타임프레임/기간 지정 OHLCV 수집 + 기술지표 자동 계산 반환 (`{ohlcv, indicators}`). yfinance interval/period 제한 자동 적용(`15m` max 60d, `60m` max 2y). `calc_technical_indicators()` — MACD/RSI(Wilder)/Stochastic/%K%D/볼린저밴드/MA5·20·60 순수 pandas 구현, 최대 300봉. 모듈 레벨 KIS 토큰 캐시(`_kis_token_cache`)로 분당 1회 발급 제한 우회. `fetch_segments_kr()` — OpenAI 기반 사업부문 추론. |
 | `utils.py` | `is_domestic(code)` — 6자리 숫자=국내, 아니면 해외. 모든 모듈에서 국내/해외 분기에 사용. |
 | `symbol_map.py` | pykrx 기반 종목코드↔종목명 매핑 (7일 캐시). `_find_latest_trading_day()`로 최근 거래일 자동 탐색. `code_to_name()` — 맵 빌드 실패 시 `get_market_ticker_name()` 직접 호출 fallback. |
@@ -357,7 +364,8 @@ frontend/
       order.js            placeOrder / fetchOpenOrders / cancelOrder / modifyOrder / fetchExecutions 등
       advisory.js         fetchAdvisoryStocks / addAdvisoryStock / removeAdvisoryStock /
                           refreshAdvisoryData(code, market, name) / fetchAdvisoryData / generateReport /
-                          fetchReport / fetchAdvisoryOhlcv(code, market, interval, period)
+                          fetchReport / fetchReportHistory(code, market, limit) / fetchReportById(code, id, market) /
+                          fetchAdvisoryOhlcv(code, market, interval, period)
       search.js           searchStocks(q, market) → GET /api/search
     hooks/
       useScreener.js      { data, loading, error, search }
@@ -367,14 +375,18 @@ frontend/
       useDetail.js        useDetailReport
       useOrder.js         useOrderPlace / useBuyable / useOpenOrders / useExecutions / useOrderHistory / useOrderSync / useReservations
       useNotification.js  토스트 상태 관리 + 브라우저 Notification API 래퍼
-      useQuote.js         실시간 호가 WebSocket 훅. { price, change, changeRate, sign, asks, bids, totalAskVolume, totalBidVolume, connected }
-      useAdvisory.js      useAdvisoryStocks (CRUD) / useAdvisoryData (load + refresh) / useAdvisoryReport (load + generate) /
+      useWebSocket.js     공용 WebSocket 훅. 연결 수명주기 + 지수 백오프 재연결(500ms→10초) + visibilitychange. { connected, sendMessage }. buildWsUrl(path) 헬퍼 export.
+      useQuote.js         실시간 호가 WebSocket 훅 (useWebSocket 기반). { price, change, changeRate, sign, asks, bids, totalAskVolume, totalBidVolume, connected }. rAF throttle 자체 관리.
+      useAdvisory.js      useAdvisoryStocks (CRUD) / useAdvisoryData (load + refresh) /
+                          useAdvisoryReport (load + generate + loadById, history 상태 포함) /
                           useAdvisoryOhlcv (load(code, market, interval, period) → { ohlcv, indicators, interval, period })
     components/
       layout/Header.jsx   네비게이션 바 (7개 메뉴, 로고: "DK STOCK")
       common/             LoadingSpinner, ErrorAlert, EmptyState, DataTable, ToastNotification
-      screener/           FilterPanel, StockTable (WatchlistButton — 이미 관심종목이면 ★ 표시, 아니면 + 추가 버튼)
-      earnings/           FilingsTable  (국내/미국 컬럼 분기, market prop, WatchlistButton ★ 표시 동일)
+                          WatchlistButton (code/market/alreadyAdded props, ★/+ 버튼, StockTable·FilingsTable 공용)
+                          CandlestickChart (ohlcv/indicators props, 캔들+MA5/20/60+BB+거래량, PriceChartPanel·TechnicalPanel 공용)
+      screener/           FilterPanel, StockTable (WatchlistButton import — common/WatchlistButton 사용)
+      earnings/           FilingsTable  (국내/미국 컬럼 분기, market prop, WatchlistButton import — common/WatchlistButton 사용)
       balance/            PortfolioSummary, HoldingsTable, OverseasHoldingsTable, FuturesTable
       watchlist/          AddStockForm (시장 선택 드롭다운), WatchlistDashboard (통화 표시), StockInfoModal
       detail/             StockHeader, FinancialTable, ValuationChart, ReportSummary
@@ -383,7 +395,7 @@ frontend/
                           OrderbookPanel (실시간 호가창)
       advisory/           FundamentalPanel (재무제표 3종 + 계량지표 + 파이차트)
                           TechnicalPanel (타임프레임/기간 선택 + 캔들스틱+MA+BB / 거래량 / MACD / RSI / Stochastic)
-                          AIReportPanel (GPT-4o 종합의견 + 기술적시그널 + 리스크/투자포인트)
+                          AIReportPanel (GPT-4o 종합의견 + 기술적시그널 + 리스크/투자포인트. 리포트 2개 이상 시 날짜 드롭다운으로 과거 리포트 선택 가능)
     pages/
       DashboardPage.jsx   /         잔고 요약 + 오늘 공시 + 시총 상위
       ScreenerPage.jsx    /screener

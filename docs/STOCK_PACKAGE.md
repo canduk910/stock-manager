@@ -10,9 +10,10 @@
 
 | 파일 | 역할 |
 |------|------|
+| `db_base.py` | SQLite 공용 유틸. `connect(db_name, init_fn)` contextmanager (DB 생성/init 중복 방지), `row_to_dict()`. 모든 store 모듈의 공통 기반. |
 | `store.py` | 관심종목 CRUD (SQLite) |
 | `order_store.py` | 주문 이력 + 예약주문 CRUD (SQLite, `orders.db`) |
-| `advisory_store.py` | AI자문 종목/캐시/리포트 CRUD (SQLite, `advisory.db`) |
+| `advisory_store.py` | AI자문 종목/캐시/리포트 CRUD (SQLite, `advisory.db`). 리포트 히스토리 조회 지원. |
 | `advisory_fetcher.py` | 15분봉 OHLCV 수집 + 기술적 지표 계산 + 사업부문 추론 |
 | `symbol_map.py` | 종목코드 ↔ 종목명 매핑 (pykrx 기반, fallback 포함). 서버 시작 시 background thread로 pre-warm. |
 | `market.py` | yfinance 기반 국내 시세/펀더멘털 수집. `_is_kr_trading_hours()` / `_is_us_trading_hours()` 장중판별 헬퍼 포함. TTL 장중/장외 자동 분리. |
@@ -120,6 +121,8 @@ advisory_reports  -- AI 리포트 이력 (autoincrement id)
 | `get_cache(code, market)` | 캐시 조회. 없으면 None |
 | `save_report(code, market, model, report)` | AI 리포트 저장. report_id 반환 |
 | `get_latest_report(code, market)` | 최신 리포트 조회. 없으면 None |
+| `get_report_history(code, market, limit=20)` | 히스토리 목록 (본문 제외, 최신순). id/generated_at/model 포함. |
+| `get_report_by_id(report_id)` | 특정 ID 리포트 상세 조회 (본문 포함). |
 
 ---
 
