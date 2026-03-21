@@ -1,12 +1,13 @@
-import { useState } from 'react'
-import { addToWatchlist } from '../../api/watchlist'
+import { useState, useEffect } from 'react'
+import { addToWatchlist, fetchWatchlist } from '../../api/watchlist'
 import DataTable from '../common/DataTable'
 
-function WatchlistButton({ code }) {
-  const [status, setStatus] = useState('idle') // idle | loading | done | error
+function WatchlistButton({ code, alreadyAdded = false }) {
+  const [status, setStatus] = useState(alreadyAdded ? 'exists' : 'idle')
+  // idle | loading | done | error | exists
 
   const handleAdd = async () => {
-    if (status === 'loading' || status === 'done' || !code) return
+    if (status !== 'idle' && status !== 'error' || !code) return
     setStatus('loading')
     try {
       await addToWatchlist(code, '', 'KR')
@@ -17,6 +18,8 @@ function WatchlistButton({ code }) {
     }
   }
 
+  if (status === 'exists')
+    return <span className="text-green-600 text-xs font-medium">★ 관심종목</span>
   if (status === 'done')
     return <span className="text-green-600 text-xs font-medium">✓ 추가됨</span>
   if (status === 'loading')
@@ -71,9 +74,10 @@ function fmtDivYield(val) {
   return `${val.toLocaleString('ko-KR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`
 }
 
-const COLUMNS = [
+function makeColumns(watchlistSet) {
+  return [
   { key: '_watchlist', label: '', align: 'center', sortable: false,
-    render: (_, row) => <WatchlistButton code={row.code} /> },
+    render: (_, row) => <WatchlistButton code={row.code} alreadyAdded={watchlistSet.has(row.code)} /> },
   { key: '_rank', label: '순위', align: 'right' },
   { key: 'code', label: '종목코드', align: 'center' },
   { key: 'name', label: '종목명', align: 'left' },
@@ -95,12 +99,24 @@ const COLUMNS = [
   { key: 'pbr', label: 'PBR', align: 'right', render: fmtFloat },
   { key: 'roe', label: 'ROE(%)', align: 'right', render: fmtFloat },
   { key: 'mktcap', label: '시가총액', align: 'right', render: fmtMktcap },
-]
+]}
 
 export default function StockTable({ stocks }) {
+  const [watchlistSet, setWatchlistSet] = useState(new Set())
+
+  useEffect(() => {
+    fetchWatchlist()
+      .then(data => {
+        // 스크리너는 KR 전용이므로 code만으로 Set 구성
+        const s = new Set((data.items || []).filter(i => i.market === 'KR').map(i => i.code))
+        setWatchlistSet(s)
+      })
+      .catch(() => {})
+  }, [])
+
   if (!stocks || stocks.length === 0) return null
 
   const enriched = stocks.map((s, i) => ({ ...s, _rank: i + 1 }))
 
-  return <DataTable columns={COLUMNS} data={enriched} rowKey="code" />
+  return <DataTable columns={makeColumns(watchlistSet)} data={enriched} rowKey="code" />
 }

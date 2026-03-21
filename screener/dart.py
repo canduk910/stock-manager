@@ -73,10 +73,17 @@ def fetch_filings(start_date: str, end_date: str) -> list[dict]:
             corp_name, stock_code, report_type, report_name,
             rcept_no, dart_url, rcept_dt, flr_nm
     """
+    from datetime import date as _date
+
+    today_str = _date.today().strftime("%Y%m%d")
+    # end_date가 오늘 이상이면 당일 공시가 추가될 수 있으므로 캐시 사용 안 함
+    use_cache = end_date < today_str
+
     cache_key = f"dart_filings:{start_date}:{end_date}"
-    cached = get_cached(cache_key)
-    if cached is not None:
-        return cached
+    if use_cache:
+        cached = get_cached(cache_key)
+        if cached is not None:
+            return cached
 
     api_key = _get_api_key()
     all_filings: list[dict] = []
@@ -150,5 +157,6 @@ def fetch_filings(start_date: str, end_date: str) -> list[dict]:
         page_no += 1
         time.sleep(0.3)
 
-    set_cached(cache_key, all_filings)
+    if use_cache:
+        set_cached(cache_key, all_filings)
     return all_filings

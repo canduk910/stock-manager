@@ -75,7 +75,8 @@ def fetch_price_yf(code: str) -> Optional[dict]:
     try:
         t = _ticker(code)
         fi = t.fast_info
-        close = _safe(fi.last_price)
+        # 비개장일에 last_price가 None인 경우 previous_close로 fallback
+        close = _safe(fi.last_price) or _safe(fi.previous_close)
         if close is None:
             set_cached(key, {}, ttl_hours=1)
             return None

@@ -3,59 +3,42 @@ import MarketBoardCard from './MarketBoardCard'
 import AddStockSlot from './AddStockSlot'
 import MarketBoardSearchModal from './MarketBoardSearchModal'
 
-const STORAGE_KEY = 'market-board-symbols'
-const MAX_STOCKS = 12  // 최대 슬롯 수
-
-function loadStored() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    return raw ? JSON.parse(raw) : []
-  } catch {
-    return []
-  }
-}
-
-function saveStored(items) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(items))
-}
+export const MAX_STOCKS = 30  // 별도 등록 종목 최대 수
 
 /**
  * CustomStockSection
- * prices: { [symbol]: { price, change_pct, sign } } (WS 실시간)
- * sparklines: { [code]: [{date, close}] }
- * onNeedSparklines: (items) => void  추가 시 sparkline 요청
- * onSubscribe: (symbols) => void     WS 구독 요청
- * onUnsubscribe: (symbols) => void   WS 구독 해제
+ * stocks: { code, market, name, _source: 'watchlist'|'custom' }[]
+ *   - watchlist: ★ 배지, X 버튼 없음 (관심종목에서만 삭제 가능)
+ *   - custom: X 버튼으로 DB 삭제 가능
+ * onAdd(item): custom 종목 추가 (DB 저장)
+ * onRemove(code, market): custom 종목 삭제 (DB 삭제)
  */
-export default function CustomStockSection({ prices, sparklines, onNeedSparklines, onSubscribe, onUnsubscribe }) {
-  const [stocks, setStocks] = useState(() => loadStored())
+export default function CustomStockSection({ stocks = [], onAdd, onRemove, prices, sparklines }) {
   const [showModal, setShowModal] = useState(false)
 
   const handleAdd = useCallback((item) => {
-    setStocks(prev => {
-      if (prev.find(s => s.code === item.code && s.market === item.market)) return prev
-      const next = [...prev, item]
-      saveStored(next)
-      onNeedSparklines?.([{ code: item.code, market: item.market }])
-      onSubscribe?.([item.code])
-      return next
-    })
-  }, [onNeedSparklines, onSubscribe])
+    onAdd?.(item)
+    setShowModal(false)
+  }, [onAdd])
 
   const handleRemove = useCallback((code, market) => {
-    setStocks(prev => {
-      const next = prev.filter(s => !(s.code === code && s.market === market))
-      saveStored(next)
-      onUnsubscribe?.([code])
-      return next
-    })
-  }, [onUnsubscribe])
+    onRemove?.(code, market)
+  }, [onRemove])
+
+  // custom 종목 수만 MAX_STOCKS 한도 체크
+  const customCount = stocks.filter(s => s._source === 'custom').length
 
   return (
     <div>
-      <h2 className="text-base font-bold text-gray-300 mb-3">내 관심 종목</h2>
+      <div className="flex items-center gap-2 mb-3">
+        <h2 className="text-base font-bold text-gray-300">내 관심 종목</h2>
+        <span className="text-xs text-gray-500">
+          ★ 관심종목 {stocks.filter(s => s._source === 'watchlist').length}
+          {customCount > 0 && ` · 별도 추가 ${customCount}`}
+        </span>
+      </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3">
+      <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8 2xl:grid-cols-10 gap-2">
         {stocks.map(s => (
           <div key={`${s.code}-${s.market}`} className="relative group">
             <MarketBoardCard
@@ -72,17 +55,25 @@ export default function CustomStockSection({ prices, sparklines, onNeedSparkline
               livePrice={prices?.[s.code]}
               sparkline={sparklines?.[s.code]}
             />
-            {/* 삭제 버튼 */}
-            <button
-              onClick={(e) => { e.stopPropagation(); handleRemove(s.code, s.market) }}
-              className="absolute top-1.5 right-1.5 w-5 h-5 rounded-full bg-gray-700 text-gray-400 hover:bg-red-700 hover:text-white text-xs leading-none hidden group-hover:flex items-center justify-center"
-            >
-              ×
-            </button>
+
+            {/* 관심종목 배지 */}
+            {s._source === 'watchlist' && (
+              <span className="absolute top-1 right-1 text-yellow-400 text-[10px] pointer-events-none">★</span>
+            )}
+
+            {/* custom 종목 삭제 버튼 */}
+            {s._source === 'custom' && (
+              <button
+                onClick={(e) => { e.stopPropagation(); handleRemove(s.code, s.market) }}
+                className="absolute top-1 right-1 w-4 h-4 rounded-full bg-gray-700 text-gray-400 hover:bg-red-700 hover:text-white text-[10px] leading-none hidden group-hover:flex items-center justify-center"
+              >
+                ×
+              </button>
+            )}
           </div>
         ))}
 
-        {stocks.length < MAX_STOCKS && (
+        {customCount < MAX_STOCKS && (
           <AddStockSlot onClick={() => setShowModal(true)} />
         )}
       </div>

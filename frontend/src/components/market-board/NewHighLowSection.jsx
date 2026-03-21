@@ -15,7 +15,7 @@ export default function NewHighLowSection({ data, sparklines, prices }) {
         {new_highs.length === 0 ? (
           <p className="text-gray-500 text-sm py-8 text-center">해당 종목 없음</p>
         ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-2">
             {new_highs.map(stock => (
               <MarketBoardCard
                 key={stock.code}
@@ -38,7 +38,7 @@ export default function NewHighLowSection({ data, sparklines, prices }) {
         {new_lows.length === 0 ? (
           <p className="text-gray-500 text-sm py-8 text-center">해당 종목 없음</p>
         ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-2">
             {new_lows.map(stock => (
               <MarketBoardCard
                 key={stock.code}

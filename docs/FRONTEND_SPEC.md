@@ -43,6 +43,7 @@ frontend/
 | `/watchlist` | WatchlistPage | 관심종목 CRUD + 시세/재무 대시보드 |
 | `/detail/:symbol` | DetailPage | 탭 UI: 재무분석 / 밸류에이션 / 종합 리포트 (서브탭: CAGR요약 / 기본적분석 / 기술적분석 / AI자문) |
 | `/order` | OrderPage | 탭 UI: 주문발송 / 미체결 / 체결내역 / 주문이력 / 예약주문 |
+| `/market-board` | MarketBoardPage | 시세판: 신고가/신저가 + 사용자 선택 종목. 실시간 WS. |
 
 ---
 
@@ -59,6 +60,7 @@ frontend/
 | `order.js` | `placeOrder()`, `fetchBuyable()`, `fetchOpenOrders()`, `cancelOrder()`, `modifyOrder()`, `fetchExecutions()`, `fetchOrderHistory()`, `syncOrders()`, `createReservation()`, `fetchReservations()`, `deleteReservation()` | `/api/order/*` |
 | `advisory.js` | `fetchAdvisoryStocks()`, `addAdvisoryStock()`, `removeAdvisoryStock()`, `refreshAdvisoryData(code, market, name)`, `fetchAdvisoryData()`, `generateReport()`, `fetchReport()`, `fetchAdvisoryOhlcv(code, market, interval, period)` | `/api/advisory/*` |
 | `search.js` | `searchStocks(q, market)` | `GET /api/search` |
+| `marketBoard.js` | `fetchNewHighsLows(top)`, `fetchSparklines(items)` | `GET /api/market-board/new-highs-lows`, `POST /api/market-board/sparklines` |
 
 ---
 
@@ -80,6 +82,8 @@ frontend/
 | | `useAdvisoryData()` | `{ data, loading, error, load, refresh }` — 분석 데이터 조회/새로고침. `refresh(code, market, name)` |
 | | `useAdvisoryReport()` | `{ report, loading, error, load, generate }` — AI 리포트 조회/생성 |
 | | `useAdvisoryOhlcv()` | `{ result, loading, error, load }` — 타임프레임별 OHLCV+지표 조회. `load(code, market, interval, period)` → `{ ohlcv, indicators, interval, period }` |
+| `useMarketBoard.js` | `useMarketBoard()` | `{ data, sparklines, loading, error, load, loadSparklines }` — 신고가/신저가 REST 로드 + sparkline 배치 로드 |
+| `useMarketBoardWS.js` | `useMarketBoardWS()` | `{ prices, connected, subscribe, unsubscribe }` — `/ws/market-board` 다중심볼 WS. subscribe(symbols[]) / unsubscribe(symbols[]) 제공. rAF throttle + 지수 백오프 + visibilitychange (useQuote.js 동일 패턴). 재연결 시 기존 구독 자동 복원. prices 상태: `{ [symbol]: { price, change_pct, sign } }` |
 
 ---
 
@@ -99,20 +103,20 @@ frontend/
 
 | 컴포넌트 | 설명 |
 |---------|------|
-| `Header` | 상단 네비게이션 바. 로고 "DK STOCK". `NAV_ITEMS` 배열로 6개 메뉴 렌더링 (대시보드/스크리너/공시/잔고/관심종목/주문). AI자문 메뉴는 DetailPage 내 탭으로 통합되어 제거됨. `NavLink`의 `isActive`로 현재 페이지 강조. |
+| `Header` | 상단 네비게이션 바. 로고 "DK STOCK". `NAV_ITEMS` 배열로 7개 메뉴 렌더링 (대시보드/스크리너/공시/잔고/관심종목/시세판/주문). AI자문 메뉴는 DetailPage 내 탭으로 통합되어 제거됨. `NavLink`의 `isActive`로 현재 페이지 강조. |
 
 ### 스크리너 (`src/components/screener/`)
 
 | 컴포넌트 | 설명 |
 |---------|------|
 | `FilterPanel` | 시장/PER/PBR/ROE/정렬 등 필터 입력 폼. "조회하기" 버튼 클릭 시 API 호출 (onChange 즉시 호출 안 함). |
-| `StockTable` | 스크리닝 결과 테이블. 컬럼: **`+ 관심` 버튼**(WatchlistButton) / 순위 / 종목코드 / 종목명 / 시장(배지) / **전일종가** / **현재가** / **당일%** / **3개월%** / **6개월%** / **1년%** / **배당수익률** / PER / PBR / ROE / 시가총액. 시가총액 억/조 포맷팅. 퍼센트 컬럼 한국 관례 색상(상승=빨강, 하락=파랑). |
+| `StockTable` | 스크리닝 결과 테이블. 마운트 시 관심종목 목록 조회 → 이미 추가된 종목은 `★ 관심종목` 표시, 미추가 종목은 `+ 관심` 버튼(WatchlistButton). 컬럼: 관심종목 / 순위 / 종목코드 / 종목명 / 시장(배지) / **전일종가** / **현재가** / **당일%** / **3개월%** / **6개월%** / **1년%** / **배당수익률** / PER / PBR / ROE / 시가총액. 시가총액 억/조 포맷팅. 퍼센트 컬럼 한국 관례 색상(상승=빨강, 하락=파랑). |
 
 ### 공시 (`src/components/earnings/`)
 
 | 컴포넌트 | 설명 |
 |---------|------|
-| `FilingsTable` | 정기보고서 목록 테이블. `WatchlistButton`으로 인라인 관심종목 추가. 컬럼: 관심종목 버튼 / 종목코드 / 종목명 / 당일·3개월·6개월·1년 수익률(`ReturnCell`) / 매출액·영업이익(`FinCell`, YoY 포함) / 보고서 종류(색상 배지: 사업=보라, 반기=파랑, 분기=청록) / 보고서명(DART 링크) / 제출일 / 제출인. |
+| `FilingsTable` | 정기보고서 목록 테이블. 마운트 시 관심종목 목록 조회 → 이미 추가된 종목은 `★ 관심종목` 표시, 미추가 종목은 `+ 관심` 버튼(WatchlistButton, market 파라미터 포함). 컬럼: 관심종목 / 종목코드 / 종목명 / 당일·3개월·6개월·1년 수익률(`ReturnCell`) / 매출액·영업이익(`FinCell`, YoY 포함) / 보고서 종류(색상 배지: 사업=보라, 반기=파랑, 분기=청록) / 보고서명(DART 링크) / 제출일 / 제출인. |
 
 ### 잔고 (`src/components/balance/`)
 
@@ -147,6 +151,17 @@ frontend/
 | `ReservationForm` | 예약주문 등록 폼. 조건 유형(가격 이하/이상/지정 시각) + 주문 정보 입력. |
 | `ReservationsTable` | 예약주문 목록. WAITING 상태만 삭제 가능. |
 | `SyncButton` | 대사 동기화 버튼. 클릭 시 `POST /api/order/sync` 호출, 갱신 건수 표시. |
+
+### 시세판 (`src/components/market-board/`)
+
+| 컴포넌트 | 설명 |
+|---------|------|
+| `MarketBoardCard` | 종목 1개 카드 (컴팩트). 신고가/신저가 배지, 현재가+등락률(WS 실시간), 미니 스파크라인(`height` prop). 시총·52주 고저 미표시. 클릭 시 `/detail/:symbol` 이동. |
+| `SparklineChart` | Recharts AreaChart 기반 미니 차트. `data=[{date,close}]`, `trend='up'|'down'|null`, `height=48`. React `useId()`로 SVG gradient ID 고유화. |
+| `NewHighLowSection` | 신고가(빨강)/신저가(파랑) 2컬럼 그리드. 각 10종목. 카드 그리드: `grid-cols-2 sm:3 xl:4 2xl:5`. |
+| `CustomStockSection` | 시세판 하단 종목 목록. **stocks/onAdd/onRemove props 기반**. `_source='watchlist'` → ★ 배지(X 없음), `_source='custom'` → X 버튼. 별도 추가 최대 **30**개. 그리드: `grid-cols-3 sm:4 md:5 lg:6 xl:8 2xl:10`. |
+| `AddStockSlot` | "+" 빈 슬롯 버튼. 클릭 시 `MarketBoardSearchModal` 오픈. |
+| `MarketBoardSearchModal` | 종목 추가 모달. `SymbolSearchBar` 재사용. KR/US 시장 선택 + 종목 검색 + 추가 버튼. |
 
 ### AI자문 (`src/components/advisory/`)
 
@@ -219,6 +234,18 @@ frontend/
 - 미체결 탭: 국내/미국 탭 선택, 새로고침 버튼, 동기화 버튼(`SyncButton`)
 - 주문 발송 성공 시 토스트 알림 (`notify()`)
 - 예약주문 탭: 등록 폼 + 목록 (좌우 분할 레이아웃)
+
+### MarketBoardPage (`/market-board`)
+- 마운트 시 `GET /api/market-board/new-highs-lows` 호출 (최초 조회 시 수십 초 소요, 이후 캐시)
+- 신고가/신저가 종목 확정 후 sparkline 배치 로드 (`POST /api/market-board/sparklines`)
+- `useMarketBoardWS`로 단일 WS 연결, 신고가/신저가 + 사용자 종목 일괄 구독
+- **마운트 시 병렬 조회**: `fetchWatchlist()` + `fetchCustomStocks()` → watchlistStocks/customStocks 상태 세팅
+- **하단 표시 = 관심종목(★) + 별도 등록 종목(X)**: `displayStocks = useMemo(...)` 중복 제거 합산
+  - `_source: 'watchlist'` → ★ 배지, X 버튼 없음 (관심종목에서 삭제 시 자동 제거)
+  - `_source: 'custom'` → X 버튼으로 DB 삭제 가능 (GET/POST/DELETE `/api/market-board/custom-stocks`)
+- custom 종목 추가/삭제 시 DB API 호출 + 상태 업데이트 + WS subscribe/unsubscribe + sparkline 요청
+- 새로고침 버튼으로 수동 갱신 가능
+- 연결 상태 배지(초록/회색) + 기준 시각 + 스캔 종목 수 표시
 
 ---
 

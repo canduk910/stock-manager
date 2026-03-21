@@ -6,16 +6,16 @@ import { AreaChart, Area, ResponsiveContainer } from 'recharts'
  * data: [{ date, close }, ...]
  * trend: 'up' | 'down' | null (색상 결정)
  */
-export default function SparklineChart({ data = [], trend = null }) {
+export default function SparklineChart({ data = [], trend = null, height = 48 }) {
   const uid = useId()
   if (!data || data.length < 2) {
-    return <div className="h-12 flex items-center justify-center text-gray-600 text-xs">-</div>
+    return <div style={{ height }} className="flex items-center justify-center text-gray-600 text-xs">-</div>
   }
 
   const color = trend === 'up' ? '#ef4444' : trend === 'down' ? '#3b82f6' : '#6b7280'
 
   return (
-    <div className="h-12 w-full">
+    <div style={{ height }} className="w-full">
       <ResponsiveContainer width="100%" height="100%">
         <AreaChart data={data} margin={{ top: 2, right: 0, left: 0, bottom: 2 }}>
           <defs>

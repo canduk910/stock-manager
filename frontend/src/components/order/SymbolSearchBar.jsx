@@ -135,7 +135,7 @@ export default function SymbolSearchBar({
     setSearchQuery(`${item.name} (${item.code})`)
     setShowDropdown(false)
     setSuggestions([])
-    onSymbolSelect?.({ code: item.code, name: item.name, market: item.market || 'KR' })
+    onSymbolSelect?.({ code: item.code, name: item.name, market: market })
   }
 
   const isSelected = !!symbol

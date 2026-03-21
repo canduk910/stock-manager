@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { addToWatchlist } from '../../api/watchlist'
+import { useState, useEffect } from 'react'
+import { addToWatchlist, fetchWatchlist } from '../../api/watchlist'
 import DataTable from '../common/DataTable'
 
 function fmtDate(s) {
@@ -7,11 +7,12 @@ function fmtDate(s) {
   return `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}`
 }
 
-function WatchlistButton({ code, market = 'KR' }) {
-  const [status, setStatus] = useState('idle') // idle | loading | done | error
+function WatchlistButton({ code, market = 'KR', alreadyAdded = false }) {
+  const [status, setStatus] = useState(alreadyAdded ? 'exists' : 'idle')
+  // idle | loading | done | error | exists
 
   const handleAdd = async () => {
-    if (status === 'loading' || status === 'done' || !code) return
+    if (status !== 'idle' && status !== 'error' || !code) return
     setStatus('loading')
     try {
       await addToWatchlist(code, '', market)
@@ -24,6 +25,8 @@ function WatchlistButton({ code, market = 'KR' }) {
 
   if (!code) return null
 
+  if (status === 'exists')
+    return <span className="text-green-600 text-xs font-medium">★ 관심종목</span>
   if (status === 'done')
     return <span className="text-green-600 text-xs font-medium">✓ 추가됨</span>
   if (status === 'loading')
@@ -93,14 +96,21 @@ const REPORT_TYPE_COLORS_US = {
   '10-Q': 'bg-teal-100 text-teal-700',
 }
 
-function makeColumns(market) {
+function makeColumns(market, watchlistSet) {
   const isUS = market === 'US'
   return [
     {
       key: '_watchlist',
       label: '',
       align: 'center',
-      render: (_, row) => <WatchlistButton code={row.stock_code} market={market} />,
+      sortable: false,
+      render: (_, row) => (
+        <WatchlistButton
+          code={row.stock_code}
+          market={market}
+          alreadyAdded={watchlistSet.has(`${row.stock_code}:${market}`)}
+        />
+      ),
     },
     { key: 'stock_code', label: isUS ? '티커' : '종목코드', align: 'center' },
     { key: 'corp_name', label: '종목명', align: 'left' },
@@ -148,7 +158,18 @@ function makeColumns(market) {
 }
 
 export default function FilingsTable({ filings, market = 'KR' }) {
-  const columns = makeColumns(market)
+  const [watchlistSet, setWatchlistSet] = useState(new Set())
+
+  useEffect(() => {
+    fetchWatchlist()
+      .then(data => {
+        const s = new Set((data.items || []).map(item => `${item.code}:${item.market}`))
+        setWatchlistSet(s)
+      })
+      .catch(() => {})
+  }, [])
+
+  const columns = makeColumns(market, watchlistSet)
   // US는 rcept_no가 없을 수 있으므로 인덱스 기반 key 사용 (DataTable은 rowKey 미전달 시 index 사용)
   const rowKey = market === 'US' ? undefined : 'stock_code'
   return <DataTable columns={columns} data={filings} rowKey={rowKey} />

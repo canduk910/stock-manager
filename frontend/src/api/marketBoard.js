@@ -16,3 +16,31 @@ export async function fetchSparklines(items) {
   if (!res.ok) throw new Error('sparkline 조회 실패')
   return res.json()
 }
+
+// ── 시세판 별도 등록 종목 CRUD ────────────────────────────────────────────────
+
+export async function fetchCustomStocks() {
+  const res = await fetch(`${BASE}/custom-stocks`)
+  if (!res.ok) throw new Error('시세판 종목 조회 실패')
+  return res.json()  // { items: [{code, market, name, added_date}] }
+}
+
+export async function addCustomStock(code, name, market = 'KR') {
+  const res = await fetch(`${BASE}/custom-stocks`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code, name, market }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.detail || '종목 추가 실패')
+  }
+  return res.json()
+}
+
+export async function removeCustomStock(code, market = 'KR') {
+  const res = await fetch(`${BASE}/custom-stocks/${code}?market=${market}`, {
+    method: 'DELETE',
+  })
+  if (!res.ok && res.status !== 404) throw new Error('종목 삭제 실패')
+}

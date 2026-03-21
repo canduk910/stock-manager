@@ -1,15 +1,19 @@
 """
 시세판 API 라우터.
-GET  /api/market-board/new-highs-lows   신고가/신저가 Top 10
-POST /api/market-board/sparklines       복수 종목 sparkline 배치
-WS   /ws/market-board                   다중심볼 실시간 시세
+GET    /api/market-board/new-highs-lows         신고가/신저가 Top 10
+POST   /api/market-board/sparklines             복수 종목 sparkline 배치
+GET    /api/market-board/custom-stocks          별도 등록 종목 목록
+POST   /api/market-board/custom-stocks          별도 등록 종목 추가
+DELETE /api/market-board/custom-stocks/{code}   별도 등록 종목 삭제
+WS     /ws/market-board                         다중심볼 실시간 시세
 """
 import asyncio
 import json
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
+from fastapi.exceptions import HTTPException
 from pydantic import BaseModel
 
 from services.quote_service import get_manager, get_overseas_manager
@@ -37,6 +41,40 @@ def get_sparklines(body: SparklineRequest):
     """복수 종목 1년 주봉 종가 배치 조회."""
     from stock.market_board import fetch_sparklines_batch
     return fetch_sparklines_batch(body.items)
+
+
+# ── 시세판 별도 등록 종목 CRUD ──────────────────────────────────────────────────
+
+class CustomStockBody(BaseModel):
+    code: str
+    name: str
+    market: str = "KR"
+
+
+@router.get("/api/market-board/custom-stocks")
+def list_custom_stocks():
+    """시세판 별도 등록 종목 목록."""
+    from stock.market_board_store import all_items
+    return {"items": all_items()}
+
+
+@router.post("/api/market-board/custom-stocks", status_code=201)
+def add_custom_stock(body: CustomStockBody):
+    """시세판 별도 종목 추가."""
+    from stock.market_board_store import add_item
+    ok = add_item(body.code, body.name, body.market)
+    if not ok:
+        raise HTTPException(status_code=409, detail="이미 등록된 종목입니다.")
+    return {"item": {"code": body.code, "market": body.market, "name": body.name}}
+
+
+@router.delete("/api/market-board/custom-stocks/{code}", status_code=204)
+def remove_custom_stock(code: str, market: str = Query("KR")):
+    """시세판 별도 종목 삭제."""
+    from stock.market_board_store import remove_item
+    ok = remove_item(code, market)
+    if not ok:
+        raise HTTPException(status_code=404, detail="등록되지 않은 종목입니다.")
 
 
 # ── 다중심볼 WebSocket ────────────────────────────────────────────────────────

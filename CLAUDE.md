@@ -75,7 +75,7 @@ python test.py                      # 삼성전자 현재가 조회
 ```
 wrapper.py          KIS API 완전 래퍼 (standalone)
 main.py             FastAPI 서버 진입점 (라우터 등록 + SPA 정적 파일 서빙)
-routers/            API 라우터 패키지 (8개, quote는 WebSocket)
+routers/            API 라우터 패키지 (10개, quote/market_board는 WebSocket 포함)
 services/           서비스 레이어 (watchlist_service, detail_service, quote_service, advisory_service)
 screener/           스크리너 패키지 (CLI + API 공용, pykrx + OpenDart)
 stock/              관심종목 패키지 (CLI + API 공용, pykrx + OpenDart + yfinance + advisory_store/fetcher)
@@ -98,7 +98,7 @@ standalone으로 사용 가능. `main.py`/`routers/`와는 독립적이다.
 ### `main.py` — FastAPI 서버
 
 - CORS 미들웨어: `localhost:5173` 허용 (Vite 개발 서버)
-- `routers/` 9개 라우터 등록 (screener, earnings, balance, watchlist, detail, order, quote, advisory, search)
+- `routers/` 10개 라우터 등록 (screener, earnings, balance, watchlist, detail, order, quote, advisory, search, market_board)
 - lifespan: ① `quote_manager.start()` (KIS WebSocket 관리자) ② 예약주문 스케줄러 시작 ③ `symbol_map` background pre-warm thread 시작 (Docker 재기동 후 cold-start 지연 방지) — 종료 시 역순 정리
 - `services/quote_service.py`: `KISQuoteManager` + `OverseasQuoteManager` + `FinnhubWSClient`. WS 끊김 시 REST fallback 자동 전환
 - SPA 라우팅: `/assets` StaticFiles 마운트 + `/{full_path:path}` 캐치올로 index.html 반환
@@ -122,6 +122,7 @@ standalone으로 사용 가능. `main.py`/`routers/`와는 독립적이다.
 | `quote.py` | `WS /ws/quote/{symbol}` | 실시간 호가 WebSocket. 국내=KIS WS 브릿지, 해외=yfinance 2초 polling |
 | `advisory.py` | `/api/advisory/*` | AI자문 종목 관리 + 데이터 수집/조회 + GPT-4o AI 리포트 생성 |
 | `search.py` | `GET /api/search` | 종목 검색. KR=이름/코드 자동완성(최대 10건), US=티커 유효성 검증 |
+| `market_board.py` | `GET /api/market-board/new-highs-lows`, `POST /api/market-board/sparklines`, `GET/POST/DELETE /api/market-board/custom-stocks`, `WS /ws/market-board` | 당일 신고가/신저가 + sparkline 배치 + 시세판 별도 종목 CRUD + 다중심볼 실시간 시세 WS |
 
 - 모든 핸들러는 `def`(sync) — pykrx/requests가 동기 라이브러리이므로 FastAPI가 threadpool에서 자동 실행
 - KIS 키 미설정 시 `/api/balance`는 503 반환 (서버 시작은 정상)
@@ -266,7 +267,7 @@ GET /api/watchlist/info/{code}?market=KR
 | `detail_service.py` | 재무 테이블 + PER/PBR 히스토리 + CAGR 종합 리포트. 해외는 yfinance(최대 4년), 밸류에이션 차트 빈 데이터 반환. |
 | `order_service.py` | KIS API 직접 호출로 국내/해외 주문 발송·정정·취소·미체결 조회·당일 체결 내역·로컬 DB 대사. `_strip_leading_zeros()`로 10자리→8자리 주문번호 변환. `excg_id_dvsn_cd != 'SOR'` 조건으로 API 취소 가능 여부 판별. |
 | `reservation_service.py` | 예약주문 실행 엔진. `asyncio` 20초 간격 폴링. 가격 조건(`price_below`/`price_above`) + 시간 조건(`scheduled`) 체크 후 자동 주문 발송. |
-| `quote_service.py` | **KISQuoteManager** + **OverseasQuoteManager** + **FinnhubWSClient**. 국내: KIS WS 단일 연결 + 심볼별 `asyncio.Queue` pub/sub. WS 끊김 시 REST fallback(`FHKST01010100`) 자동 전환, 재연결 시 자동 해제. 재연결 지수 백오프(1→30초). 해외: `FINNHUB_API_KEY` 있으면 Finnhub WS(30 심볼), 없으면 yfinance 2초 폴링. 구독자 0이면 on-demand cancel. |
+| `quote_service.py` | **KISQuoteManager** + **OverseasQuoteManager** + **FinnhubWSClient**. 국내: KIS WS 단일 연결 + 심볼별 `asyncio.Queue` pub/sub. WS 끊김 시 REST fallback(`FHKST01010100`) 자동 전환, 재연결 시 자동 해제. 재연결 지수 백오프(1→30초). **비개장일 대응**: 구독 즉시 `_push_initial_price()`로 yfinance 직전 거래일 가격 push. REST fallback `price=0` 시 yfinance fallback. 해외: `FINNHUB_API_KEY` 있으면 Finnhub WS(30 심볼), 없으면 yfinance 2초 폴링. `fast_info.last_price or previous_close` 패턴으로 비개장일에도 직전 종가 표시. 구독자 0이면 on-demand cancel. |
 | `advisory_service.py` | AI자문 서비스. `refresh_stock_data()` — 기본적/기술적 분석 수집 후 `advisory_cache` 저장. `generate_ai_report()` — 캐시 데이터 기반 OpenAI GPT-4o 호출 후 리포트 저장. |
 
 **국내/해외 분기 기준**: `stock/utils.py`의 `is_domestic(code)` — 6자리 숫자이면 국내(KRX), 아니면 해외.
@@ -309,8 +310,10 @@ CLI와 API 라우터 양쪽에서 공용으로 사용한다. 데이터는 `~/sto
 | `utils.py` | `is_domestic(code)` — 6자리 숫자=국내, 아니면 해외. 모든 모듈에서 국내/해외 분기에 사용. |
 | `symbol_map.py` | pykrx 기반 종목코드↔종목명 매핑 (7일 캐시). `_find_latest_trading_day()`로 최근 거래일 자동 탐색. `code_to_name()` — 맵 빌드 실패 시 `get_market_ticker_name()` 직접 호출 fallback. |
 | `market.py` | **yfinance 기반** 시세/시가총액/52주 고저/PER/PBR + 기간별 수익률 (2026-02 KRX 서버 변경으로 pykrx 전면 yfinance 전환). `_kr_yf_ticker_str(code)` — `.KS`/`.KQ` suffix 자동 선택 (7일 캐시). `fetch_market_metrics(code)` — 잔고·관심종목·AI자문용 시가총액·PER·PBR·ROE·**배당수익률·주당배당금** 조회 (6시간 캐시). 배당수익률: `dividendYield`(이미 % 형태, KR/US 공통) 우선 사용, 없으면 `trailingAnnualDividendYield × 100` fallback (ADR 환율 오류 방지). 주당배당금: `dividendRate`(연간, 원). |
+| `market_board.py` | 시세판 데이터. `fetch_new_highs_lows()` — 시총 상위 200종목 yfinance 배치 스캔, 신고가/신저가 탐지(3개월 거래량 0·연간변동폭 3% 미만 제외, 중복 시 거리 기반 분류). `fetch_sparkline(code, market)` — 1년 주봉 종가(24시간 캐시). `fetch_sparklines_batch(items)` — ThreadPoolExecutor 병렬 배치. |
+| `market_board_store.py` | 시세판 별도 등록 종목 CRUD (`~/stock-watchlist/market_board.db`). `all_items()` / `add_item(code, name, market)` / `remove_item(code, market)`. 복합 PK `(code, market)`. |
 | `dart_fin.py` | OpenDart `fnlttSinglAcntAll` API 기반 재무제표 조회. 3년 단위 배치 호출로 최대 10년치 수집. DART 사업보고서 링크(`dart_url`) 포함. `_ACCOUNT_KEYS`에 적자 기업 변형 계정명(`영업손실`, `당기순손실`, `매출` 등) 포함. `fetch_income_detail_annual()` — 매출원가/SGA/이자비용/EPS 세부 손익. `fetch_bs_cf_annual()` — 대차대조표(자산/부채/자본) + 현금흐름표(영업/투자/재무 CF, CAPEX, FCF). |
-| `yf_client.py` | yfinance 기반 해외주식 데이터. `validate_ticker`, `fetch_price_yf`, `fetch_detail_yf`(ROE+**배당수익률+주당배당금** 포함), `fetch_period_returns_yf`, `fetch_financials_multi_year_yf`. NaN → None 자동 정제. `fetch_financials_multi_year_yf`는 캐시에 전체 연도를 저장하고 반환 시점에 슬라이싱 (부분 캐시 버그 방지). AI자문용 추가 함수: `fetch_income_detail_yf()` / `fetch_balance_sheet_yf()` / `fetch_cashflow_yf()` / `fetch_metrics_yf()`(PER·PBR·PSR·EV/EBITDA·ROE·ROA) / `fetch_segments_yf()`(사업부문, best-effort). `fetch_detail_yf()` 반환: `dividend_per_share` 필드 포함 (`dividendRate`, USD). |
+| `yf_client.py` | yfinance 기반 해외주식 데이터. `validate_ticker`, `fetch_price_yf`, `fetch_detail_yf`(ROE+**배당수익률+주당배당금** 포함), `fetch_period_returns_yf`, `fetch_financials_multi_year_yf`. NaN → None 자동 정제. `fetch_financials_multi_year_yf`는 캐시에 전체 연도를 저장하고 반환 시점에 슬라이싱 (부분 캐시 버그 방지). `fetch_price_yf()`: `fast_info.last_price or previous_close` 패턴으로 비개장일(주말/공휴일)에도 직전 종가 반환. AI자문용 추가 함수: `fetch_income_detail_yf()` / `fetch_balance_sheet_yf()` / `fetch_cashflow_yf()` / `fetch_metrics_yf()`(PER·PBR·PSR·EV/EBITDA·ROE·ROA) / `fetch_segments_yf()`(사업부문, best-effort). `fetch_detail_yf()` 반환: `dividend_per_share` 필드 포함 (`dividendRate`, USD). |
 | `sec_filings.py` | SEC EDGAR EFTS API 기반 미국 10-K/10-Q 공시 조회. 키 불필요. 국내 공시와 동일한 필드 구조 반환. |
 | `display.py` | Rich 테이블 출력 + CSV 내보내기. |
 | `cache.py` | SQLite TTL 캐시 (`~/stock-watchlist/cache.db`). `set_cached`/`get_cached` 모두 NaN/Inf → None 자동 sanitize. |
@@ -368,10 +371,10 @@ frontend/
       useAdvisory.js      useAdvisoryStocks (CRUD) / useAdvisoryData (load + refresh) / useAdvisoryReport (load + generate) /
                           useAdvisoryOhlcv (load(code, market, interval, period) → { ohlcv, indicators, interval, period })
     components/
-      layout/Header.jsx   네비게이션 바 (6개 메뉴, 로고: "DK STOCK")
+      layout/Header.jsx   네비게이션 바 (7개 메뉴, 로고: "DK STOCK")
       common/             LoadingSpinner, ErrorAlert, EmptyState, DataTable, ToastNotification
-      screener/           FilterPanel, StockTable (WatchlistButton 포함 — 관심종목 즉시 추가)
-      earnings/           FilingsTable  (국내/미국 컬럼 분기, market prop)
+      screener/           FilterPanel, StockTable (WatchlistButton — 이미 관심종목이면 ★ 표시, 아니면 + 추가 버튼)
+      earnings/           FilingsTable  (국내/미국 컬럼 분기, market prop, WatchlistButton ★ 표시 동일)
       balance/            PortfolioSummary, HoldingsTable, OverseasHoldingsTable, FuturesTable
       watchlist/          AddStockForm (시장 선택 드롭다운), WatchlistDashboard (통화 표시), StockInfoModal
       detail/             StockHeader, FinancialTable, ValuationChart, ReportSummary
@@ -389,6 +392,7 @@ frontend/
       WatchlistPage.jsx   /watchlist
       DetailPage.jsx      /detail/:symbol  탭 UI (재무분석/밸류에이션/종합 리포트[서브탭: CAGR요약/기본적분석/기술적분석/AI자문])
       OrderPage.jsx       /order     탭 UI (주문발송/미체결/체결내역/주문이력/예약주문)
+      MarketBoardPage.jsx /market-board  시세판: 신고가/신저가 Top10 + 사용자 선택 종목(관심종목 자동 동기화). 실시간 WS.
 ```
 
 **프론트엔드 규칙**
@@ -524,6 +528,7 @@ KIS API는 실전/모의투자에 따라 TR_ID 접두사가 다르다.
 | `~/stock-watchlist/cache.db` | 관심종목 시세/재무/종목코드/수익률 캐시 (국내+해외) | 키별 상이 |
 | `~/stock-watchlist/watchlist.db` | 관심종목 목록 (SQLite CRUD, 국내+해외) | 영구 |
 | `~/stock-watchlist/orders.db` | 주문 이력 + 예약주문 (SQLite). `orders` + `reservations` 테이블 | 영구 |
+| `~/stock-watchlist/market_board.db` | 시세판 별도 등록 종목 (SQLite). `market_board_stocks` 테이블. 복합 PK `(code, market)` | 영구 |
 | `~/stock-watchlist/advisory.db` | AI자문 (SQLite). `advisory_stocks` + `advisory_cache` + `advisory_reports` 3테이블 | 영구 |
 
 `stock/` 캐시 TTL: `corpCode.xml` 30일, `symbol_map` 7일, 시세/재무 24시간, `market:period_returns:` 1시간, `yf:*` 1~24시간.
@@ -555,7 +560,7 @@ KIS API는 실전/모의투자에 따라 TR_ID 접두사가 다르다.
 
 ---
 
-## 시세 수신 개선 이력 (Phase 1 → Phase 2)
+## 시세 수신 개선 이력 (Phase 1 → Phase 3)
 
 ### Phase 1 (2026-03 완료)
 - rAF throttle (`useQuote.js`): 고빈도 WS 메시지 → 최대 60fps 렌더링
@@ -574,3 +579,13 @@ KIS API는 실전/모의투자에 따라 TR_ID 접두사가 다르다.
 
 ### 환경변수 추가
 - `FINNHUB_API_KEY`: 해외주식 실시간 시세 (선택). 미설정 시 yfinance 2초 폴링(15분 지연) 유지.
+
+### Phase 3 (2026-03 완료)
+- **신고가/신저가 그리드 밀도 개선** (`NewHighLowSection.jsx`): `md:grid-cols-4`, `lg:grid-cols-3` 추가. 외부 2컬럼 래퍼 안에서도 충분한 카드 밀도 확보.
+- **비개장일 국내 시세 fallback** (`KISQuoteManager`): `subscribe()` 호출 즉시 `asyncio.create_task(_push_initial_price())` — yfinance `fetch_price(symbol)`로 직전 거래일 가격 queue push. `_fetch_rest_price()` KIS 반환 `price=0` 시 yfinance fallback.
+- **비개장일 해외 시세 fallback** (`OverseasQuoteManager`): `_prefetch_and_subscribe()`에서 `fi.last_price or fi.previous_close` 패턴. `_poll_loop()`도 동일 패턴 적용, p=None이면 broadcast skip.
+- **`fetch_price_yf()` fallback** (`stock/yf_client.py`): `close = _safe(fi.last_price) or _safe(fi.previous_close)` — 관심종목·잔고·AI자문용 해외 시세도 비개장일 직전 종가 반환.
+
+### DART 공시 캐시 버그 수정 (2026-03)
+- **원인**: `screener/cache.py`는 TTL 없는 영구 캐시. 당일 오전 조회 시 빈 결과가 캐시되면 이후 제출 공시가 보이지 않음 (골프존 3/19 사업보고서 미노출 사례)
+- **수정**: `screener/dart.py`의 `fetch_filings()`에서 `end_date < today`인 경우만 캐시 사용. 오늘 이상 날짜 포함 범위는 항상 DART API 직접 호출.

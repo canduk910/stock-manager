@@ -109,12 +109,38 @@ class KISQuoteManager:
                 await self._send_subscribe(symbol)
             except Exception as e:
                 logger.warning("[QuoteService] 구독 요청 실패: %s — %s", symbol, e)
+        # 즉시 초기 가격 push (비개장일 포함)
+        asyncio.create_task(self._push_initial_price(symbol, queue))
 
     def unsubscribe(self, symbol: str, queue: asyncio.Queue):
         self._subscribers[symbol].discard(queue)
         if not self._subscribers[symbol]:
             self._subscribers.pop(symbol, None)
             self._subscribed_symbols.discard(symbol)
+
+    # ── 초기 가격 push ─────────────────────────────────────────────
+
+    async def _push_initial_price(self, symbol: str, queue: asyncio.Queue):
+        """구독 즉시 yfinance 최근 가격 push (비개장일 대응)."""
+        try:
+            loop = asyncio.get_event_loop()
+            from stock.market import fetch_price
+            data = await loop.run_in_executor(None, fetch_price, symbol)
+            if data and data.get("price"):
+                msg = {
+                    "type": "price",
+                    "symbol": symbol,
+                    "price": data["price"],
+                    "sign": "3",
+                    "change": 0.0,
+                    "change_rate": data.get("change_pct") or 0.0,
+                }
+                try:
+                    queue.put_nowait(msg)
+                except asyncio.QueueFull:
+                    pass
+        except Exception as e:
+            logger.debug("[QuoteService] 초기 가격 push 실패: %s — %s", symbol, e)
 
     # ── 내부 메서드 ────────────────────────────────────────────────
 
@@ -283,6 +309,21 @@ class KISQuoteManager:
             output = resp.json().get("output", {})
             price = float(output.get("stck_prpr", 0) or 0)
             if price <= 0:
+                # 비개장일: yfinance fallback으로 직전 거래일 가격 반환
+                try:
+                    from stock.market import fetch_price
+                    data = fetch_price(symbol)
+                    if data and data.get("price"):
+                        return {
+                            "type": "price",
+                            "symbol": symbol,
+                            "price": data["price"],
+                            "sign": "3",
+                            "change": 0.0,
+                            "change_rate": data.get("change_pct") or 0.0,
+                        }
+                except Exception:
+                    pass
                 return None
             return {
                 "type": "price",
@@ -516,15 +557,18 @@ class OverseasQuoteManager:
         try:
             def _fetch():
                 fi = yf.Ticker(symbol).fast_info
-                return fi.previous_close, fi.last_price
+                # 비개장일에 last_price가 None인 경우 previous_close로 fallback
+                last = fi.last_price or fi.previous_close
+                return fi.previous_close, last
 
             prev, last = await loop.run_in_executor(None, _fetch)
             if prev:
                 self._prev_close[symbol] = float(prev)
-            # 초기 시세 즉시 broadcast
-            if last and prev:
-                ch = float(last) - float(prev)
-                rt = ch / float(prev) * 100
+            # 초기 시세 즉시 broadcast (prev 없어도 last만 있으면 broadcast)
+            if last:
+                prev_val = float(prev) if prev else float(last)
+                ch = float(last) - prev_val if prev else 0.0
+                rt = ch / prev_val * 100 if prev else 0.0
                 msg = {
                     "type": "price",
                     "symbol": symbol,
@@ -567,20 +611,26 @@ class OverseasQuoteManager:
             try:
                 def _fetch():
                     fi = yf.Ticker(symbol).fast_info
-                    p = fi.last_price
-                    prev = fi.previous_close
-                    ch = (p - prev) if (p and prev) else 0.0
+                    # 비개장일에 last_price가 None인 경우 previous_close로 fallback
+                    p = fi.last_price or fi.previous_close
+                    if not p:
+                        return None
+                    prev = fi.previous_close or p
+                    ch = (p - prev) if prev else 0.0
                     rt = (ch / prev * 100) if prev else 0.0
                     return {
                         "type": "price",
                         "symbol": symbol,
-                        "price": round(float(p), 2) if p else None,
+                        "price": round(float(p), 2),
                         "change": round(float(ch), 2),
                         "change_rate": round(float(rt), 2),
                         "sign": "2" if ch >= 0 else "5",
                     }
 
                 msg = await loop.run_in_executor(None, _fetch)
+                if msg is None:
+                    await asyncio.sleep(2)
+                    continue
                 self._latest[symbol] = msg
                 await self._broadcast(symbol, msg)
             except asyncio.CancelledError:

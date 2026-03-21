@@ -33,39 +33,33 @@ export default function MarketBoardCard({ stock, livePrice, sparkline, badge }) 
 
   return (
     <div
-      className="bg-gray-800 rounded-xl p-3 cursor-pointer hover:bg-gray-750 hover:ring-1 hover:ring-gray-600 transition-all"
+      className="bg-gray-800 rounded-xl p-2 cursor-pointer hover:bg-gray-750 hover:ring-1 hover:ring-gray-600 transition-all"
       onClick={() => navigate(`/detail/${stock.code}`)}
     >
       {/* 헤더: 종목명 + 배지 + 시장 */}
       <div className="flex items-start justify-between mb-1 gap-1">
-        <div className="flex items-center gap-1.5 min-w-0">
+        <div className="flex items-center gap-1 min-w-0">
           {badge === 'high' && (
-            <span className="shrink-0 px-1 py-0.5 text-[10px] font-bold bg-red-900 text-red-300 rounded">신고가</span>
+            <span className="shrink-0 px-1 py-0.5 text-[9px] font-bold bg-red-900 text-red-300 rounded">신고가</span>
           )}
           {badge === 'low' && (
-            <span className="shrink-0 px-1 py-0.5 text-[10px] font-bold bg-blue-900 text-blue-300 rounded">신저가</span>
+            <span className="shrink-0 px-1 py-0.5 text-[9px] font-bold bg-blue-900 text-blue-300 rounded">신저가</span>
           )}
-          <span className="text-sm font-semibold text-white truncate">{stock.name}</span>
+          <span className="text-xs font-semibold text-white truncate">{stock.name}</span>
         </div>
         <span className="shrink-0 text-[10px] text-gray-500 mt-0.5">{stock.market_type}</span>
       </div>
 
       {/* 가격 + 등락 */}
-      <div className="flex items-baseline gap-2 mb-1">
-        <span className="text-lg font-bold text-white">{fmt(price)}</span>
-        <span className={`text-sm font-medium ${chgCls}`}>
+      <div className="flex items-baseline gap-1.5 mb-1">
+        <span className="text-sm font-bold text-white">{fmt(price)}</span>
+        <span className={`text-xs font-medium ${chgCls}`}>
           {chgPct != null ? `${chgPct > 0 ? '+' : ''}${chgPct.toFixed(2)}%` : '-'}
         </span>
       </div>
 
       {/* 미니 차트 */}
-      <SparklineChart data={sparkline} trend={trend} />
-
-      {/* 하단: 시총 + 52주 고저 */}
-      <div className="flex justify-between text-[10px] text-gray-500 mt-1">
-        <span>시총 {fmtMktcap(stock.mktcap)}</span>
-        <span>H {fmt(stock.year_high)} · L {fmt(stock.year_low)}</span>
-      </div>
+      <SparklineChart data={sparkline} trend={trend} height={32} />
     </div>
   )
 }
