@@ -1,42 +1,31 @@
 """시세판 별도 등록 종목 CRUD (~/stock-watchlist/market_board.db — SQLite)."""
 
 import sqlite3
-from contextlib import contextmanager
 from datetime import date
-from pathlib import Path
 
-_WATCHLIST_DIR = Path.home() / "stock-watchlist"
-_DB_PATH = _WATCHLIST_DIR / "market_board.db"
+from .db_base import connect
 
-
-def _init_db() -> None:
-    _WATCHLIST_DIR.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(_DB_PATH) as conn:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS market_board_stocks (
-                code       TEXT NOT NULL,
-                market     TEXT NOT NULL DEFAULT 'KR',
-                name       TEXT NOT NULL,
-                added_date TEXT NOT NULL,
-                PRIMARY KEY (code, market)
-            )
-        """)
-        conn.commit()
+_DB = "market_board.db"
 
 
-@contextmanager
+def _create_tables(conn):
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS market_board_stocks (
+            code       TEXT NOT NULL,
+            market     TEXT NOT NULL DEFAULT 'KR',
+            name       TEXT NOT NULL,
+            added_date TEXT NOT NULL,
+            PRIMARY KEY (code, market)
+        )
+    """)
+    conn.commit()
+
+
 def _conn():
-    _init_db()
-    conn = sqlite3.connect(_DB_PATH)
-    conn.row_factory = sqlite3.Row
-    try:
-        yield conn
-        conn.commit()
-    finally:
-        conn.close()
+    return connect(_DB, _create_tables)
 
 
-def _row_to_dict(row: sqlite3.Row) -> dict:
+def _row_to_dict(row):
     return {
         "code": row["code"],
         "market": row["market"],

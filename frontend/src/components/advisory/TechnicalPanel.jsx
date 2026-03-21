@@ -2,59 +2,18 @@
  * 기술적 분석 탭
  * 캔들스틱 + MA + BB + 거래량 + MACD + RSI + Stochastic
  * 타임프레임 (15분/60분/1일/1주) + 기간 선택 지원
- *
- * [캔들 렌더링 원리]
- * Recharts Bar에 background={{ fill:'transparent' }} 를 주면
- * shape 함수에 background={x, y, width, height} 가 전달된다.
- *   - background.y      = 차트 플롯 영역 상단 픽셀 (= dMax 에 해당)
- *   - background.height = 차트 플롯 영역 높이 픽셀
- * YAxis domain=[dMin,dMax] 를 명시하면
- *   toY(v) = background.y + background.height * (dMax - v) / (dMax - dMin)
- * 으로 임의 가격 → 픽셀 변환이 가능하다.
  */
-import { useState, useEffect, useMemo, useCallback } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import {
   ComposedChart, Bar, Line, XAxis, YAxis, Tooltip,
-  ResponsiveContainer, ReferenceLine, LineChart, BarChart,
+  ResponsiveContainer, ReferenceLine, LineChart,
 } from 'recharts'
 import { useAdvisoryOhlcv } from '../../hooks/useAdvisory'
-
-// ── 타임프레임/기간 옵션 ──────────────────────────────────────────────────────
-const INTERVAL_OPTS = [
-  { id: '15m', label: '15분' },
-  { id: '60m', label: '60분' },
-  { id: '1d',  label: '1일'  },
-  { id: '1wk', label: '1주'  },
-]
-
-const PERIOD_OPTIONS = {
-  '15m': [
-    { id: '5d',  label: '5일'   },
-    { id: '1mo', label: '1개월' },
-    { id: '60d', label: '2개월' },
-  ],
-  '60m': [
-    { id: '1mo', label: '1개월' },
-    { id: '3mo', label: '3개월' },
-    { id: '6mo', label: '6개월' },
-    { id: '1y',  label: '1년'   },
-    { id: '2y',  label: '2년'   },
-  ],
-  '1d': [
-    { id: '3mo', label: '3개월' },
-    { id: '6mo', label: '6개월' },
-    { id: '1y',  label: '1년'   },
-    { id: '3y',  label: '3년'   },
-    { id: '5y',  label: '5년'   },
-    { id: '10y', label: '10년'  },
-  ],
-  '1wk': [
-    { id: '1y',  label: '1년'  },
-    { id: '3y',  label: '3년'  },
-    { id: '5y',  label: '5년'  },
-    { id: '10y', label: '10년' },
-  ],
-}
+import CandlestickChart, {
+  INTERVAL_OPTS,
+  PERIOD_OPTIONS,
+  makeTickFormatter,
+} from '../common/CandlestickChart'
 
 const DEFAULT_PERIOD  = { '15m': '60d', '60m': '6mo', '1d': '1y', '1wk': '3y' }
 const INTERVAL_LABEL  = { '15m': '15분봉', '60m': '60분봉', '1d': '일봉', '1wk': '주봉' }
@@ -78,23 +37,6 @@ function SignalBadge({ label, value, type }) {
       {label}: {value} {arrow}
     </span>
   )
-}
-
-// ── X축 레이블 포맷 ───────────────────────────────────────────────────────
-function makeTickFormatter(interval) {
-  if (interval === '1d' || interval === '1wk') {
-    return (val) => {
-      if (!val) return ''
-      const date = val.split('T')[0]
-      return date.slice(5)   // MM-DD
-    }
-  }
-  return (val) => {
-    if (!val) return ''
-    const [date, time] = val.split('T')
-    if (!time) return val.slice(5, 10)
-    return `${date.slice(5)} ${time.slice(0, 5)}`  // MM-DD HH:mm
-  }
 }
 
 // ── 메인 컴포넌트 ─────────────────────────────────────────────────────────
@@ -128,106 +70,40 @@ export default function TechnicalPanel({ data, symbol, market }) {
   const macd    = indicators.macd   || {}
   const rsi     = indicators.rsi    || {}
   const stoch   = indicators.stoch  || {}
-  const bb      = indicators.bb     || {}
-  const ma      = indicators.ma     || {}
 
   const times = macd.times || rsi.times || ohlcv.map(b => b.time)
 
-  // ── 가격 Y축 도메인 (ohlcv + BB 포함, ±5% 여유) ────────────────────────
-  const priceDomain = useMemo(() => {
-    if (!ohlcv.length) return [0, 1]
-    const vals = [
-      ...ohlcv.map(d => d.low).filter(v => v != null),
-      ...ohlcv.map(d => d.high).filter(v => v != null),
-      ...(bb.upper || []).filter(v => v != null),
-      ...(bb.lower || []).filter(v => v != null),
-    ]
-    if (!vals.length) return [0, 1]
-    const minP = Math.min(...vals)
-    const maxP = Math.max(...vals)
-    const pad  = (maxP - minP) * 0.05
-    return [minP - pad, maxP + pad]
-  }, [ohlcv, bb])
+  // MACD/RSI/Stochastic 데이터를 extraChartData로 병합
+  const extraChartData = useMemo(() => {
+    if (!macd.macd && !rsi.values && !stoch.k) return undefined
+    return (_d, i) => ({
+      macd:       (macd.macd      || [])[i],
+      macdSignal: (macd.signal    || [])[i],
+      macdHist:   (macd.histogram || [])[i],
+      rsi:        (rsi.values     || [])[i],
+      stochK:     (stoch.k        || [])[i],
+      stochD:     (stoch.d        || [])[i],
+    })
+  }, [macd, rsi, stoch])
 
-  const [dMin, dMax] = priceDomain
-  const dRange = dMax - dMin
-
-  // ── 캔들스틱 Bar shape ─────────────────────────────────────────────────
-  const candleShape = useCallback((props) => {
-    const { x, width, background, payload } = props
-    if (!payload) return null
-    if (!background || !background.height) return null
-
-    const chartTop = background.y
-    const chartH   = background.height
-    if (dRange <= 0 || chartH <= 0) return null
-
-    const toY = (v) => chartTop + chartH * (dMax - v) / dRange
-
-    const { open, high, low, close } = payload
-    if (open == null || close == null || high == null || low == null) return null
-
-    const isUp  = close >= open
-    const color = isUp ? '#ef4444' : '#3b82f6'
-    const cx    = x + width / 2
-    const bw    = Math.max(width * 0.65, 1.5)
-
-    const yH    = toY(high)
-    const yL    = toY(low)
-    const yO    = toY(open)
-    const yC    = toY(close)
-    const yTop  = Math.min(yO, yC)
-    const yBot  = Math.max(yO, yC)
-    const bodyH = Math.max(yBot - yTop, 1)
-
-    return (
-      <g>
-        {/* 꼬리: 저가 ~ 고가 */}
-        <line x1={cx} y1={yH} x2={cx} y2={yL} stroke={color} strokeWidth={1} />
-        {/* 몸통: 시가 ~ 종가 */}
-        <rect x={cx - bw / 2} y={yTop} width={bw} height={bodyH} fill={color} />
-      </g>
-    )
-  }, [dMin, dMax, dRange])
-
-  // ── 거래량 Bar shape (상승/하락 색 분리) ──────────────────────────────
-  const volumeShape = useCallback((props) => {
-    const { x, y, width, height, payload } = props
-    if (!payload) return null
-    const isUp = (payload.close ?? 0) >= (payload.open ?? 0)
-    return (
-      <rect
-        x={x} y={y} width={Math.max(width, 1)} height={Math.max(height, 0)}
-        fill={isUp ? '#ef4444' : '#3b82f6'}
-        opacity={0.7}
-      />
-    )
-  }, [])
-
-  // ── 차트 데이터 병합 ──────────────────────────────────────────────────
-  const chartData = times.map((t, i) => ({
-    time:       t,
-    open:       ohlcv[i]?.open,
-    high:       ohlcv[i]?.high,
-    low:        ohlcv[i]?.low,
-    close:      ohlcv[i]?.close,
-    volume:     ohlcv[i]?.volume,
-    macd:       (macd.macd      || [])[i],
-    macdSignal: (macd.signal    || [])[i],
-    macdHist:   (macd.histogram || [])[i],
-    rsi:        (rsi.values     || [])[i],
-    stochK:     (stoch.k        || [])[i],
-    stochD:     (stoch.d        || [])[i],
-    bbUpper:    (bb.upper       || [])[i],
-    bbMid:      (bb.mid         || [])[i],
-    bbLower:    (bb.lower       || [])[i],
-    ma5:        (ma.ma5         || [])[i],
-    ma20:       (ma.ma20        || [])[i],
-    ma60:       (ma.ma60        || [])[i],
-  }))
+  // 하위 차트용 데이터 (times 기반)
+  const subChartData = useMemo(() =>
+    times.map((t, i) => ({
+      time:       t,
+      open:       ohlcv[i]?.open,
+      close:      ohlcv[i]?.close,
+      volume:     ohlcv[i]?.volume,
+      macd:       (macd.macd      || [])[i],
+      macdSignal: (macd.signal    || [])[i],
+      macdHist:   (macd.histogram || [])[i],
+      rsi:        (rsi.values     || [])[i],
+      stochK:     (stoch.k        || [])[i],
+      stochD:     (stoch.d        || [])[i],
+    })),
+  [times, ohlcv, macd, rsi, stoch])
 
   const tickFormatter = makeTickFormatter(activeInterval)
-  const xInterval     = Math.max(Math.floor(chartData.length / 8), 1)
+  const xInterval     = Math.max(Math.floor(subChartData.length / 8), 1)
 
   if (!ohlcv.length && !ohlcvLoading) {
     return (
@@ -254,7 +130,7 @@ export default function TechnicalPanel({ data, symbol, market }) {
 
   const commonXAxisProps = {
     dataKey:       'time',
-    tickFormatter: tickFormatter,
+    tickFormatter,
     tick:          { fontSize: 9 },
     interval:      xInterval,
   }
@@ -264,7 +140,6 @@ export default function TechnicalPanel({ data, symbol, market }) {
 
       {/* ── 타임프레임 / 기간 선택 ──────────────────────────────────────────── */}
       <div className="flex items-center gap-2 flex-wrap">
-        {/* interval 선택 */}
         <div className="flex rounded border border-gray-200 overflow-hidden text-xs">
           {INTERVAL_OPTS.map(opt => (
             <button
@@ -281,7 +156,6 @@ export default function TechnicalPanel({ data, symbol, market }) {
           ))}
         </div>
 
-        {/* period 선택 */}
         <div className="flex rounded border border-gray-200 overflow-hidden text-xs">
           {(PERIOD_OPTIONS[activeInterval] || []).map(opt => (
             <button
@@ -333,70 +207,22 @@ export default function TechnicalPanel({ data, symbol, market }) {
         <p className="text-xs font-semibold text-gray-600 mb-1">
           가격 ({INTERVAL_LABEL[activeInterval]})
         </p>
-        <ResponsiveContainer width="100%" height={280}>
-          <ComposedChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-            <XAxis {...commonXAxisProps} />
-            <YAxis
-              domain={priceDomain}
-              tick={{ fontSize: 10 }}
-              width={65}
-              tickFormatter={v => v.toLocaleString()}
-            />
-            <Tooltip
-              content={({ active, payload }) => {
-                if (!active || !payload?.length) return null
-                const d = payload[0]?.payload
-                if (!d) return null
-                return (
-                  <div className="bg-white border border-gray-200 rounded shadow p-2 text-xs">
-                    <p className="text-gray-500 mb-1">{tickFormatter(d.time)}</p>
-                    <p>시: {d.open?.toLocaleString()}</p>
-                    <p>고: {d.high?.toLocaleString()}</p>
-                    <p>저: {d.low?.toLocaleString()}</p>
-                    <p className={d.close >= d.open ? 'text-red-600' : 'text-blue-600'}>
-                      종: {d.close?.toLocaleString()}
-                    </p>
-                  </div>
-                )
-              }}
-            />
-            {/* 볼린저밴드 */}
-            <Line type="monotone" dataKey="bbUpper" stroke="#94a3b8" strokeWidth={1} dot={false} strokeDasharray="3 3" name="BB상단" />
-            <Line type="monotone" dataKey="bbMid"   stroke="#64748b" strokeWidth={1} dot={false} strokeDasharray="3 3" name="BB중간" />
-            <Line type="monotone" dataKey="bbLower" stroke="#94a3b8" strokeWidth={1} dot={false} strokeDasharray="3 3" name="BB하단" />
-            {/* 이동평균 */}
-            <Line type="monotone" dataKey="ma5"  stroke="#f59e0b" strokeWidth={1.5} dot={false} name="MA5" />
-            <Line type="monotone" dataKey="ma20" stroke="#8b5cf6" strokeWidth={1.5} dot={false} name="MA20" />
-            <Line type="monotone" dataKey="ma60" stroke="#06b6d4" strokeWidth={1.5} dot={false} name="MA60" />
-            {/* 캔들스틱 */}
-            <Bar
-              dataKey="close"
-              background={{ fill: 'transparent' }}
-              shape={candleShape}
-              isAnimationActive={false}
-            />
-          </ComposedChart>
-        </ResponsiveContainer>
-      </div>
-
-      {/* ── 거래량 ─────────────────────────────────────────────────────────── */}
-      <div>
-        <p className="text-xs font-semibold text-gray-600 mb-1">거래량</p>
-        <ResponsiveContainer width="100%" height={70}>
-          <BarChart data={chartData} margin={{ top: 0, right: 8, left: 0, bottom: 0 }}>
-            <XAxis {...commonXAxisProps} />
-            <YAxis tick={{ fontSize: 9 }} width={50} tickFormatter={v => (v / 1000).toFixed(0) + 'K'} />
-            <Tooltip formatter={v => v?.toLocaleString()} />
-            <Bar dataKey="volume" shape={volumeShape} isAnimationActive={false} name="거래량" />
-          </BarChart>
-        </ResponsiveContainer>
+        <CandlestickChart
+          ohlcv={ohlcv}
+          indicators={indicators}
+          interval={activeInterval}
+          height={280}
+          volumeHeight={70}
+          showMA60
+          extraChartData={extraChartData}
+        />
       </div>
 
       {/* ── MACD ───────────────────────────────────────────────────────────── */}
       <div>
         <p className="text-xs font-semibold text-gray-600 mb-1">MACD</p>
         <ResponsiveContainer width="100%" height={110}>
-          <ComposedChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+          <ComposedChart data={subChartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
             <XAxis {...commonXAxisProps} />
             <YAxis tick={{ fontSize: 9 }} width={50} />
             <Tooltip formatter={v => v?.toFixed(4)} />
@@ -427,7 +253,7 @@ export default function TechnicalPanel({ data, symbol, market }) {
       <div>
         <p className="text-xs font-semibold text-gray-600 mb-1">RSI (14)</p>
         <ResponsiveContainer width="100%" height={90}>
-          <LineChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+          <LineChart data={subChartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
             <XAxis {...commonXAxisProps} />
             <YAxis domain={[0, 100]} tick={{ fontSize: 9 }} width={30} />
             <Tooltip formatter={v => v?.toFixed(1)} />
@@ -442,7 +268,7 @@ export default function TechnicalPanel({ data, symbol, market }) {
       <div>
         <p className="text-xs font-semibold text-gray-600 mb-1">Stochastic (14,3)</p>
         <ResponsiveContainer width="100%" height={90}>
-          <LineChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+          <LineChart data={subChartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
             <XAxis {...commonXAxisProps} />
             <YAxis domain={[0, 100]} tick={{ fontSize: 9 }} width={30} />
             <Tooltip formatter={v => v?.toFixed(1)} />

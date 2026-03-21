@@ -4,58 +4,48 @@ DB 위치: ~/stock-watchlist/advisory.db
 """
 
 import json
-import os
 import sqlite3
 from datetime import datetime
-from pathlib import Path
 from typing import Optional
 
+from .db_base import connect, row_to_dict
 
-def _db_path() -> str:
-    base = Path.home() / "stock-watchlist"
-    base.mkdir(exist_ok=True)
-    return str(base / "advisory.db")
+_DB = "advisory.db"
 
 
-def _conn() -> sqlite3.Connection:
-    con = sqlite3.connect(_db_path())
-    con.row_factory = sqlite3.Row
-    return con
+def _create_tables(conn):
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS advisory_stocks (
+            code       TEXT NOT NULL,
+            market     TEXT NOT NULL DEFAULT 'KR',
+            name       TEXT NOT NULL,
+            added_date TEXT NOT NULL,
+            memo       TEXT NOT NULL DEFAULT '',
+            PRIMARY KEY (code, market)
+        );
+
+        CREATE TABLE IF NOT EXISTS advisory_cache (
+            code        TEXT NOT NULL,
+            market      TEXT NOT NULL DEFAULT 'KR',
+            updated_at  TEXT NOT NULL,
+            fundamental TEXT,
+            technical   TEXT,
+            PRIMARY KEY (code, market)
+        );
+
+        CREATE TABLE IF NOT EXISTS advisory_reports (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            code         TEXT NOT NULL,
+            market       TEXT NOT NULL DEFAULT 'KR',
+            generated_at TEXT NOT NULL,
+            model        TEXT NOT NULL,
+            report       TEXT NOT NULL
+        );
+    """)
 
 
-def _init_db() -> None:
-    with _conn() as con:
-        con.executescript("""
-            CREATE TABLE IF NOT EXISTS advisory_stocks (
-                code       TEXT NOT NULL,
-                market     TEXT NOT NULL DEFAULT 'KR',
-                name       TEXT NOT NULL,
-                added_date TEXT NOT NULL,
-                memo       TEXT NOT NULL DEFAULT '',
-                PRIMARY KEY (code, market)
-            );
-
-            CREATE TABLE IF NOT EXISTS advisory_cache (
-                code        TEXT NOT NULL,
-                market      TEXT NOT NULL DEFAULT 'KR',
-                updated_at  TEXT NOT NULL,
-                fundamental TEXT,
-                technical   TEXT,
-                PRIMARY KEY (code, market)
-            );
-
-            CREATE TABLE IF NOT EXISTS advisory_reports (
-                id           INTEGER PRIMARY KEY AUTOINCREMENT,
-                code         TEXT NOT NULL,
-                market       TEXT NOT NULL DEFAULT 'KR',
-                generated_at TEXT NOT NULL,
-                model        TEXT NOT NULL,
-                report       TEXT NOT NULL
-            );
-        """)
-
-
-_init_db()
+def _conn():
+    return connect(_DB, _create_tables)
 
 
 # ── 자문종목 CRUD ─────────────────────────────────────────────────────────────

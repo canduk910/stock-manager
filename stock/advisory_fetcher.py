@@ -7,11 +7,12 @@ from __future__ import annotations
 
 import json
 import math
-import os
 import time
 from typing import Optional
 
 import requests
+
+from config import KIS_APP_KEY, KIS_APP_SECRET, KIS_BASE_URL, OPENAI_API_KEY, OPENAI_MODEL
 
 
 # ── KIS 토큰 캐시 (모듈 수준, 분당 1회 제한 대응) ────────────────────────────
@@ -24,21 +25,17 @@ def _get_kis_token() -> str | None:
     if _kis_token_cache["token"] and now < _kis_token_cache["expires_at"]:
         return _kis_token_cache["token"]
 
-    app_key = os.getenv("KIS_APP_KEY")
-    app_secret = os.getenv("KIS_APP_SECRET")
-    base_url = os.getenv("KIS_BASE_URL") or "https://openapi.koreainvestment.com:9443"
-
-    if not app_key or not app_secret:
+    if not KIS_APP_KEY or not KIS_APP_SECRET:
         return None
 
     try:
         resp = requests.post(
-            f"{base_url}/oauth2/tokenP",
+            f"{KIS_BASE_URL}/oauth2/tokenP",
             headers={"content-type": "application/json"},
             data=json.dumps({
                 "grant_type": "client_credentials",
-                "appkey": app_key,
-                "appsecret": app_secret,
+                "appkey": KIS_APP_KEY,
+                "appsecret": KIS_APP_SECRET,
             }),
             timeout=10,
         )
@@ -63,13 +60,13 @@ def _fetch_15min_ohlcv_kr_yf(code: str) -> list[dict]:
     """yfinance 기반 국내 15분봉 (최대 60일치). .KS/.KQ suffix 사용."""
     try:
         from stock.market import _kr_yf_ticker_str
-        import yfinance as yf
+        from stock.yf_client import _ticker
 
         ticker_str = _kr_yf_ticker_str(code)
         if not ticker_str:
             return []
 
-        hist = yf.Ticker(ticker_str).history(period="60d", interval="15m")
+        hist = _ticker(ticker_str).history(period="60d", interval="15m")
         if hist is None or hist.empty:
             return []
 
@@ -103,11 +100,7 @@ def fetch_15min_ohlcv_kr(code: str) -> list[dict]:
     KIS 키 미설정 시 즉시 yfinance fallback.
     반환: [{time, open, high, low, close, volume}] 최근 300봉.
     """
-    app_key = os.getenv("KIS_APP_KEY")
-    app_secret = os.getenv("KIS_APP_SECRET")
-    base_url = os.getenv("KIS_BASE_URL") or "https://openapi.koreainvestment.com:9443"
-
-    if not app_key or not app_secret:
+    if not KIS_APP_KEY or not KIS_APP_SECRET:
         return _fetch_15min_ohlcv_kr_yf(code)
 
     try:
@@ -118,8 +111,8 @@ def fetch_15min_ohlcv_kr(code: str) -> list[dict]:
         headers = {
             "content-type": "application/json",
             "authorization": f"Bearer {token}",
-            "appkey": app_key,
-            "appsecret": app_secret,
+            "appkey": KIS_APP_KEY,
+            "appsecret": KIS_APP_SECRET,
             "tr_id": "FHKST03010200",
             "custtype": "P",
         }
@@ -136,7 +129,7 @@ def fetch_15min_ohlcv_kr(code: str) -> list[dict]:
             }
             try:
                 resp = requests.get(
-                    f"{base_url}/uapi/domestic-stock/v1/quotations/inquire-time-itemchartprice",
+                    f"{KIS_BASE_URL}/uapi/domestic-stock/v1/quotations/inquire-time-itemchartprice",
                     headers=headers,
                     params=params,
                     timeout=20,
@@ -216,8 +209,8 @@ def fetch_15min_ohlcv_kr(code: str) -> list[dict]:
 def fetch_15min_ohlcv_us(code: str) -> list[dict]:
     """yfinance 15분봉 (최대 60일치). 최근 300봉 반환."""
     try:
-        import yfinance as yf
-        t = yf.Ticker(code.upper())
+        from stock.yf_client import _ticker
+        t = _ticker(code.upper())
         hist = t.history(period="60d", interval="15m")
         if hist is None or hist.empty:
             return []
@@ -514,13 +507,13 @@ def _fetch_ohlcv_kr_yf(code: str, interval: str = "15m", period: str = "60d") ->
     """yfinance 기반 국내 OHLCV (interval/period 지정). .KS/.KQ suffix 사용."""
     try:
         from stock.market import _kr_yf_ticker_str
-        import yfinance as yf
+        from stock.yf_client import _ticker
 
         ticker_str = _kr_yf_ticker_str(code)
         if not ticker_str:
             return []
 
-        hist = yf.Ticker(ticker_str).history(period=period, interval=interval)
+        hist = _ticker(ticker_str).history(period=period, interval=interval)
         return _yf_hist_to_ohlcv_list(hist)
     except Exception:
         return []
@@ -529,8 +522,8 @@ def _fetch_ohlcv_kr_yf(code: str, interval: str = "15m", period: str = "60d") ->
 def _fetch_ohlcv_us_yf(code: str, interval: str = "15m", period: str = "60d") -> list[dict]:
     """yfinance 기반 해외 OHLCV (interval/period 지정)."""
     try:
-        import yfinance as yf
-        hist = yf.Ticker(code.upper()).history(period=period, interval=interval)
+        from stock.yf_client import _ticker
+        hist = _ticker(code.upper()).history(period=period, interval=interval)
         return _yf_hist_to_ohlcv_list(hist)
     except Exception:
         return []
@@ -581,13 +574,12 @@ def fetch_segments_kr(code: str, name: str) -> list[dict]:
     OPENAI_API_KEY 미설정 시 빈 리스트 반환.
     반환: [{segment, revenue_pct, note}] (note: "AI추정")
     """
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
+    if not OPENAI_API_KEY:
         return []
 
     try:
         from openai import OpenAI
-        client = OpenAI(api_key=api_key)
+        client = OpenAI(api_key=OPENAI_API_KEY)
 
         prompt = (
             f"{name}(종목코드: {code})의 주요 사업부문과 대략적인 매출 비중을 "
@@ -596,7 +588,7 @@ def fetch_segments_kr(code: str, name: str) -> list[dict]:
         )
 
         resp = client.chat.completions.create(
-            model=os.getenv("OPENAI_MODEL", "gpt-5-mini"),
+            model=OPENAI_MODEL,
             messages=[{"role": "user", "content": prompt}],
             max_completion_tokens=400,
             response_format={"type": "json_object"},

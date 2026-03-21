@@ -9,14 +9,14 @@ FastAPI lifespan에서 start() / stop() 호출.
 import asyncio
 import json
 import logging
-import os
 
 import requests  # approval_key / REST fallback (동기)
 import websockets
 from collections import defaultdict
 
+from config import KIS_APP_KEY, KIS_APP_SECRET, KIS_BASE_URL, FINNHUB_API_KEY
+
 KIS_WS_URL = "ws://ops.koreainvestment.com:21000"
-KIS_BASE_URL = os.getenv("KIS_BASE_URL", "https://openapi.koreainvestment.com:9443")
 
 logger = logging.getLogger(__name__)
 
@@ -31,15 +31,13 @@ def _get_rest_token_sync() -> str | None:
     global _rest_token
     if _rest_token:
         return _rest_token
-    app_key = os.getenv("KIS_APP_KEY")
-    app_secret = os.getenv("KIS_APP_SECRET")
-    if not app_key or not app_secret:
+    if not KIS_APP_KEY or not KIS_APP_SECRET:
         return None
     try:
         res = requests.post(
             f"{KIS_BASE_URL}/oauth2/tokenP",
             headers={"content-type": "application/json"},
-            json={"grant_type": "client_credentials", "appkey": app_key, "appsecret": app_secret},
+            json={"grant_type": "client_credentials", "appkey": KIS_APP_KEY, "appsecret": KIS_APP_SECRET},
             timeout=10,
         )
         _rest_token = res.json()["access_token"]
@@ -71,7 +69,7 @@ class KISQuoteManager:
     # ── lifecycle ──────────────────────────────────────────────────
 
     async def start(self):
-        if not (os.getenv("KIS_APP_KEY") and os.getenv("KIS_APP_SECRET")):
+        if not (KIS_APP_KEY and KIS_APP_SECRET):
             logger.warning("[QuoteService] KIS 키 미설정 — 실시간 호가 비활성화")
             return
         self._running = True
@@ -169,8 +167,8 @@ class KISQuoteManager:
             headers={"content-type": "application/json"},
             json={
                 "grant_type": "client_credentials",
-                "appkey": os.getenv("KIS_APP_KEY"),
-                "secretkey": os.getenv("KIS_APP_SECRET"),
+                "appkey": KIS_APP_KEY,
+                "secretkey": KIS_APP_SECRET,
             },
             timeout=10,
         )
@@ -274,9 +272,7 @@ class KISQuoteManager:
         logger.info("[QuoteService] REST fallback 폴링 종료")
 
     async def _fetch_rest_price(self, symbol: str) -> dict | None:
-        app_key = os.getenv("KIS_APP_KEY")
-        app_secret = os.getenv("KIS_APP_SECRET")
-        if not app_key or not app_secret:
+        if not KIS_APP_KEY or not KIS_APP_SECRET:
             return None
 
         loop = asyncio.get_event_loop()
@@ -288,8 +284,8 @@ class KISQuoteManager:
             headers = {
                 "content-type": "application/json",
                 "authorization": f"Bearer {token}",
-                "appkey": app_key,
-                "appsecret": app_secret,
+                "appkey": KIS_APP_KEY,
+                "appsecret": KIS_APP_SECRET,
                 "tr_id": "FHKST01010100",
                 "custtype": "P",
             }
@@ -492,9 +488,8 @@ class OverseasQuoteManager:
 
     async def start(self):
         self._running = True
-        api_key = os.getenv("FINNHUB_API_KEY")
-        if api_key:
-            self._finnhub = FinnhubWSClient(api_key, self._on_finnhub_trade)
+        if FINNHUB_API_KEY:
+            self._finnhub = FinnhubWSClient(FINNHUB_API_KEY, self._on_finnhub_trade)
             await self._finnhub.start()
             logger.info("[OverseasQuote] Finnhub WS 활성화 (최대 %d 심볼)", FinnhubWSClient.MAX_SYMBOLS)
         else:
@@ -552,11 +547,11 @@ class OverseasQuoteManager:
 
     async def _prefetch_and_subscribe(self, symbol: str):
         """Finnhub 구독 전 yfinance로 전일 종가 + 초기 시세 확보 후 WS 구독."""
-        import yfinance as yf
+        from stock.yf_client import _ticker
         loop = asyncio.get_event_loop()
         try:
             def _fetch():
-                fi = yf.Ticker(symbol).fast_info
+                fi = _ticker(symbol).fast_info
                 # 비개장일에 last_price가 None인 경우 previous_close로 fallback
                 last = fi.last_price or fi.previous_close
                 return fi.previous_close, last
@@ -605,12 +600,12 @@ class OverseasQuoteManager:
 
     async def _poll_loop(self, symbol: str):
         """심볼별 yfinance 2초 폴링 태스크 (Finnhub 미설정 또는 한도 초과 심볼)."""
-        import yfinance as yf
+        from stock.yf_client import _ticker
         loop = asyncio.get_event_loop()
         while self._running and symbol in self._subscribers:
             try:
                 def _fetch():
-                    fi = yf.Ticker(symbol).fast_info
+                    fi = _ticker(symbol).fast_info
                     # 비개장일에 last_price가 None인 경우 previous_close로 fallback
                     p = fi.last_price or fi.previous_close
                     if not p:

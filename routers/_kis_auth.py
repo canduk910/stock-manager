@@ -5,12 +5,13 @@ balance.py, order.py 등에서 공용으로 사용한다.
 """
 
 import json
-import os
 
 import requests
 from fastapi import HTTPException
 
-BASE_URL = os.getenv("KIS_BASE_URL") or "https://openapi.koreainvestment.com:9443"
+from config import KIS_APP_KEY, KIS_APP_SECRET, KIS_ACNT_NO, KIS_ACNT_PRDT_CD, KIS_BASE_URL
+
+BASE_URL = KIS_BASE_URL
 
 # 인메모리 토큰 캐시 (재시작 시 재발급)
 _access_token: str | None = None
@@ -18,18 +19,13 @@ _access_token: str | None = None
 
 def get_kis_credentials() -> tuple[str, str, str, str]:
     """KIS 환경변수를 읽어 반환한다. 누락 시 HTTPException(503)."""
-    app_key = os.getenv("KIS_APP_KEY")
-    app_secret = os.getenv("KIS_APP_SECRET")
-    acnt_no = os.getenv("KIS_ACNT_NO")
-    acnt_prdt_cd = os.getenv("KIS_ACNT_PRDT_CD")
-
-    if not all([app_key, app_secret, acnt_no, acnt_prdt_cd]):
+    if not all([KIS_APP_KEY, KIS_APP_SECRET, KIS_ACNT_NO, KIS_ACNT_PRDT_CD]):
         missing = [
             name for name, val in [
-                ("KIS_APP_KEY", app_key),
-                ("KIS_APP_SECRET", app_secret),
-                ("KIS_ACNT_NO", acnt_no),
-                ("KIS_ACNT_PRDT_CD", acnt_prdt_cd),
+                ("KIS_APP_KEY", KIS_APP_KEY),
+                ("KIS_APP_SECRET", KIS_APP_SECRET),
+                ("KIS_ACNT_NO", KIS_ACNT_NO),
+                ("KIS_ACNT_PRDT_CD", KIS_ACNT_PRDT_CD),
             ] if not val
         ]
         raise HTTPException(
@@ -37,7 +33,7 @@ def get_kis_credentials() -> tuple[str, str, str, str]:
             detail=f"KIS API 키가 설정되지 않았습니다. 누락된 환경변수: {', '.join(missing)}",
         )
 
-    return app_key, app_secret, acnt_no, acnt_prdt_cd
+    return KIS_APP_KEY, KIS_APP_SECRET, KIS_ACNT_NO, KIS_ACNT_PRDT_CD
 
 
 def get_access_token() -> str:
@@ -46,9 +42,7 @@ def get_access_token() -> str:
     if _access_token:
         return _access_token
 
-    app_key = os.getenv("KIS_APP_KEY")
-    app_secret = os.getenv("KIS_APP_SECRET")
-    if not app_key or not app_secret:
+    if not KIS_APP_KEY or not KIS_APP_SECRET:
         raise HTTPException(
             status_code=503,
             detail="KIS API 키가 설정되지 않았습니다. .env에 KIS_APP_KEY, KIS_APP_SECRET를 설정해주세요.",
@@ -57,8 +51,8 @@ def get_access_token() -> str:
     url = f"{BASE_URL}/oauth2/tokenP"
     body = {
         "grant_type": "client_credentials",
-        "appkey": app_key,
-        "appsecret": app_secret,
+        "appkey": KIS_APP_KEY,
+        "appsecret": KIS_APP_SECRET,
     }
     try:
         res = requests.post(url, headers={"content-type": "application/json"}, data=json.dumps(body), timeout=10)
@@ -80,13 +74,11 @@ def clear_token_cache():
 
 def issue_hashkey(data: dict) -> str:
     """POST 요청 데이터에 대한 hashkey를 발급한다."""
-    app_key = os.getenv("KIS_APP_KEY")
-    app_secret = os.getenv("KIS_APP_SECRET")
     url = f"{BASE_URL}/uapi/hashkey"
     headers = {
         "content-type": "application/json",
-        "appKey": app_key,
-        "appSecret": app_secret,
+        "appKey": KIS_APP_KEY,
+        "appSecret": KIS_APP_SECRET,
         "User-Agent": "Mozilla/5.0",
     }
     resp = requests.post(url, headers=headers, data=json.dumps(data), timeout=10)

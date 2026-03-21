@@ -8,7 +8,7 @@ import json
 import os
 
 import requests
-from fastapi import HTTPException
+from services.exceptions import ExternalAPIError, ServiceError
 
 from routers._kis_auth import (
     BASE_URL,
@@ -112,13 +112,13 @@ def _place_domestic_order(
     try:
         res = requests.post(url, headers=headers, data=json.dumps(body), timeout=10)
     except requests.RequestException as e:
-        raise HTTPException(status_code=502, detail=f"KIS 주문 요청 실패: {e}")
+        raise ExternalAPIError(f"KIS 주문 요청 실패: {e}")
 
     data = res.json()
     if data.get("rt_cd") != "0":
         if "토큰" in data.get("msg1", "") or "Token" in data.get("msg1", ""):
             clear_token_cache()
-        raise HTTPException(status_code=400, detail=f"KIS 주문 오류: {data.get('msg1', '알 수 없는 오류')}")
+        raise ServiceError(f"KIS 주문 오류: {data.get('msg1', '알 수 없는 오류')}")
 
     output = data.get("output", {})
     order_no = output.get("ODNO", "")
@@ -178,13 +178,13 @@ def _place_overseas_order(
     try:
         res = requests.post(url, headers=headers, data=json.dumps(body), timeout=10)
     except requests.RequestException as e:
-        raise HTTPException(status_code=502, detail=f"KIS 해외주문 요청 실패: {e}")
+        raise ExternalAPIError(f"KIS 해외주문 요청 실패: {e}")
 
     data = res.json()
     if data.get("rt_cd") != "0":
         if "토큰" in data.get("msg1", "") or "Token" in data.get("msg1", ""):
             clear_token_cache()
-        raise HTTPException(status_code=400, detail=f"KIS 해외주문 오류: {data.get('msg1', '알 수 없는 오류')}")
+        raise ServiceError(f"KIS 해외주문 오류: {data.get('msg1', '알 수 없는 오류')}")
 
     output = data.get("output", {})
     order_no = output.get("ODNO", "")
@@ -234,7 +234,7 @@ def _get_domestic_buyable(token, app_key, app_secret, acnt_no, acnt_prdt_cd, sym
         res = requests.get(url, headers=headers, params=params, timeout=10)
         data = res.json()
         if data.get("rt_cd") != "0":
-            raise HTTPException(status_code=400, detail=f"매수가능조회 오류: {data.get('msg1')}")
+            raise ServiceError(f"매수가능조회 오류: {data.get('msg1')}")
         out = data.get("output", {})
         return {
             "buyable_amount": out.get("ord_psbl_cash", "0"),
@@ -245,7 +245,7 @@ def _get_domestic_buyable(token, app_key, app_secret, acnt_no, acnt_prdt_cd, sym
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"매수가능조회 요청 실패: {e}")
+        raise ExternalAPIError(f"매수가능조회 요청 실패: {e}")
 
 
 def _get_overseas_buyable(token, app_key, app_secret, acnt_no, acnt_prdt_cd, symbol, price, order_type) -> dict:
@@ -262,7 +262,7 @@ def _get_overseas_buyable(token, app_key, app_secret, acnt_no, acnt_prdt_cd, sym
         res = requests.get(url, headers=headers, params=params, timeout=10)
         data = res.json()
         if data.get("rt_cd") != "0":
-            raise HTTPException(status_code=400, detail=f"해외 매수가능조회 오류: {data.get('msg1')}")
+            raise ServiceError(f"해외 매수가능조회 오류: {data.get('msg1')}")
         out = data.get("output", {})
         return {
             "buyable_amount": out.get("frcr_ord_psbl_amt1", "0"),
@@ -273,7 +273,7 @@ def _get_overseas_buyable(token, app_key, app_secret, acnt_no, acnt_prdt_cd, sym
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"해외 매수가능조회 요청 실패: {e}")
+        raise ExternalAPIError(f"해외 매수가능조회 요청 실패: {e}")
 
 
 def get_open_orders(market: str = "KR") -> list[dict]:
@@ -305,7 +305,7 @@ def _get_domestic_open_orders(token, app_key, app_secret, acnt_no, acnt_prdt_cd)
             res = requests.get(url, headers=headers, params=params, timeout=10)
             data = res.json()
         except Exception as e:
-            raise HTTPException(status_code=502, detail=f"미체결조회 요청 실패: {e}")
+            raise ExternalAPIError(f"미체결조회 요청 실패: {e}")
 
         if data.get("rt_cd") != "0":
             break
@@ -365,7 +365,7 @@ def _get_overseas_open_orders(token, app_key, app_secret, acnt_no, acnt_prdt_cd)
             res = requests.get(url, headers=headers, params=params, timeout=10)
             data = res.json()
         except Exception as e:
-            raise HTTPException(status_code=502, detail=f"해외 미체결조회 요청 실패: {e}")
+            raise ExternalAPIError(f"해외 미체결조회 요청 실패: {e}")
 
         if data.get("rt_cd") != "0":
             break
@@ -461,10 +461,10 @@ def _modify_domestic_order(
         res = requests.post(url, headers=headers, data=json.dumps(body), timeout=10)
         data = res.json()
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"정정 요청 실패: {e}")
+        raise ExternalAPIError(f"정정 요청 실패: {e}")
 
     if data.get("rt_cd") != "0":
-        raise HTTPException(status_code=400, detail=f"정정 오류: {data.get('msg1')}")
+        raise ServiceError(f"정정 오류: {data.get('msg1')}")
     return {"success": True, "data": data.get("output", {})}
 
 
@@ -495,10 +495,10 @@ def _modify_overseas_order(
         res = requests.post(url, headers=headers, data=json.dumps(body), timeout=10)
         data = res.json()
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"해외 정정 요청 실패: {e}")
+        raise ExternalAPIError(f"해외 정정 요청 실패: {e}")
 
     if data.get("rt_cd") != "0":
-        raise HTTPException(status_code=400, detail=f"해외 정정 오류: {data.get('msg1')}")
+        raise ServiceError(f"해외 정정 오류: {data.get('msg1')}")
     return {"success": True, "data": data.get("output", {})}
 
 
@@ -551,10 +551,10 @@ def _cancel_domestic_order(
         res = requests.post(url, headers=headers, data=json.dumps(body), timeout=10)
         data = res.json()
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"취소 요청 실패: {e}")
+        raise ExternalAPIError(f"취소 요청 실패: {e}")
 
     if data.get("rt_cd") != "0":
-        raise HTTPException(status_code=400, detail=f"취소 오류: {data.get('msg1')}")
+        raise ServiceError(f"취소 오류: {data.get('msg1')}")
     return {"success": True, "data": data.get("output", {})}
 
 
@@ -585,10 +585,10 @@ def _cancel_overseas_order(
         res = requests.post(url, headers=headers, data=json.dumps(body), timeout=10)
         data = res.json()
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"해외 취소 요청 실패: {e}")
+        raise ExternalAPIError(f"해외 취소 요청 실패: {e}")
 
     if data.get("rt_cd") != "0":
-        raise HTTPException(status_code=400, detail=f"해외 취소 오류: {data.get('msg1')}")
+        raise ServiceError(f"해외 취소 오류: {data.get('msg1')}")
     return {"success": True, "data": data.get("output", {})}
 
 
@@ -629,7 +629,7 @@ def _get_domestic_executions(token, app_key, app_secret, acnt_no, acnt_prdt_cd) 
             res = requests.get(url, headers=headers, params=params, timeout=10)
             data = res.json()
         except Exception as e:
-            raise HTTPException(status_code=502, detail=f"체결내역 조회 실패: {e}")
+            raise ExternalAPIError(f"체결내역 조회 실패: {e}")
 
         if data.get("rt_cd") != "0":
             break
@@ -687,7 +687,7 @@ def _get_overseas_executions(token, app_key, app_secret, acnt_no, acnt_prdt_cd) 
             res = requests.get(url, headers=headers, params=params, timeout=10)
             data = res.json()
         except Exception as e:
-            raise HTTPException(status_code=502, detail=f"해외 체결내역 조회 실패: {e}")
+            raise ExternalAPIError(f"해외 체결내역 조회 실패: {e}")
 
         if data.get("rt_cd") != "0":
             break

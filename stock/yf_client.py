@@ -14,9 +14,15 @@ from stock.market import _is_us_trading_hours
 
 
 def _ticker(code: str):
-    """yfinance Ticker 객체 반환."""
+    """yfinance Ticker 객체 반환 (LRU 캐시로 중복 생성 방지)."""
     import yfinance as yf
     return yf.Ticker(code.upper())
+
+
+# lru_cache를 _ticker 자체에 적용하면 Ticker 내부 상태가 stale될 수 있으므로
+# 별도 캐시 dict + TTL 없이 maxsize 제한만 적용
+from functools import lru_cache as _lru_cache
+_ticker = _lru_cache(maxsize=256)(_ticker)
 
 
 def _safe(v) -> Optional[float]:

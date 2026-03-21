@@ -61,14 +61,14 @@ def _kr_yf_ticker_str(code: str) -> Optional[str]:
     if cached is not None:
         return cached or None  # 빈 문자열 '' → None
 
-    import yfinance as yf
+    from .yf_client import _ticker
 
     best: Optional[str] = None
     best_score = -1  # 0=가격만, 1=가격+시총, 2=가격+시총+shares
 
     for suffix in [".KS", ".KQ"]:
         try:
-            fi = yf.Ticker(f"{code}{suffix}").fast_info
+            fi = _ticker(f"{code}{suffix}").fast_info
             price = fi.last_price
             if not price or price <= 0:
                 continue
@@ -111,14 +111,14 @@ def fetch_price(code: str, refresh: bool = False) -> Optional[dict]:
         if cached is not None:
             return cached
 
-    import yfinance as yf
+    from .yf_client import _ticker
 
     ticker_str = _kr_yf_ticker_str(code)
     if not ticker_str:
         return None
 
     try:
-        fi = yf.Ticker(ticker_str).fast_info
+        fi = _ticker(ticker_str).fast_info
 
         close = fi.last_price
         prev_close = fi.previous_close
@@ -162,7 +162,7 @@ def fetch_detail(code: str, refresh: bool = False) -> Optional[dict]:
         if cached is not None:
             return cached
 
-    import yfinance as yf
+    from .yf_client import _ticker
 
     ticker_str = _kr_yf_ticker_str(code)
     if not ticker_str:
@@ -173,7 +173,7 @@ def fetch_detail(code: str, refresh: bool = False) -> Optional[dict]:
         return None
 
     try:
-        t = yf.Ticker(ticker_str)
+        t = _ticker(ticker_str)
         fi = t.fast_info
         info = t.info
 
@@ -286,7 +286,7 @@ def fetch_market_metrics(code: str) -> dict:
     if cached is not None:
         return cached
 
-    import yfinance as yf
+    from .yf_client import _ticker
 
     ticker_str = _kr_yf_ticker_str(code)
     result: dict = {
@@ -304,7 +304,7 @@ def fetch_market_metrics(code: str) -> dict:
         return result
 
     try:
-        t = yf.Ticker(ticker_str)
+        t = _ticker(ticker_str)
         fi = t.fast_info
         info = t.info
 
@@ -357,7 +357,7 @@ def fetch_period_returns(code: str) -> dict:
     if cached is not None:
         return cached
 
-    import yfinance as yf
+    from .yf_client import _ticker
 
     ticker_str = _kr_yf_ticker_str(code)
     empty = {
@@ -371,7 +371,7 @@ def fetch_period_returns(code: str) -> dict:
         return empty
 
     try:
-        hist = yf.Ticker(ticker_str).history(period="14mo")
+        hist = _ticker(ticker_str).history(period="14mo")
     except Exception:
         return empty
 

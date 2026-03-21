@@ -1,43 +1,7 @@
 import { useState, useEffect } from 'react'
-import { addToWatchlist, fetchWatchlist } from '../../api/watchlist'
+import { fetchWatchlist } from '../../api/watchlist'
 import DataTable from '../common/DataTable'
-
-function WatchlistButton({ code, alreadyAdded = false }) {
-  const [status, setStatus] = useState(alreadyAdded ? 'exists' : 'idle')
-  // idle | loading | done | error | exists
-
-  const handleAdd = async () => {
-    if (status !== 'idle' && status !== 'error' || !code) return
-    setStatus('loading')
-    try {
-      await addToWatchlist(code, '', 'KR')
-      setStatus('done')
-    } catch {
-      setStatus('error')
-      setTimeout(() => setStatus('idle'), 2000)
-    }
-  }
-
-  if (status === 'exists')
-    return <span className="text-green-600 text-xs font-medium">★ 관심종목</span>
-  if (status === 'done')
-    return <span className="text-green-600 text-xs font-medium">✓ 추가됨</span>
-  if (status === 'loading')
-    return <span className="text-gray-400 text-xs">추가 중...</span>
-
-  return (
-    <button
-      onClick={handleAdd}
-      className={`text-xs px-2 py-0.5 rounded border transition-colors ${
-        status === 'error'
-          ? 'border-red-300 text-red-500'
-          : 'border-gray-300 text-gray-500 hover:border-blue-500 hover:text-blue-600 hover:bg-blue-50'
-      }`}
-    >
-      {status === 'error' ? '실패' : '+ 관심'}
-    </button>
-  )
-}
+import WatchlistButton from '../common/WatchlistButton'
 
 /** 시가총액 억/조 포맷팅 */
 function fmtMktcap(val) {

@@ -3,28 +3,30 @@ import os
 import threading
 import uvicorn
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
 
-# .env 파일 로드
+# .env 파일 로드 (config.py 임포트 전에 호출해야 환경변수 반영)
 load_dotenv()
+
+from config import KIS_APP_KEY, KIS_APP_SECRET, KIS_ACNT_NO, KIS_ACNT_PRDT_CD, FINNHUB_API_KEY
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     missing = [name for name, val in (
-        ("KIS_APP_KEY", os.getenv("KIS_APP_KEY")),
-        ("KIS_APP_SECRET", os.getenv("KIS_APP_SECRET")),
-        ("KIS_ACNT_NO", os.getenv("KIS_ACNT_NO")),
-        ("KIS_ACNT_PRDT_CD", os.getenv("KIS_ACNT_PRDT_CD")),
+        ("KIS_APP_KEY", KIS_APP_KEY),
+        ("KIS_APP_SECRET", KIS_APP_SECRET),
+        ("KIS_ACNT_NO", KIS_ACNT_NO),
+        ("KIS_ACNT_PRDT_CD", KIS_ACNT_PRDT_CD),
     ) if not val]
     if missing:
         print(f"[경고] KIS 환경변수 누락: {', '.join(missing)} — 잔고/주문 비활성화")
 
-    if not os.getenv("FINNHUB_API_KEY"):
+    if not FINNHUB_API_KEY:
         print("[정보] FINNHUB_API_KEY 미설정 — 해외주식 시세 yfinance 폴링 모드 (15분 지연)")
 
     # 종목 심볼맵 pre-warm (Docker 재시작 후 캐시 초기화 → 첫 검색 지연 방지)
@@ -64,6 +66,13 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Stock Manager API", lifespan=lifespan)
+
+# ServiceError → HTTP 응답 변환 (서비스 레이어에서 HTTPException 직접 사용 제거)
+from services.exceptions import ServiceError  # noqa: E402
+
+@app.exception_handler(ServiceError)
+async def service_error_handler(request: Request, exc: ServiceError):
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.message})
 
 # CORS: 프론트엔드 개발 서버 허용
 app.add_middleware(

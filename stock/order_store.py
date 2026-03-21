@@ -1,79 +1,62 @@
 """주문/예약주문 저장소 (~/stock-watchlist/orders.db — SQLite)."""
 
-import json
-import sqlite3
-from contextlib import contextmanager
 from datetime import datetime
-from pathlib import Path
 from typing import Optional
 
-_WATCHLIST_DIR = Path.home() / "stock-watchlist"
-_DB_PATH = _WATCHLIST_DIR / "orders.db"
+from .db_base import connect, row_to_dict
+
+_DB = "orders.db"
 
 
-def _init_db() -> None:
-    _WATCHLIST_DIR.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(_DB_PATH) as conn:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS orders (
-                id              INTEGER PRIMARY KEY AUTOINCREMENT,
-                order_no        TEXT,
-                org_no          TEXT,
-                symbol          TEXT NOT NULL,
-                symbol_name     TEXT,
-                market          TEXT NOT NULL DEFAULT 'KR',
-                side            TEXT NOT NULL,
-                order_type      TEXT NOT NULL,
-                price           REAL NOT NULL,
-                quantity        INTEGER NOT NULL,
-                filled_price    REAL,
-                filled_quantity INTEGER DEFAULT 0,
-                status          TEXT NOT NULL DEFAULT 'PLACED',
-                currency        TEXT DEFAULT 'KRW',
-                memo            TEXT DEFAULT '',
-                placed_at       TEXT NOT NULL,
-                filled_at       TEXT,
-                updated_at      TEXT NOT NULL,
-                kis_response    TEXT
-            )
-        """)
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS reservations (
-                id              INTEGER PRIMARY KEY AUTOINCREMENT,
-                symbol          TEXT NOT NULL,
-                symbol_name     TEXT,
-                market          TEXT NOT NULL DEFAULT 'KR',
-                side            TEXT NOT NULL,
-                order_type      TEXT NOT NULL,
-                price           REAL NOT NULL,
-                quantity        INTEGER NOT NULL,
-                condition_type  TEXT NOT NULL,
-                condition_value TEXT NOT NULL,
-                status          TEXT NOT NULL DEFAULT 'WAITING',
-                result_order_no TEXT,
-                memo            TEXT DEFAULT '',
-                created_at      TEXT NOT NULL,
-                triggered_at    TEXT,
-                updated_at      TEXT NOT NULL
-            )
-        """)
-        conn.commit()
+def _create_tables(conn):
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS orders (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            order_no        TEXT,
+            org_no          TEXT,
+            symbol          TEXT NOT NULL,
+            symbol_name     TEXT,
+            market          TEXT NOT NULL DEFAULT 'KR',
+            side            TEXT NOT NULL,
+            order_type      TEXT NOT NULL,
+            price           REAL NOT NULL,
+            quantity        INTEGER NOT NULL,
+            filled_price    REAL,
+            filled_quantity INTEGER DEFAULT 0,
+            status          TEXT NOT NULL DEFAULT 'PLACED',
+            currency        TEXT DEFAULT 'KRW',
+            memo            TEXT DEFAULT '',
+            placed_at       TEXT NOT NULL,
+            filled_at       TEXT,
+            updated_at      TEXT NOT NULL,
+            kis_response    TEXT
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS reservations (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            symbol          TEXT NOT NULL,
+            symbol_name     TEXT,
+            market          TEXT NOT NULL DEFAULT 'KR',
+            side            TEXT NOT NULL,
+            order_type      TEXT NOT NULL,
+            price           REAL NOT NULL,
+            quantity        INTEGER NOT NULL,
+            condition_type  TEXT NOT NULL,
+            condition_value TEXT NOT NULL,
+            status          TEXT NOT NULL DEFAULT 'WAITING',
+            result_order_no TEXT,
+            memo            TEXT DEFAULT '',
+            created_at      TEXT NOT NULL,
+            triggered_at    TEXT,
+            updated_at      TEXT NOT NULL
+        )
+    """)
+    conn.commit()
 
 
-@contextmanager
 def _conn():
-    _init_db()
-    conn = sqlite3.connect(_DB_PATH)
-    conn.row_factory = sqlite3.Row
-    try:
-        yield conn
-        conn.commit()
-    finally:
-        conn.close()
-
-
-def _row_to_dict(row: sqlite3.Row) -> dict:
-    return {k: row[k] for k in row.keys()}
+    return connect(_DB, _create_tables)
 
 
 def _now() -> str:
@@ -107,7 +90,7 @@ def insert_order(
              price, quantity, currency, memo, now, now, kis_response),
         )
         row = conn.execute("SELECT * FROM orders WHERE id = ?", (cursor.lastrowid,)).fetchone()
-        return _row_to_dict(row)
+        return row_to_dict(row)
 
 
 def update_order_status(
@@ -146,13 +129,13 @@ def update_order_status(
         values.append(order_id)
         conn.execute(f"UPDATE orders SET {', '.join(fields)} WHERE id = ?", values)
         row = conn.execute("SELECT * FROM orders WHERE id = ?", (order_id,)).fetchone()
-        return _row_to_dict(row) if row else None
+        return row_to_dict(row) if row else None
 
 
 def get_order(order_id: int) -> Optional[dict]:
     with _conn() as conn:
         row = conn.execute("SELECT * FROM orders WHERE id = ?", (order_id,)).fetchone()
-        return _row_to_dict(row) if row else None
+        return row_to_dict(row) if row else None
 
 
 def get_order_by_order_no(order_no: str, market: str = "KR") -> Optional[dict]:
@@ -161,7 +144,7 @@ def get_order_by_order_no(order_no: str, market: str = "KR") -> Optional[dict]:
             "SELECT * FROM orders WHERE order_no = ? AND market = ? ORDER BY id DESC LIMIT 1",
             (order_no, market),
         ).fetchone()
-        return _row_to_dict(row) if row else None
+        return row_to_dict(row) if row else None
 
 
 def list_orders(
@@ -196,7 +179,7 @@ def list_orders(
         rows = conn.execute(
             f"SELECT * FROM orders {where} ORDER BY id DESC LIMIT ?", values
         ).fetchall()
-        return [_row_to_dict(r) for r in rows]
+        return [row_to_dict(r) for r in rows]
 
 
 def list_active_orders() -> list[dict]:
@@ -205,7 +188,7 @@ def list_active_orders() -> list[dict]:
         rows = conn.execute(
             "SELECT * FROM orders WHERE status IN ('PLACED', 'PARTIAL') ORDER BY id DESC"
         ).fetchall()
-        return [_row_to_dict(r) for r in rows]
+        return [row_to_dict(r) for r in rows]
 
 
 # ── 예약주문 CRUD ─────────────────────────────────────────────────────────────
@@ -233,7 +216,7 @@ def insert_reservation(
              condition_type, condition_value, memo, now, now),
         )
         row = conn.execute("SELECT * FROM reservations WHERE id = ?", (cursor.lastrowid,)).fetchone()
-        return _row_to_dict(row)
+        return row_to_dict(row)
 
 
 def update_reservation_status(
@@ -254,7 +237,7 @@ def update_reservation_status(
         values.append(res_id)
         conn.execute(f"UPDATE reservations SET {', '.join(fields)} WHERE id = ?", values)
         row = conn.execute("SELECT * FROM reservations WHERE id = ?", (res_id,)).fetchone()
-        return _row_to_dict(row) if row else None
+        return row_to_dict(row) if row else None
 
 
 def list_reservations(status: str = None) -> list[dict]:
@@ -265,13 +248,13 @@ def list_reservations(status: str = None) -> list[dict]:
             ).fetchall()
         else:
             rows = conn.execute("SELECT * FROM reservations ORDER BY id DESC").fetchall()
-        return [_row_to_dict(r) for r in rows]
+        return [row_to_dict(r) for r in rows]
 
 
 def get_reservation(res_id: int) -> Optional[dict]:
     with _conn() as conn:
         row = conn.execute("SELECT * FROM reservations WHERE id = ?", (res_id,)).fetchone()
-        return _row_to_dict(row) if row else None
+        return row_to_dict(row) if row else None
 
 
 def delete_reservation(res_id: int) -> bool:

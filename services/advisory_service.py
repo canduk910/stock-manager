@@ -6,13 +6,15 @@
 from __future__ import annotations
 
 import json
-import os
 from typing import Optional
 
-from fastapi import HTTPException
+from config import OPENAI_API_KEY, OPENAI_MODEL
 
 from stock import advisory_store, advisory_fetcher
 from stock.utils import is_domestic
+from services.exceptions import (
+    ConfigError, ExternalAPIError, NotFoundError, PaymentRequiredError,
+)
 
 
 # ── 공개 API ──────────────────────────────────────────────────────────────────
@@ -36,29 +38,22 @@ def generate_ai_report(code: str, market: str, name: str) -> dict:
     OPENAI_API_KEY 미설정 시 HTTPException(503).
     캐시 없을 시 HTTPException(404).
     """
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        raise HTTPException(
-            status_code=503,
-            detail="OPENAI_API_KEY가 설정되지 않았습니다.",
-        )
+    if not OPENAI_API_KEY:
+        raise ConfigError("OPENAI_API_KEY가 설정되지 않았습니다.")
 
     cache = advisory_store.get_cache(code, market)
     if not cache:
-        raise HTTPException(
-            status_code=404,
-            detail="분석 데이터가 없습니다. 먼저 새로고침을 해주세요.",
-        )
+        raise NotFoundError("분석 데이터가 없습니다. 먼저 새로고침을 해주세요.")
 
     fundamental = cache.get("fundamental") or {}
     technical = cache.get("technical") or {}
 
-    model = os.getenv("OPENAI_MODEL", "gpt-5-mini")
+    model = OPENAI_MODEL
     prompt = _build_prompt(code, market, name, fundamental, technical)
 
     try:
         from openai import OpenAI
-        client = OpenAI(api_key=api_key)
+        client = OpenAI(api_key=OPENAI_API_KEY)
         resp = client.chat.completions.create(
             model=model,
             messages=[
@@ -77,16 +72,15 @@ def generate_ai_report(code: str, market: str, name: str) -> dict:
         )
         content = resp.choices[0].message.content or "{}"
         report = _parse_report(content)
-    except HTTPException:
+    except (ConfigError, NotFoundError, PaymentRequiredError, ExternalAPIError):
         raise
     except Exception as e:
         err_str = str(e)
         if "insufficient_quota" in err_str or "429" in err_str:
-            raise HTTPException(
-                status_code=402,
-                detail="OpenAI API 크레딧이 부족합니다. platform.openai.com에서 결제 정보를 확인해주세요.",
+            raise PaymentRequiredError(
+                "OpenAI API 크레딧이 부족합니다. platform.openai.com에서 결제 정보를 확인해주세요.",
             )
-        raise HTTPException(status_code=502, detail=f"OpenAI 호출 실패: {err_str}")
+        raise ExternalAPIError(f"OpenAI 호출 실패: {err_str}")
 
     report_id = advisory_store.save_report(code, market, model, report)
     return advisory_store.get_latest_report(code, market) or {}

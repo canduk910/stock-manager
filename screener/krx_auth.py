@@ -11,8 +11,9 @@ pykrx 내부 HTTP 세션을 인증된 세션으로 교체하는 우회 방법을
 from __future__ import annotations
 
 import logging
-import os
 import time
+
+from config import KRX_ID, KRX_PASSWORD
 from typing import Optional
 
 import requests
@@ -99,17 +100,14 @@ def ensure_krx_session() -> bool:
     """
     global _session_ok, _last_login_at
 
-    login_id = os.getenv("KRX_ID")
-    login_pw = os.getenv("KRX_PASSWORD")
-
-    if not login_id or not login_pw:
+    if not KRX_ID or not KRX_PASSWORD:
         return False  # 환경변수 미설정 → 비인증 상태 (정상적인 미설정)
 
     now = time.time()
     if _session_ok and (now - _last_login_at) < _SESSION_TTL:
         return True   # 세션 유효
 
-    ok, msg = _do_login(login_id, login_pw)
+    ok, msg = _do_login(KRX_ID, KRX_PASSWORD)
     if ok:
         _session_ok = True
         _last_login_at = now
@@ -123,4 +121,4 @@ def ensure_krx_session() -> bool:
 
 def is_krx_configured() -> bool:
     """KRX 환경변수가 설정되어 있는지 여부."""
-    return bool(os.getenv("KRX_ID") and os.getenv("KRX_PASSWORD"))
+    return bool(KRX_ID and KRX_PASSWORD)

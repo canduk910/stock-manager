@@ -19,13 +19,13 @@ def _fetch_hi_lo_info(code: str) -> Optional[dict]:
     - 3개월 평균 거래량 0 → 매매정지/거래정지 종목 제외
     - 연간 변동폭(year_high/year_low) < 3% → 사실상 정지 종목 제외
     """
-    import yfinance as yf
+    from .yf_client import _ticker
 
     ticker_str = _kr_yf_ticker_str(code)
     if not ticker_str:
         return None
     try:
-        t = yf.Ticker(ticker_str)
+        t = _ticker(ticker_str)
         fi = t.fast_info
         price = fi.last_price
         if not price or price <= 0:
@@ -166,7 +166,7 @@ def fetch_sparkline(code: str, market: str = "KR") -> list[dict]:
     if cached is not None:
         return cached
 
-    import yfinance as yf
+    from .yf_client import _ticker
 
     if market == "KR":
         ticker_str = _kr_yf_ticker_str(code)
@@ -176,7 +176,7 @@ def fetch_sparkline(code: str, market: str = "KR") -> list[dict]:
         ticker_str = code.upper()
 
     try:
-        hist = yf.Ticker(ticker_str).history(period="1y", interval="1wk")
+        hist = _ticker(ticker_str).history(period="1y", interval="1wk")
         if hist is None or hist.empty:
             return []
         # tz-aware → tz-naive
