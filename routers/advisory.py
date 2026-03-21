@@ -159,6 +159,21 @@ def get_ohlcv(
     return {**result, "interval": interval, "period": period}
 
 
+@router.get("/{code}/reports")
+def get_report_history(code: str, market: str = Query("KR"), limit: int = Query(20)):
+    """AI 리포트 히스토리 목록 (최신순, 본문 제외)."""
+    return advisory_store.get_report_history(code.upper(), market.upper(), limit)
+
+
+@router.get("/{code}/reports/{report_id}")
+def get_report_by_id(code: str, report_id: int, market: str = Query("KR")):
+    """특정 ID의 AI 리포트 조회."""
+    report = advisory_store.get_report_by_id(report_id)
+    if not report or report["code"] != code.upper():
+        raise HTTPException(status_code=404, detail="리포트를 찾을 수 없습니다.")
+    return report
+
+
 @router.get("/{code}/report")
 def get_report(code: str, market: str = Query("KR")):
     """최신 AI 리포트 조회."""

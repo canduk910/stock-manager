@@ -60,7 +60,7 @@ export default function DetailPage() {
   const { data, loading, error, load } = useDetailReport()
 
   const { data: advData, loading: advLoading, error: advError, load: loadAdvData, refresh: refreshAdvData } = useAdvisoryData()
-  const { report, loading: reportLoading, error: reportError, load: loadReport, generate } = useAdvisoryReport()
+  const { report, history: reportHistory, loading: reportLoading, error: reportError, load: loadReport, generate, loadById: loadReportById } = useAdvisoryReport()
 
   // advisory 데이터 lazy load: 종합리포트 탭 + cagr 외 서브탭 최초 진입 시
   const advLoadedRef = useState(false)
@@ -238,9 +238,11 @@ export default function DetailPage() {
                 {subTab === 'ai' && (
                   <AIReportPanel
                     report={report}
+                    history={reportHistory}
                     loading={reportLoading}
                     error={reportError}
                     onGenerate={handleGenerate}
+                    onSelectHistory={(id) => loadReportById(symbol, id, market)}
                   />
                 )}
               </div>

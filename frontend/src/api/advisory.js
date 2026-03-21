@@ -35,6 +35,14 @@ export const generateReport = (code, market = 'KR') =>
     method: 'POST',
   })
 
+// ── AI 리포트 히스토리 목록 ────────────────────────────────────────────────
+export const fetchReportHistory = (code, market = 'KR', limit = 20) =>
+  apiFetch(`/api/advisory/${encodeURIComponent(code)}/reports?market=${market}&limit=${limit}`)
+
+// ── 특정 ID 리포트 조회 ────────────────────────────────────────────────────
+export const fetchReportById = (code, reportId, market = 'KR') =>
+  apiFetch(`/api/advisory/${encodeURIComponent(code)}/reports/${reportId}?market=${market}`)
+
 // ── 최신 AI 리포트 조회 ────────────────────────────────────────────────────
 export const fetchReport = (code, market = 'KR') =>
   apiFetch(`/api/advisory/${encodeURIComponent(code)}/report?market=${market}`)

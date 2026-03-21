@@ -150,6 +150,37 @@ def save_report(code: str, market: str, model: str, report: dict) -> int:
         return cur.lastrowid
 
 
+def get_report_history(code: str, market: str, limit: int = 20) -> list[dict]:
+    """AI 리포트 히스토리 목록 (최신순, 본문 제외)."""
+    with _conn() as con:
+        rows = con.execute(
+            """SELECT id, code, market, generated_at, model
+               FROM advisory_reports WHERE code=? AND market=?
+               ORDER BY id DESC LIMIT ?""",
+            (code.upper(), market.upper(), limit),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_report_by_id(report_id: int) -> Optional[dict]:
+    """특정 ID의 AI 리포트 조회."""
+    with _conn() as con:
+        row = con.execute(
+            "SELECT id, code, market, generated_at, model, report FROM advisory_reports WHERE id=?",
+            (report_id,),
+        ).fetchone()
+    if not row:
+        return None
+    return {
+        "id": row["id"],
+        "code": row["code"],
+        "market": row["market"],
+        "generated_at": row["generated_at"],
+        "model": row["model"],
+        "report": json.loads(row["report"] or "{}"),
+    }
+
+
 def get_latest_report(code: str, market: str) -> Optional[dict]:
     """최신 AI 리포트 조회."""
     with _conn() as con:

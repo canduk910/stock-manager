@@ -7,6 +7,8 @@ import {
   fetchAdvisoryData,
   generateReport,
   fetchReport,
+  fetchReportHistory,
+  fetchReportById,
   fetchAdvisoryOhlcv,
 } from '../api/advisory'
 
@@ -79,9 +81,10 @@ export function useAdvisoryData() {
   return { data, loading, error, load, refresh }
 }
 
-/** AI 리포트 생성 + 조회 */
+/** AI 리포트 생성 + 조회 + 히스토리 */
 export function useAdvisoryReport() {
   const [report, setReport] = useState(null)
+  const [history, setHistory] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
 
@@ -89,13 +92,19 @@ export function useAdvisoryReport() {
     setLoading(true)
     setError(null)
     try {
-      const result = await fetchReport(code, market)
-      setReport(result)
-    } catch (e) {
-      if (e.status === 404) {
+      const [latestResult, historyResult] = await Promise.allSettled([
+        fetchReport(code, market),
+        fetchReportHistory(code, market),
+      ])
+      if (latestResult.status === 'fulfilled') {
+        setReport(latestResult.value)
+      } else if (latestResult.reason?.status === 404) {
         setReport(null)
       } else {
-        setError(e.message)
+        setError(latestResult.reason?.message)
+      }
+      if (historyResult.status === 'fulfilled') {
+        setHistory(historyResult.value)
       }
     } finally {
       setLoading(false)
@@ -108,6 +117,9 @@ export function useAdvisoryReport() {
     try {
       const result = await generateReport(code, market)
       setReport(result)
+      // 히스토리 갱신
+      const h = await fetchReportHistory(code, market)
+      setHistory(h)
     } catch (e) {
       setError(e.message)
     } finally {
@@ -115,7 +127,20 @@ export function useAdvisoryReport() {
     }
   }, [])
 
-  return { report, loading, error, load, generate }
+  const loadById = useCallback(async (code, reportId, market) => {
+    setLoading(true)
+    setError(null)
+    try {
+      const result = await fetchReportById(code, reportId, market)
+      setReport(result)
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  return { report, history, loading, error, load, generate, loadById }
 }
 
 /** OHLCV 타임프레임별 데이터 조회 */
