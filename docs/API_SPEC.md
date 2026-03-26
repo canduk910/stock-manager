@@ -329,6 +329,13 @@ PER > 500 이상치는 평균 계산에서 제외.
     "avg_per": 15.2, "avg_pbr": 1.62,
     "per_vs_avg": -17.8, "pbr_vs_avg": -25.9,
     "years": 10, "year_start": 2015, "year_end": 2024
+  },
+  "forward_estimates": {
+    "eps_current_year": 6.5, "eps_forward": 7.2, "forward_pe": 22.1,
+    "revenue_current": null, "revenue_forward": null,
+    "net_income_estimate": 150000, "net_income_forward": null,
+    "target_mean_price": 85000, "target_high_price": 95000, "target_low_price": 70000,
+    "num_analysts": 12, "recommendation": "buy", "current_fiscal_year_end": "2025-12"
   }
 }
 ```
@@ -889,6 +896,11 @@ OpenAI GPT-4o로 종합 투자 의견 리포트 생성. **10~30초 소요**.
       "등급": "중립",
       "요약": "...",
       "근거": ["...", "..."]
+    },
+    "전략별평가": {
+      "변동성돌파": {"신호": "매수|대기|중립", "설명": "..."},
+      "안전마진": {"graham_number": 75000, "현재가대비": "할인", "설명": "..."},
+      "추세추종": {"신호": "중립", "설명": "..."}
     },
     "기술적시그널": {
       "신호": "관망",

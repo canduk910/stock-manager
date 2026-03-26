@@ -281,12 +281,12 @@ def _extract_period_accounts(is_items: list[dict], period_key: str) -> dict:
 
 
 def _bsns_year_candidates() -> list[int]:
-    """시도할 사업연도 목록 (최근 연도 우선)."""
+    """시도할 사업연도 목록 (최근 연도 우선).
+
+    3~4월에도 전년도 사업보고서가 공시되므로 항상 y-1 우선 시도.
+    """
     y = date.today().year
-    # 4월 이후면 전년도 보고서 공시 가능성 높음
-    if date.today().month >= 4:
-        return [y - 1, y - 2, y - 3]
-    return [y - 2, y - 1, y - 3]
+    return [y - 1, y - 2, y - 3]
 
 
 # ── 공개 API ────────────────────────────────────────────────────────────────
@@ -371,9 +371,9 @@ def fetch_financials_multi_year(
         set_cached(cache_key, [], ttl_hours=6)
         return []
 
-    # 최근 확정 사업연도 결정 (4월 이후면 전년도 보고서 공시됨)
+    # 최근 확정 사업연도 결정 (3~4월에도 전년도 사업보고서 공시됨)
     today = date.today()
-    latest_year = today.year - 1 if today.month >= 4 else today.year - 2
+    latest_year = today.year - 1
 
     # 3년 단위 앵커 연도 목록 (최대 ceil(years/3)개 배치)
     num_batches = (years + 2) // 3
@@ -382,54 +382,67 @@ def fetch_financials_multi_year(
     collected: dict[int, dict] = {}
     fs_div_used: Optional[str] = None  # 연결/별도 결정 후 고정
 
-    for anchor in anchor_years:
+    for batch_idx, anchor in enumerate(anchor_years):
         if len(collected) >= years:
             break
 
-        fs_divs = [fs_div_used] if fs_div_used else ["CFS", "OFS"]
-        for fs_div in fs_divs:
-            try:
-                items = _call_fin_api(corp_code, anchor, fs_div)
-            except Exception:
-                continue
-            if not items:
-                continue
+        # 첫 번째 배치(latest_year)가 미공시면 anchor-1로 fallback
+        effective_anchor = anchor
+        items: list = []
+        found_fs: Optional[str] = None
 
-            is_items = [i for i in items if i.get("sj_div") in ("IS", "CIS")]
-            if not is_items:
-                continue
-
-            rcept_no = is_items[0].get("rcept_no", "")
-            dart_url = (
-                f"https://dart.fss.or.kr/dsaf001/main.do?rcpNo={rcept_no}"
-                if rcept_no
-                else ""
-            )
-
-            # thstrm(당기), frmtrm(전기), bfefrmtrm(전전기) 각각 추출
-            for period_key, year_offset in [
-                ("thstrm", 0),
-                ("frmtrm", -1),
-                ("bfefrmtrm", -2),
-            ]:
-                target_year = anchor + year_offset
-                if target_year in collected:
+        for try_anchor in ([anchor, anchor - 1] if batch_idx == 0 else [anchor]):
+            fs_divs = [fs_div_used] if fs_div_used else ["CFS", "OFS"]
+            for fs_div in fs_divs:
+                try:
+                    candidate = _call_fin_api(corp_code, try_anchor, fs_div)
+                except Exception:
                     continue
-                period_data = _extract_period_accounts(is_items, period_key)
-                if period_data.get("revenue") is None:
+                if not candidate:
                     continue
-                collected[target_year] = {
-                    "year": target_year,
-                    "revenue": period_data["revenue"],
-                    "operating_income": period_data["operating_income"],
-                    "net_income": period_data["net_income"],
-                    "rcept_no": rcept_no,
-                    "dart_url": dart_url,
-                }
+                if not any(i.get("sj_div") in ("IS", "CIS") for i in candidate):
+                    continue
+                items = candidate
+                found_fs = fs_div
+                effective_anchor = try_anchor
+                break
+            if items:
+                break
 
-            if fs_div_used is None and collected:
-                fs_div_used = fs_div
-            break
+        if not items:
+            continue
+
+        is_items = [i for i in items if i.get("sj_div") in ("IS", "CIS")]
+        rcept_no = is_items[0].get("rcept_no", "")
+        dart_url = (
+            f"https://dart.fss.or.kr/dsaf001/main.do?rcpNo={rcept_no}"
+            if rcept_no
+            else ""
+        )
+
+        # thstrm(당기), frmtrm(전기), bfefrmtrm(전전기) 각각 추출
+        for period_key, year_offset in [
+            ("thstrm", 0),
+            ("frmtrm", -1),
+            ("bfefrmtrm", -2),
+        ]:
+            target_year = effective_anchor + year_offset
+            if target_year in collected:
+                continue
+            period_data = _extract_period_accounts(is_items, period_key)
+            if period_data.get("revenue") is None:
+                continue
+            collected[target_year] = {
+                "year": target_year,
+                "revenue": period_data["revenue"],
+                "operating_income": period_data["operating_income"],
+                "net_income": period_data["net_income"],
+                "rcept_no": rcept_no,
+                "dart_url": dart_url,
+            }
+
+        if fs_div_used is None and collected:
+            fs_div_used = found_fs
 
     # 과거 → 최신 정렬, 최대 years개
     result = sorted(collected.values(), key=lambda x: x["year"])
@@ -500,7 +513,7 @@ def fetch_bs_cf_annual(stock_code: str, years: int = 5) -> dict:
         return empty
 
     today = date.today()
-    latest_year = today.year - 1 if today.month >= 4 else today.year - 2
+    latest_year = today.year - 1  # 3~4월에도 전년도 사업보고서 공시됨
 
     num_batches = (years + 2) // 3
     anchor_years = [latest_year - i * 3 for i in range(num_batches)]
@@ -509,56 +522,72 @@ def fetch_bs_cf_annual(stock_code: str, years: int = 5) -> dict:
     cf_collected: dict[int, dict] = {}
     fs_div_used: Optional[str] = None
 
-    for anchor in anchor_years:
+    for batch_idx, anchor in enumerate(anchor_years):
         if len(bs_collected) >= years and len(cf_collected) >= years:
             break
 
-        fs_divs = [fs_div_used] if fs_div_used else ["CFS", "OFS"]
-        for fs_div in fs_divs:
-            try:
-                items = _call_fin_api(corp_code, anchor, fs_div)
-            except Exception:
-                continue
-            if not items:
-                continue
+        # 첫 번째 배치(latest_year)가 미공시면 anchor-1로 fallback
+        effective_anchor = anchor
+        items: list = []
+        found_fs: Optional[str] = None
 
-            has_bs = any(i.get("sj_div") in ("BS", "CBS") for i in items)
-            has_cf = any(i.get("sj_div") in ("CF", "CCF") for i in items)
-            if not has_bs and not has_cf:
-                continue
+        for try_anchor in ([anchor, anchor - 1] if batch_idx == 0 else [anchor]):
+            fs_divs = [fs_div_used] if fs_div_used else ["CFS", "OFS"]
+            for fs_div in fs_divs:
+                try:
+                    candidate = _call_fin_api(corp_code, try_anchor, fs_div)
+                except Exception:
+                    continue
+                if not candidate:
+                    continue
+                has_bs = any(i.get("sj_div") in ("BS", "CBS") for i in candidate)
+                has_cf = any(i.get("sj_div") in ("CF", "CCF") for i in candidate)
+                if not has_bs and not has_cf:
+                    continue
+                items = candidate
+                found_fs = fs_div
+                effective_anchor = try_anchor
+                break
+            if items:
+                break
 
-            for period_key, year_offset in [
-                ("thstrm", 0),
-                ("frmtrm", -1),
-                ("bfefrmtrm", -2),
-            ]:
-                target_year = anchor + year_offset
+        if not items:
+            continue
 
-                if target_year not in bs_collected and has_bs:
-                    bs_data = _extract_sheet_period(items, ("BS", "CBS"), _BS_KEYS, period_key)
-                    if bs_data.get("total_assets") is not None:
-                        # 부채비율, 유동비율 계산
-                        equity = bs_data.get("total_equity") or 0
-                        liab = bs_data.get("total_liabilities") or 0
-                        cur_a = bs_data.get("current_assets") or 0
-                        cur_l = bs_data.get("current_liabilities") or 1
-                        bs_data["debt_ratio"] = round(liab / equity * 100, 1) if equity else None
-                        bs_data["current_ratio"] = round(cur_a / cur_l * 100, 1) if cur_l else None
-                        bs_collected[target_year] = {"year": target_year, **bs_data}
+        has_bs = any(i.get("sj_div") in ("BS", "CBS") for i in items)
+        has_cf = any(i.get("sj_div") in ("CF", "CCF") for i in items)
 
-                if target_year not in cf_collected and has_cf:
-                    cf_data = _extract_sheet_period(items, ("CF", "CCF"), _CF_KEYS, period_key)
-                    if cf_data.get("operating_cf") is not None:
-                        op_cf = cf_data.get("operating_cf") or 0
-                        capex = cf_data.get("capex") or 0
-                        # capex는 음수로 기재되는 경우 있음 → abs
-                        free_cf = op_cf - abs(capex)
-                        cf_data["free_cf"] = free_cf
-                        cf_collected[target_year] = {"year": target_year, **cf_data}
+        for period_key, year_offset in [
+            ("thstrm", 0),
+            ("frmtrm", -1),
+            ("bfefrmtrm", -2),
+        ]:
+            target_year = effective_anchor + year_offset
 
-            if fs_div_used is None and (bs_collected or cf_collected):
-                fs_div_used = fs_div
-            break
+            if target_year not in bs_collected and has_bs:
+                bs_data = _extract_sheet_period(items, ("BS", "CBS"), _BS_KEYS, period_key)
+                if bs_data.get("total_assets") is not None:
+                    # 부채비율, 유동비율 계산
+                    equity = bs_data.get("total_equity") or 0
+                    liab = bs_data.get("total_liabilities") or 0
+                    cur_a = bs_data.get("current_assets") or 0
+                    cur_l = bs_data.get("current_liabilities") or 1
+                    bs_data["debt_ratio"] = round(liab / equity * 100, 1) if equity else None
+                    bs_data["current_ratio"] = round(cur_a / cur_l * 100, 1) if cur_l else None
+                    bs_collected[target_year] = {"year": target_year, **bs_data}
+
+            if target_year not in cf_collected and has_cf:
+                cf_data = _extract_sheet_period(items, ("CF", "CCF"), _CF_KEYS, period_key)
+                if cf_data.get("operating_cf") is not None:
+                    op_cf = cf_data.get("operating_cf") or 0
+                    capex = cf_data.get("capex") or 0
+                    # capex는 음수로 기재되는 경우 있음 → abs
+                    free_cf = op_cf - abs(capex)
+                    cf_data["free_cf"] = free_cf
+                    cf_collected[target_year] = {"year": target_year, **cf_data}
+
+        if fs_div_used is None and (bs_collected or cf_collected):
+            fs_div_used = found_fs
 
     bs_result = sorted(bs_collected.values(), key=lambda x: x["year"])[-years:]
     cf_result = sorted(cf_collected.values(), key=lambda x: x["year"])[-years:]
@@ -586,7 +615,7 @@ def fetch_income_detail_annual(stock_code: str, years: int = 5) -> list[dict]:
         return []
 
     today = date.today()
-    latest_year = today.year - 1 if today.month >= 4 else today.year - 2
+    latest_year = today.year - 1  # 3월에도 전년도 사업보고서가 공시됨
 
     num_batches = (years + 2) // 3
     anchor_years = [latest_year - i * 3 for i in range(num_batches)]
@@ -594,45 +623,57 @@ def fetch_income_detail_annual(stock_code: str, years: int = 5) -> list[dict]:
     collected: dict[int, dict] = {}
     fs_div_used: Optional[str] = None
 
-    for anchor in anchor_years:
+    for batch_idx, anchor in enumerate(anchor_years):
         if len(collected) >= years:
             break
 
-        fs_divs = [fs_div_used] if fs_div_used else ["CFS", "OFS"]
-        for fs_div in fs_divs:
-            try:
-                items = _call_fin_api(corp_code, anchor, fs_div)
-            except Exception:
-                continue
-            if not items:
-                continue
+        items: list = []
+        found_fs: Optional[str] = None
+        effective_anchor = anchor
 
-            is_items = [i for i in items if i.get("sj_div") in ("IS", "CIS")]
-            if not is_items:
-                continue
-
-            for period_key, year_offset in [
-                ("thstrm", 0),
-                ("frmtrm", -1),
-                ("bfefrmtrm", -2),
-            ]:
-                target_year = anchor + year_offset
-                if target_year in collected:
+        # 첫 번째 배치는 anchor-1도 fallback 시도 (미공시 기업 대응)
+        for try_anchor in ([anchor, anchor - 1] if batch_idx == 0 else [anchor]):
+            fs_divs = [fs_div_used] if fs_div_used else ["CFS", "OFS"]
+            for fs_div in fs_divs:
+                try:
+                    candidate = _call_fin_api(corp_code, try_anchor, fs_div)
+                except Exception:
                     continue
-                row = _extract_is_detail_period(items, period_key)
-                if row.get("revenue") is None:
+                if not candidate:
                     continue
-                # 마진 계산
-                rev = row.get("revenue") or 0
-                oi = row.get("operating_income") or 0
-                ni = row.get("net_income") or 0
-                row["oi_margin"] = round(oi / rev * 100, 1) if rev else None
-                row["net_margin"] = round(ni / rev * 100, 1) if rev else None
-                collected[target_year] = {"year": target_year, **row}
+                if not any(i.get("sj_div") in ("IS", "CIS") for i in candidate):
+                    continue
+                items = candidate
+                found_fs = fs_div
+                effective_anchor = try_anchor
+                break
+            if items:
+                break
 
-            if fs_div_used is None and collected:
-                fs_div_used = fs_div
-            break
+        if not items:
+            continue
+
+        for period_key, year_offset in [
+            ("thstrm", 0),
+            ("frmtrm", -1),
+            ("bfefrmtrm", -2),
+        ]:
+            target_year = effective_anchor + year_offset
+            if target_year in collected:
+                continue
+            row = _extract_is_detail_period(items, period_key)
+            if row.get("revenue") is None:
+                continue
+            # 마진 계산
+            rev = row.get("revenue") or 0
+            oi = row.get("operating_income") or 0
+            ni = row.get("net_income") or 0
+            row["oi_margin"] = round(oi / rev * 100, 1) if rev else None
+            row["net_margin"] = round(ni / rev * 100, 1) if rev else None
+            collected[target_year] = {"year": target_year, **row}
+
+        if fs_div_used is None and collected:
+            fs_div_used = found_fs
 
     result = sorted(collected.values(), key=lambda x: x["year"])[-years:]
     set_cached(cache_key, result, ttl_hours=24)

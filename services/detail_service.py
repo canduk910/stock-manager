@@ -162,6 +162,7 @@ class DetailService:
         financials = self.get_financials(code, years)
         valuation = self.get_valuation_chart(code, years)
         detail = fetch_detail(code)
+        forward = yf_client.fetch_forward_estimates_yf(code, is_kr=True)
 
         resolved = symbol_map.resolve(code)
         name = resolved[1] if resolved else code
@@ -206,12 +207,13 @@ class DetailService:
         except Exception:
             pass
 
-        return self._build_report(basic, financials, valuation)
+        return self._build_report(basic, financials, valuation, forward)
 
     def _get_report_us(self, code: str, years: int) -> dict:
         financials = self.get_financials(code, years)
         valuation = self.get_valuation_chart(code, years)  # 빈 데이터
         detail = yf_client.fetch_detail_yf(code)
+        forward = yf_client.fetch_forward_estimates_yf(code, is_kr=False)
 
         basic: dict = {
             "code": code,
@@ -250,9 +252,9 @@ class DetailService:
                 "sector": detail.get("sector"),
             })
 
-        return self._build_report(basic, financials, valuation)
+        return self._build_report(basic, financials, valuation, forward)
 
-    def _build_report(self, basic: dict, financials: dict, valuation: dict) -> dict:
+    def _build_report(self, basic: dict, financials: dict, valuation: dict, forward: dict = None) -> dict:
         current_per = basic.get("per")
         current_pbr = basic.get("pbr")
         rows = financials["rows"]
@@ -283,6 +285,7 @@ class DetailService:
             "basic": basic,
             "financials": financials,
             "valuation": valuation,
+            "forward_estimates": forward or {},
             "summary": {
                 "rev_cagr": rev_cagr,
                 "op_cagr": op_cagr,

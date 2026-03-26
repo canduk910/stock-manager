@@ -142,7 +142,7 @@ KIS API의 토큰 발급 분당 1회 제한에 대응하기 위해 모듈 수준
 | `fetch_15min_ohlcv_kr(code)` | KIS 1분봉 4회 호출 → 15분 resample. 30봉 미만 시 yfinance fallback. 최대 300봉 반환. |
 | `fetch_15min_ohlcv_us(code)` | yfinance `.history(period='5d', interval='15m')`. 최대 300봉 반환. |
 | `fetch_ohlcv_by_interval(code, market, interval, period)` | 타임프레임/기간 지정 OHLCV 수집 후 `calc_technical_indicators()` 자동 호출. `{"ohlcv": [...], "indicators": {...}}` 반환. interval=`15m`/`60m`/`1d`/`1wk`. yfinance 최대 기간 자동 조정. |
-| `calc_technical_indicators(ohlcv)` | 기술적 지표 계산. 데이터 부족 시 None 처리. 최대 300봉 입력 지원. |
+| `calc_technical_indicators(ohlcv)` | 기술적 지표 계산. 데이터 부족 시 None 처리. 최대 300봉 입력 지원. **ATR(14, Wilder법)**, **MA배열** (`ma_alignment`: 정배열/역배열/혼합), **K=0.3·0.5·0.7 변동성 돌파 목표가** 추가. |
 | `fetch_segments_kr(code, name)` | OpenAI로 국내 기업 사업부문 추론 (AI추정 표시) |
 
 #### `fetch_15min_ohlcv_kr` 동작 방식
@@ -195,7 +195,7 @@ KIS 키 미설정 시 즉시 yfinance fallback 시도. yfinance도 실패 시 `[
     "stoch": {"k": [...], "d": [...], "times": []}, # %K 14기간, %D SMA(3)
     "bb": {"upper": [...], "mid": [...], "lower": [...], "times": []},  # SMA(20), ±2σ
     "ma": {"ma5": [...], "ma20": [...], "ma60": [...], "times": []},
-    "volatility_target": float | None,  # (전일고가-전일저가)×0.5 + 당일시가
+    "volatility_target": float | None,  # (전일고가-전일저가)×0.5 + 당일시가 (K=0.5)
     "current_signals": {
         "macd_cross": "golden" | "dead" | "none",
         "rsi_signal": "overbought" | "oversold" | "neutral",
@@ -204,6 +204,13 @@ KIS 키 미설정 시 즉시 yfinance fallback 시도. yfinance도 실패 시 `[
         "stoch_k": float | None,
         "above_ma20": bool,
         "ma20": float | None,
+        "ma5": float | None,          # 추가
+        "ma60": float | None,         # 추가
+        "ma_alignment": "정배열" | "역배열" | "혼합" | None,  # 추가
+        "atr": float | None,          # ATR(14, Wilder법) 추가
+        "volatility_target_k03": float | None,  # K=0.3 목표가 추가
+        "volatility_target_k05": float | None,  # K=0.5 목표가 추가
+        "volatility_target_k07": float | None,  # K=0.7 목표가 추가
         "current_price": float | None,
     }
 }
@@ -214,6 +221,8 @@ KIS 키 미설정 시 즉시 yfinance fallback 시도. yfinance도 실패 시 `[
 - RSI: Wilder's RSI (14기간)
 - Stochastic: %K 14기간, %D = SMA(%K, 3)
 - 볼린저밴드: SMA(20), ±2σ
+- ATR: `max(H-L, |H-PC|, |L-PC|)`, Wilder 평균법 (14기간)
+- 변동성 돌파 목표가: `당일시가 + (전일H-전일L) × K` (K=0.3/0.5/0.7)
 
 ---
 
@@ -364,6 +373,37 @@ yfinance 기반 해외주식 데이터 수집. 일부 함수는 국내주식(`.K
 | `fetch_cashflow_yf(code, years)` | 현금흐름표 (AI자문용) |
 | `fetch_metrics_yf(code)` | PER/PBR/PSR/EV·EBITDA/ROE/ROA (AI자문 계량지표) |
 | `fetch_segments_yf(code)` | 사업부문 매출비중 (best-effort) |
+| `fetch_forward_estimates_yf(code, is_kr=False)` | 애널리스트 컨센서스 추정치. `is_kr=True` 시 `.KS`/`.KQ` suffix 자동. TTL 6시간. |
+
+#### `fetch_forward_estimates_yf(code, is_kr=False)` — 애널리스트 컨센서스 추정치
+
+yfinance `t.info`와 `t.analysis` DataFrame을 조합하여 포워드 가이던스를 반환한다.
+
+```python
+{
+    "eps_current_year": 6.5,          # 현재 회계연도 EPS 추정
+    "eps_forward": 7.2,               # 차기 연도 EPS 추정
+    "forward_pe": 22.1,               # 포워드 PER (info['forwardPE'])
+    "revenue_current": 2500.0,        # 현재 회계연도 매출 추정 (M USD 또는 억원)
+    "revenue_forward": 2700.0,        # 차기 연도 매출 추정
+    "net_income_estimate": 150.0,     # 현재 연도 순이익 추정 (eps × shares)
+    "net_income_forward": 170.0,      # 차기 연도 순이익 추정
+    "shares_outstanding": 100.0,      # 주식수 (M주)
+    "target_mean_price": 85000,       # 목표주가 평균
+    "target_high_price": 95000,       # 목표주가 최고
+    "target_low_price": 70000,        # 목표주가 최저
+    "num_analysts": 12,               # 분석가 수
+    "recommendation": "buy",          # 투자의견 (buy/hold/sell 등)
+    "current_fiscal_year_end": "2025-12",  # 현재 회계연도 종료월
+}
+```
+
+- `net_income_estimate = eps_current_year × shares_outstanding` 계산
+- `revenue_current/forward`: `t.analysis` DataFrame "+0y"/"+1y" 행 사용 (yfinance 버전에 따라 None 가능)
+- 국내 주식은 애널리스트 커버리지 제한으로 일부 필드 None 허용
+- KR/US 공통 함수. `is_kr=True` 시 `_kr_yf_ticker_str(code)`로 suffix 선택.
+
+---
 
 #### `fetch_valuation_history_yf(code, years=5)` — 해외주식 PER/PBR 추정
 
@@ -398,6 +438,10 @@ div_rate       = info.get("dividendRate")          # 연간 주당배당금(USD)
 ## `dart_fin.py` — OpenDart 재무데이터
 
 DART `fnlttSinglAcntAll` API로 사업보고서(연간) 재무제표를 수집한다.
+
+**연도 계산 수정 (2026-03)**: `latest_year = today.year - 1` 고정 (월 경계 제거). 3월에도 전년도(2025) 사업보고서를 조회. 기존 4월 경계 로직 제거.
+
+**첫 배치 fallback (2026-03)**: 첫 배치(최신 연도 묶음)가 빈 결과일 경우 `anchor-1` 연도로 재시도. 최신 사업보고서 미공시 기업도 이전 연도부터 정상 반환.
 
 ### 함수
 

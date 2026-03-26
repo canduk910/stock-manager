@@ -122,7 +122,11 @@ export default function TechnicalPanel({ data, symbol, market }) {
   const stochSignal = signals.stoch_signal || 'neutral'
   const stochK      = signals.stoch_k
   const aboveMa20   = signals.above_ma20
-  const volTarget   = indicators.volatility_target
+  const maAlignment = signals.ma_alignment || '혼합'
+  const atrVal      = signals.atr
+  const vtK03 = signals.volatility_target_k03 ?? indicators.volatility_target_k03
+  const vtK05 = signals.volatility_target_k05 ?? indicators.volatility_target_k05
+  const vtK07 = signals.volatility_target_k07 ?? indicators.volatility_target_k07
 
   const macdLabel  = { golden: '골든크로스', dead: '데드크로스', none: '크로스없음' }[macdCross] || '-'
   const rsiLabel   = { overbought: '과매수', oversold: '과매도', neutral: '중립' }[rsiSignal] || '-'
@@ -195,11 +199,35 @@ export default function TechnicalPanel({ data, symbol, market }) {
           value={stochLabel} type={stochSignal}
         />
         <SignalBadge label="MA20" value={aboveMa20 ? '상회' : '하회'} type={aboveMa20 ? 'up' : 'down'} />
-        {volTarget != null && (
-          <span className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs border bg-purple-50 text-purple-700 border-purple-300 font-medium">
-            변동성 돌파 목표가: {volTarget.toLocaleString()}
+
+        {/* MA 정배열/역배열 */}
+        <span className={`inline-flex items-center gap-1 px-2 py-1 rounded text-xs border font-medium ${
+          maAlignment === '정배열'
+            ? 'bg-red-50 text-red-700 border-red-300'
+            : maAlignment === '역배열'
+            ? 'bg-blue-50 text-blue-700 border-blue-300'
+            : 'bg-gray-100 text-gray-600 border-gray-300'
+        }`}>
+          MA배열: {maAlignment}
+        </span>
+
+        {/* ATR */}
+        {atrVal != null && (
+          <span className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs border bg-gray-100 text-gray-600 border-gray-300 font-medium">
+            ATR(14): {atrVal.toLocaleString(undefined, { maximumFractionDigits: 0 })}
           </span>
         )}
+
+        {/* 변동성 돌파 목표가 K=0.3/0.5/0.7 */}
+        {[
+          { label: 'K=0.3', val: vtK03 },
+          { label: 'K=0.5', val: vtK05 },
+          { label: 'K=0.7', val: vtK07 },
+        ].filter(x => x.val != null).map(({ label, val }) => (
+          <span key={label} className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs border bg-purple-50 text-purple-700 border-purple-300 font-medium">
+            변동성돌파{label}: {val.toLocaleString()}
+          </span>
+        ))}
       </div>
 
       {/* ── 캔들스틱 + MA + BB ─────────────────────────────────────────────── */}

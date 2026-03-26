@@ -34,6 +34,7 @@ export default function AIReportPanel({ report, history = [], loading, error, on
   const model = report?.model
 
   const opinion = reportData['종합투자의견'] || reportData.opinion || {}
+  const strategies = reportData['전략별평가'] || {}
   const technical = reportData['기술적시그널'] || reportData.technical_signal || {}
   const risks = reportData['리스크요인'] || reportData.risk_factors || []
   const points = reportData['투자포인트'] || reportData.investment_points || []
@@ -115,6 +116,83 @@ export default function AIReportPanel({ report, history = [], loading, error, on
               ))}
             </ul>
           )}
+        </Section>
+      )}
+
+      {/* 전략별 평가 */}
+      {!loading && !rawText && Object.keys(strategies).length > 0 && (
+        <Section title="전략별 평가" icon="🎯">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+
+            {/* 변동성 돌파 */}
+            {strategies['변동성돌파']?.신호 && (() => {
+              const s = strategies['변동성돌파']
+              return (
+                <div className="border border-gray-200 rounded-lg p-3 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-gray-600">변동성 돌파</span>
+                    <GradeBadge grade={s.신호} />
+                  </div>
+                  {s.목표가 != null && (
+                    <p className="text-xs text-gray-500">
+                      목표가(K=0.5): <span className="font-semibold text-gray-800">
+                        {Number(s.목표가).toLocaleString()}
+                      </span>
+                    </p>
+                  )}
+                  <p className="text-xs text-gray-600 leading-relaxed">{s.근거}</p>
+                </div>
+              )
+            })()}
+
+            {/* 안전마진 */}
+            {strategies['안전마진']?.신호 && (() => {
+              const s = strategies['안전마진']
+              return (
+                <div className="border border-gray-200 rounded-lg p-3 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-gray-600">안전마진 (Graham)</span>
+                    <GradeBadge grade={s.신호} />
+                  </div>
+                  {s.graham_number != null && (
+                    <p className="text-xs text-gray-500">
+                      Graham Number: <span className="font-semibold text-gray-800">
+                        {Number(s.graham_number).toLocaleString()}
+                      </span>
+                    </p>
+                  )}
+                  {s.할인율 != null && (
+                    <p className="text-xs text-gray-500">
+                      할인율: <span className={`font-semibold ${s.할인율 > 0 ? 'text-red-600' : 'text-blue-600'}`}>
+                        {s.할인율 > 0 ? '+' : ''}{s.할인율}%
+                      </span>
+                    </p>
+                  )}
+                  <p className="text-xs text-gray-600 leading-relaxed">{s.근거}</p>
+                </div>
+              )
+            })()}
+
+            {/* 추세추종 */}
+            {strategies['추세추종']?.신호 && (() => {
+              const s = strategies['추세추종']
+              return (
+                <div className="border border-gray-200 rounded-lg p-3 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-gray-600">추세추종</span>
+                    <GradeBadge grade={s.신호} />
+                  </div>
+                  {s.추세강도 && (
+                    <p className="text-xs text-gray-500">
+                      추세강도: <span className="font-semibold text-gray-800">{s.추세강도}</span>
+                    </p>
+                  )}
+                  <p className="text-xs text-gray-600 leading-relaxed">{s.근거}</p>
+                </div>
+              )
+            })()}
+
+          </div>
         </Section>
       )}
 

@@ -630,7 +630,6 @@ def fetch_segments_yf(code: str) -> list[dict]:
 
         # yfinance에는 공식 세그먼트 API가 없음 → sector/industry 수준만 반환
         sector = info.get("sector", "")
-        industry = info.get("industry", "")
         segments: list[dict] = []
         if sector:
             segments.append({"segment": sector, "revenue_pct": 100.0, "note": "섹터"})
@@ -640,3 +639,119 @@ def fetch_segments_yf(code: str) -> list[dict]:
     except Exception:
         set_cached(key, [], ttl_hours=6)
         return []
+
+
+# ── 포워드 가이던스 / 애널리스트 컨센서스 ────────────────────────────────────
+
+def _fmt_fiscal_year_end(ts) -> Optional[str]:
+    """Unix timestamp → 'YYYY-MM' 문자열."""
+    if not ts:
+        return None
+    try:
+        from datetime import datetime, timezone
+        return datetime.fromtimestamp(int(ts), tz=timezone.utc).strftime("%Y-%m")
+    except Exception:
+        return None
+
+
+def fetch_forward_estimates_yf(code: str, is_kr: bool = False) -> dict:
+    """애널리스트 컨센서스 포워드 추정치 조회.
+
+    US: yfinance info에서 비교적 풍부하게 제공.
+    KR: .KS/.KQ suffix로 시도, 없으면 None 반환.
+
+    반환:
+    {
+        "eps_current_year":        float | None,  # 현재 회계연도 EPS 추정
+        "eps_forward":             float | None,  # 다음 회계연도 EPS 추정
+        "forward_pe":              float | None,  # 포워드 PER
+        "revenue_current":         float | None,  # 현재 회계연도 매출 추정
+        "target_mean_price":       float | None,  # 애널리스트 목표가 평균
+        "target_high_price":       float | None,  # 목표가 상단
+        "target_low_price":        float | None,  # 목표가 하단
+        "num_analysts":            int   | None,  # 평가 애널리스트 수
+        "recommendation":          str   | None,  # "buy"/"hold"/"sell" 등
+        "current_fiscal_year_end": str   | None,  # "2025-12" 형식
+    }
+    """
+    cache_key = f"yf:forward:{code.upper()}"
+    cached = get_cached(cache_key)
+    if cached is not None:
+        return cached
+
+    ticker_str: str
+    if is_kr:
+        from stock.market import _kr_yf_ticker_str
+        ticker_str = _kr_yf_ticker_str(code)
+    else:
+        ticker_str = code.upper()
+
+    empty: dict = {}
+
+    try:
+        import yfinance as yf
+        t = yf.Ticker(ticker_str)
+        info = t.info or {}
+
+        # 매출 추정치: ticker.analysis DataFrame에서 추출 (불안정 → 실패 허용)
+        rev_estimate: Optional[float] = None
+        rev_forward: Optional[float] = None
+        try:
+            import pandas as pd
+            analysis = t.analysis
+            if analysis is not None and not analysis.empty:
+                if "Revenue Estimate" in analysis.columns:
+                    # 현재 회계연도 (0y)
+                    if "0y" in analysis.index:
+                        val = analysis.loc["0y", "Revenue Estimate"]
+                        if not pd.isna(val):
+                            rev_estimate = float(val)
+                    elif len(analysis.index) > 0:
+                        val = analysis.iloc[0]["Revenue Estimate"]
+                        if not pd.isna(val):
+                            rev_estimate = float(val)
+                    # 차기 회계연도 (+1y)
+                    if "+1y" in analysis.index:
+                        val2 = analysis.loc["+1y", "Revenue Estimate"]
+                        if not pd.isna(val2):
+                            rev_forward = float(val2)
+        except Exception:
+            pass
+
+        # 순이익 추정: EPS × 발행주식수
+        eps_cy = _safe(info.get("epsCurrentYear"))
+        eps_fw = _safe(info.get("epsForward"))
+        shares = _safe_int(info.get("sharesOutstanding"))
+        net_income_estimate: Optional[float] = None
+        net_income_forward: Optional[float] = None
+        if shares and eps_cy is not None:
+            net_income_estimate = eps_cy * shares
+        if shares and eps_fw is not None:
+            net_income_forward = eps_fw * shares
+
+        result = {
+            "eps_current_year":        eps_cy,
+            "eps_forward":             eps_fw,
+            "forward_pe":              _safe(info.get("forwardPE")),
+            "revenue_current":         rev_estimate,
+            "revenue_forward":         rev_forward,
+            "net_income_estimate":     net_income_estimate,
+            "net_income_forward":      net_income_forward,
+            "shares_outstanding":      shares,
+            "target_mean_price":       _safe(info.get("targetMeanPrice")),
+            "target_high_price":       _safe(info.get("targetHighPrice")),
+            "target_low_price":        _safe(info.get("targetLowPrice")),
+            "num_analysts":            _safe_int(info.get("numberOfAnalystOpinions")),
+            "recommendation":          info.get("recommendationKey") or None,
+            "current_fiscal_year_end": _fmt_fiscal_year_end(info.get("nextFiscalYearEnd")),
+        }
+
+        # 모든 값이 None이면 빈 dict 캐싱 (데이터 없음)
+        has_data = any(v is not None for v in result.values())
+        payload = result if has_data else empty
+        set_cached(cache_key, payload, ttl_hours=6)
+        return payload
+
+    except Exception:
+        set_cached(cache_key, empty, ttl_hours=1)
+        return empty

@@ -49,7 +49,8 @@ def generate_ai_report(code: str, market: str, name: str) -> dict:
     technical = cache.get("technical") or {}
 
     model = OPENAI_MODEL
-    prompt = _build_prompt(code, market, name, fundamental, technical)
+    graham_data = _calc_graham_number(fundamental, market)
+    prompt = _build_prompt(code, market, name, fundamental, technical, graham_data)
 
     try:
         from openai import OpenAI
@@ -61,13 +62,23 @@ def generate_ai_report(code: str, market: str, name: str) -> dict:
                     "role": "system",
                     "content": (
                         "당신은 전문 주식 애널리스트입니다. "
-                        "제공된 재무 데이터와 기술적 분석 결과를 바탕으로 "
-                        "종합 투자 의견을 JSON 형식으로 작성해주세요."
+                        "다음 세 가지 전략 프레임워크를 반드시 평가하여 종합 투자 의견을 JSON 형식으로 작성해주세요.\n\n"
+                        "【전략 1: 변동성 돌파 전략】\n"
+                        "래리 윌리엄스 기반. 당일 시가 + (전일 고저 범위 × K값) 돌파 시 매수 진입. "
+                        "K=0.5가 표준이며, ATR 기반 변동성 수준도 함께 판단하세요.\n\n"
+                        "【전략 2: 안전마진 전략 (벤자민 그레이엄)】\n"
+                        "Graham Number = sqrt(22.5 × EPS × BPS). "
+                        "할인율 >30%: 강한 매수, 10~30%: 매수, 0~10%: 중립, 음수: 고평가. "
+                        "EPS/BPS 계산 불가 시 PER/PBR 상대 비교로 평가하세요.\n\n"
+                        "【전략 3: 추세추종 전략】\n"
+                        "MA5>MA20>MA60 정배열 + MACD 방향 + RSI 모멘텀으로 추세 강도 판단. "
+                        "정배열+MACD 골든크로스+RSI 55이상: 강한 추세. 역배열: 하락추세.\n\n"
+                        "각 전략 신호를 독립적으로 평가하고, 전략 간 일치/불일치도 종합 의견에 반영하세요."
                     ),
                 },
                 {"role": "user", "content": prompt},
             ],
-            max_completion_tokens=1500,
+            max_completion_tokens=2500,
             response_format={"type": "json_object"},
         )
         content = resp.choices[0].message.content or "{}"
@@ -114,12 +125,17 @@ def _collect_fundamental_kr(code: str, name: str) -> dict:
     # 사업별 매출비중 (OpenAI 추론)
     segments = advisory_fetcher.fetch_segments_kr(code, name)
 
+    # 포워드 가이던스 (yfinance .KS/.KQ, 없으면 빈 dict)
+    from stock.yf_client import fetch_forward_estimates_yf
+    forward_estimates = fetch_forward_estimates_yf(code, is_kr=True)
+
     return {
         "income_stmt": income_stmt,
         "balance_sheet": balance_sheet,
         "cashflow": cashflow,
         "metrics": metrics,
         "segments": segments,
+        "forward_estimates": forward_estimates,
     }
 
 
@@ -138,12 +154,16 @@ def _collect_fundamental_us(code: str) -> dict:
     metrics = fetch_metrics_yf(code)
     segments = fetch_segments_yf(code)
 
+    from stock.yf_client import fetch_forward_estimates_yf
+    forward_estimates = fetch_forward_estimates_yf(code, is_kr=False)
+
     return {
         "income_stmt": income_stmt,
         "balance_sheet": balance_sheet,
         "cashflow": cashflow,
         "metrics": metrics,
         "segments": segments,
+        "forward_estimates": forward_estimates,
     }
 
 
@@ -226,7 +246,61 @@ def _collect_technical(code: str, market: str) -> dict:
     }
 
 
-def _build_prompt(code: str, market: str, name: str, fundamental: dict, technical: dict) -> str:
+def _calc_graham_number(fundamental: dict, market: str) -> dict:
+    """Graham Number = sqrt(22.5 × EPS × BPS) 계산.
+    BPS 직접 데이터 없으면 price/PBR 역산 (KR/US 공통).
+    EPS <= 0 이면 Graham Number = None.
+    """
+    import math as _math
+    metrics = fundamental.get("metrics") or {}
+    income  = fundamental.get("income_stmt") or []
+    per = metrics.get("per")
+    pbr = metrics.get("pbr")
+
+    eps: Optional[float] = None
+    if income:
+        raw_eps = income[-1].get("eps")
+        if raw_eps is not None:
+            try:
+                eps = float(raw_eps)
+            except (TypeError, ValueError):
+                eps = None
+
+    bps: Optional[float] = None
+    method = "N/A"
+    if per and pbr and per > 0 and pbr > 0 and eps and eps > 0:
+        estimated_price = eps * per
+        bps = round(estimated_price / pbr, 2)
+        method = "PBR역산"
+
+    graham_number: Optional[float] = None
+    if eps and bps and eps > 0 and bps > 0:
+        graham_number = round(_math.sqrt(22.5 * eps * bps), 2)
+
+    current_price: Optional[float] = None
+    if eps and per and per > 0:
+        current_price = round(eps * per, 0)
+    else:
+        mc = metrics.get("market_cap")
+        sh = metrics.get("shares")
+        if mc and sh and sh > 0:
+            current_price = round(mc / sh, 2)
+
+    discount_rate: Optional[float] = None
+    if graham_number and current_price and current_price > 0:
+        discount_rate = round((graham_number - current_price) / current_price * 100, 1)
+
+    return {
+        "graham_number": graham_number,
+        "eps": round(eps, 2) if eps else None,
+        "bps": bps,
+        "discount_rate": discount_rate,
+        "method": method,
+    }
+
+
+def _build_prompt(code: str, market: str, name: str, fundamental: dict, technical: dict,
+                  graham_data: Optional[dict] = None) -> str:
     """GPT 프롬프트 구성."""
     currency = "KRW(억원)" if market == "KR" else "USD(백만달러)"
 
@@ -288,7 +362,38 @@ def _build_prompt(code: str, market: str, name: str, fundamental: dict, technica
     stoch_signal = signals.get("stoch_signal", "neutral")
     stoch_k = signals.get("stoch_k")
     above_ma20 = signals.get("above_ma20", False)
-    vol_target = indicators.get("volatility_target")
+
+    # 전략 관련 신규 필드
+    ma5_cur      = signals.get("ma5")
+    ma20_cur     = signals.get("ma20")
+    ma60_cur     = signals.get("ma60")
+    ma_alignment = signals.get("ma_alignment", "혼합")
+    atr_val      = signals.get("atr")
+    cur_price_sig = signals.get("current_price")
+    vt_k03 = signals.get("volatility_target_k03") or indicators.get("volatility_target_k03")
+    vt_k05 = signals.get("volatility_target_k05") or indicators.get("volatility_target_k05")
+    vt_k07 = signals.get("volatility_target_k07") or indicators.get("volatility_target_k07")
+
+    def _break_status(target, price):
+        if target is None or price is None or price == 0:
+            return "데이터없음"
+        return "돌파" if price >= target else "미돌파"
+
+    vt_k03_status = _break_status(vt_k03, cur_price_sig)
+    vt_k05_status = _break_status(vt_k05, cur_price_sig)
+    vt_k07_status = _break_status(vt_k07, cur_price_sig)
+
+    # Graham Number
+    gn = graham_data or {}
+    graham_number = gn.get("graham_number")
+    discount_rate = gn.get("discount_rate")
+    gn_eps        = gn.get("eps")
+    gn_bps        = gn.get("bps")
+    gn_method     = gn.get("method", "N/A")
+    gn_str        = f"{graham_number:,.0f} ({gn_method})" if graham_number else f"N/A ({gn_method})"
+    dr_str        = f"{discount_rate:+.1f}%" if discount_rate is not None else "N/A"
+
+    macd_label = {'golden': '골든크로스(매수신호)', 'dead': '데드크로스(매도신호)', 'none': '크로스 없음'}.get(macd_cross, macd_cross)
 
     prompt = f"""다음은 {name}({code}, {market}) 종목의 분석 데이터입니다. 통화단위: {currency}
 
@@ -305,18 +410,52 @@ def _build_prompt(code: str, market: str, name: str, fundamental: dict, technica
 - PER: {per}배, PBR: {pbr}배, ROE: {roe}%, PSR: {psr}배, EV/EBITDA: {ev_ebitda}배
 
 ## 기술적 시그널 (15분봉 기준)
-- MACD: {macd_cross} ({{'golden': '골든크로스(매수신호)', 'dead': '데드크로스(매도신호)', 'none': '크로스 없음'}}.get(macd_cross, macd_cross))
+- MACD: {macd_cross} ({macd_label})
 - RSI: {rsi_val}({rsi_signal})
 - 스토캐스틱 %K: {stoch_k}({stoch_signal})
 - MA20 상회: {above_ma20}
-- 변동성 돌파 목표가: {vol_target}
 
-위 데이터를 종합 분석하여 다음 JSON 형식으로 투자 의견을 작성해주세요:
+## 변동성 돌파 전략 데이터
+- 현재가: {cur_price_sig}
+- ATR(14): {atr_val}
+- K=0.3 목표가: {vt_k03} → {vt_k03_status}
+- K=0.5 목표가: {vt_k05} → {vt_k05_status}
+- K=0.7 목표가: {vt_k07} → {vt_k07_status}
+
+## 안전마진 분석 (Graham Number)
+- Graham Number: {gn_str}
+- EPS: {gn_eps}, BPS: {gn_bps}
+- 현재가 대비 할인율: {dr_str} (양수=내재가치 대비 저평가, 음수=고평가)
+
+## 추세추종 전략 데이터
+- MA 정렬: {ma_alignment} (MA5={ma5_cur}, MA20={ma20_cur}, MA60={ma60_cur})
+- MACD 크로스: {macd_cross}
+- RSI: {rsi_val} ({rsi_signal})
+
+위 데이터를 세 가지 전략 프레임워크(변동성 돌파/안전마진/추세추종)로 종합 분석하여 다음 JSON 형식으로 투자 의견을 작성해주세요:
 {{
   "종합투자의견": {{
     "등급": "매수 또는 중립 또는 매도",
     "요약": "2-3문장 요약",
     "근거": ["근거1", "근거2", "근거3"]
+  }},
+  "전략별평가": {{
+    "변동성돌파": {{
+      "신호": "매수 또는 관망",
+      "목표가": K=0.5 목표가 숫자 또는 null,
+      "근거": "돌파 여부와 ATR 기반 변동성 수준 설명"
+    }},
+    "안전마진": {{
+      "신호": "매수 또는 중립 또는 매도",
+      "graham_number": Graham Number 숫자 또는 null,
+      "할인율": 할인율 숫자(%) 또는 null,
+      "근거": "Graham Number 해석 및 안전마진 수준 설명"
+    }},
+    "추세추종": {{
+      "신호": "매수 또는 관망 또는 매도",
+      "추세강도": "강 또는 중 또는 약",
+      "근거": "MA 정배열/RSI/MACD 조합 해석"
+    }}
   }},
   "기술적시그널": {{
     "신호": "매수 또는 관망 또는 매도",

@@ -170,16 +170,16 @@ frontend/
 
 | 컴포넌트 | 설명 |
 |---------|------|
-| `FundamentalPanel` | 기본적 분석 탭. 계량지표 카드 그리드 (PER/PBR/PSR/EV·EBITDA/ROE/ROA/부채비율/유동비율) + 손익계산서 테이블 + BarChart (매출/영업이익/순이익) + 대차대조표 테이블 + 현금흐름표 테이블 + BarChart (영업CF vs FCF) + 사업별 매출비중 PieChart (KR: "AI추정" 배지). |
-| `TechnicalPanel` | 기술적 분석 탭. `data`, `symbol`, `market` props. 타임프레임 선택(15분/60분/1일/1주) + 기간 선택(타임프레임별 허용 기간 목록). interval/period 변경 시 `fetchAdvisoryOhlcv()` 자동 호출. 초기 데이터는 `data.technical.ohlcv` 캐시 사용. 시그널 배지 카드 (MACD/RSI/Stochastic/MA20 상회 + 변동성돌파 목표가) + ComposedChart (종가봉+MA5/20/60+BB) + 거래량 BarChart + MACD ComposedChart + RSI LineChart (70/30 기준선) + Stochastic LineChart (80/20 기준선). |
-| `AIReportPanel` | AI자문 탭. Props: `report`, `history`, `loading`, `error`, `onGenerate`, `onSelectHistory`. "AI 분석 생성" 버튼 + 리포트 2개 이상 시 날짜 드롭다운(과거 리포트 선택) + 종합투자의견(등급 배지+요약+근거) + 기술적시그널(신호 배지+지표별) + 리스크 요인 + 투자 포인트. JSON 파싱 실패 시 원문 텍스트 fallback. |
+| `FundamentalPanel` | 기본적 분석 탭. **① ForwardEstimatesSection**: `forward_estimates` 있을 때만 표시 — EPS/매출/순이익 추정치 + 목표주가 + 투자의견 카드. ② 계량지표 카드 그리드 (PER/PBR/PSR/EV·EBITDA/ROE/ROA/부채비율/유동비율) ③ 손익계산서 테이블+BarChart (매출/영업이익/순이익 + `{fyYear}E`/`{fyYear+1}E` 추정 열, 인디고 스타일) ④ 대차대조표 테이블 ⑤ 현금흐름표 테이블+BarChart (영업CF vs FCF) ⑥ 사업별 매출비중 PieChart (KR: "AI추정" 배지). |
+| `TechnicalPanel` | 기술적 분석 탭. `data`, `symbol`, `market` props. 타임프레임 선택(15분/60분/1일/1주) + 기간 선택. interval/period 변경 시 `fetchAdvisoryOhlcv()` 자동 호출. 시그널 배지 카드: MACD/RSI/Stochastic/MA20 상회 + 변동성돌파 목표가(K=0.5) + **ATR(14)** + **MA배열** (정배열=빨강/역배열=파랑/혼합=회색) + **K=0.3·0.5·0.7 목표가** (보라 배지). 차트: ComposedChart (종가봉+MA5/20/60+BB) + 거래량 BarChart + MACD + RSI(70/30) + Stochastic(80/20). |
+| `AIReportPanel` | AI자문 탭. Props: `report`, `history`, `loading`, `error`, `onGenerate`, `onSelectHistory`. "AI 분석 생성" 버튼 + 리포트 2개 이상 시 날짜 드롭다운 + 종합투자의견(등급 배지+요약+근거) + **전략별평가 3컬럼 카드** (변동성돌파/안전마진/추세추종, 구 리포트에는 미표시) + 기술적시그널(신호 배지+지표별) + 리스크 요인 + 투자 포인트. JSON 파싱 실패 시 원문 텍스트 fallback. |
 
 ### 종목 상세 (`src/components/detail/`)
 
 | 컴포넌트 | 설명 |
 |---------|------|
 | `StockHeader` | 현재가/전일대비 + PER/PBR 배지 (평균 대비 저평가/고평가 색상 표시) + 시장/업종/시총 정보. |
-| `FinancialTable` | 가로 스크롤 10년 재무 테이블. 연도 헤더는 DART 사업보고서 링크. 매출/영업이익/영업이익률/순이익 행. YoY 증감률 색상 표시. 첫 열(항목명) sticky. |
+| `FinancialTable` | 가로 스크롤 10년 재무 테이블. 연도 헤더는 DART 사업보고서 링크. 매출/영업이익/영업이익률/순이익 행. YoY 증감률 색상 표시. 첫 열(항목명) sticky. **`forward` prop**: 오른쪽에 `{fyYear}E`/`{fyYear+1}E` 추정 열 추가 (인디고 계열 스타일, 매출·순이익 추정값, 영업이익 `-`). 상단에 `ForwardSection` 카드 (포워드 PER/EPS/매출/목표가/투자의견, 데이터 없으면 숨김). |
 | `ValuationChart` | Recharts `LineChart`로 PER/PBR 월별 시계열 차트. `ReferenceLine`으로 기간 평균선 표시. 연도 변경 시에만 X축 레이블 표시. 커스텀 Tooltip. |
 | `ReportSummary` | CAGR 카드(매출/영업이익/순이익 연평균 성장률) + 밸류에이션 진단(현재 PER/PBR vs 평균, 저평가/고평가 판정) + 최근 실적 요약 카드. |
 

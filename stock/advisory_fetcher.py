@@ -324,6 +324,31 @@ def _bollinger(closes: list[float], period: int = 20, sigma: float = 2.0):
     return upper, mid, lower
 
 
+def _atr(highs: list[float], lows: list[float], closes: list[float], period: int = 14) -> list[Optional[float]]:
+    """Average True Range (Wilder 평균법).
+    True Range = max(high-low, |high-prev_close|, |low-prev_close|)
+    """
+    n = len(closes)
+    result: list[Optional[float]] = [None] * n
+    if n < period + 1:
+        return result
+    tr_list = []
+    for i in range(1, n):
+        tr_list.append(max(
+            highs[i] - lows[i],
+            abs(highs[i] - closes[i - 1]),
+            abs(lows[i] - closes[i - 1]),
+        ))
+    if len(tr_list) < period:
+        return result
+    atr_val = sum(tr_list[:period]) / period
+    result[period] = atr_val
+    for i in range(period + 1, n):
+        atr_val = (atr_val * (period - 1) + tr_list[i - 1]) / period
+        result[i] = atr_val
+    return result
+
+
 def _safe_val(v: Optional[float]) -> Optional[float]:
     if v is None:
         return None
@@ -340,9 +365,16 @@ def calc_technical_indicators(ohlcv: list[dict]) -> dict:
         return {
             "macd": {}, "rsi": {}, "stoch": {}, "bb": {}, "ma": {},
             "volatility_target": None,
+            "volatility_target_k03": None,
+            "volatility_target_k05": None,
+            "volatility_target_k07": None,
             "current_signals": {
                 "macd_cross": "none", "rsi_signal": "neutral",
                 "stoch_signal": "neutral", "above_ma20": False,
+                "ma_alignment": "혼합", "atr": None,
+                "volatility_target_k03": None,
+                "volatility_target_k05": None,
+                "volatility_target_k07": None,
             },
         }
 
@@ -389,13 +421,20 @@ def calc_technical_indicators(ohlcv: list[dict]) -> dict:
     ma20 = [_safe_val(v) for v in ma20_raw]
     ma60 = [_safe_val(v) for v in ma60_raw]
 
-    # 변동성 돌파 목표가 (K=0.5)
-    volatility_target = None
+    # ATR (14기간, Wilder)
+    atr_raw = _atr(highs, lows, closes, 14)
+    atr_cur = next((v for v in reversed(atr_raw) if v is not None), None)
+
+    # 변동성 돌파 목표가 K=0.3/0.5/0.7 (기존 K=0.5 단일 → 3종 확장)
+    volatility_target = None           # 하위 호환 유지 (K=0.5)
+    volatility_target_k03 = volatility_target_k05 = volatility_target_k07 = None
     if len(ohlcv) >= 2:
-        prev = ohlcv[-2]
-        curr = ohlcv[-1]
-        range_val = prev["high"] - prev["low"]
-        volatility_target = _safe_val(curr["open"] + range_val * 0.5)
+        range_val = ohlcv[-2]["high"] - ohlcv[-2]["low"]
+        open_cur  = ohlcv[-1]["open"]
+        volatility_target_k03 = _safe_val(open_cur + range_val * 0.3)
+        volatility_target_k05 = _safe_val(open_cur + range_val * 0.5)
+        volatility_target_k07 = _safe_val(open_cur + range_val * 0.7)
+        volatility_target = volatility_target_k05
 
     # 현재 시그널 요약
     cur_close = closes[-1] if closes else 0
@@ -431,9 +470,21 @@ def calc_technical_indicators(ohlcv: list[dict]) -> dict:
         elif k_cur <= 20:
             stoch_signal = "oversold"
 
-    # MA20 상회 여부
+    # MA 현재값
+    ma5_cur  = next((v for v in reversed(ma5)  if v is not None), None)
     ma20_cur = next((v for v in reversed(ma20) if v is not None), None)
+    ma60_cur = next((v for v in reversed(ma60) if v is not None), None)
+
+    # MA20 상회 여부
     above_ma20 = (cur_close > ma20_cur) if (ma20_cur is not None and cur_close) else False
+
+    # MA 정배열/역배열
+    ma_alignment = "혼합"
+    if all(v is not None for v in [ma5_cur, ma20_cur, ma60_cur]):
+        if ma5_cur > ma20_cur > ma60_cur:
+            ma_alignment = "정배열"
+        elif ma5_cur < ma20_cur < ma60_cur:
+            ma_alignment = "역배열"
 
     return {
         "macd": {
@@ -464,6 +515,9 @@ def calc_technical_indicators(ohlcv: list[dict]) -> dict:
             "times": times,
         },
         "volatility_target": volatility_target,
+        "volatility_target_k03": volatility_target_k03,
+        "volatility_target_k05": volatility_target_k05,
+        "volatility_target_k07": volatility_target_k07,
         "current_signals": {
             "macd_cross": macd_cross,
             "rsi_signal": rsi_signal,
@@ -471,8 +525,15 @@ def calc_technical_indicators(ohlcv: list[dict]) -> dict:
             "stoch_signal": stoch_signal,
             "stoch_k": k_cur,
             "above_ma20": above_ma20,
+            "ma5": ma5_cur,
             "ma20": ma20_cur,
+            "ma60": ma60_cur,
+            "ma_alignment": ma_alignment,
+            "atr": _safe_val(atr_cur),
             "current_price": _safe_val(cur_close),
+            "volatility_target_k03": volatility_target_k03,
+            "volatility_target_k05": volatility_target_k05,
+            "volatility_target_k07": volatility_target_k07,
         },
     }
 

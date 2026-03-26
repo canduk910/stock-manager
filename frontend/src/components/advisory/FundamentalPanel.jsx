@@ -73,8 +73,33 @@ function Th({ children, right = false }) {
 }
 
 // ── 손익계산서 테이블 ─────────────────────────────────────────────────────
-function IncomeTable({ rows, market }) {
+function IncomeTable({ rows, market, forward }) {
   if (!rows?.length) return <p className="text-xs text-gray-400 py-2">데이터 없음</p>
+
+  const fyEnd  = forward?.current_fiscal_year_end
+  const fyYear = fyEnd ? parseInt(fyEnd.slice(0, 4)) : null
+  const hasCurEst = fyYear && (forward?.revenue_current != null || forward?.net_income_estimate != null)
+  const hasFwdEst = fyYear && (forward?.revenue_forward != null || forward?.net_income_forward != null)
+
+  // 추정 열 값 매핑 (항목 field → 현재E / 차기E)
+  const estCur = {
+    revenue:          forward?.revenue_current,
+    cogs:             null,
+    gross_profit:     null,
+    operating_income: null,
+    net_income:       forward?.net_income_estimate,
+  }
+  const estFwd = {
+    revenue:          forward?.revenue_forward,
+    cogs:             null,
+    gross_profit:     null,
+    operating_income: null,
+    net_income:       forward?.net_income_forward,
+  }
+
+  const estThCls = "px-3 py-2 text-xs font-semibold text-right bg-indigo-50 border-l border-dashed border-indigo-200 whitespace-nowrap"
+  const estTdBase = "px-3 py-2 text-xs text-right bg-indigo-50/40 border-l border-dashed border-indigo-200 italic"
+
   return (
     <div className="overflow-x-auto">
       <table className="min-w-full text-gray-700">
@@ -82,6 +107,8 @@ function IncomeTable({ rows, market }) {
           <tr>
             <Th>항목</Th>
             {rows.map(r => <Th key={r.year} right>{r.year}</Th>)}
+            {hasCurEst && <th className={estThCls}><span className="text-indigo-600">{fyYear}E</span></th>}
+            {hasFwdEst && <th className={estThCls}><span className="text-indigo-400">{fyYear + 1}E</span></th>}
           </tr>
         </thead>
         <tbody>
@@ -97,6 +124,20 @@ function IncomeTable({ rows, market }) {
               {rows.map(r => (
                 <Td key={r.year} right>{fmtMoney(r[field], market)}</Td>
               ))}
+              {hasCurEst && (
+                <td className={estTdBase}>
+                  {estCur[field] != null
+                    ? <span className="text-indigo-700">{fmtMoney(estCur[field], market)}</span>
+                    : <span className="text-gray-300">-</span>}
+                </td>
+              )}
+              {hasFwdEst && (
+                <td className={estTdBase}>
+                  {estFwd[field] != null
+                    ? <span className="text-indigo-400">{fmtMoney(estFwd[field], market)}</span>
+                    : <span className="text-gray-300">-</span>}
+                </td>
+              )}
             </tr>
           ))}
           <tr className="border-t border-gray-200">
@@ -106,6 +147,8 @@ function IncomeTable({ rows, market }) {
                 {fmtPct(r.oi_margin)}
               </td>
             ))}
+            {hasCurEst && <td className={estTdBase}><span className="text-gray-300">-</span></td>}
+            {hasFwdEst && <td className={estTdBase}><span className="text-gray-300">-</span></td>}
           </tr>
           <tr className="border-t border-gray-100">
             <td className="px-3 py-2 text-xs font-medium text-gray-600 bg-gray-50 sticky left-0">순이익률</td>
@@ -114,6 +157,8 @@ function IncomeTable({ rows, market }) {
                 {fmtPct(r.net_margin)}
               </td>
             ))}
+            {hasCurEst && <td className={estTdBase}><span className="text-gray-300">-</span></td>}
+            {hasFwdEst && <td className={estTdBase}><span className="text-gray-300">-</span></td>}
           </tr>
         </tbody>
       </table>
@@ -301,6 +346,84 @@ function SegmentsChart({ segments }) {
   )
 }
 
+const FW_REC_MAP = {
+  strong_buy:  { label: '적극매수', cls: 'bg-red-100 text-red-700 border-red-300' },
+  buy:         { label: '매수',     cls: 'bg-red-50  text-red-600 border-red-200' },
+  hold:        { label: '중립',     cls: 'bg-gray-100 text-gray-600 border-gray-300' },
+  sell:        { label: '매도',     cls: 'bg-blue-50 text-blue-600 border-blue-200' },
+  strong_sell: { label: '적극매도', cls: 'bg-blue-100 text-blue-700 border-blue-300' },
+}
+
+function ForwardEstimatesSection({ forward, market }) {
+  if (!forward) return null
+  const {
+    eps_current_year, eps_forward, forward_pe,
+    revenue_current, target_mean_price, target_high_price, target_low_price,
+    num_analysts, recommendation, current_fiscal_year_end,
+  } = forward
+
+  const hasAny = [eps_current_year, eps_forward, forward_pe, target_mean_price, revenue_current].some(v => v != null)
+  if (!hasAny) return null
+
+  const fy = current_fiscal_year_end ? `FY${current_fiscal_year_end.slice(0, 4)}E` : '추정치'
+  const rec = FW_REC_MAP[recommendation] || null
+
+  const fmtEps = (v) => {
+    if (v == null) return '-'
+    return market === 'KR' ? `${Math.round(v).toLocaleString()}원` : `$${v.toFixed(2)}`
+  }
+  const fmtPrice = (v) => {
+    if (v == null) return '-'
+    return market === 'KR' ? `${Math.round(v).toLocaleString()}원` : `$${v.toLocaleString(undefined, { maximumFractionDigits: 0 })}`
+  }
+  const fmtRev = (v) => {
+    if (v == null) return '-'
+    if (market === 'KR') {
+      const awk = v / 1e8
+      if (awk >= 10000) return (awk / 10000).toFixed(1) + '조'
+      return Math.round(awk).toLocaleString() + '억'
+    }
+    const m = v / 1e6
+    return m >= 1000 ? `$${(m / 1000).toFixed(1)}B` : `$${Math.round(m).toLocaleString()}M`
+  }
+
+  const items = [
+    forward_pe != null && { label: '포워드 PER', value: `${forward_pe.toFixed(1)}x`, sub: null },
+    eps_current_year != null && { label: `추정 EPS (${fy})`, value: fmtEps(eps_current_year), sub: eps_forward != null ? `차기: ${fmtEps(eps_forward)}` : null },
+    revenue_current != null && { label: '매출 추정', value: fmtRev(revenue_current), sub: null },
+    target_mean_price != null && {
+      label: '목표주가 (평균)',
+      value: fmtPrice(target_mean_price),
+      sub: (target_low_price != null || target_high_price != null) ? `${fmtPrice(target_low_price)} ~ ${fmtPrice(target_high_price)}` : null,
+    },
+  ].filter(Boolean)
+
+  return (
+    <div className="border border-indigo-100 rounded-xl bg-indigo-50/40 overflow-hidden">
+      <div className="px-4 py-2.5 border-b border-indigo-100 flex items-center justify-between">
+        <span className="text-sm font-semibold text-indigo-700">📊 애널리스트 컨센서스 ({fy})</span>
+        <div className="flex items-center gap-2">
+          {rec && (
+            <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-bold border ${rec.cls}`}>{rec.label}</span>
+          )}
+          {num_analysts != null && (
+            <span className="text-xs text-indigo-400">{num_analysts}명 추정</span>
+          )}
+        </div>
+      </div>
+      <div className={`grid gap-0 divide-x divide-indigo-100`} style={{ gridTemplateColumns: `repeat(${items.length}, 1fr)` }}>
+        {items.map(({ label, value, sub }) => (
+          <div key={label} className="px-4 py-3">
+            <div className="text-xs text-gray-500 mb-0.5">{label}</div>
+            <div className="text-sm font-semibold text-gray-800">{value}</div>
+            {sub && <div className="text-xs text-gray-400 mt-0.5">{sub}</div>}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 // ── 메인 컴포넌트 ─────────────────────────────────────────────────────────
 export default function FundamentalPanel({ data, market }) {
   const fundamental = data?.fundamental || {}
@@ -309,9 +432,13 @@ export default function FundamentalPanel({ data, market }) {
   const balanceSheet = fundamental.balance_sheet || []
   const cashflow = fundamental.cashflow || []
   const segments = fundamental.segments || []
+  const forwardEstimates = fundamental.forward_estimates || null
 
   return (
     <div className="space-y-2">
+      {/* 포워드 가이던스 */}
+      <ForwardEstimatesSection forward={forwardEstimates} market={market} />
+
       {/* 계량지표 */}
       <SectionTitle>계량지표</SectionTitle>
       <div className="grid grid-cols-4 gap-2 sm:grid-cols-4 lg:grid-cols-8">
@@ -327,7 +454,7 @@ export default function FundamentalPanel({ data, market }) {
 
       {/* 손익계산서 */}
       <SectionTitle>손익계산서</SectionTitle>
-      <IncomeTable rows={incomeStmt} market={market} />
+      <IncomeTable rows={incomeStmt} market={market} forward={forwardEstimates} />
       <IncomeChart rows={incomeStmt} market={market} />
 
       {/* 대차대조표 */}
