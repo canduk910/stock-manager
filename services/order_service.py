@@ -68,7 +68,7 @@ def place_order(
     Returns:
         로컬 DB에 저장된 주문 dict
     """
-    app_key, app_secret, acnt_no, acnt_prdt_cd = get_kis_credentials()
+    app_key, app_secret, acnt_no, acnt_prdt_cd, _ = get_kis_credentials()
     token = get_access_token()
 
     if market == "KR":
@@ -209,7 +209,7 @@ def _place_overseas_order(
 
 def get_buyable(symbol: str, market: str, price: float, order_type: str) -> dict:
     """매수가능 금액/수량 조회."""
-    app_key, app_secret, acnt_no, acnt_prdt_cd = get_kis_credentials()
+    app_key, app_secret, acnt_no, acnt_prdt_cd, _ = get_kis_credentials()
     token = get_access_token()
 
     if market == "KR":
@@ -278,7 +278,7 @@ def _get_overseas_buyable(token, app_key, app_secret, acnt_no, acnt_prdt_cd, sym
 
 def get_open_orders(market: str = "KR") -> list[dict]:
     """미체결 주문 목록 (KIS)."""
-    app_key, app_secret, acnt_no, acnt_prdt_cd = get_kis_credentials()
+    app_key, app_secret, acnt_no, acnt_prdt_cd, _ = get_kis_credentials()
     token = get_access_token()
 
     if market == "KR":
@@ -411,7 +411,7 @@ def modify_order(
     total: bool = True,
 ) -> dict:
     """주문 정정."""
-    app_key, app_secret, acnt_no, acnt_prdt_cd = get_kis_credentials()
+    app_key, app_secret, acnt_no, acnt_prdt_cd, _ = get_kis_credentials()
     token = get_access_token()
 
     if market == "KR":
@@ -511,7 +511,7 @@ def cancel_order(
     total: bool = True,
 ) -> dict:
     """주문 취소."""
-    app_key, app_secret, acnt_no, acnt_prdt_cd = get_kis_credentials()
+    app_key, app_secret, acnt_no, acnt_prdt_cd, _ = get_kis_credentials()
     token = get_access_token()
 
     if market == "KR":
@@ -594,7 +594,7 @@ def _cancel_overseas_order(
 
 def get_executions(market: str = "KR") -> list[dict]:
     """당일 체결 내역 조회 (KIS)."""
-    app_key, app_secret, acnt_no, acnt_prdt_cd = get_kis_credentials()
+    app_key, app_secret, acnt_no, acnt_prdt_cd, _ = get_kis_credentials()
     token = get_access_token()
 
     if market == "KR":

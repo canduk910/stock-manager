@@ -10,7 +10,8 @@ import os
 KIS_APP_KEY = os.getenv("KIS_APP_KEY", "")
 KIS_APP_SECRET = os.getenv("KIS_APP_SECRET", "")
 KIS_ACNT_NO = os.getenv("KIS_ACNT_NO", "")
-KIS_ACNT_PRDT_CD = os.getenv("KIS_ACNT_PRDT_CD", "")
+KIS_ACNT_PRDT_CD_STK = os.getenv("KIS_ACNT_PRDT_CD_STK", "")
+KIS_ACNT_PRDT_CD_FNO = os.getenv("KIS_ACNT_PRDT_CD_FNO", "")
 KIS_BASE_URL = os.getenv("KIS_BASE_URL", "https://openapi.koreainvestment.com:9443")
 
 # ── OpenDart ─────────────────────────────────────────────────────────────────

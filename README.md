@@ -65,7 +65,8 @@ cp .env.example .env
 | `KIS_APP_KEY` | 잔고·주문 조회 시 필수 | KIS 실계좌 앱 키 |
 | `KIS_APP_SECRET` | 잔고·주문 조회 시 필수 | KIS 실계좌 앱 시크릿 |
 | `KIS_ACNT_NO` | 잔고·주문 조회 시 필수 | 계좌번호 앞 8자리 |
-| `KIS_ACNT_PRDT_CD` | 잔고·주문 조회 시 필수 | 계좌번호 뒤 2자리 (보통 `01`) |
+| `KIS_ACNT_PRDT_CD_STK` | 잔고·주문 조회 시 필수 | 주식 계좌상품코드(뒤 2자리, 예: `01`) |
+| `KIS_ACNT_PRDT_CD_FNO` | 선택 | 선물옵션 계좌상품코드(뒤 2자리, 예: `03`). 미설정 시 선물옵션 잔고 미조회 |
 | `OPENDART_API_KEY` | 국내 공시·재무 조회 시 필수 | [OpenDART](https://opendart.fss.or.kr) 에서 발급 |
 | `OPENAI_API_KEY` | AI자문 리포트 생성 시 필수 | [OpenAI Platform](https://platform.openai.com) 에서 발급 |
 | `OPENAI_MODEL` | 선택 | 기본값: `gpt-4o`. `gpt-4o-mini`, `o3-mini` 등 지원 |

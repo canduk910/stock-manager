@@ -468,7 +468,8 @@ Stage 2  python:3.11-slim → pip install + 앱 소스 + COPY --from Stage 1
 | 조건 | 동작 |
 |------|------|
 | `KIS_APP_KEY` / `KIS_APP_SECRET` 미설정 | 경고 출력 (종료 안 함). `/api/balance` → 503 |
-| `KIS_ACNT_NO` / `KIS_ACNT_PRDT_CD` 미설정 | 경고 출력 |
+| `KIS_ACNT_NO` / `KIS_ACNT_PRDT_CD_STK` 미설정 | 경고 출력 |
+| `KIS_ACNT_PRDT_CD_FNO` 미설정 | 정보 출력. 선물옵션 잔고 조회 비활성화 |
 | `OPENDART_API_KEY` 미설정 | 경고 출력. 국내 `/api/earnings/filings`, `/api/detail/*` → 502 (해외 공시는 영향 없음) |
 | `OPENAI_API_KEY` 미설정 | 경고 출력. `/api/advisory/{code}/analyze` → 503 (데이터 수집/조회는 정상) |
 | `frontend/dist/` 존재 | "정적 파일 서빙" 안내 |
@@ -486,7 +487,8 @@ Stage 2  python:3.11-slim → pip install + 앱 소스 + COPY --from Stage 1
 | `KIS_APP_KEY` | 잔고 조회 시 필수 | KIS 실계좌 앱 키 |
 | `KIS_APP_SECRET` | 잔고 조회 시 필수 | KIS 실계좌 앱 시크릿 |
 | `KIS_ACNT_NO` | 잔고 조회 시 필수 | 계좌번호 앞 8자리 |
-| `KIS_ACNT_PRDT_CD` | 잔고 조회 시 필수 | 계좌번호 뒤 2자리 |
+| `KIS_ACNT_PRDT_CD_STK` | 잔고 조회 시 필수 | 주식 계좌상품코드(뒤 2자리, 예: 01) |
+| `KIS_ACNT_PRDT_CD_FNO` | 선택 | 선물옵션 계좌상품코드(뒤 2자리, 예: 03). 미설정 시 선물옵션 잔고 미조회 |
 | `KIS_BASE_URL` | 선택 | 기본값: `https://openapi.koreainvestment.com:9443` |
 | `OPENDART_API_KEY` | 국내 공시/재무 조회 시 필수 | https://opendart.fss.or.kr 에서 발급 |
 | `OPENAI_API_KEY` | AI자문 리포트 생성 시 필수 | https://platform.openai.com 에서 발급. 미설정 시 `/analyze` → 503. 크레딧 부족 시 402 반환. |

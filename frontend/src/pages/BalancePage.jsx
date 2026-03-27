@@ -37,7 +37,7 @@ export default function BalancePage() {
             <p className="font-semibold">KIS API 키가 설정되지 않았습니다</p>
             <p>{error}</p>
             <p className="text-xs text-amber-600 mt-2">
-              .env 파일에 KIS_APP_KEY, KIS_APP_SECRET, KIS_ACNT_NO, KIS_ACNT_PRDT_CD를 설정하면 잔고 조회를 사용할 수 있습니다.
+              .env 파일에 KIS_APP_KEY, KIS_APP_SECRET, KIS_ACNT_NO, KIS_ACNT_PRDT_CD_STK를 설정하면 잔고 조회를 사용할 수 있습니다.
             </p>
           </div>
         ) : (

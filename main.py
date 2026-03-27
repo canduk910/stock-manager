@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 # .env 파일 로드 (config.py 임포트 전에 호출해야 환경변수 반영)
 load_dotenv()
 
-from config import KIS_APP_KEY, KIS_APP_SECRET, KIS_ACNT_NO, KIS_ACNT_PRDT_CD, FINNHUB_API_KEY
+from config import KIS_APP_KEY, KIS_APP_SECRET, KIS_ACNT_NO, KIS_ACNT_PRDT_CD_STK, KIS_ACNT_PRDT_CD_FNO, FINNHUB_API_KEY
 
 
 @asynccontextmanager
@@ -21,10 +21,12 @@ async def lifespan(app: FastAPI):
         ("KIS_APP_KEY", KIS_APP_KEY),
         ("KIS_APP_SECRET", KIS_APP_SECRET),
         ("KIS_ACNT_NO", KIS_ACNT_NO),
-        ("KIS_ACNT_PRDT_CD", KIS_ACNT_PRDT_CD),
+        ("KIS_ACNT_PRDT_CD_STK", KIS_ACNT_PRDT_CD_STK),
     ) if not val]
     if missing:
         print(f"[경고] KIS 환경변수 누락: {', '.join(missing)} — 잔고/주문 비활성화")
+    if not KIS_ACNT_PRDT_CD_FNO:
+        print("[정보] KIS_ACNT_PRDT_CD_FNO 미설정 — 선물옵션 잔고 조회 비활성화")
 
     if not FINNHUB_API_KEY:
         print("[정보] FINNHUB_API_KEY 미설정 — 해외주식 시세 yfinance 폴링 모드 (15분 지연)")

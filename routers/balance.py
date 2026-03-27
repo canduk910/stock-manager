@@ -239,7 +239,7 @@ def get_balance():
     KIS API 키가 없으면 503을 반환한다.
     해외주식/선물옵션 조회 실패 시 해당 목록을 빈 배열로 반환 (국내주식은 정상 반환).
     """
-    app_key, app_secret, acnt_no, acnt_prdt_cd = get_kis_credentials()
+    app_key, app_secret, acnt_no, acnt_prdt_cd_stk, acnt_prdt_cd_fno = get_kis_credentials()
     token = get_access_token()
 
     # 국내주식 잔고
@@ -255,7 +255,7 @@ def get_balance():
     }
     params = {
         "CANO": acnt_no,
-        "ACNT_PRDT_CD": acnt_prdt_cd,
+        "ACNT_PRDT_CD": acnt_prdt_cd_stk,
         "AFHR_FLPR_YN": "N",
         "OFL_YN": "N",
         "INQR_DVSN": "02",
@@ -305,7 +305,7 @@ def get_balance():
 
     # 해외주식 잔고 (오류 발생 시 빈 결과)
     try:
-        overseas_result = _fetch_overseas_balance(token, app_key, app_secret, acnt_no, acnt_prdt_cd)
+        overseas_result = _fetch_overseas_balance(token, app_key, app_secret, acnt_no, acnt_prdt_cd_stk)
         overseas_list = overseas_result["stocks"]
         stock_eval_overseas_krw = overseas_result["stock_eval_krw"]
         deposit_overseas_krw = overseas_result["deposit_krw"]
@@ -316,7 +316,7 @@ def get_balance():
 
     # 국내선물옵션 잔고 (오류 발생 시 빈 목록)
     try:
-        futures_list = _fetch_futures_balance(token, app_key, app_secret, acnt_no, acnt_prdt_cd)
+        futures_list = _fetch_futures_balance(token, app_key, app_secret, acnt_no, acnt_prdt_cd_fno) if acnt_prdt_cd_fno else []
     except Exception:
         futures_list = []
 

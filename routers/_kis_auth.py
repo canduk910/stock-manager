@@ -9,7 +9,7 @@ import json
 import requests
 from fastapi import HTTPException
 
-from config import KIS_APP_KEY, KIS_APP_SECRET, KIS_ACNT_NO, KIS_ACNT_PRDT_CD, KIS_BASE_URL
+from config import KIS_APP_KEY, KIS_APP_SECRET, KIS_ACNT_NO, KIS_ACNT_PRDT_CD_STK, KIS_ACNT_PRDT_CD_FNO, KIS_BASE_URL
 
 BASE_URL = KIS_BASE_URL
 
@@ -17,15 +17,20 @@ BASE_URL = KIS_BASE_URL
 _access_token: str | None = None
 
 
-def get_kis_credentials() -> tuple[str, str, str, str]:
-    """KIS 환경변수를 읽어 반환한다. 누락 시 HTTPException(503)."""
-    if not all([KIS_APP_KEY, KIS_APP_SECRET, KIS_ACNT_NO, KIS_ACNT_PRDT_CD]):
+def get_kis_credentials() -> tuple[str, str, str, str, str]:
+    """KIS 환경변수를 읽어 반환한다. 누락 시 HTTPException(503).
+
+    Returns:
+        (app_key, app_secret, acnt_no, acnt_prdt_cd_stk, acnt_prdt_cd_fno)
+        acnt_prdt_cd_fno는 선택 — 미설정 시 빈 문자열.
+    """
+    if not all([KIS_APP_KEY, KIS_APP_SECRET, KIS_ACNT_NO, KIS_ACNT_PRDT_CD_STK]):
         missing = [
             name for name, val in [
                 ("KIS_APP_KEY", KIS_APP_KEY),
                 ("KIS_APP_SECRET", KIS_APP_SECRET),
                 ("KIS_ACNT_NO", KIS_ACNT_NO),
-                ("KIS_ACNT_PRDT_CD", KIS_ACNT_PRDT_CD),
+                ("KIS_ACNT_PRDT_CD_STK", KIS_ACNT_PRDT_CD_STK),
             ] if not val
         ]
         raise HTTPException(
@@ -33,7 +38,7 @@ def get_kis_credentials() -> tuple[str, str, str, str]:
             detail=f"KIS API 키가 설정되지 않았습니다. 누락된 환경변수: {', '.join(missing)}",
         )
 
-    return KIS_APP_KEY, KIS_APP_SECRET, KIS_ACNT_NO, KIS_ACNT_PRDT_CD
+    return KIS_APP_KEY, KIS_APP_SECRET, KIS_ACNT_NO, KIS_ACNT_PRDT_CD_STK, KIS_ACNT_PRDT_CD_FNO
 
 
 def get_access_token() -> str:

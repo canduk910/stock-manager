@@ -10,8 +10,12 @@ if [ -z "${KIS_APP_KEY:-}" ] || [ -z "${KIS_APP_SECRET:-}" ]; then
 fi
 
 # 계좌번호: 두 값 중 하나라도 없으면 경고
-if [ -z "${KIS_ACNT_NO:-}" ] || [ -z "${KIS_ACNT_PRDT_CD:-}" ]; then
-  echo "[경고] KIS_ACNT_NO / KIS_ACNT_PRDT_CD 미설정 — 잔고 조회(/api/balance) 비활성화" >&2
+if [ -z "${KIS_ACNT_NO:-}" ] || [ -z "${KIS_ACNT_PRDT_CD_STK:-}" ]; then
+  echo "[경고] KIS_ACNT_NO / KIS_ACNT_PRDT_CD_STK 미설정 — 잔고 조회(/api/balance) 비활성화" >&2
+fi
+
+if [ -z "${KIS_ACNT_PRDT_CD_FNO:-}" ]; then
+  echo "[정보] KIS_ACNT_PRDT_CD_FNO 미설정 — 선물옵션 잔고 조회 비활성화" >&2
 fi
 
 # DART API 키: 없으면 공시 조회 실패
