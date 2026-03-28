@@ -40,6 +40,7 @@ const TABS = [
 const MARKET_TABS = [
   { key: 'KR', label: '국내' },
   { key: 'US', label: '미국' },
+  { key: 'FNO', label: '선물옵션' },
 ]
 
 export default function OrderPage({ notify }) {

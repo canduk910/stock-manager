@@ -22,7 +22,7 @@ const EMPTY_STATE = {
   connected: false,
 }
 
-export function useQuote(symbol) {
+export function useQuote(symbol, market = 'KR') {
   const [state, setState] = useState(EMPTY_STATE)
 
   // rAF throttle refs
@@ -70,10 +70,11 @@ export function useQuote(symbol) {
     }
   }, [])
 
-  const url = useMemo(
-    () => symbol ? buildWsUrl(`/ws/quote/${symbol}`) : null,
-    [symbol]
-  )
+  const url = useMemo(() => {
+    if (!symbol) return null
+    const base = buildWsUrl(`/ws/quote/${symbol}`)
+    return market === 'FNO' ? `${base}?market=FNO` : base
+  }, [symbol, market])
 
   const { connected } = useWebSocket(url, { onMessage })
 

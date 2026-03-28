@@ -41,12 +41,12 @@ export function useBuyable() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
 
-  const load = useCallback(async (symbol, market = 'KR', price = 0, orderType = '00') => {
+  const load = useCallback(async (symbol, market = 'KR', price = 0, orderType = '00', side = 'buy') => {
     setLoading(true)
     setError(null)
     setData(null)
     try {
-      const result = await fetchBuyable(symbol, market, price, orderType)
+      const result = await fetchBuyable(symbol, market, price, orderType, side)
       setData(result)
     } catch (e) {
       setError(e.message)

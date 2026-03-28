@@ -2,18 +2,21 @@
  * 실시간 호가창 컴포넌트.
  * 국내(KR): KIS WS 기반 10호가 + 현재가
  * 해외(US): yfinance polling 현재가만 (호가 미지원)
+ * 선물옵션(FNO): KIS WS 기반 5호가(지수) or 10호가(주식선물옵션) + 현재가
  *
  * Props:
- *   symbol      - 종목코드 (예: '005930', 'AAPL')
- *   market      - 'KR' | 'US'
- *   onPriceSelect(price) - 호가 클릭 시 가격 전달 콜백
+ *   symbol      - 종목코드 (예: '005930', 'AAPL', '101W09')
+ *   market      - 'KR' | 'US' | 'FNO'
+ *   onPriceSelect(price, side) - 호가 클릭 시 가격+방향 전달 콜백
  */
 import { memo, useMemo } from 'react'
 import { useQuote } from '../../hooks/useQuote'
 
 function formatPrice(price, market) {
   if (price == null || price === 0) return '—'
-  if (market === 'US') return price.toFixed(2)
+  if (market === 'US' || market === 'FNO') {
+    return price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  }
   return Math.floor(price).toLocaleString()
 }
 
@@ -29,10 +32,12 @@ function calcPct(volume, maxVolume) {
   return Math.min((volume / maxVolume) * 100, 100)
 }
 
-function OrderbookPanel({ symbol, market = 'KR', onPriceSelect, onSideSelect }) {
-  const { price, change, changeRate, sign, asks, bids, totalAskVolume, totalBidVolume, connected } = useQuote(symbol)
-
+function OrderbookPanel({ symbol, market = 'KR', onPriceSelect }) {
+  const isFNO = market === 'FNO'
   const isDomestic = market === 'KR'
+  const showOrderbook = market !== 'US'  // KR/FNO 모두 호가창 표시
+
+  const { price, change, changeRate, sign, asks, bids, totalAskVolume, totalBidVolume, connected } = useQuote(symbol, market)
 
   // 가격 등락 색상: sign '2'=상승(빨강), '5'=하락(파랑), '3'=보합(회색)
   const priceColor =
@@ -51,12 +56,12 @@ function OrderbookPanel({ symbol, market = 'KR', onPriceSelect, onSideSelect }) 
 
   // asks[0]은 최우선(최저) 매도호가 → UI 상단은 높은가격 → reverse
   const { displayAsks, displayBids, maxVolume } = useMemo(() => {
-    const da = isDomestic ? [...asks].reverse() : []
-    const db = isDomestic ? bids : []
+    const da = showOrderbook ? [...asks].reverse() : []
+    const db = showOrderbook ? bids : []
     const allVolumes = [...da, ...db].map((r) => r.volume).filter(Boolean)
     const mv = allVolumes.length > 0 ? Math.max(...allVolumes) : 1
     return { displayAsks: da, displayBids: db, maxVolume: mv }
-  }, [asks, bids, isDomestic])
+  }, [asks, bids, showOrderbook])
 
   // 종목 없음 플레이스홀더
   if (!symbol) {
@@ -74,12 +79,17 @@ function OrderbookPanel({ symbol, market = 'KR', onPriceSelect, onSideSelect }) 
       <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <span className="text-sm font-bold text-gray-800">{symbol}</span>
-          <span className={`inline-flex items-center gap-1 text-xs ${connected ? 'text-green-500' : 'text-gray-400'}`}>
-            <span className={`w-1.5 h-1.5 rounded-full ${connected ? 'bg-green-500' : 'bg-gray-300'}`} />
-            {connected ? '실시간' : '연결 중...'}
-          </span>
+          {(isDomestic || isFNO) && (
+            <span className={`inline-flex items-center gap-1 text-xs ${connected ? 'text-green-500' : 'text-gray-400'}`}>
+              <span className={`w-1.5 h-1.5 rounded-full ${connected ? 'bg-green-500' : 'bg-gray-300'}`} />
+              {connected ? '실시간' : '연결 중...'}
+            </span>
+          )}
         </div>
-        {!isDomestic && (
+        {isFNO && (
+          <span className="text-xs text-gray-400 bg-gray-50 px-2 py-0.5 rounded">선물옵션</span>
+        )}
+        {!isDomestic && !isFNO && (
           <span className="text-xs text-gray-400 bg-gray-50 px-2 py-0.5 rounded">15분 지연</span>
         )}
       </div>
@@ -90,7 +100,8 @@ function OrderbookPanel({ symbol, market = 'KR', onPriceSelect, onSideSelect }) 
           <div>
             <div className={`text-2xl font-bold ${priceColor}`}>
               {formatPrice(price, market)}
-              <span className="text-sm font-normal ml-1">{market === 'KR' ? '원' : 'USD'}</span>
+              {isDomestic && <span className="text-sm font-normal ml-1">원</span>}
+              {market === 'US' && <span className="text-sm font-normal ml-1">USD</span>}
             </div>
             {changeLabel && <div className="text-sm mt-0.5">{changeLabel}</div>}
           </div>
@@ -99,8 +110,8 @@ function OrderbookPanel({ symbol, market = 'KR', onPriceSelect, onSideSelect }) 
         )}
       </div>
 
-      {/* 호가 테이블 */}
-      {isDomestic ? (
+      {/* 호가 테이블 (KR / FNO) */}
+      {showOrderbook ? (
         <div className="text-xs">
           {/* 컬럼 헤더 */}
           <div className="grid grid-cols-3 text-center text-gray-400 font-medium py-1.5 border-b border-gray-100 bg-gray-50">
@@ -109,7 +120,7 @@ function OrderbookPanel({ symbol, market = 'KR', onPriceSelect, onSideSelect }) 
             <span className="text-red-400">잔량(매수)</span>
           </div>
 
-          {/* 매도 10호가 (높은가격→낮은가격, 위→아래) */}
+          {/* 매도 호가 (높은가격→낮은가격, 위→아래) */}
           {displayAsks.map((row, i) => {
             const pct = calcPct(row.volume, maxVolume)
             return (
@@ -138,7 +149,7 @@ function OrderbookPanel({ symbol, market = 'KR', onPriceSelect, onSideSelect }) 
           {/* 현재가 구분선 */}
           {price != null && (
             <div
-              onClick={() => onPriceSelect?.(Math.floor(price))}
+              onClick={() => onPriceSelect?.(isFNO ? price : Math.floor(price))}
               className="grid grid-cols-3 text-center py-1.5 bg-gray-100 border-y border-gray-200 cursor-pointer hover:bg-gray-150"
             >
               <div />
@@ -149,7 +160,7 @@ function OrderbookPanel({ symbol, market = 'KR', onPriceSelect, onSideSelect }) 
             </div>
           )}
 
-          {/* 매수 10호가 (높은가격→낮은가격, 위→아래) */}
+          {/* 매수 호가 (높은가격→낮은가격, 위→아래) */}
           {displayBids.map((row, i) => {
             const pct = calcPct(row.volume, maxVolume)
             return (
@@ -187,7 +198,7 @@ function OrderbookPanel({ symbol, market = 'KR', onPriceSelect, onSideSelect }) 
           {/* 호가 데이터 없을 때 안내 */}
           {displayAsks.length === 0 && displayBids.length === 0 && (
             <div className="py-8 text-center text-gray-400 text-xs">
-              호가 데이터 수신 중...
+              {isFNO ? '선물옵션 호가 데이터 수신 중...' : '호가 데이터 수신 중...'}
             </div>
           )}
         </div>

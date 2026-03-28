@@ -8,18 +8,20 @@ import logging
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from services.quote_service import get_manager, get_overseas_manager
-from stock.utils import is_domestic
+from stock.utils import is_domestic, is_fno
 
 router = APIRouter(tags=["quote"])
 logger = logging.getLogger(__name__)
 
 
 @router.websocket("/ws/quote/{symbol}")
-async def quote_ws(websocket: WebSocket, symbol: str):
+async def quote_ws(websocket: WebSocket, symbol: str, market: str = ""):
     await websocket.accept()
     symbol = symbol.upper()
     try:
-        if is_domestic(symbol):
+        if market == "FNO" or (not market and is_fno(symbol)):
+            await _stream_fno(websocket, symbol)
+        elif is_domestic(symbol):
             await _stream_domestic(websocket, symbol)
         else:
             await _stream_overseas(websocket, symbol)
@@ -64,6 +66,37 @@ async def _stream_domestic(websocket: WebSocket, symbol: str):
                     break
 
             # 병합된 최신 메시지만 전송
+            for m in latest.values():
+                await websocket.send_json(m)
+    finally:
+        manager.unsubscribe(symbol, queue)
+
+
+async def _stream_fno(websocket: WebSocket, symbol: str):
+    """KIS WebSocket → FastAPI WebSocket 브릿지 (선물옵션). 100ms 메시지 병합."""
+    manager = get_manager()
+    queue: asyncio.Queue = asyncio.Queue(maxsize=100)
+    await manager.subscribe(symbol, queue, is_fno=True)
+    try:
+        while True:
+            try:
+                msg = await asyncio.wait_for(queue.get(), timeout=30.0)
+            except asyncio.TimeoutError:
+                await websocket.send_json({"type": "ping"})
+                continue
+
+            latest = {msg["type"]: msg}
+            deadline = asyncio.get_event_loop().time() + 0.1
+            while True:
+                remaining = deadline - asyncio.get_event_loop().time()
+                if remaining <= 0:
+                    break
+                try:
+                    extra = await asyncio.wait_for(queue.get(), timeout=remaining)
+                    latest[extra["type"]] = extra
+                except asyncio.TimeoutError:
+                    break
+
             for m in latest.values():
                 await websocket.send_json(m)
     finally:

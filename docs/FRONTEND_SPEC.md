@@ -78,7 +78,7 @@ frontend/
 | `useOrder.js` | `useOrderPlace()`, `useBuyable()`, `useOpenOrders()`, `useExecutions()`, `useOrderHistory()`, `useOrderSync()`, `useReservations()` | 각각 `{ loading, error, ... }` + 액션 함수 |
 | `useNotification.js` | `useNotification()` | `{ toasts, notify, dismiss }` — 토스트 상태 + 브라우저 Notification API |
 | `useWebSocket.js` | `useWebSocket(url, { onMessage, onOpen })` | `{ connected, sendMessage }` — 공용 WS 연결 수명주기. 지수 백오프 재연결(500ms→10초), visibilitychange 탭 복귀 재연결. url=null이면 연결 안 함. `buildWsUrl(path)` 헬퍼도 export. |
-| `useQuote.js` | `useQuote(symbol)` | `{ price, change, changeRate, sign, asks, bids, totalAskVolume, totalBidVolume, connected }` — `useWebSocket` 기반. 자체 rAF throttle(pendingRef + rafRef)으로 60fps 렌더링 제어. symbol 변경 시 state 초기화. |
+| `useQuote.js` | `useQuote(symbol, market='KR')` | `{ price, change, changeRate, sign, asks, bids, totalAskVolume, totalBidVolume, connected }` — `useWebSocket` 기반. `market` 파라미터를 WS URL `?market=` 쿼리로 전달 (`KR`/`FNO`/`US`). 자체 rAF throttle(pendingRef + rafRef)으로 60fps 렌더링 제어. symbol 변경 시 state 초기화. |
 | `useAdvisory.js` | `useAdvisoryStocks()` | `{ stocks, loading, error, load, add, remove }` — 자문종목 목록 CRUD |
 | | `useAdvisoryData()` | `{ data, loading, error, load, refresh }` — 분석 데이터 조회/새로고침. `refresh(code, market, name)` |
 | | `useAdvisoryReport()` | `{ report, history, loading, error, load, generate, loadById }` — AI 리포트 조회/생성/히스토리. `history`: 목록(본문 제외). `loadById(code, id, market)`: 특정 리포트 로드. |
@@ -143,8 +143,8 @@ frontend/
 | 컴포넌트 | 설명 |
 |---------|------|
 | `SymbolSearchBar` | 주문 페이지 공용 종목 검색 바 (신규 컴포넌트). 시장 드롭다운(KR/US) + 종목 검색 입력 + 자동완성. Props: `market`, `onMarketChange`, `symbol`, `symbolName`, `onSymbolSelect`, `defaultQuery`. KR=자동완성 드롭다운(400ms debounce, 2글자 이상, `GET /api/search`), US=티커 검증(500ms debounce). 시장 변경 시 검색 상태 완전 초기화(대기 중 debounce 취소 포함). `marketRef`로 async 완료 시점 시장 변경 감지(US→KR 먹통 방지). |
-| `OrderForm` | 매매구분/가격/수량 입력 폼. `symbol`, `symbolName`, `market` props로 종목/시장을 외부에서 제어. 잔고 페이지 URL 파라미터 `defaultValues` prop으로 반영. 매수가능 조회 버튼. `externalPrice` prop → 지정가 자동 세팅(호가창 연동). `externalSide` prop → 매매방향 자동 세팅(호가 클릭 연동). |
-| `OrderbookPanel` | 실시간 호가창. `symbol`+`market` prop. 국내=KIS WS 10호가(매도↑매수↓, 잔량 배경바), 해외=현재가만 표시(호가 미지원 안내). **매도호가(asks) 클릭 → `onPriceSelect(price, 'sell')`, 매수호가(bids) 클릭 → `onPriceSelect(price, 'buy')`**. 연결 상태 배지(녹색/회색). symbol 없으면 플레이스홀더 표시. `useMemo([asks, bids, isDomestic])`으로 `displayAsks` / `displayBids` / `maxVolume` 재계산 방지. `export default memo(OrderbookPanel)`으로 props 미변경 시 리렌더 차단. |
+| `OrderForm` | 매매구분/가격/수량 입력 폼. `symbol`, `symbolName`, `market` props로 종목/시장을 외부에서 제어. 잔고 페이지 URL 파라미터 `defaultValues` prop으로 반영. 매수가능 조회 버튼. `externalPrice` prop → 지정가 자동 세팅(호가창 연동). `externalSide` prop → 매매방향 자동 세팅(호가 클릭 연동). **FNO**: `FNO_ORDER_TYPE_OPTIONS`(지정가/시장가/조건부지정가/최유리지정가) + `FNO_CONDITION_OPTIONS`(없음/IOC/FOK). `mapFnoOrderCodes(orderType, condition)` → `{nmpr_type_cd, krx_nmpr_cndt_cd, ord_dvsn_cd}` 자동 매핑. 가격 step=0.01. |
+| `OrderbookPanel` | 실시간 호가창. `symbol`+`market` prop. **KR/FNO 모두 `useQuote(symbol, market)` 훅 사용** (REST 폴링 제거). KR=KIS WS 10호가(실시간), FNO=KIS FNO WS 호가(실시간, 5 또는 10레벨), US=현재가만 표시(호가 미지원 안내). KR/FNO는 동일한 호가창 그리드 렌더링 공유(매도↑매수↓, 잔량 배경바). **매도호가(asks) 클릭 → `onPriceSelect(price, 'sell')`, 매수호가(bids) 클릭 → `onPriceSelect(price, 'buy')`**. 연결 상태 배지(녹색/회색). symbol 없으면 플레이스홀더 표시. `useMemo([asks, bids, market])`으로 `displayAsks` / `displayBids` / `maxVolume` 재계산 방지. `export default memo(OrderbookPanel)`으로 props 미변경 시 리렌더 차단. |
 | `PriceChartPanel` | 가격 차트 패널. Props: `symbol`, `market`. `useAdvisoryOhlcv` 훅 사용. 타임프레임(15m/60m/1d/1wk) + 기간 선택 UI. `CandlestickChart` 컴포넌트로 차트 렌더링. symbol 변경 시 500ms debounce. |
 | `OrderConfirmModal` | 주문 확인 모달. 종목/수량/가격/매매구분 재확인 후 발송. |
 | `OpenOrdersTable` | 미체결 주문 테이블. `api_cancellable` 기준으로 API 주문은 정정/취소 버튼, HTS/MTS 주문은 "앱취소필요" 표시. |

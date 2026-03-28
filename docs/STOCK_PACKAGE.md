@@ -20,7 +20,7 @@
 | `dart_fin.py` | OpenDart 재무데이터 수집 (IS + BS + CF) |
 | `yf_client.py` | yfinance 해외주식 데이터 수집 + 밸류에이션 히스토리 추정 |
 | `sec_filings.py` | SEC EDGAR 미국 공시 조회 |
-| `utils.py` | `is_domestic(code)` 국내/해외 구분 |
+| `utils.py` | `is_domestic(code)` 국내/해외 구분. `is_fno(code)` FNO 단축코드 여부 판별. |
 | `display.py` | Rich 테이블 렌더링 + CSV 내보내기 |
 | `cache.py` | SQLite 캐시 (TTL 지원) |
 | `cli.py` | Click CLI (`python -m stock watch ...`) |

@@ -4,6 +4,9 @@ KIS WebSocket 단일 연결 관리 + 심볼별 asyncio.Queue 브로드캐스트.
 FastAPI lifespan에서 start() / stop() 호출.
 국내(KR): H0STCNT0 체결가 + H0STASP0 호가 실시간 수신
          WS 끊김 시 KIS REST FHKST01010100 5초 폴링 자동 전환
+선물옵션(FNO): H0IFASP0/H0IFCNT0(지수) H0IOASP0/H0IOCNT0(지수옵션)
+              H0ZFASP0/H0ZFCNT0(주식선물) H0ZOASP0/H0ZOCNT0(주식옵션)
+              동일 WS 연결, 5레벨(지수) 또는 10레벨(주식) 호가
 해외(US): Finnhub WS (FINNHUB_API_KEY 설정 시) 또는 yfinance 2초 폴링
 """
 import asyncio
@@ -19,6 +22,40 @@ from config import KIS_APP_KEY, KIS_APP_SECRET, KIS_BASE_URL, FINNHUB_API_KEY
 KIS_WS_URL = "ws://ops.koreainvestment.com:21000"
 
 logger = logging.getLogger(__name__)
+
+# ── FNO WS TR_ID 상수 ──────────────────────────────────────────────────────────
+
+_FNO_TR_IDS: dict[str, dict] = {
+    "IF": {"orderbook": "H0IFASP0", "execution": "H0IFCNT0", "levels": 5},   # 지수선물
+    "IO": {"orderbook": "H0IOASP0", "execution": "H0IOCNT0", "levels": 5},   # 지수옵션
+    "ZF": {"orderbook": "H0ZFASP0", "execution": "H0ZFCNT0", "levels": 10},  # 주식선물
+    "ZO": {"orderbook": "H0ZOASP0", "execution": "H0ZOCNT0", "levels": 10},  # 주식옵션
+}
+_FNO_EXECUTION_TR_IDS: set[str] = {"H0IFCNT0", "H0IOCNT0", "H0ZFCNT0", "H0ZOCNT0"}
+_FNO_ORDERBOOK_TR_IDS: set[str] = {"H0IFASP0", "H0IOASP0", "H0ZFASP0", "H0ZOASP0"}
+_FNO_5LEVEL_TR_IDS:   set[str] = {"H0IFASP0", "H0IOASP0"}
+
+
+def _resolve_fno_type(symbol: str) -> str:
+    """FNO 심볼 → 상품 유형 코드 ('IF'|'IO'|'ZF'|'ZO')."""
+    if not symbol:
+        return "IF"
+    ch = symbol[0]
+    if ch == "1":
+        return "IF"
+    if ch == "2":
+        return "IO"
+    if ch == "3":
+        # 주식선물 vs 주식옵션 구분: fno_master의 product_type 활용
+        try:
+            from stock.fno_master import validate_fno_symbol
+            info = validate_fno_symbol(symbol)
+            if info and "옵션" in info.get("product_type", ""):
+                return "ZO"
+        except Exception:
+            pass
+        return "ZF"
+    return "IF"
 
 
 # ── KIS REST 토큰 캐시 (quote_service 전용, HTTPException 없이 동작) ──────────
@@ -65,6 +102,9 @@ class KISQuoteManager:
         # REST fallback
         self._fallback_mode: bool = False
         self._fallback_task: asyncio.Task | None = None
+        # FNO 구독 관리
+        self._fno_symbols: set[str] = set()
+        self._fno_types: dict[str, str] = {}  # symbol → 'IF'|'IO'|'ZF'|'ZO'
 
     # ── lifecycle ──────────────────────────────────────────────────
 
@@ -100,21 +140,31 @@ class KISQuoteManager:
 
     # ── pub/sub ────────────────────────────────────────────────────
 
-    async def subscribe(self, symbol: str, queue: asyncio.Queue):
+    async def subscribe(self, symbol: str, queue: asyncio.Queue, is_fno: bool = False):
         self._subscribers[symbol].add(queue)
+        if is_fno:
+            self._fno_symbols.add(symbol)
         if symbol not in self._subscribed_symbols and self._ws:
             try:
-                await self._send_subscribe(symbol)
+                if symbol in self._fno_symbols:
+                    await self._send_subscribe_fno(symbol)
+                else:
+                    await self._send_subscribe(symbol)
             except Exception as e:
                 logger.warning("[QuoteService] 구독 요청 실패: %s — %s", symbol, e)
         # 즉시 초기 가격 push (비개장일 포함)
-        asyncio.create_task(self._push_initial_price(symbol, queue))
+        if symbol in self._fno_symbols:
+            asyncio.create_task(self._push_initial_price_fno(symbol, queue))
+        else:
+            asyncio.create_task(self._push_initial_price(symbol, queue))
 
     def unsubscribe(self, symbol: str, queue: asyncio.Queue):
         self._subscribers[symbol].discard(queue)
         if not self._subscribers[symbol]:
             self._subscribers.pop(symbol, None)
             self._subscribed_symbols.discard(symbol)
+            self._fno_symbols.discard(symbol)
+            self._fno_types.pop(symbol, None)
 
     # ── 초기 가격 push ─────────────────────────────────────────────
 
@@ -140,6 +190,19 @@ class KISQuoteManager:
         except Exception as e:
             logger.debug("[QuoteService] 초기 가격 push 실패: %s — %s", symbol, e)
 
+    async def _push_initial_price_fno(self, symbol: str, queue: asyncio.Queue):
+        """FNO 구독 즉시 REST FHMIF10000000으로 초기 시세 push."""
+        try:
+            loop = asyncio.get_event_loop()
+            msg = await loop.run_in_executor(None, self._fetch_fno_rest_price_sync, symbol)
+            if msg:
+                try:
+                    queue.put_nowait(msg)
+                except asyncio.QueueFull:
+                    pass
+        except Exception as e:
+            logger.debug("[QuoteService] FNO 초기 가격 push 실패: %s — %s", symbol, e)
+
     # ── 내부 메서드 ────────────────────────────────────────────────
 
     async def _send_subscribe(self, symbol: str):
@@ -158,6 +221,26 @@ class KISQuoteManager:
             await self._ws.send(json.dumps(msg))
         self._subscribed_symbols.add(symbol)
         logger.debug("[QuoteService] 구독 등록: %s", symbol)
+
+    async def _send_subscribe_fno(self, symbol: str):
+        fno_type = _resolve_fno_type(symbol)
+        self._fno_types[symbol] = fno_type
+        tr_info = _FNO_TR_IDS[fno_type]
+        approval_key = self._get_approval_key()
+        for tr_id in [tr_info["execution"], tr_info["orderbook"]]:
+            msg = {
+                "header": {
+                    "approval_key": approval_key,
+                    "personalseckey": "1",
+                    "custtype": "P",
+                    "tr_type": "1",
+                    "content-type": "utf-8",
+                },
+                "body": {"input": {"tr_id": tr_id, "tr_key": symbol}},
+            }
+            await self._ws.send(json.dumps(msg))
+        self._subscribed_symbols.add(symbol)
+        logger.debug("[QuoteService] FNO 구독 등록: %s (%s)", symbol, fno_type)
 
     def _get_approval_key(self) -> str:
         if self._approval_key:
@@ -202,7 +285,10 @@ class KISQuoteManager:
             self._ws = ws
             logger.info("[QuoteService] KIS WebSocket 연결됨")
             for symbol in list(self._subscribers.keys()):
-                await self._send_subscribe(symbol)
+                if symbol in self._fno_symbols:
+                    await self._send_subscribe_fno(symbol)
+                else:
+                    await self._send_subscribe(symbol)
             async for message in ws:
                 if not self._running:
                     break
@@ -223,6 +309,15 @@ class KISQuoteManager:
                     await self._broadcast(parsed["symbol"], {"type": "price", **parsed})
             elif tr_id == "H0STASP0":
                 parsed = self._parse_orderbook(tokens[3])
+                if parsed:
+                    await self._broadcast(parsed["symbol"], {"type": "orderbook", **parsed})
+            elif tr_id in _FNO_EXECUTION_TR_IDS:
+                parsed = self._parse_fno_execution(tokens[3])
+                if parsed:
+                    await self._broadcast(parsed["symbol"], {"type": "price", **parsed})
+            elif tr_id in _FNO_ORDERBOOK_TR_IDS:
+                levels = 5 if tr_id in _FNO_5LEVEL_TR_IDS else 10
+                parsed = self._parse_fno_orderbook(tokens[3], levels)
                 if parsed:
                     await self._broadcast(parsed["symbol"], {"type": "orderbook", **parsed})
         else:
@@ -253,7 +348,7 @@ class KISQuoteManager:
     # ── REST Fallback ──────────────────────────────────────────────
 
     async def _rest_fallback_loop(self):
-        """WS 끊김 시 KIS REST FHKST01010100 5초 폴링 (price only)."""
+        """WS 끊김 시 KIS REST 5초 폴링 (price only). FNO는 FHMIF10000000, 국내는 FHKST01010100."""
         logger.info("[QuoteService] REST fallback 폴링 시작")
         while self._fallback_mode and self._running:
             symbols = list(self._subscribers.keys())
@@ -261,7 +356,11 @@ class KISQuoteManager:
                 if not self._fallback_mode or not self._running:
                     break
                 try:
-                    msg = await self._fetch_rest_price(symbol)
+                    if symbol in self._fno_symbols:
+                        loop = asyncio.get_event_loop()
+                        msg = await loop.run_in_executor(None, self._fetch_fno_rest_price_sync, symbol)
+                    else:
+                        msg = await self._fetch_rest_price(symbol)
                     if msg:
                         await self._broadcast(symbol, msg)
                 except Exception as e:
@@ -332,17 +431,18 @@ class KISQuoteManager:
 
         return await loop.run_in_executor(None, _sync)
 
+    @staticmethod
+    def _sf(v) -> float:
+        try:
+            return float(v)
+        except Exception:
+            return 0.0
+
     def _parse_execution(self, raw: str) -> dict | None:
         t = raw.split('^')
         if len(t) < 6:
             return None
-
-        def sf(v):
-            try:
-                return float(v)
-            except Exception:
-                return 0.0
-
+        sf = self._sf
         return {
             "symbol": t[0],
             "price": sf(t[2]),
@@ -355,16 +455,9 @@ class KISQuoteManager:
         t = raw.split('^')
         if len(t) < 45:
             return None
-
-        def sf(v):
-            try:
-                return float(v)
-            except Exception:
-                return 0.0
-
+        sf = self._sf
         asks = [{"price": sf(t[3 + i]), "volume": sf(t[23 + i])} for i in range(10)]
         bids = [{"price": sf(t[13 + i]), "volume": sf(t[33 + i])} for i in range(10)]
-
         return {
             "symbol": t[0],
             "asks": asks,
@@ -372,6 +465,115 @@ class KISQuoteManager:
             "total_ask_volume": sf(t[43]),
             "total_bid_volume": sf(t[44]),
         }
+
+    def _parse_fno_execution(self, raw: str) -> dict | None:
+        """FNO 체결 파싱. H0IFCNT0/H0IOCNT0/H0ZFCNT0/H0ZOCNT0 공통.
+        [0]=종목코드, [2]=전일대비, [3]=부호, [4]=대비율, [5]=현재가
+        """
+        t = raw.split('^')
+        if len(t) < 6:
+            return None
+        sf = self._sf
+        return {
+            "symbol": t[0],
+            "price": sf(t[5]),
+            "sign": t[3],
+            "change": sf(t[2]),
+            "change_rate": sf(t[4]),
+        }
+
+    def _parse_fno_orderbook(self, raw: str, levels: int) -> dict | None:
+        """FNO 호가 파싱.
+        5레벨(H0IFASP0/H0IOASP0):
+          [0]=종목코드, [2-6]=매도호가1-5, [7-11]=매수호가1-5,
+          [22-26]=매도잔량1-5, [27-31]=매수잔량1-5, [34]=총매도잔량, [35]=총매수잔량
+        10레벨(H0ZFASP0/H0ZOASP0):
+          5레벨 확장 구조 (실데이터 확인 후 오프셋 조정 필요)
+        """
+        t = raw.split('^')
+        sf = self._sf
+        if levels == 5:
+            if len(t) < 36:
+                return None
+            asks = [{"price": sf(t[2 + i]), "volume": sf(t[22 + i])} for i in range(5)]
+            bids = [{"price": sf(t[7 + i]), "volume": sf(t[27 + i])} for i in range(5)]
+            return {
+                "symbol": t[0],
+                "asks": asks,
+                "bids": bids,
+                "total_ask_volume": sf(t[34]),
+                "total_bid_volume": sf(t[35]),
+            }
+        else:
+            # 10레벨: H0ZFASP0/H0ZOASP0 — 오프셋은 5레벨과 유사한 패턴으로 추정
+            # [0]=종목, [2-11]=매도호가1-10, [12-21]=매수호가1-10,
+            # [32-41]=매도잔량1-10, [42-51]=매수잔량1-10, [54]=총매도, [55]=총매수
+            if len(t) < 56:
+                logger.debug("[QuoteService] FNO 10레벨 호가 필드 부족: %d", len(t))
+                return None
+            asks = [{"price": sf(t[2 + i]),  "volume": sf(t[32 + i])} for i in range(10)]
+            bids = [{"price": sf(t[12 + i]), "volume": sf(t[42 + i])} for i in range(10)]
+            return {
+                "symbol": t[0],
+                "asks": asks,
+                "bids": bids,
+                "total_ask_volume": sf(t[54]),
+                "total_bid_volume": sf(t[55]),
+            }
+
+    def _fetch_fno_rest_price_sync(self, symbol: str) -> dict | None:
+        """FNO 현재가 REST 조회 (동기). FHMIF10000000 사용."""
+        if not KIS_APP_KEY or not KIS_APP_SECRET:
+            return None
+        try:
+            token = _get_rest_token_sync()
+            if not token:
+                return None
+            fno_type = self._fno_types.get(symbol, _resolve_fno_type(symbol))
+            tr_info = _FNO_TR_IDS.get(fno_type, _FNO_TR_IDS["IF"])
+            # mrkt_div: IF/IO → F/O, ZF/ZO → JF
+            mrkt_div_map = {"IF": "F", "IO": "O", "ZF": "JF", "ZO": "JF"}
+            mrkt_div = mrkt_div_map.get(fno_type, "F")
+            headers = {
+                "content-type": "application/json",
+                "authorization": f"Bearer {token}",
+                "appkey": KIS_APP_KEY,
+                "appsecret": KIS_APP_SECRET,
+                "tr_id": "FHMIF10000000",
+                "custtype": "P",
+            }
+            params = {
+                "FID_COND_MRKT_DIV_CODE": mrkt_div,
+                "FID_INPUT_ISCD": symbol,
+            }
+            resp = requests.get(
+                f"{KIS_BASE_URL}/uapi/domestic-futureoption/v1/quotations/inquire-price",
+                headers=headers,
+                params=params,
+                timeout=5,
+            )
+            if resp.status_code == 401:
+                _clear_rest_token()
+                return None
+            output = resp.json().get("output", {})
+            price = float(output.get("last", 0) or output.get("stck_prpr", 0) or 0)
+            if price <= 0:
+                return None
+            prev = float(output.get("base", 0) or 0)
+            change = price - prev if prev else 0.0
+            change_rate = (change / prev * 100) if prev else 0.0
+            sign = "2" if change > 0 else ("5" if change < 0 else "3")
+            return {
+                "type": "price",
+                "symbol": symbol,
+                "price": price,
+                "sign": sign,
+                "change": change,
+                "change_rate": change_rate,
+            }
+        except Exception as e:
+            logger.debug("[QuoteService] FNO REST 가격 조회 실패 %s: %s", symbol, e)
+            return None
 
 
 # ── FinnhubWSClient ────────────────────────────────────────────────────────────

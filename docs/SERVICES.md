@@ -11,7 +11,7 @@
 | `exceptions.py` | 서비스 레이어 공용 예외 계층 (FastAPI HTTPException 의존 제거) |
 | `watchlist_service.py` | `WatchlistService` — 관심종목 대시보드 + 상세 조회 |
 | `detail_service.py` | `DetailService` — 종목 상세 분석 (재무/밸류에이션/리포트) |
-| `quote_service.py` | `KISQuoteManager` 싱글턴 — KIS WebSocket 단일 연결 + 심볼별 pub/sub |
+| `quote_service.py` | `KISQuoteManager` 싱글턴 — KIS WebSocket 단일 연결 + 심볼별 pub/sub (국내 + FNO 모두 지원) |
 | `advisory_service.py` | 자문종목 데이터 수집 + OpenAI 리포트 생성 |
 
 ---
@@ -307,7 +307,7 @@ KIS는 주문 채널(API/HTS/MTS)별로 접근을 분리한다:
 
 ## `quote_service.py` — KISQuoteManager + OverseasQuoteManager
 
-`routers/quote.py`에서 사용. 국내는 KIS WebSocket 단일 연결, 해외는 Finnhub WS 또는 yfinance 폴링으로 심볼별 `asyncio.Queue` pub/sub 브로드캐스트.
+`routers/quote.py`에서 사용. 국내/FNO는 KIS WebSocket 단일 연결, 해외는 Finnhub WS 또는 yfinance 폴링으로 심볼별 `asyncio.Queue` pub/sub 브로드캐스트.
 
 ### 싱글턴 접근
 
@@ -333,12 +333,13 @@ await manager.stop()    # FastAPI lifespan shutdown
 ### KISQuoteManager — pub/sub API
 
 ```python
-await manager.subscribe(symbol, queue)   # asyncio.Queue 등록 (최대 100 메시지 버퍼)
-manager.unsubscribe(symbol, queue)       # Queue 제거. 마지막 구독자 해제 시 심볼도 제거.
+await manager.subscribe(symbol, queue, is_fno=False)  # asyncio.Queue 등록 (최대 100 메시지 버퍼). is_fno=True 시 FNO WS TR_ID 사용.
+manager.unsubscribe(symbol, queue)                    # Queue 제거. 마지막 구독자 해제 시 심볼도 제거.
 ```
 
 - Queue Full 시 오래된 메시지 제거 후 새 메시지 삽입 (느린 클라이언트 대응)
 - 동일 심볼에 여러 큐 등록 가능 (브라우저 탭 여러 개)
+- `is_fno=True`: `_send_subscribe_fno(symbol)` 호출 → `_resolve_fno_type(symbol)`로 TR_ID 자동 결정
 
 ### KISQuoteManager — 비개장일 초기 가격 push (`_push_initial_price`)
 
@@ -383,6 +384,38 @@ WS 연결 끊김 감지 시 자동으로 KIS REST API를 폴링합니다.
 | `bids[0~9]` | 매수호가 01~10 `{price, volume}`. [0]=최우선(최고가) |
 | `total_ask_volume` | 총매도잔량 (items[43]) |
 | `total_bid_volume` | 총매수잔량 (items[44]) |
+
+### KISQuoteManager — FNO WS 지원
+
+FNO 심볼은 `subscribe(symbol, queue, is_fno=True)` 호출 시 국내 주식과 동일한 KIS WS 연결을 공유하되, FNO 전용 TR_ID를 등록한다.
+
+#### `_resolve_fno_type(symbol)` — FNO TR_ID 결정
+
+단축코드 첫 자리로 상품 유형을 추론한다.
+
+| 첫 자리 | 상품 유형 | 체결 TR_ID | 호가 TR_ID | 호가 레벨 |
+|---------|----------|-----------|-----------|---------|
+| `1` | 지수선물 | `H0IFCNT0` | `H0IFASP0` | 5 |
+| `2` | 지수옵션 | `H0IOCNT0` | `H0IOASP0` | 5 |
+| `3` (선물) | 주식선물 | `H0ZFCNT0` | `H0ZFASP0` | 10 |
+| `3` (옵션) | 주식옵션 | `H0ZOCNT0` | `H0ZOASP0` | 10 |
+
+`_FNO_TR_IDS`: `{tr_id: (product_type, data_type)}` 상수 딕셔너리.
+`_FNO_EXECUTION_TR_IDS`: 체결 TR_ID set (price 메시지 발행).
+`_FNO_ORDERBOOK_TR_IDS`: 호가 TR_ID set (orderbook 메시지 발행).
+`_FNO_5LEVEL_TR_IDS`: 5레벨 호가 TR_ID set (H0IFASP0, H0IOASP0).
+
+#### `_parse_fno_execution(raw)` — FNO 체결
+
+체결가 파싱. `_parse_execution(raw)`와 유사 구조. `type: "price"` 메시지 발행.
+
+#### `_parse_fno_orderbook(raw, levels)` — FNO 호가
+
+`levels=5`(지수) 또는 `levels=10`(주식). `type: "orderbook"` 메시지 발행. `asks`/`bids` 배열 길이가 레벨에 따라 다름.
+
+#### `_push_initial_price_fno(symbol, queue)`
+
+FNO `subscribe()` 즉시 `asyncio.create_task`로 실행. `_fetch_fno_rest_price_sync(symbol)` 호출 → `FHMIF10000000` REST API로 직전 가격 push. 이후 WS 체결가가 도착하면 overwrite.
 
 ---
 

@@ -8,8 +8,12 @@ export const placeOrder = (body) =>
   })
 
 // ── 매수가능 조회 ──────────────────────────────────────────────────────────
-export const fetchBuyable = (symbol, market = 'KR', price = 0, orderType = '00') =>
-  apiFetch(`/api/order/buyable?symbol=${encodeURIComponent(symbol)}&market=${market}&price=${price}&order_type=${orderType}`)
+export const fetchBuyable = (symbol, market = 'KR', price = 0, orderType = '00', side = 'buy') =>
+  apiFetch(`/api/order/buyable?symbol=${encodeURIComponent(symbol)}&market=${market}&price=${price}&order_type=${orderType}&side=${side}`)
+
+// ── 선물옵션 시세 조회 ─────────────────────────────────────────────────────
+export const fetchFnoPrice = (symbol, mrktDiv = 'F') =>
+  apiFetch(`/api/order/fno-price?symbol=${encodeURIComponent(symbol)}&mrkt_div=${mrktDiv}`)
 
 // ── 미체결 주문 목록 ───────────────────────────────────────────────────────
 export const fetchOpenOrders = (market = 'KR') =>

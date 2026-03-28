@@ -19,26 +19,34 @@ router = APIRouter(prefix="/api/order", tags=["order"])
 class PlaceOrderBody(BaseModel):
     symbol: str
     symbol_name: str = ""
-    market: str = "KR"          # KR / US
+    market: str = "KR"          # KR / US / FNO
     side: str                   # buy / sell
     order_type: str = "00"      # 00(지정가) / 01(시장가)
     price: float = 0.0
     quantity: int
     memo: str = ""
+    # FNO 전용 (선택)
+    nmpr_type_cd: str = ""      # 호가유형코드 (FNO)
+    krx_nmpr_cndt_cd: str = ""  # KRX 호가조건코드 (FNO)
+    ord_dvsn_cd: str = ""       # 주문구분코드 (FNO)
 
 
 class ModifyOrderBody(BaseModel):
     org_no: str
-    market: str = "KR"
+    market: str = "KR"          # KR / US / FNO
     order_type: str = "00"
     price: float
     quantity: int
     total: bool = True
+    # FNO 전용 (선택)
+    nmpr_type_cd: str = ""
+    krx_nmpr_cndt_cd: str = ""
+    ord_dvsn_cd: str = ""
 
 
 class CancelOrderBody(BaseModel):
     org_no: str
-    market: str = "KR"
+    market: str = "KR"          # KR / US / FNO
     order_type: str = "00"
     quantity: int = 0
     total: bool = True
@@ -75,6 +83,9 @@ def place_order(body: PlaceOrderBody):
         price=body.price,
         quantity=body.quantity,
         memo=body.memo,
+        nmpr_type_cd=body.nmpr_type_cd,
+        krx_nmpr_cndt_cd=body.krx_nmpr_cndt_cd,
+        ord_dvsn_cd=body.ord_dvsn_cd,
     )
     return {"order": order}
 
@@ -87,9 +98,10 @@ def get_buyable(
     market: str = Query("KR"),
     price: float = Query(0.0),
     order_type: str = Query("00"),
+    side: str = Query("buy"),
 ):
-    """매수가능 금액/수량 조회."""
-    return order_service.get_buyable(symbol, market, price, order_type)
+    """매수가능 금액/수량 조회. FNO는 side 파라미터 필요."""
+    return order_service.get_buyable(symbol, market, price, order_type, side=side)
 
 
 # ── 미체결 주문 목록 (KIS) ────────────────────────────────────────────────────
@@ -114,6 +126,9 @@ def modify_order(order_no: str, body: ModifyOrderBody):
         price=body.price,
         quantity=body.quantity,
         total=body.total,
+        nmpr_type_cd=body.nmpr_type_cd,
+        krx_nmpr_cndt_cd=body.krx_nmpr_cndt_cd,
+        ord_dvsn_cd=body.ord_dvsn_cd,
     )
     return result
 
@@ -141,6 +156,53 @@ def get_executions(market: str = Query("KR")):
     """당일 체결 내역 (KIS). market: KR / US."""
     executions = order_service.get_executions(market)
     return {"executions": executions}
+
+
+# ── 선물옵션 시세 조회 ────────────────────────────────────────────────────────
+
+@router.get("/fno-price")
+def get_fno_price(
+    symbol: str = Query(..., description="선물옵션 단축코드 (예: 101W09)"),
+    mrkt_div: str = Query("F", description="시장분류: F=지수선물, O=지수옵션, JF=주식선물"),
+):
+    """선물옵션 현재가 조회. 주문 전 시세 확인 및 종목 유효성 검증에 사용."""
+    from routers._kis_auth import BASE_URL, get_access_token, get_kis_credentials, make_headers
+    import requests as _req
+
+    get_kis_credentials()  # 키 설정 확인
+    token = get_access_token()
+    headers = make_headers(token, "", "", "FHMIF10000000")
+    # appkey/appsecret는 헤더에서 개별 세팅
+    from config import KIS_APP_KEY, KIS_APP_SECRET
+    headers["appkey"] = KIS_APP_KEY
+    headers["appsecret"] = KIS_APP_SECRET
+
+    url = f"{BASE_URL}/uapi/domestic-futureoption/v1/quotations/inquire-price"
+    params = {
+        "FID_COND_MRKT_DIV_CODE": mrkt_div,
+        "FID_INPUT_ISCD": symbol,
+    }
+    try:
+        res = _req.get(url, headers=headers, params=params, timeout=10)
+        data = res.json()
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"선물옵션 시세 조회 실패: {e}")
+
+    if data.get("rt_cd") != "0":
+        raise HTTPException(status_code=400, detail=f"선물옵션 시세 오류: {data.get('msg1', '알 수 없는 오류')}")
+
+    out = data.get("output1", data.get("output", {}))
+    return {
+        "symbol": symbol,
+        "mrkt_div": mrkt_div,
+        "current_price": out.get("last", out.get("stck_prpr", "0")),
+        "prev_price": out.get("base", out.get("stck_bstp_enu", "0")),
+        "change": out.get("diff", "0"),
+        "change_rate": out.get("rate", "0"),
+        "volume": out.get("acml_vol", "0"),
+        "name": out.get("hts_kor_isnm", ""),
+        "raw": out,
+    }
 
 
 # ── 로컬 주문 이력 ────────────────────────────────────────────────────────────

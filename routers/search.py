@@ -1,4 +1,4 @@
-"""종목 검색 API — KR 자동완성 / US 티커 검증."""
+"""종목 검색 API — KR 자동완성 / US 티커 검증 / FNO 선물옵션 검색."""
 
 import re
 from fastapi import APIRouter, Query
@@ -9,11 +9,12 @@ router = APIRouter(prefix="/api/search", tags=["search"])
 @router.get("")
 def search_stocks(
     q: str = Query("", description="검색어 (종목명, 코드, 티커)"),
-    market: str = Query("KR", description="시장 구분: KR | US"),
+    market: str = Query("KR", description="시장 구분: KR | US | FNO"),
 ):
     """
     KR: 종목명/코드 부분 검색 → 최대 10건 자동완성 목록
     US: 티커 유효성 검증 → 유효하면 [단일 항목], 무효면 []
+    FNO: 선물옵션 종목명/코드 부분 검색 → 최대 10건 목록
     """
     q = q.strip()
 
@@ -51,5 +52,24 @@ def search_stocks(
         if info:
             return [{"code": q.upper(), "name": info["name"], "market": info.get("exchange", "US")}]
         return []
+
+    if market == "FNO":
+        if not q or len(q) < 1:
+            return []
+
+        from stock.fno_master import search_fno_symbols
+        results = search_fno_symbols(q, limit=10)
+        return [
+            {
+                "code": r["code"],
+                "name": r["name"],
+                "market": "FNO",
+                "product_type": r.get("product_type", ""),
+                "underlying_name": r.get("underlying_name", ""),
+                "strike": r.get("strike", ""),
+                "atm": r.get("atm", ""),
+            }
+            for r in results
+        ]
 
     return []

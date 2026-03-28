@@ -637,20 +637,26 @@ KIS 당일 체결 내역과 로컬 DB 대사(Reconciliation). 로컬 `PLACED`/`P
 
 ### `WS /ws/quote/{symbol}`
 
-실시간 현재가 + 10호가 WebSocket 스트림.
+실시간 현재가 + 호가 WebSocket 스트림.
 
-- **국내(KR)**: KIS WebSocket(`ws://ops.koreainvestment.com:21000`) 브릿지. `H0STCNT0`(체결가) + `H0STASP0`(호가) 실시간 수신. KIS Approval Key 자동 발급 및 캐시.
-- **해외(US)**: yfinance `Ticker.fast_info` 2초 주기 polling.
+| 파라미터 | 타입 | 기본값 | 설명 |
+|---------|------|--------|------|
+| `symbol` | path | - | 종목코드 또는 FNO 단축코드 |
+| `market` | query | `KR` | `KR` / `US` / `FNO` |
+
+- **국내(`market=KR`)**: KIS WebSocket(`ws://ops.koreainvestment.com:21000`) 브릿지. `H0STCNT0`(체결가) + `H0STASP0`(호가) 실시간 수신. 10호가. KIS Approval Key 자동 발급 및 캐시.
+- **선물옵션(`market=FNO`)**: KIS WebSocket FNO 채널 브릿지. `_resolve_fno_type(symbol)`으로 TR_ID 자동 선택. 지수선물(1xxx): `H0IFCNT0`(체결)+`H0IFASP0`(5레벨 호가), 지수옵션(2xxx): `H0IOCNT0`+`H0IOASP0`, 주식선물(3xxx): `H0ZFCNT0`+`H0ZFASP0`(10레벨), 주식옵션(3xxx): `H0ZOCNT0`+`H0ZOASP0`. `_stream_fno()` 핸들러로 분기.
+- **해외(`market=US`)**: yfinance `Ticker.fast_info` 2초 주기 polling. 체결가만 (호가 미지원).
 - KIS 키 미설정 시 연결은 수락되나 데이터 없음(ping만 수신).
 
 **메시지 타입**
 
 | `type` | 발생 조건 | 필드 |
 |--------|----------|------|
-| `price` | 체결 발생(국내) / 2초 주기(해외) | `symbol`, `price`, `change`, `change_rate`, `sign` |
-| `orderbook` | 호가 변동(국내만) | `symbol`, `asks[{price,volume}×10]`, `bids[{price,volume}×10]`, `total_ask_volume`, `total_bid_volume` |
+| `price` | 체결 발생(KR/FNO) / 2초 주기(US) | `symbol`, `price`, `change`, `change_rate`, `sign` |
+| `orderbook` | 호가 변동(KR=10호가 / FNO=5 또는 10레벨) | `symbol`, `asks[{price,volume}×N]`, `bids[{price,volume}×N]`, `total_ask_volume`, `total_bid_volume` |
 | `ping` | 30초간 데이터 없음 | (연결 유지용) |
-| `error` | 해외 시세 조회 실패 | `message` |
+| `error` | 시세 조회 실패 | `message` |
 
 **`sign` 값**: `'2'`=상승, `'3'`=보합, `'5'`=하락
 
