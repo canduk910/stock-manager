@@ -349,6 +349,8 @@ PER > 500 이상치는 평균 계산에서 제외.
 
 KIS 실전계좌 주문 발송·정정·취소·미체결·체결 내역·이력·대사·예약주문. KIS API 키 필수.
 
+**계층 분리**: `routers/order.py`는 오직 `services.order_service`만 import. `order_store` 직접 접근 금지. 이력 조회·예약주문·FNO 시세 모두 서비스 계층 경유.
+
 로컬 DB: `~/stock-watchlist/orders.db`
 
 ### `POST /api/order/place`
@@ -393,9 +395,12 @@ KIS 실전계좌 주문 발송·정정·취소·미체결·체결 내역·이력
     "currency": "KRW",
     "placed_at": "2026-02-26T15:10:49",
     "updated_at": "2026-02-26T15:10:49"
-  }
+  },
+  "balance_stale": true
 }
 ```
+
+- `balance_stale: true` — 프론트엔드에서 잔고 재조회 트리거 신호
 
 **에러**: 503 (KIS 키 미설정), 400 (KIS 주문 오류 - 잔고 부족, 호가단위 오류 등)
 
@@ -481,7 +486,10 @@ KIS 실전계좌 주문 발송·정정·취소·미체결·체결 내역·이력
 
 - `total: true`: 잔량 전부 취소 (`QTY_ALL_ORD_YN: Y`)
 
-**응답**: `{"success": true, "data": {...}}`
+**응답**: `{"success": true, "data": {...}, "local_synced": true, "order_status": "CANCELLED"}`
+
+- `local_synced: true` — 로컬 DB의 주문 상태가 즉시 CANCELLED로 갱신됨
+- `order_status` — 최종 상태 (`"CANCELLED"` 전량취소, `"PARTIAL"` 부분취소)
 
 **에러**: 400 (KIS 취소 오류. HTS 주문이면 "원주문정보가 존재하지않습니다" 오류 발생)
 
@@ -503,7 +511,9 @@ KIS 실전계좌 주문 발송·정정·취소·미체결·체결 내역·이력
 }
 ```
 
-**응답**: `{"success": true, "data": {...}}`
+**응답**: `{"success": true, "data": {...}, "local_synced": true}`
+
+- `local_synced: true` — 로컬 DB의 가격/수량이 즉시 반영됨
 
 ---
 
@@ -544,7 +554,7 @@ KIS 실전계좌 주문 발송·정정·취소·미체결·체결 내역·이력
 
 ### `GET /api/order/history`
 
-로컬 DB 주문 이력.
+로컬 DB 주문 이력. **반환 전 활성 주문(PLACED/PARTIAL)을 KIS 체결+미체결 내역과 자동 대사(best-effort)**하여 최신 상태를 보장한다. `date_from > date_to`이면 400 에러.
 
 | 파라미터 | 타입 | 기본값 | 설명 |
 |---------|------|--------|------|

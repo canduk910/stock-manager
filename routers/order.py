@@ -2,6 +2,7 @@
 
 주문 발송 / 정정 / 취소 / 미체결 조회 / 체결 내역 / 이력 / 대사 / 예약주문.
 KIS API 키 미설정 시 503 반환.
+모든 엔드포인트는 services.order_service를 통해서만 데이터에 접근한다.
 """
 
 from fastapi import APIRouter, HTTPException, Query
@@ -9,7 +10,6 @@ from pydantic import BaseModel
 from typing import Optional
 
 from services import order_service
-from stock import order_store
 
 router = APIRouter(prefix="/api/order", tags=["order"])
 
@@ -87,7 +87,7 @@ def place_order(body: PlaceOrderBody):
         krx_nmpr_cndt_cd=body.krx_nmpr_cndt_cd,
         ord_dvsn_cd=body.ord_dvsn_cd,
     )
-    return {"order": order}
+    return {"order": order, "balance_stale": True}
 
 
 # ── 매수가능 조회 ─────────────────────────────────────────────────────────────
@@ -166,43 +166,7 @@ def get_fno_price(
     mrkt_div: str = Query("F", description="시장분류: F=지수선물, O=지수옵션, JF=주식선물"),
 ):
     """선물옵션 현재가 조회. 주문 전 시세 확인 및 종목 유효성 검증에 사용."""
-    from routers._kis_auth import BASE_URL, get_access_token, get_kis_credentials, make_headers
-    import requests as _req
-
-    get_kis_credentials()  # 키 설정 확인
-    token = get_access_token()
-    headers = make_headers(token, "", "", "FHMIF10000000")
-    # appkey/appsecret는 헤더에서 개별 세팅
-    from config import KIS_APP_KEY, KIS_APP_SECRET
-    headers["appkey"] = KIS_APP_KEY
-    headers["appsecret"] = KIS_APP_SECRET
-
-    url = f"{BASE_URL}/uapi/domestic-futureoption/v1/quotations/inquire-price"
-    params = {
-        "FID_COND_MRKT_DIV_CODE": mrkt_div,
-        "FID_INPUT_ISCD": symbol,
-    }
-    try:
-        res = _req.get(url, headers=headers, params=params, timeout=10)
-        data = res.json()
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"선물옵션 시세 조회 실패: {e}")
-
-    if data.get("rt_cd") != "0":
-        raise HTTPException(status_code=400, detail=f"선물옵션 시세 오류: {data.get('msg1', '알 수 없는 오류')}")
-
-    out = data.get("output1", data.get("output", {}))
-    return {
-        "symbol": symbol,
-        "mrkt_div": mrkt_div,
-        "current_price": out.get("last", out.get("stck_prpr", "0")),
-        "prev_price": out.get("base", out.get("stck_bstp_enu", "0")),
-        "change": out.get("diff", "0"),
-        "change_rate": out.get("rate", "0"),
-        "volume": out.get("acml_vol", "0"),
-        "name": out.get("hts_kor_isnm", ""),
-        "raw": out,
-    }
+    return order_service.get_fno_price(symbol, mrkt_div)
 
 
 # ── 로컬 주문 이력 ────────────────────────────────────────────────────────────
@@ -216,8 +180,8 @@ def get_order_history(
     date_to: Optional[str] = Query(None),
     limit: int = Query(100, ge=1, le=500),
 ):
-    """로컬 DB 주문 이력 (날짜/종목/상태 필터)."""
-    orders = order_store.list_orders(
+    """로컬 DB 주문 이력. 반환 전 활성 주문을 KIS와 자동 대사."""
+    orders = order_service.get_order_history(
         symbol=symbol,
         market=market,
         status=status,
@@ -232,7 +196,7 @@ def get_order_history(
 
 @router.post("/sync")
 def sync_orders():
-    """KIS 체결 내역과 로컬 DB 대사(Reconciliation)."""
+    """KIS 체결+미체결 내역과 로컬 DB 대사(Reconciliation)."""
     result = order_service.sync_orders()
     return result
 
@@ -241,8 +205,8 @@ def sync_orders():
 
 @router.post("/reserve", status_code=201)
 def create_reservation(body: ReservationBody):
-    """예약주문 등록."""
-    reservation = order_store.insert_reservation(
+    """예약주문 등록. 도메인 규칙 검증 포함."""
+    reservation = order_service.create_reservation(
         symbol=body.symbol,
         symbol_name=body.symbol_name,
         market=body.market,
@@ -260,14 +224,14 @@ def create_reservation(body: ReservationBody):
 @router.get("/reserves")
 def list_reservations(status: Optional[str] = Query(None)):
     """예약주문 목록. status: WAITING / TRIGGERED / EXECUTED / FAILED / CANCELLED"""
-    reservations = order_store.list_reservations(status=status)
+    reservations = order_service.get_reservations(status=status)
     return {"reservations": reservations}
 
 
 @router.delete("/reserve/{res_id}")
 def delete_reservation(res_id: int):
     """예약주문 삭제 (WAITING 상태만 가능)."""
-    deleted = order_store.delete_reservation(res_id)
+    deleted = order_service.delete_reservation(res_id)
     if not deleted:
         raise HTTPException(
             status_code=404,

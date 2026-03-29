@@ -23,7 +23,7 @@ export function useOrderPlace() {
     setError(null)
     try {
       const data = await placeOrder(body)
-      return data.order
+      return { order: data.order, balance_stale: data.balance_stale }
     } catch (e) {
       setError(e.message)
       throw e
@@ -77,13 +77,17 @@ export function useOpenOrders() {
     }
   }, [])
 
-  const modify = useCallback(async (orderNo, body) => {
-    await modifyOrder(orderNo, body)
-  }, [])
+  const modify = useCallback(async (orderNo, body, market = 'KR') => {
+    const result = await modifyOrder(orderNo, body)
+    await load(market)
+    return result
+  }, [load])
 
-  const cancel = useCallback(async (orderNo, body) => {
-    await cancelOrder(orderNo, body)
-  }, [])
+  const cancel = useCallback(async (orderNo, body, market = 'KR') => {
+    const result = await cancelOrder(orderNo, body)
+    await load(market)
+    return result
+  }, [load])
 
   return { orders, loading, error, load, modify, cancel }
 }

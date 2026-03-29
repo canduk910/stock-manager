@@ -622,28 +622,33 @@ def modify_order(
     krx_nmpr_cndt_cd: str = "",
     ord_dvsn_cd: str = "",
 ) -> dict:
-    """주문 정정."""
+    """주문 정정. KIS 정정 성공 후 로컬 DB에 가격/수량을 즉시 반영한다."""
     app_key, app_secret, acnt_no, acnt_prdt_cd, acnt_prdt_cd_fno = get_kis_credentials()
     token = get_access_token()
 
     if market == "KR":
-        return _modify_domestic_order(
+        result = _modify_domestic_order(
             token, app_key, app_secret, acnt_no, acnt_prdt_cd,
             order_no, org_no, order_type, price, quantity, total,
         )
     elif market == "FNO":
         if not acnt_prdt_cd_fno:
             raise ConfigError("KIS_ACNT_PRDT_CD_FNO 환경변수가 설정되지 않았습니다.")
-        return _modify_fno_order(
+        result = _modify_fno_order(
             token, app_key, app_secret, acnt_no, acnt_prdt_cd_fno,
             order_no, price, quantity, total,
             nmpr_type_cd=nmpr_type_cd, krx_nmpr_cndt_cd=krx_nmpr_cndt_cd, ord_dvsn_cd=ord_dvsn_cd,
         )
     else:
-        return _modify_overseas_order(
+        result = _modify_overseas_order(
             token, app_key, app_secret, acnt_no, acnt_prdt_cd,
             order_no, org_no, order_type, price, quantity, total,
         )
+
+    # KIS 정정 성공 → 로컬 DB에 가격/수량 즉시 반영
+    local_synced = _sync_local_order_details(order_no, market, price, quantity)
+    result["local_synced"] = local_synced
+    return result
 
 
 def _strip_leading_zeros(order_no: str) -> str:
@@ -770,27 +775,34 @@ def cancel_order(
     quantity: int = 0,
     total: bool = True,
 ) -> dict:
-    """주문 취소."""
+    """주문 취소. KIS 취소 성공 후 로컬 DB 상태를 즉시 갱신한다."""
     app_key, app_secret, acnt_no, acnt_prdt_cd, acnt_prdt_cd_fno = get_kis_credentials()
     token = get_access_token()
 
     if market == "KR":
-        return _cancel_domestic_order(
+        result = _cancel_domestic_order(
             token, app_key, app_secret, acnt_no, acnt_prdt_cd,
             order_no, org_no, order_type, quantity, total,
         )
     elif market == "FNO":
         if not acnt_prdt_cd_fno:
             raise ConfigError("KIS_ACNT_PRDT_CD_FNO 환경변수가 설정되지 않았습니다.")
-        return _cancel_fno_order(
+        result = _cancel_fno_order(
             token, app_key, app_secret, acnt_no, acnt_prdt_cd_fno,
             order_no, quantity, total,
         )
     else:
-        return _cancel_overseas_order(
+        result = _cancel_overseas_order(
             token, app_key, app_secret, acnt_no, acnt_prdt_cd,
             order_no, org_no, order_type, quantity, total,
         )
+
+    # KIS 취소 성공 → 로컬 DB 즉시 갱신
+    new_status = "CANCELLED" if total else "PARTIAL"
+    local_synced = _sync_local_order_status(order_no, market, new_status)
+    result["local_synced"] = local_synced
+    result["order_status"] = new_status
+    return result
 
 
 def _cancel_domestic_order(
@@ -1031,26 +1043,71 @@ def _get_overseas_executions(token, app_key, app_secret, acnt_no, acnt_prdt_cd) 
 
 
 def sync_orders() -> dict:
-    """로컬 DB와 KIS 체결 내역 대사(Reconciliation).
+    """로컬 DB와 KIS 상태 대사(Reconciliation).
 
-    로컬 PLACED/PARTIAL 주문을 KIS 당일 체결 내역과 비교하여 상태를 갱신한다.
+    로컬 PLACED/PARTIAL 주문을 KIS 체결+미체결 내역과 비교하여 상태를 갱신한다.
+    체결에도 미체결에도 없는 주문은 CANCELLED로 처리한다.
+    """
+    synced, results = _reconcile_active_orders()
+    if results is None:
+        return {"synced": 0, "message": "동기화할 활성 주문이 없습니다."}
+    return {"synced": synced, "details": results}
+
+
+# ── 내부 헬퍼 ─────────────────────────────────────────────────────────────────
+
+
+def _sync_local_order_status(order_no: str, market: str, new_status: str) -> bool:
+    """로컬 DB에서 order_no로 주문을 찾아 상태를 갱신한다. 성공 여부 반환."""
+    try:
+        local = order_store.get_order_by_order_no(order_no, market)
+        if local:
+            order_store.update_order_status(local["id"], new_status)
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _sync_local_order_details(order_no: str, market: str, price: float, quantity: int) -> bool:
+    """로컬 DB에서 order_no로 주문을 찾아 가격/수량을 갱신한다. 성공 여부 반환."""
+    try:
+        local = order_store.get_order_by_order_no(order_no, market)
+        if local:
+            order_store.update_order_details(local["id"], price=price, quantity=quantity)
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _reconcile_active_orders() -> tuple[int, list[dict] | None]:
+    """활성 주문(PLACED/PARTIAL)을 KIS 상태와 대사.
+
+    Returns:
+        (변경 건수, 결과 리스트) 또는 활성 주문 없으면 (0, None)
     """
     local_active = order_store.list_active_orders()
     if not local_active:
-        return {"synced": 0, "message": "동기화할 활성 주문이 없습니다."}
+        return 0, None
 
-    # 시장 구분별로 체결 내역 조회
+    # 시장 구분별로 체결 + 미체결 내역 조회
     markets = {o["market"] for o in local_active}
     kis_executions: list[dict] = []
+    kis_open_orders: list[dict] = []
     for mkt in markets:
         try:
-            execs = get_executions(mkt)
-            kis_executions.extend(execs)
+            kis_executions.extend(get_executions(mkt))
+        except Exception:
+            pass
+        try:
+            kis_open_orders.extend(get_open_orders(mkt))
         except Exception:
             pass
 
     # order_no 기준 매핑
     exec_map = {e["order_no"]: e for e in kis_executions if e.get("order_no")}
+    open_map = {e["order_no"]: e for e in kis_open_orders if e.get("order_no")}
 
     synced = 0
     results = []
@@ -1058,31 +1115,172 @@ def sync_orders() -> dict:
         ono = local.get("order_no")
         if not ono:
             continue
+
         kis_exec = exec_map.get(ono)
-        if not kis_exec:
+        kis_open = open_map.get(ono)
+
+        if kis_exec:
+            # 체결 내역에 존재 → 체결 상태 판단
+            filled_qty = int(kis_exec.get("filled_qty") or 0)
+            order_qty = int(local.get("quantity") or 0)
+            if filled_qty >= order_qty:
+                new_status = "FILLED"
+            elif filled_qty > 0:
+                new_status = "PARTIAL"
+            else:
+                new_status = local["status"]
+
+            if new_status != local["status"]:
+                order_store.update_order_status(
+                    local["id"],
+                    new_status,
+                    filled_quantity=filled_qty,
+                    filled_price=float(kis_exec.get("filled_price") or 0),
+                )
+                synced += 1
+                results.append({"id": local["id"], "order_no": ono, "action": "updated", "new_status": new_status})
+            else:
+                results.append({"id": local["id"], "order_no": ono, "action": "no_change"})
+        elif kis_open:
+            # 미체결 목록에 존재 → 아직 살아있는 주문
             results.append({"id": local["id"], "order_no": ono, "action": "no_change"})
-            continue
-
-        filled_qty = int(kis_exec.get("filled_qty") or 0)
-        order_qty = int(local.get("quantity") or 0)
-
-        if filled_qty >= order_qty:
-            new_status = "FILLED"
-        elif filled_qty > 0:
-            new_status = "PARTIAL"
         else:
-            new_status = local["status"]
-
-        if new_status != local["status"]:
-            order_store.update_order_status(
-                local["id"],
-                new_status,
-                filled_quantity=filled_qty,
-                filled_price=float(kis_exec.get("filled_price") or 0),
-            )
+            # 체결에도 미체결에도 없음 → 취소된 주문
+            order_store.update_order_status(local["id"], "CANCELLED")
             synced += 1
-            results.append({"id": local["id"], "order_no": ono, "action": "updated", "new_status": new_status})
-        else:
-            results.append({"id": local["id"], "order_no": ono, "action": "no_change"})
+            results.append({"id": local["id"], "order_no": ono, "action": "updated", "new_status": "CANCELLED"})
 
-    return {"synced": synced, "details": results}
+    return synced, results
+
+
+# ── 이력 조회 서비스 ───────────────────────────────────────────────────────────
+
+
+def get_order_history(
+    symbol: str = None,
+    market: str = None,
+    status: str = None,
+    date_from: str = None,
+    date_to: str = None,
+    limit: int = 100,
+) -> list[dict]:
+    """주문 이력 조회. 반환 전 활성 주문을 KIS와 대사하여 최신화한다."""
+    # 기간 필터 검증
+    if date_from and date_to and date_from > date_to:
+        raise ServiceError("date_from이 date_to보다 클 수 없습니다.")
+
+    # 활성 주문 자동 대사 (best-effort)
+    try:
+        _reconcile_active_orders()
+    except Exception:
+        pass
+
+    return order_store.list_orders(
+        symbol=symbol,
+        market=market,
+        status=status,
+        date_from=date_from,
+        date_to=date_to,
+        limit=limit,
+    )
+
+
+# ── FNO 시세 서비스 ───────────────────────────────────────────────────────────
+
+
+def get_fno_price(symbol: str, mrkt_div: str = "F") -> dict:
+    """선물옵션 현재가 조회 (FHMIF10000000)."""
+    app_key, app_secret, _, _, _ = get_kis_credentials()
+    token = get_access_token()
+    headers = make_headers(token, app_key, app_secret, "FHMIF10000000")
+
+    url = f"{BASE_URL}/uapi/domestic-futureoption/v1/quotations/inquire-price"
+    params = {
+        "FID_COND_MRKT_DIV_CODE": mrkt_div,
+        "FID_INPUT_ISCD": symbol,
+    }
+    try:
+        res = requests.get(url, headers=headers, params=params, timeout=10)
+        data = res.json()
+    except Exception as e:
+        raise ExternalAPIError(f"선물옵션 시세 조회 실패: {e}")
+
+    if data.get("rt_cd") != "0":
+        raise ServiceError(f"선물옵션 시세 오류: {data.get('msg1', '알 수 없는 오류')}")
+
+    out = data.get("output1", data.get("output", {}))
+    return {
+        "symbol": symbol,
+        "mrkt_div": mrkt_div,
+        "current_price": out.get("last", out.get("stck_prpr", "0")),
+        "prev_price": out.get("base", out.get("stck_bstp_enu", "0")),
+        "change": out.get("diff", "0"),
+        "change_rate": out.get("rate", "0"),
+        "volume": out.get("acml_vol", "0"),
+        "name": out.get("hts_kor_isnm", ""),
+        "raw": out,
+    }
+
+
+# ── 예약주문 서비스 ───────────────────────────────────────────────────────────
+
+
+_VALID_CONDITION_TYPES = {"scheduled", "price_below", "price_above"}
+
+
+def create_reservation(
+    symbol: str,
+    symbol_name: str,
+    market: str,
+    side: str,
+    order_type: str,
+    price: float,
+    quantity: int,
+    condition_type: str,
+    condition_value: str,
+    memo: str = "",
+) -> dict:
+    """예약주문 등록. 도메인 규칙 검증 후 DB 삽입."""
+    if condition_type not in _VALID_CONDITION_TYPES:
+        raise ServiceError(f"잘못된 condition_type: {condition_type}. 허용: {', '.join(_VALID_CONDITION_TYPES)}")
+
+    if condition_type == "scheduled":
+        try:
+            datetime.fromisoformat(condition_value)
+        except ValueError:
+            raise ServiceError(f"잘못된 예약 시간 형식: {condition_value} (ISO 8601 필요)")
+    else:
+        try:
+            v = float(condition_value)
+            if v <= 0:
+                raise ValueError
+        except (ValueError, TypeError):
+            raise ServiceError(f"잘못된 목표 가격: {condition_value} (양수 필요)")
+
+    if quantity <= 0:
+        raise ServiceError("수량은 1 이상이어야 합니다.")
+    if price < 0:
+        raise ServiceError("가격은 0 이상이어야 합니다.")
+
+    return order_store.insert_reservation(
+        symbol=symbol,
+        symbol_name=symbol_name,
+        market=market,
+        side=side,
+        order_type=order_type,
+        price=price,
+        quantity=quantity,
+        condition_type=condition_type,
+        condition_value=condition_value,
+        memo=memo,
+    )
+
+
+def get_reservations(status: str = None) -> list[dict]:
+    """예약주문 목록 조회."""
+    return order_store.list_reservations(status=status)
+
+
+def delete_reservation(res_id: int) -> bool:
+    """예약주문 삭제. WAITING 상태만 허용."""
+    return order_store.delete_reservation(res_id)

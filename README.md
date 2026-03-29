@@ -276,18 +276,250 @@ KIS 실전계좌 잔고 조회. KIS API 키 미설정 시 503 반환.
 
 ## 아키텍처
 
+### 전체 시스템 구조
+
 ```
-config.py         환경변수 중앙 관리 (os.getenv 단일 진입점)
-routers/          API 엔드포인트 (screener / earnings / balance / watchlist / detail / order / quote / advisory)
-services/         서비스 레이어 (watchlist_service / detail_service / order_service / quote_service / advisory_service)
-services/exceptions.py  서비스 예외 계층 (ServiceError → FastAPI exception_handler로 HTTP 변환)
-screener/         스크리너 패키지 (CLI + API 공용, pykrx + OpenDart)
-stock/            관심종목 패키지 (CLI + API 공용, yfinance + OpenDart + advisory_store/fetcher)
-stock/db_base.py  SQLite 공용 유틸 (4개 store 공용, connect contextmanager)
-frontend/         React 19 SPA (Vite + Tailwind CSS v4 + Recharts)
+┌─────────────────────────────────────────────────────────────────┐
+│                        Browser (React SPA)                       │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐           │
+│  │Pages     │ │Components│ │ Hooks    │ │ API Layer│           │
+│  │ (7 pages)│→│(UI 조립) │→│(상태관리)│→│(fetch)   │           │
+│  └──────────┘ └──────────┘ └──────────┘ └────┬─────┘           │
+└──────────────────────────────────────────────┼──────────────────┘
+                                               │ HTTP / WebSocket
+┌──────────────────────────────────────────────┼──────────────────┐
+│                    FastAPI Server (main.py)   │                   │
+│                                              ▼                   │
+│  ┌─────────────────────────────────────────────────────────┐    │
+│  │                   Routers (routers/)                      │    │
+│  │  screener │ earnings │ balance │ watchlist │ detail       │    │
+│  │  order    │ quote(WS)│ advisory│ search   │ market_board │    │
+│  └────────────────────────┬────────────────────────────────┘    │
+│           (HTTP 검증 + 라우팅만) │ ← 계층 분리: services만 호출     │
+│  ┌────────────────────────▼────────────────────────────────┐    │
+│  │                  Services (services/)                      │    │
+│  │  ┌─────────────┐ ┌─────────────┐ ┌──────────────────┐   │    │
+│  │  │order_service│ │quote_service│ │advisory_service  │   │    │
+│  │  │ 주문/취소/  │ │ KIS WS 관리│ │ AI분석+리포트    │   │    │
+│  │  │ 대사/이력   │ │ REST fallbk│ │ GPT-4o 호출      │   │    │
+│  │  └──────┬──────┘ └──────┬──────┘ └────────┬─────────┘   │    │
+│  │  ┌──────┴──────┐ ┌──────┴──────┐ ┌────────┴─────────┐   │    │
+│  │  │watchlist_svc│ │detail_svc   │ │reservation_svc   │   │    │
+│  │  │ 관심종목    │ │ 재무+밸류   │ │ 예약주문 스케줄러 │   │    │
+│  │  └─────────────┘ └─────────────┘ └──────────────────┘   │    │
+│  └─────────────────────────┬───────────────────────────────┘    │
+│           (비즈니스 로직 + 외부 API 호출) │                        │
+│  ┌─────────────────────────▼───────────────────────────────┐    │
+│  │               Data Layer (stock/ + screener/)             │    │
+│  │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌───────────┐  │    │
+│  │  │order_    │ │advisory_ │ │market_   │ │watchlist  │  │    │
+│  │  │store     │ │store     │ │board_    │ │store      │  │    │
+│  │  │(orders.db│ │(advisory.│ │store     │ │(watchlist.│  │    │
+│  │  │ WAL모드) │ │ db)      │ │(mkt_brd. │ │ db)       │  │    │
+│  │  └──────────┘ └──────────┘ │ db)      │ └───────────┘  │    │
+│  │  ┌──────────┐ ┌──────────┐ └──────────┘ ┌───────────┐  │    │
+│  │  │cache.py  │ │symbol_   │ ┌──────────┐ │fno_master │  │    │
+│  │  │(cache.db │ │map.py    │ │dart_fin  │ │(마스터    │  │    │
+│  │  │ WAL모드) │ │(종목코드)│ │(재무제표)│ │ 파일)     │  │    │
+│  │  └──────────┘ └──────────┘ └──────────┘ └───────────┘  │    │
+│  └─────────────────────────────────────────────────────────┘    │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-**국내/해외 분기 기준**: `stock/utils.py`의 `is_domestic(code)` — 6자리 숫자이면 국내(KRX), 아니면 해외(US).
+### 외부 의존성 연결
+
+```
+                    ┌──────────────────────┐
+                    │   KIS OpenAPI 서버    │
+                    │  (한국투자증권)        │
+                    └──────┬───────────────┘
+                           │
+         ┌─────────────────┼─────────────────┐
+         │                 │                  │
+    REST API          WebSocket          OAuth2 토큰
+  (주문/잔고/시세)   (실시간 호가)      (12시간 TTL)
+         │                 │                  │
+         ▼                 ▼                  ▼
+  ┌──────────────────────────────────────────────┐
+  │              FastAPI Server                    │
+  │                                                │
+  │  order_service ◄── KIS REST (주문/잔고)        │
+  │  quote_service ◄── KIS WS (체결/호가)          │
+  │       │              │                         │
+  │       │         WS 끊김 시                      │
+  │       │         REST fallback                   │
+  │       │         (3초 폴링)                      │
+  │       ▼              ▼                         │
+  │  ┌─────────┐  ┌─────────────┐                  │
+  │  │orders.db│  │ yfinance    │ ◄── 비개장일     │
+  │  │(SQLite) │  │ (fallback)  │     직전 종가     │
+  │  └─────────┘  └─────────────┘                  │
+  └────────────────────────────────────────────────┘
+
+  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐
+  │ OpenDART │  │ yfinance │  │ SEC      │  │ OpenAI   │
+  │ (공시/   │  │ (해외시세│  │ EDGAR    │  │ (GPT-4o) │
+  │  재무)   │  │  /재무)  │  │ (미국공시│  │          │
+  └──────────┘  └──────────┘  └──────────┘  └──────────┘
+```
+
+### 실시간 시세 데이터 흐름
+
+```
+┌── 국내 주식 (KR) ──────────────────────────────────────────────┐
+│                                                                  │
+│  KIS WS (단일 연결)                                              │
+│    ├─ H0STCNT0 (체결가)  ──┐                                    │
+│    └─ H0STASP0 (10호가)  ──┤                                    │
+│                             ▼                                    │
+│  KISQuoteManager ──► _broadcast() ──► asyncio.Queue (per tab)   │
+│       │                                     │                    │
+│       │ (WS 끊김 시)                        ▼                    │
+│       └─► REST fallback ──────────► /ws/quote/{symbol}          │
+│           (3초 폴링, 0.1초/심볼)     100ms 배칭 → 브라우저 WS    │
+│                                           │                      │
+│                                           ▼                      │
+│                                    useQuote() 훅               │
+│                                    rAF throttle                  │
+│                                    → React 렌더링                │
+└──────────────────────────────────────────────────────────────────┘
+
+┌── 선물옵션 (FNO) ──────────────────────────────────────────────┐
+│                                                                  │
+│  동일 KIS WS 연결에서 구독                                       │
+│    ├─ H0IFASP0/CNT0 (지수선물, 5레벨)                           │
+│    ├─ H0IOASP0/CNT0 (지수옵션, 5레벨)                           │
+│    ├─ H0ZFASP0/CNT0 (주식선물, 10레벨)                          │
+│    └─ H0ZOASP0/CNT0 (주식옵션, 10레벨)                          │
+│                                                                  │
+│  _resolve_fno_type(symbol) → IF/IO/ZF/ZO (캐싱)               │
+│  /ws/quote/{symbol}?market=FNO → 100ms 배칭                    │
+└──────────────────────────────────────────────────────────────────┘
+
+┌── 해외 주식 (US) ──────────────────────────────────────────────┐
+│                                                                  │
+│  ┌── FINNHUB_API_KEY 있음 ──┐  ┌── 없음 ────────────────────┐  │
+│  │ Finnhub WS (30심볼 한도) │  │ yfinance 2초 폴링 (15분지연)│  │
+│  │ 실시간 체결가             │  │ fast_info.last_price         │  │
+│  └────────────┬─────────────┘  └──────────┬──────────────────┘  │
+│               └──────────┬────────────────┘                      │
+│                          ▼                                       │
+│              OverseasQuoteManager                                │
+│              심볼당 1개 폴링 태스크 (N 탭 → 1 호출)             │
+│                          │                                       │
+│                          ▼                                       │
+│              /ws/quote/{symbol} → 브라우저                       │
+└──────────────────────────────────────────────────────────────────┘
+
+┌── 시세판 (Market Board) ───────────────────────────────────────┐
+│                                                                  │
+│  /ws/market-board (다중 심볼 단일 WS)                           │
+│    ├─ 클라이언트 → subscribe/unsubscribe 메시지                  │
+│    ├─ 서버 → 200ms 배칭 → {"type":"prices", "data":{...}} 일괄  │
+│    └─ 국내+해외 심볼 혼합 가능                                   │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+### 주문 도메인 상태 동기화
+
+```
+┌─ 주문 발송 ────────────────────────────────────────────────────┐
+│                                                                  │
+│  프론트 → POST /api/order/place                                  │
+│              │                                                   │
+│              ▼                                                   │
+│      order_service.place_order()                                │
+│         ├─ KIS API 호출 (매수/매도)                              │
+│         ├─ 성공 → order_store.insert_order(PLACED)              │
+│         └─ 응답: { order: {...}, balance_stale: true }          │
+│                                     │                            │
+│                     프론트: 잔고 재조회 트리거 ◄──┘               │
+└──────────────────────────────────────────────────────────────────┘
+
+┌─ 주문 취소 ────────────────────────────────────────────────────┐
+│                                                                  │
+│  프론트 → POST /api/order/{no}/cancel                            │
+│              │                                                   │
+│              ▼                                                   │
+│      order_service.cancel_order()                               │
+│         ├─ KIS API 호출 (취소)                                   │
+│         ├─ 성공 → order_store.update_order_status(CANCELLED)    │
+│         └─ 응답: { success, local_synced: true,                 │
+│                     order_status: "CANCELLED" }                  │
+│                                     │                            │
+│           프론트: 미체결 목록 자동 재조회 ◄──┘                    │
+└──────────────────────────────────────────────────────────────────┘
+
+┌─ 대사 (Reconciliation) ───────────────────────────────────────┐
+│                                                                  │
+│  GET /api/order/history 또는 POST /api/order/sync               │
+│              │                                                   │
+│              ▼                                                   │
+│    _reconcile_active_orders()                                   │
+│      ├─ 로컬 DB: PLACED/PARTIAL 주문 조회                       │
+│      ├─ KIS: 체결 내역 조회 (get_executions)                    │
+│      ├─ KIS: 미체결 내역 조회 (get_open_orders)                 │
+│      └─ 매칭:                                                   │
+│           체결에 있음 ──────► FILLED / PARTIAL                   │
+│           미체결에 있음 ────► 상태 유지                           │
+│           양쪽 다 없음 ────► CANCELLED (자동 감지)              │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+### 디렉토리 구조
+
+```
+stock-manager/
+├── config.py              # 환경변수 중앙 관리
+├── main.py                # FastAPI 진입점 + lifespan (WS 관리자/스케줄러 시작)
+├── routers/               # API 라우터 (HTTP 검증 + 라우팅만)
+│   ├── _kis_auth.py       #   KIS 인증 공통 (ConfigError/ExternalAPIError)
+│   ├── screener.py        #   GET /api/screener/stocks
+│   ├── earnings.py        #   GET /api/earnings/filings
+│   ├── balance.py         #   GET /api/balance
+│   ├── watchlist.py       #   /api/watchlist/*
+│   ├── detail.py          #   /api/detail/*
+│   ├── order.py           #   /api/order/* (order_service만 import)
+│   ├── quote.py           #   WS /ws/quote/{symbol}
+│   ├── advisory.py        #   /api/advisory/*
+│   ├── search.py          #   GET /api/search
+│   └── market_board.py    #   /api/market-board/* + WS (200ms 배칭)
+├── services/              # 비즈니스 로직
+│   ├── exceptions.py      #   ServiceError 예외 계층
+│   ├── order_service.py   #   주문/취소/정정/대사/이력/예약/FNO시세
+│   ├── quote_service.py   #   KIS WS + REST fallback + Finnhub + yfinance
+│   ├── advisory_service.py#   AI분석 + GPT-4o 리포트
+│   ├── watchlist_service.py#  관심종목 대시보드
+│   ├── detail_service.py  #   재무/밸류에이션/종합리포트
+│   └── reservation_service.py # 예약주문 스케줄러 (20초 폴링)
+├── stock/                 # 데이터 레이어 (DB + 외부 데이터 수집)
+│   ├── db_base.py         #   SQLite 공용 (WAL 모드, timeout 10초)
+│   ├── order_store.py     #   orders.db CRUD
+│   ├── advisory_store.py  #   advisory.db CRUD
+│   ├── market_board_store.py # market_board.db CRUD
+│   ├── store.py           #   watchlist.db CRUD
+│   ├── cache.py           #   cache.db (TTL 캐시, WAL 모드)
+│   ├── market.py          #   yfinance 기반 시세/펀더멘털
+│   ├── yf_client.py       #   해외주식 yfinance 클라이언트
+│   ├── dart_fin.py        #   OpenDART 재무제표
+│   ├── fno_master.py      #   KIS 선물옵션 마스터파일
+│   ├── symbol_map.py      #   종목코드 ↔ 종목명 매핑
+│   ├── utils.py           #   is_domestic() / is_fno()
+│   └── sec_filings.py     #   SEC EDGAR 공시
+├── screener/              # 스크리너 패키지 (CLI + API 공용)
+├── frontend/              # React 19 + Vite + Tailwind CSS v4
+│   └── src/
+│       ├── pages/         #   7개 페이지 (SPA 라우팅)
+│       ├── components/    #   재사용 UI 컴포넌트
+│       ├── hooks/         #   커스텀 훅 (API 통신 + 상태 관리)
+│       └── api/           #   fetch 래퍼 (hooks에서만 사용)
+├── Dockerfile             # 멀티스테이지 빌드 (Node → Python)
+└── docker-compose.yml     # 프로덕션 배포
+```
+
+**국내/해외/FNO 분기 기준**: `stock/utils.py`의 `is_domestic(code)` — 6자리 숫자이면 국내(KRX), `is_fno(code)` — 1/2/3xxx 형식이면 선물옵션, 나머지는 해외(US).
+
+**계층 분리 원칙**: `routers/`는 오직 `services/`만 호출. `stock/` store 직접 접근 금지. 예외는 `ServiceError` 계층(`ConfigError`/`ExternalAPIError`) 사용 — `main.py` 중앙 핸들러에서 HTTP 응답으로 일괄 변환.
 
 ---
 
@@ -329,5 +561,6 @@ frontend/         React 19 SPA (Vite + Tailwind CSS v4 + Recharts)
 - 스크리너 첫 조회: KRX 전종목 수집 + yfinance enrichment로 수십 초 소요. 이후 캐시로 빠르게 응답
 - 미국 주식 재무 데이터는 yfinance 기준 최대 4년치만 제공됩니다
 - `FINNHUB_API_KEY` 미설정 시 해외주식 호가는 yfinance 2초 폴링(15분 지연)으로 동작합니다
-- KIS WebSocket 끊김 시 REST API 자동 fallback으로 국내 시세를 5초 간격으로 유지합니다
+- KIS WebSocket 끊김 시 REST API 자동 fallback으로 국내 시세를 3초 간격으로 유지합니다
+- KIS Approval Key / REST 토큰은 12시간 TTL로 자동 갱신됩니다
 - **비개장일(주말/공휴일)에도 직전 거래일 가격이 표시됩니다** — 국내: KIS WS 구독 즉시 yfinance 초기 push / 해외: `fast_info.last_price or previous_close` fallback

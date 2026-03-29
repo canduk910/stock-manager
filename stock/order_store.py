@@ -191,6 +191,32 @@ def list_active_orders() -> list[dict]:
         return [row_to_dict(r) for r in rows]
 
 
+def update_order_details(
+    order_id: int,
+    *,
+    price: float = None,
+    quantity: int = None,
+    order_type: str = None,
+) -> Optional[dict]:
+    """주문 정정 사항 로컬 반영 (가격/수량/주문유형)."""
+    with _conn() as conn:
+        fields = ["updated_at = ?"]
+        values = [_now()]
+        if price is not None:
+            fields.append("price = ?")
+            values.append(price)
+        if quantity is not None:
+            fields.append("quantity = ?")
+            values.append(quantity)
+        if order_type is not None:
+            fields.append("order_type = ?")
+            values.append(order_type)
+        values.append(order_id)
+        conn.execute(f"UPDATE orders SET {', '.join(fields)} WHERE id = ?", values)
+        row = conn.execute("SELECT * FROM orders WHERE id = ?", (order_id,)).fetchone()
+        return row_to_dict(row) if row else None
+
+
 # ── 예약주문 CRUD ─────────────────────────────────────────────────────────────
 
 def insert_reservation(

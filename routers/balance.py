@@ -1,9 +1,10 @@
 """잔고 조회 API 라우터 (main.py에서 이동)."""
 
 import requests
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 
 from routers._kis_auth import BASE_URL, get_access_token, get_kis_credentials, clear_token_cache
+from services.exceptions import ExternalAPIError, ServiceError
 from stock.market import fetch_market_metrics
 from stock.yf_client import fetch_detail_yf
 
@@ -270,16 +271,16 @@ def get_balance():
     try:
         res = requests.get(url, headers=headers, params=params, timeout=10)
     except requests.RequestException as e:
-        raise HTTPException(status_code=502, detail=f"KIS API 호출 실패: {e}")
+        raise ExternalAPIError(f"KIS API 호출 실패: {e}")
 
     if res.status_code != 200:
-        raise HTTPException(status_code=res.status_code, detail="잔고 조회 실패")
+        raise ExternalAPIError(f"잔고 조회 실패 (HTTP {res.status_code})")
 
     data = res.json()
     if data.get("rt_cd") != "0":
         # 토큰 만료일 수 있으므로 캐시 초기화
         clear_token_cache()
-        raise HTTPException(status_code=400, detail=f"API 오류: {data.get('msg1')}")
+        raise ServiceError(f"API 오류: {data.get('msg1')}")
 
     stocks = []
     for item in data.get("output1", []):

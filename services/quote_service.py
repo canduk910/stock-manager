@@ -12,6 +12,7 @@ FastAPI lifespan에서 start() / stop() 호출.
 import asyncio
 import json
 import logging
+import time
 
 import requests  # approval_key / REST fallback (동기)
 import websockets
@@ -61,12 +62,14 @@ def _resolve_fno_type(symbol: str) -> str:
 # ── KIS REST 토큰 캐시 (quote_service 전용, HTTPException 없이 동작) ──────────
 
 _rest_token: str | None = None
+_rest_token_at: float = 0
+_REST_TOKEN_TTL = 12 * 3600  # 12시간
 
 
 def _get_rest_token_sync() -> str | None:
-    """KIS REST 액세스 토큰 발급 (동기). 실패 시 None 반환."""
-    global _rest_token
-    if _rest_token:
+    """KIS REST 액세스 토큰 발급 (동기). 12시간 TTL. 실패 시 None 반환."""
+    global _rest_token, _rest_token_at
+    if _rest_token and (time.time() - _rest_token_at) < _REST_TOKEN_TTL:
         return _rest_token
     if not KIS_APP_KEY or not KIS_APP_SECRET:
         return None
@@ -78,6 +81,7 @@ def _get_rest_token_sync() -> str | None:
             timeout=10,
         )
         _rest_token = res.json()["access_token"]
+        _rest_token_at = time.time()
         return _rest_token
     except Exception as e:
         logger.error("[QuoteService] REST 토큰 발급 실패: %s", e)
@@ -85,8 +89,9 @@ def _get_rest_token_sync() -> str | None:
 
 
 def _clear_rest_token():
-    global _rest_token
+    global _rest_token, _rest_token_at
     _rest_token = None
+    _rest_token_at = 0
 
 
 # ── KISQuoteManager ────────────────────────────────────────────────────────────
@@ -94,6 +99,7 @@ def _clear_rest_token():
 class KISQuoteManager:
     def __init__(self):
         self._approval_key: str | None = None
+        self._approval_key_at: float = 0
         self._subscribers: dict[str, set[asyncio.Queue]] = defaultdict(set)
         self._subscribed_symbols: set[str] = set()
         self._ws = None
@@ -242,8 +248,10 @@ class KISQuoteManager:
         self._subscribed_symbols.add(symbol)
         logger.debug("[QuoteService] FNO 구독 등록: %s (%s)", symbol, fno_type)
 
+    _APPROVAL_KEY_TTL = 12 * 3600  # 12시간
+
     def _get_approval_key(self) -> str:
-        if self._approval_key:
+        if self._approval_key and (time.time() - self._approval_key_at) < self._APPROVAL_KEY_TTL:
             return self._approval_key
         res = requests.post(
             f"{KIS_BASE_URL}/oauth2/Approval",
@@ -256,6 +264,7 @@ class KISQuoteManager:
             timeout=10,
         )
         self._approval_key = res.json()["approval_key"]
+        self._approval_key_at = time.time()
         return self._approval_key
 
     async def _connect_loop(self):
@@ -269,6 +278,7 @@ class KISQuoteManager:
             except Exception as e:
                 logger.error("[QuoteService] WS 오류: %s — %.0f초 후 재연결", e, backoff)
                 self._approval_key = None
+                self._approval_key_at = 0
                 await self._broadcast_all({"type": "disconnected"})
                 # WS 끊김 시 REST fallback 시작
                 if not self._fallback_mode:
@@ -329,6 +339,8 @@ class KISQuoteManager:
             if tr_id == "PINGPONG":
                 await self._ws.send(data)
 
+    _drop_count: dict[str, int] = {}
+
     async def _broadcast(self, symbol: str, message: dict):
         for q in list(self._subscribers.get(symbol, set())):
             if q.full():
@@ -336,6 +348,9 @@ class KISQuoteManager:
                     q.get_nowait()
                 except asyncio.QueueEmpty:
                     pass
+                cnt = self._drop_count[symbol] = self._drop_count.get(symbol, 0) + 1
+                if cnt % 100 == 1:
+                    logger.warning("[QuoteManager] %s: %d messages dropped (queue full)", symbol, cnt)
             try:
                 q.put_nowait(message)
             except asyncio.QueueFull:
@@ -348,7 +363,7 @@ class KISQuoteManager:
     # ── REST Fallback ──────────────────────────────────────────────
 
     async def _rest_fallback_loop(self):
-        """WS 끊김 시 KIS REST 5초 폴링 (price only). FNO는 FHMIF10000000, 국내는 FHKST01010100."""
+        """WS 끊김 시 KIS REST 3초 폴링 (price only). FNO는 FHMIF10000000, 국내는 FHKST01010100."""
         logger.info("[QuoteService] REST fallback 폴링 시작")
         while self._fallback_mode and self._running:
             symbols = list(self._subscribers.keys())
@@ -365,9 +380,8 @@ class KISQuoteManager:
                         await self._broadcast(symbol, msg)
                 except Exception as e:
                     logger.debug("[QuoteService] REST fallback %s: %s", symbol, e)
-                # 심볼 간 0.2초 간격 (KIS API 호출 제한 분산)
-                await asyncio.sleep(0.2)
-            await asyncio.sleep(5)
+                await asyncio.sleep(0.1)  # 심볼 간 0.1초 (KIS 초당 10건)
+            await asyncio.sleep(3)  # 폴링 주기 3초
         logger.info("[QuoteService] REST fallback 폴링 종료")
 
     async def _fetch_rest_price(self, symbol: str) -> dict | None:
@@ -529,7 +543,10 @@ class KISQuoteManager:
             token = _get_rest_token_sync()
             if not token:
                 return None
-            fno_type = self._fno_types.get(symbol, _resolve_fno_type(symbol))
+            fno_type = self._fno_types.get(symbol)
+            if not fno_type:
+                fno_type = _resolve_fno_type(symbol)
+                self._fno_types[symbol] = fno_type
             tr_info = _FNO_TR_IDS.get(fno_type, _FNO_TR_IDS["IF"])
             # mrkt_div: IF/IO → F/O, ZF/ZO → JF
             mrkt_div_map = {"IF": "F", "IO": "O", "ZF": "JF", "ZO": "JF"}

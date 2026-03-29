@@ -1,19 +1,14 @@
-import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
-import { useMarketBoard } from '../hooks/useMarketBoard'
+import { useEffect, useRef, useState, useMemo } from 'react'
+import { useMarketBoard, useDisplayStocks } from '../hooks/useMarketBoard'
 import { useMarketBoardWS } from '../hooks/useMarketBoardWS'
-import { fetchWatchlist } from '../api/watchlist'
-import { fetchCustomStocks, addCustomStock, removeCustomStock } from '../api/marketBoard'
 import NewHighLowSection from '../components/market-board/NewHighLowSection'
 import CustomStockSection from '../components/market-board/CustomStockSection'
 
 export default function MarketBoardPage() {
   const { data, sparklines, loading, error, load, loadSparklines } = useMarketBoard()
   const { prices, connected, subscribe, unsubscribe } = useMarketBoardWS()
+  const { watchlistStocks, customStocks, loadAll, addStock, removeStock } = useDisplayStocks()
   const subscribedRef = useRef(new Set())
-
-  // 관심종목 + 별도 시세 종목
-  const [watchlistStocks, setWatchlistStocks] = useState([])
-  const [customStocks, setCustomStocks] = useState([])
 
   // 표시 목록: watchlist(★) + custom(X), 중복 제거
   const displayStocks = useMemo(() => {
@@ -34,29 +29,20 @@ export default function MarketBoardPage() {
   // 마운트 시: watchlist + custom stocks 병렬 로드 → WS 구독 + sparkline
   useEffect(() => {
     const init = async () => {
-      try {
-        const [{ items: wl = [] }, { items: custom = [] }] = await Promise.all([
-          fetchWatchlist(),
-          fetchCustomStocks(),
-        ])
-        setWatchlistStocks(wl)
-        setCustomStocks(custom)
+      const { watchlist: wl, custom } = await loadAll()
 
-        // 전체 종목 WS 구독 + sparkline
-        const allItems = [
-          ...wl,
-          ...custom.filter(c => !wl.some(w => w.code === c.code && w.market === c.market)),
-        ]
-        const newSyms = allItems.map(s => s.code).filter(c => !subscribedRef.current.has(c))
-        if (newSyms.length > 0) {
-          newSyms.forEach(c => subscribedRef.current.add(c))
-          subscribe(newSyms)
-        }
-        if (allItems.length > 0) {
-          loadSparklines(allItems.map(s => ({ code: s.code, market: s.market })))
-        }
-      } catch {
-        // 조회 실패 시 빈 목록 유지
+      // 전체 종목 WS 구독 + sparkline
+      const allItems = [
+        ...wl,
+        ...custom.filter(c => !wl.some(w => w.code === c.code && w.market === c.market)),
+      ]
+      const newSyms = allItems.map(s => s.code).filter(c => !subscribedRef.current.has(c))
+      if (newSyms.length > 0) {
+        newSyms.forEach(c => subscribedRef.current.add(c))
+        subscribe(newSyms)
+      }
+      if (allItems.length > 0) {
+        loadSparklines(allItems.map(s => ({ code: s.code, market: s.market })))
       }
     }
     init()
@@ -78,13 +64,9 @@ export default function MarketBoardPage() {
   }, [data, subscribe])
 
   // custom 종목 추가
-  const handleAddStock = useCallback(async (item) => {
+  const handleAddStock = async (item) => {
     try {
-      await addCustomStock(item.code, item.name, item.market)
-      setCustomStocks(prev => {
-        if (prev.find(s => s.code === item.code && s.market === item.market)) return prev
-        return [...prev, item]
-      })
+      await addStock(item)
       if (!subscribedRef.current.has(item.code)) {
         subscribedRef.current.add(item.code)
         subscribe([item.code])
@@ -93,16 +75,11 @@ export default function MarketBoardPage() {
     } catch (e) {
       // 중복(409) 등 에러는 무시 (이미 있으면 표시만)
     }
-  }, [subscribe, loadSparklines])
+  }
 
   // custom 종목 삭제
-  const handleRemoveStock = useCallback(async (code, market) => {
-    try {
-      await removeCustomStock(code, market)
-    } catch {
-      // 404 등 무시
-    }
-    setCustomStocks(prev => prev.filter(s => !(s.code === code && s.market === market)))
+  const handleRemoveStock = async (code, market) => {
+    await removeStock(code, market)
     // watchlist에도 없으면 WS unsubscribe
     const inWatchlist = watchlistStocks.some(s => s.code === code && s.market === market)
     const inHighLow = [
@@ -113,7 +90,7 @@ export default function MarketBoardPage() {
       subscribedRef.current.delete(code)
       unsubscribe([code])
     }
-  }, [watchlistStocks, data, unsubscribe])
+  }
 
   return (
     <div className="space-y-8">

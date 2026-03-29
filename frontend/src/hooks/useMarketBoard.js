@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react'
-import { fetchNewHighsLows, fetchSparklines } from '../api/marketBoard'
+import { fetchNewHighsLows, fetchSparklines, fetchCustomStocks, addCustomStock, removeCustomStock } from '../api/marketBoard'
+import { fetchWatchlist } from '../api/watchlist'
 
 export function useMarketBoard() {
   const [data, setData] = useState(null)   // { new_highs, new_lows, updated_at }
@@ -45,4 +46,47 @@ export function useMarketBoard() {
   }, [])
 
   return { data, sparklines, loading, error, load, loadSparklines }
+}
+
+
+/** 관심종목 + 시세판 별도 등록 종목 관리 */
+export function useDisplayStocks() {
+  const [watchlistStocks, setWatchlistStocks] = useState([])
+  const [customStocks, setCustomStocks] = useState([])
+  const [loaded, setLoaded] = useState(false)
+
+  const loadAll = useCallback(async () => {
+    try {
+      const [{ items: wl = [] }, { items: custom = [] }] = await Promise.all([
+        fetchWatchlist(),
+        fetchCustomStocks(),
+      ])
+      setWatchlistStocks(wl)
+      setCustomStocks(custom)
+      setLoaded(true)
+      return { watchlist: wl, custom }
+    } catch {
+      setLoaded(true)
+      return { watchlist: [], custom: [] }
+    }
+  }, [])
+
+  const addStock = useCallback(async (item) => {
+    await addCustomStock(item.code, item.name, item.market)
+    setCustomStocks(prev => {
+      if (prev.find(s => s.code === item.code && s.market === item.market)) return prev
+      return [...prev, item]
+    })
+  }, [])
+
+  const removeStock = useCallback(async (code, market) => {
+    try {
+      await removeCustomStock(code, market)
+    } catch {
+      // 404 등 무시
+    }
+    setCustomStocks(prev => prev.filter(s => !(s.code === code && s.market === market)))
+  }, [])
+
+  return { watchlistStocks, customStocks, loaded, loadAll, addStock, removeStock }
 }

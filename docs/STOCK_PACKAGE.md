@@ -10,7 +10,7 @@
 
 | 파일 | 역할 |
 |------|------|
-| `db_base.py` | SQLite 공용 유틸. `connect(db_name, init_fn)` contextmanager (DB 생성/init 중복 방지), `row_to_dict()`. 모든 store 모듈의 공통 기반. |
+| `db_base.py` | SQLite 공용 유틸. `connect(db_name, init_fn)` contextmanager (DB 생성/init 중복 방지), `row_to_dict()`. 모든 store 모듈의 공통 기반. **WAL 모드 + timeout 10초** — 읽기-쓰기 동시성 보장. |
 | `store.py` | 관심종목 CRUD (SQLite) |
 | `order_store.py` | 주문 이력 + 예약주문 CRUD (SQLite, `orders.db`) |
 | `advisory_store.py` | AI자문 종목/캐시/리포트 CRUD (SQLite, `advisory.db`). 리포트 히스토리 조회 지원. |
@@ -37,6 +37,7 @@
 |------|------|
 | `insert_order(symbol, symbol_name, market, side, order_type, price, quantity, currency, memo, order_no, org_no, kis_response)` | 신규 주문 기록 (status=PLACED) |
 | `update_order_status(id, status, filled_quantity, filled_price)` | 주문 상태 갱신 |
+| `update_order_details(id, price, quantity, order_type)` | 정정 사항 로컬 반영 (가격/수량/주문유형) |
 | `list_orders(symbol, market, status, date_from, date_to, limit)` | 주문 이력 조회 (필터 지원) |
 | `list_active_orders()` | PLACED/PARTIAL 상태 주문만 반환 (대사 용도) |
 

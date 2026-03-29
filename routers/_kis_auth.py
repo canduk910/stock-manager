@@ -7,9 +7,9 @@ balance.py, order.py 등에서 공용으로 사용한다.
 import json
 
 import requests
-from fastapi import HTTPException
 
 from config import KIS_APP_KEY, KIS_APP_SECRET, KIS_ACNT_NO, KIS_ACNT_PRDT_CD_STK, KIS_ACNT_PRDT_CD_FNO, KIS_BASE_URL
+from services.exceptions import ConfigError, ExternalAPIError
 
 BASE_URL = KIS_BASE_URL
 
@@ -18,7 +18,7 @@ _access_token: str | None = None
 
 
 def get_kis_credentials() -> tuple[str, str, str, str, str]:
-    """KIS 환경변수를 읽어 반환한다. 누락 시 HTTPException(503).
+    """KIS 환경변수를 읽어 반환한다. 누락 시 ConfigError(503).
 
     Returns:
         (app_key, app_secret, acnt_no, acnt_prdt_cd_stk, acnt_prdt_cd_fno)
@@ -33,10 +33,7 @@ def get_kis_credentials() -> tuple[str, str, str, str, str]:
                 ("KIS_ACNT_PRDT_CD_STK", KIS_ACNT_PRDT_CD_STK),
             ] if not val
         ]
-        raise HTTPException(
-            status_code=503,
-            detail=f"KIS API 키가 설정되지 않았습니다. 누락된 환경변수: {', '.join(missing)}",
-        )
+        raise ConfigError(f"KIS API 키가 설정되지 않았습니다. 누락된 환경변수: {', '.join(missing)}")
 
     return KIS_APP_KEY, KIS_APP_SECRET, KIS_ACNT_NO, KIS_ACNT_PRDT_CD_STK, KIS_ACNT_PRDT_CD_FNO
 
@@ -48,10 +45,7 @@ def get_access_token() -> str:
         return _access_token
 
     if not KIS_APP_KEY or not KIS_APP_SECRET:
-        raise HTTPException(
-            status_code=503,
-            detail="KIS API 키가 설정되지 않았습니다. .env에 KIS_APP_KEY, KIS_APP_SECRET를 설정해주세요.",
-        )
+        raise ConfigError("KIS API 키가 설정되지 않았습니다. .env에 KIS_APP_KEY, KIS_APP_SECRET를 설정해주세요.")
 
     url = f"{BASE_URL}/oauth2/tokenP"
     body = {
@@ -62,10 +56,10 @@ def get_access_token() -> str:
     try:
         res = requests.post(url, headers={"content-type": "application/json"}, data=json.dumps(body), timeout=10)
     except requests.RequestException as e:
-        raise HTTPException(status_code=502, detail=f"KIS 토큰 발급 요청 실패: {e}")
+        raise ExternalAPIError(f"KIS 토큰 발급 요청 실패: {e}")
 
     if res.status_code != 200:
-        raise HTTPException(status_code=502, detail=f"KIS 토큰 발급 실패: {res.text}")
+        raise ExternalAPIError(f"KIS 토큰 발급 실패: {res.text}")
 
     _access_token = res.json()["access_token"]
     return _access_token

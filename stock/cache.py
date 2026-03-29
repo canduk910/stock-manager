@@ -23,7 +23,8 @@ _DB_PATH = _CACHE_DIR / "cache.db"
 
 def _conn() -> sqlite3.Connection:
     _CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    con = sqlite3.connect(_DB_PATH)
+    con = sqlite3.connect(_DB_PATH, timeout=10.0)
+    con.execute("PRAGMA journal_mode=WAL")
     con.execute(
         """
         CREATE TABLE IF NOT EXISTS cache (

@@ -84,6 +84,7 @@ frontend/
 | | `useAdvisoryReport()` | `{ report, history, loading, error, load, generate, loadById }` — AI 리포트 조회/생성/히스토리. `history`: 목록(본문 제외). `loadById(code, id, market)`: 특정 리포트 로드. |
 | | `useAdvisoryOhlcv()` | `{ result, loading, error, load }` — 타임프레임별 OHLCV+지표 조회. `load(code, market, interval, period)` → `{ ohlcv, indicators, interval, period }` |
 | `useMarketBoard.js` | `useMarketBoard()` | `{ data, sparklines, loading, error, load, loadSparklines }` — 신고가/신저가 REST 로드 + sparkline 배치 로드 |
+| | `useDisplayStocks()` | `{ watchlistStocks, customStocks, loaded, loadAll, addStock, removeStock }` — 관심종목+별도등록 종목 API 캡슐화. MarketBoardPage에서 api/ 직접 import 대신 이 훅 사용. |
 | `useMarketBoardWS.js` | `useMarketBoardWS()` | `{ prices, connected, subscribe, unsubscribe }` — `useWebSocket` 기반. subscribe/unsubscribe 시 WS 구독 메시지 전송. 재연결 시 기존 구독 자동 복원. prices: `{ [symbol]: { price, change_pct, sign } }` |
 
 ---
@@ -242,7 +243,7 @@ frontend/
 - 마운트 시 `GET /api/market-board/new-highs-lows` 호출 (최초 조회 시 수십 초 소요, 이후 캐시)
 - 신고가/신저가 종목 확정 후 sparkline 배치 로드 (`POST /api/market-board/sparklines`)
 - `useMarketBoardWS`로 단일 WS 연결, 신고가/신저가 + 사용자 종목 일괄 구독
-- **마운트 시 병렬 조회**: `fetchWatchlist()` + `fetchCustomStocks()` → watchlistStocks/customStocks 상태 세팅
+- **마운트 시 병렬 조회**: `useDisplayStocks().loadAll()` → watchlistStocks/customStocks 상태 세팅 (api/ 직접 import 대신 훅 사용)
 - **하단 표시 = 관심종목(★) + 별도 등록 종목(X)**: `displayStocks = useMemo(...)` 중복 제거 합산
   - `_source: 'watchlist'` → ★ 배지, X 버튼 없음 (관심종목에서 삭제 시 자동 제거)
   - `_source: 'custom'` → X 버튼으로 DB 삭제 가능 (GET/POST/DELETE `/api/market-board/custom-stocks`)

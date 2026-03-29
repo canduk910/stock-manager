@@ -120,12 +120,12 @@ standalone으로 사용 가능. `main.py`/`routers/`와는 독립적이다.
 | `balance.py` | `GET /api/balance` | KIS 실전계좌 잔고 (국내주식 + 해외주식 + 국내선물옵션) |
 | `watchlist.py` | `/api/watchlist/*` | 관심종목 CRUD + 대시보드 + 종목정보 (국내/해외) |
 | `detail.py` | `/api/detail/*` | 10년 재무 + PER/PBR 히스토리 + 종합 리포트 |
-| `_kis_auth.py` | (내부 모듈) | KIS 인증 공통 모듈 (토큰 관리, hashkey 발급). `balance.py`와 `order.py` 공용 |
-| `order.py` | `/api/order/*` | 주문 발송 / 정정 / 취소 / 미체결 / 체결 내역 / 이력 / 예약주문 |
+| `_kis_auth.py` | (내부 모듈) | KIS 인증 공통 모듈 (토큰 관리, hashkey 발급). `balance.py`와 `order.py` 공용. 예외는 `ConfigError`/`ExternalAPIError` 사용 (ServiceError 계층 통일) |
+| `order.py` | `/api/order/*` | 주문 발송 / 정정 / 취소 / 미체결 / 체결 내역 / 이력 / 예약주문. **`order_service`만 import** (order_store 직접 접근 금지) |
 | `quote.py` | `WS /ws/quote/{symbol}` | 실시간 호가 WebSocket. `?market=KR`(기본)=KIS WS 브릿지, `?market=FNO`=KIS FNO WS(H0IFASP0/H0IFCNT0 등), `?market=US`=yfinance 2초 polling |
 | `advisory.py` | `/api/advisory/*` | AI자문 종목 관리 + 데이터 수집/조회 + GPT-4o AI 리포트 생성 |
 | `search.py` | `GET /api/search` | 종목 검색. KR=이름/코드 자동완성(최대 10건), US=티커 유효성 검증, FNO=선물옵션 종목명/단축코드 자동완성(최대 10건, `fno_master` 연동) |
-| `market_board.py` | `GET /api/market-board/new-highs-lows`, `POST /api/market-board/sparklines`, `GET/POST/DELETE /api/market-board/custom-stocks`, `WS /ws/market-board` | 당일 신고가/신저가 + sparkline 배치 + 시세판 별도 종목 CRUD + 다중심볼 실시간 시세 WS |
+| `market_board.py` | `GET /api/market-board/new-highs-lows`, `POST /api/market-board/sparklines`, `GET/POST/DELETE /api/market-board/custom-stocks`, `WS /ws/market-board` | 당일 신고가/신저가 + sparkline 배치 + 시세판 별도 종목 CRUD + 다중심볼 실시간 시세 WS (200ms 배칭) |
 
 - 모든 핸들러는 `def`(sync) — pykrx/requests가 동기 라이브러리이므로 FastAPI가 threadpool에서 자동 실행
 - KIS 키 미설정 시 `/api/balance`는 503 반환 (서버 시작은 정상)
@@ -152,9 +152,13 @@ DELETE /api/order/reserve/{id} 예약주문 삭제
 GET  /api/order/fno-price      선물옵션 현재가 조회 (?symbol=101W09&mrkt_div=F)
 ```
 
+- **계층 분리**: `routers/order.py`는 오직 `services.order_service`만 import. `order_store` 직접 접근 금지. 이력 조회·예약주문·FNO 시세 모두 서비스 계층 경유.
 - KIS API 키 미설정 시 503 반환
-- 주문 발송 시 로컬 `orders.db`에 자동 기록 (status: PLACED)
-- 동기화 후 KIS 체결 내역 기준으로 PLACED → FILLED/PARTIAL/CANCELLED 갱신
+- 주문 발송 시 로컬 `orders.db`에 자동 기록 (status: PLACED). 응답에 `balance_stale: true` 포함 → 프론트에서 잔고 재조회 트리거.
+- **취소 즉시 동기화**: KIS 취소 성공 → 로컬 DB 즉시 CANCELLED 갱신. 응답에 `local_synced: true`, `order_status: "CANCELLED"`.
+- **정정 즉시 동기화**: KIS 정정 성공 → 로컬 DB 가격/수량 즉시 반영. 응답에 `local_synced: true`.
+- **대사(Reconciliation)**: `sync_orders()` → 체결 내역 + 미체결 내역 양쪽 조회. 양쪽 다 없는 주문 → CANCELLED 자동 감지. `get_order_history()` 호출 시 반환 전 자동 대사(best-effort).
+- **예약주문 검증**: `create_reservation()` — condition_type/value/quantity/price 도메인 규칙 검증.
 - `excg_id_dvsn_cd` 필드: `'KRX'`=API 주문(취소 가능), `'SOR'`=HTS/MTS 주문(API 취소 불가)
 - 주문번호 포맷: `TTTC8036R`은 10자리 제로패딩(`0039822900`), 취소/정정 API는 8자리 필요 → `_strip_leading_zeros()`로 자동 변환
 
@@ -279,9 +283,9 @@ GET /api/watchlist/info/{code}?market=KR
 | `exceptions.py` | 서비스 레이어 공용 예외. `ServiceError`(기본 400) 상속: `NotFoundError`(404), `ExternalAPIError`(502), `ConfigError`(503), `PaymentRequiredError`(402). `main.py`에서 `@app.exception_handler(ServiceError)`로 일괄 HTTP 변환. |
 | `watchlist_service.py` | 관심종목 대시보드 + 종목 상세. 국내=pykrx+DART, 해외=yfinance 분기. `resolve_symbol(name_or_code, market)`. `get_stock_detail()` basic에 `roe`, `dividend_yield`, `dividend_per_share` 포함. financial rows에 `oi_margin`(영업이익률), `net_margin`(순이익률) 포함. |
 | `detail_service.py` | 재무 테이블 + PER/PBR 히스토리 + CAGR 종합 리포트. 해외는 yfinance(최대 4년), 밸류에이션 차트 빈 데이터 반환. `_get_report_kr()`/`_get_report_us()` 모두 `fetch_forward_estimates_yf()` 호출 — 응답에 `forward_estimates` 필드 포함. |
-| `order_service.py` | KIS API 직접 호출로 국내/해외/선물옵션 주문 발송·정정·취소·미체결 조회·당일 체결 내역·로컬 DB 대사. `_strip_leading_zeros()`로 10자리→8자리 주문번호 변환. `excg_id_dvsn_cd != 'SOR'` 조건으로 API 취소 가능 여부 판별. FNO: `_is_fno_night_session()`으로 주간/야간 TR_ID 자동 선택. `KIS_ACNT_PRDT_CD_FNO` 미설정 시 `ConfigError` → 503. |
+| `order_service.py` | KIS API 직접 호출로 국내/해외/선물옵션 주문 발송·정정·취소·미체결 조회·당일 체결 내역·이력 조회·예약주문 관리·FNO 시세·로컬 DB 대사. **계층 분리**: `routers/order.py`의 유일한 의존 대상. `cancel_order()` → 로컬 DB 즉시 CANCELLED 갱신 + `local_synced`/`order_status` 응답. `modify_order()` → 로컬 DB 가격/수량 즉시 반영. `get_order_history()` → 반환 전 `_reconcile_active_orders()` 자동 대사(체결+미체결 양쪽 조회, 양쪽 다 없으면 CANCELLED). `get_fno_price()` → FHMIF10000000 REST. `create_reservation()` → 도메인 규칙 검증 후 DB 삽입. `_strip_leading_zeros()`로 10자리→8자리 주문번호 변환. FNO: `_is_fno_night_session()`으로 주간/야간 TR_ID 자동 선택. `KIS_ACNT_PRDT_CD_FNO` 미설정 시 `ConfigError` → 503. |
 | `reservation_service.py` | 예약주문 실행 엔진. `asyncio` 20초 간격 폴링. 가격 조건(`price_below`/`price_above`) + 시간 조건(`scheduled`) 체크 후 자동 주문 발송. |
-| `quote_service.py` | **KISQuoteManager** + **OverseasQuoteManager** + **FinnhubWSClient**. 국내: KIS WS 단일 연결 + 심볼별 `asyncio.Queue` pub/sub. WS 끊김 시 REST fallback(`FHKST01010100`) 자동 전환, 재연결 시 자동 해제. 재연결 지수 백오프(1→30초). **비개장일 대응**: 구독 즉시 `_push_initial_price()`로 yfinance 직전 거래일 가격 push. REST fallback `price=0` 시 yfinance fallback. **FNO WS 지원**: `subscribe(is_fno=True)` + `_FNO_TR_IDS` 상수 딕셔너리 + `_resolve_fno_type(symbol)`로 심볼 첫 자리 기반 TR_ID 자동 선택. `_send_subscribe_fno()` / `_parse_fno_execution()` / `_parse_fno_orderbook(levels)` / `_push_initial_price_fno()` / `_fetch_fno_rest_price_sync()` 추가. FNO TR_ID: 지수선물(1xxx)=H0IFASP0/H0IFCNT0, 지수옵션(2xxx)=H0IOASP0/H0IOCNT0, 주식선물(3xxx 선물)=H0ZFASP0/H0ZFCNT0, 주식옵션(3xxx 옵션)=H0ZOASP0/H0ZOCNT0. `_FNO_EXECUTION_TR_IDS`, `_FNO_ORDERBOOK_TR_IDS`, `_FNO_5LEVEL_TR_IDS` set으로 파싱 분기. 5레벨 호가(H0IFASP0/H0IOASP0)는 5개, 10레벨(H0ZFASP0/H0ZOASP0)은 10개. 해외: `FINNHUB_API_KEY` 있으면 Finnhub WS(30 심볼), 없으면 yfinance 2초 폴링. `fast_info.last_price or previous_close` 패턴으로 비개장일에도 직전 종가 표시. 구독자 0이면 on-demand cancel. |
+| `quote_service.py` | **KISQuoteManager** + **OverseasQuoteManager** + **FinnhubWSClient**. 국내: KIS WS 단일 연결 + 심볼별 `asyncio.Queue` pub/sub. WS 끊김 시 REST fallback(`FHKST01010100`) 3초 폴링 자동 전환(심볼 간 0.1초 throttle), 재연결 시 자동 해제. 재연결 지수 백오프(1→30초). **approval key 12시간 TTL**: `_get_approval_key()` — 발급 후 12시간 경과 시 자동 재발급. **REST token 12시간 TTL**: `_get_rest_token_sync()` — 동일. **비개장일 대응**: 구독 즉시 `_push_initial_price()`로 yfinance 직전 거래일 가격 push. REST fallback `price=0` 시 yfinance fallback. **Queue overflow 로깅**: `_broadcast()`에서 큐 만재 시 100건마다 경고 로그. **FNO WS 지원**: `subscribe(is_fno=True)` + `_FNO_TR_IDS` 상수 딕셔너리 + `_resolve_fno_type(symbol)`로 심볼 첫 자리 기반 TR_ID 자동 선택(결과 `_fno_types` dict에 캐싱). FNO TR_ID: 지수선물(1xxx)=H0IFASP0/H0IFCNT0, 지수옵션(2xxx)=H0IOASP0/H0IOCNT0, 주식선물(3xxx 선물)=H0ZFASP0/H0ZFCNT0, 주식옵션(3xxx 옵션)=H0ZOASP0/H0ZOCNT0. 해외: `FINNHUB_API_KEY` 있으면 Finnhub WS(30 심볼), 없으면 yfinance 2초 폴링. `fast_info.last_price or previous_close` 패턴으로 비개장일에도 직전 종가 표시. 구독자 0이면 on-demand cancel. |
 | `advisory_service.py` | AI자문 서비스. `refresh_stock_data()` — 기본적/기술적 분석 수집 후 `advisory_cache` 저장(포워드 가이던스 포함). `generate_ai_report()` — 캐시 데이터 기반 OpenAI GPT-4o 호출 후 리포트 저장. **3전략 프레임워크**: 변동성 돌파(Larry Williams, K=0.3/0.5/0.7), 안전마진(Graham Number=√(22.5×EPS×BPS)), 추세추종(MA정배열+MACD+RSI). `_calc_graham_number()` 헬퍼. 출력 JSON에 `전략별평가` 섹션 포함. `max_completion_tokens=2500`. ServiceError 계층 사용 (HTTPException 직접 raise 없음). |
 
 **국내/해외/FNO 분기 기준**: `stock/utils.py`의 `is_domestic(code)` — 6자리 숫자이면 국내(KRX), 아니면 해외. `is_fno(code)` — FNO 마스터 단축코드 형식(6자리 숫자가 아니고 알파벳+숫자 혼합) 여부 판별.
@@ -319,7 +323,7 @@ CLI와 API 라우터 양쪽에서 공용으로 사용한다. 데이터는 `~/sto
 |------|------|
 | `db_base.py` | SQLite 공용 유틸. `connect(db_name, init_fn)` contextmanager — DB 생성/init 중복 방지(`_initialized` set). `row_to_dict()`. 4개 store(store/order_store/advisory_store/market_board_store)에서 공용 사용. |
 | `store.py` | 관심종목 CRUD. `~/stock-watchlist/watchlist.db` (SQLite). 복합 PK `(code, market)`. `market` 컬럼 자동 마이그레이션. |
-| `order_store.py` | 주문 이력 + 예약주문 CRUD. `~/stock-watchlist/orders.db` (SQLite). `orders` + `reservations` 테이블. |
+| `order_store.py` | 주문 이력 + 예약주문 CRUD. `~/stock-watchlist/orders.db` (SQLite). `orders` + `reservations` 테이블. `update_order_details(order_id, price, quantity, order_type)` — 정정 사항 로컬 반영. |
 | `advisory_store.py` | AI자문 DB CRUD. `~/stock-watchlist/advisory.db` (SQLite). `advisory_stocks`(자문종목) + `advisory_cache`(분석데이터) + `advisory_reports`(AI리포트 히스토리) 3테이블. `get_report_history(code, market, limit=20)` — 히스토리 목록(본문 제외, 최신순). `get_report_by_id(id)` — 특정 리포트 조회. |
 | `advisory_fetcher.py` | AI자문 데이터 수집. `fetch_15min_ohlcv_kr()` — KIS 1분봉 4회 호출(시간대별) → 15분 resample, 30봉 미만 시 yfinance fallback. `fetch_ohlcv_by_interval(code, market, interval, period)` — 타임프레임/기간 지정 OHLCV 수집 + 기술지표 자동 계산 반환 (`{ohlcv, indicators}`). yfinance interval/period 제한 자동 적용(`15m` max 60d, `60m` max 2y). `calc_technical_indicators()` — MACD/RSI(Wilder)/Stochastic/%K%D/볼린저밴드/MA5·20·60·**ATR(14, Wilder법)**/MA배열(`ma_alignment`: 정배열/역배열/혼합)/**K=0.3·0.5·0.7 변동성 돌파 목표가** 순수 pandas 구현, 최대 300봉. `current_signals`에 `ma5`, `ma60`, `ma_alignment`, `atr`, `volatility_target_k03/05/07` 추가. 모듈 레벨 KIS 토큰 캐시(`_kis_token_cache`)로 분당 1회 발급 제한 우회. `fetch_segments_kr()` — OpenAI 기반 사업부문 추론. |
 | `utils.py` | `is_domestic(code)` — 6자리 숫자=국내, 아니면 해외. `is_fno(code)` — FNO 단축코드 여부 판별. 모든 모듈에서 국내/해외/FNO 분기에 사용. |
@@ -388,6 +392,7 @@ frontend/
       useNotification.js  토스트 상태 관리 + 브라우저 Notification API 래퍼
       useWebSocket.js     공용 WebSocket 훅. 연결 수명주기 + 지수 백오프 재연결(500ms→10초) + visibilitychange. { connected, sendMessage }. buildWsUrl(path) 헬퍼 export.
       useQuote.js         실시간 호가 WebSocket 훅 (useWebSocket 기반). `useQuote(symbol, market='KR')` — market 파라미터를 WS URL `?market=` 쿼리로 전달. { price, change, changeRate, sign, asks, bids, totalAskVolume, totalBidVolume, connected }. rAF throttle 자체 관리.
+      useMarketBoard.js   `useMarketBoard` (신고가/신저가 + sparkline) + `useDisplayStocks` (관심종목+별도등록 종목 API 캡슐화). MarketBoardPage에서 api/ 직접 import 대신 이 훅 사용.
       useAdvisory.js      useAdvisoryStocks (CRUD) / useAdvisoryData (load + refresh) /
                           useAdvisoryReport (load + generate + loadById, history 상태 포함) /
                           useAdvisoryOhlcv (load(code, market, interval, period) → { ohlcv, indicators, interval, period })
@@ -564,6 +569,8 @@ KIS API는 실전/모의투자에 따라 TR_ID 접두사가 다르다.
 
 **`market:metrics:` 캐시**: `fetch_market_metrics(code)` — `{market_type, mktcap, per, pbr, roe, dividend_yield, dividend_per_share}` 저장. TTL 6시간. 잔고·관심종목·AI자문에서 각 종목에 대해 호출.
 
+**SQLite WAL 모드**: `stock/db_base.py`와 `stock/cache.py`에서 `PRAGMA journal_mode=WAL` 활성화 + timeout 10초. 읽기-쓰기 동시성 향상, `database is locked` 오류 사실상 제거. 예약주문 스케줄러와 사용자 API 요청이 동시에 DB에 접근해도 안전.
+
 ---
 
 ## 해외주식 지원 범위 및 제약
@@ -585,7 +592,7 @@ KIS API는 실전/모의투자에 따라 TR_ID 접두사가 다르다.
 
 ---
 
-## 시세 수신 개선 이력 (Phase 1 → Phase 3)
+## 시세 수신 개선 이력 (Phase 1 → Phase 4)
 
 ### Phase 1 (2026-03 완료)
 - rAF throttle (`useQuote.js`): 고빈도 WS 메시지 → 최대 60fps 렌더링
@@ -613,6 +620,20 @@ KIS API는 실전/모의투자에 따라 TR_ID 접두사가 다르다.
 - **FNO 실시간 WebSocket** (`KISQuoteManager` + `routers/quote.py`): FNO 심볼에 KIS WS 실시간 호가 지원 추가. `_FNO_TR_IDS` 상수 딕셔너리 + `_resolve_fno_type(symbol)` + `_send_subscribe_fno()`. `routers/quote.py`에 `?market=FNO` 쿼리 파라미터 추가 → `_stream_fno()` 핸들러로 분기. `useQuote(symbol, market='KR')` 시그니처 변경으로 프론트엔드 market 전달.
 - **FNO 주문유형 확장** (`OrderForm.jsx`): 지정가만 지원하던 FNO 주문을 지정가/시장가/조건부지정가/최유리지정가 + IOC/FOK 조건으로 확장. `mapFnoOrderCodes()` 함수로 `ORD_DVSN_CD` 자동 계산. `OrderbookPanel`에서 FNO REST 폴링 제거 → `useQuote` 훅으로 통합.
 - **`stock/utils.py` `is_fno(code)` 추가**: FNO 단축코드 식별 함수 추가.
+
+### Phase 4 — 구조 개선 + WS 효율화 (2026-03 완료)
+- **주문 도메인 계층 분리**: `routers/order.py`에서 `order_store` 직접 import 완전 제거. 이력 조회·예약주문·FNO 시세 모두 `order_service` 경유. 예약주문 `create_reservation()` 도메인 규칙 검증 추가.
+- **주문 즉시 동기화**: `cancel_order()` → 로컬 DB 즉시 CANCELLED + `local_synced`/`order_status` 응답. `modify_order()` → 가격/수량 즉시 반영 + `local_synced`. `place_order()` → `balance_stale: true`.
+- **대사 로직 강화**: `sync_orders()` → 체결+미체결 양쪽 조회, 양쪽 다 없으면 CANCELLED 자동 감지. `get_order_history()` 반환 전 자동 대사(best-effort).
+- **SQLite WAL 모드**: `db_base.py`, `cache.py` — `PRAGMA journal_mode=WAL` + timeout 10초. 읽기-쓰기 동시성 향상.
+- **예외 통일**: `_kis_auth.py`, `balance.py` — `HTTPException` → `ConfigError`/`ExternalAPIError` (ServiceError 계층 통일).
+- **프론트엔드 계층 분리**: `MarketBoardPage.jsx` — api/ 직접 import 제거 → `useDisplayStocks()` 훅 사용.
+- **Approval Key TTL**: `_get_approval_key()` — 12시간 TTL, 만료 시 자동 재발급.
+- **REST Token TTL**: `_get_rest_token_sync()` — 12시간 TTL, 동일 패턴.
+- **REST Fallback 최적화**: 폴링 주기 5초→3초, 심볼 간 throttle 0.2초→0.1초.
+- **FNO 타입 캐싱**: `_fetch_fno_rest_price_sync()`에서 `_fno_types` dict 캐시 미스 시 결과 저장.
+- **Queue Overflow 로깅**: `_broadcast()`에서 큐 만재 시 100건마다 경고 로그.
+- **시세판 배칭 단축**: `market_board.py` — 500ms→200ms (호가 100ms와의 격차 축소).
 
 ### DART 공시 캐시 버그 수정 (2026-03)
 - **원인**: `screener/cache.py`는 TTL 없는 영구 캐시. 당일 오전 조회 시 빈 결과가 캐시되면 이후 제출 공시가 보이지 않음 (골프존 3/19 사업보고서 미노출 사례)

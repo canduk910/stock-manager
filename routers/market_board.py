@@ -144,7 +144,7 @@ async def market_board_ws(websocket: WebSocket):
                 logger.debug("[MarketBoardWS] 제어 메시지 파싱 오류: %s", e)
 
     async def send_loop():
-        """모든 구독 큐에서 메시지 수집 → 500ms 창 병합 → 클라이언트 전송."""
+        """모든 구독 큐에서 메시지 수집 → 200ms 창 병합 → 클라이언트 전송."""
         while True:
             if not queues:
                 # 구독 없음 → ping 유지
@@ -152,9 +152,9 @@ async def market_board_ws(websocket: WebSocket):
                 await websocket.send_json({"type": "ping"})
                 continue
 
-            # 최대 500ms 동안 모든 큐 폴링
+            # 최대 200ms 동안 모든 큐 폴링
             batch: dict[str, dict] = {}  # symbol → latest price data
-            deadline = asyncio.get_event_loop().time() + 0.5
+            deadline = asyncio.get_event_loop().time() + 0.2
 
             while asyncio.get_event_loop().time() < deadline:
                 remaining = deadline - asyncio.get_event_loop().time()
@@ -184,7 +184,7 @@ async def market_board_ws(websocket: WebSocket):
             if batch:
                 await websocket.send_json({"type": "prices", "data": batch})
             else:
-                # 500ms 동안 데이터 없으면 ping
+                # 200ms 동안 데이터 없으면 ping
                 await asyncio.sleep(0.1)
 
     try:

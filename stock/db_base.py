@@ -23,7 +23,8 @@ def connect(db_name: str, init_fn=None):
     """
     DB_DIR.mkdir(parents=True, exist_ok=True)
     db_path = DB_DIR / db_name
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect(db_path, timeout=10.0)
+    conn.execute("PRAGMA journal_mode=WAL")
     conn.row_factory = sqlite3.Row
     if init_fn and db_name not in _initialized:
         init_fn(conn)
