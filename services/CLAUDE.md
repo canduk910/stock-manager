@@ -42,9 +42,12 @@ ServiceError (기본 400)
 
 ### order_service.py
 - **`routers/order.py`의 유일한 의존 대상** — `order_store` 직접 import 금지
-- `cancel_order()` → 로컬 DB 즉시 CANCELLED + `local_synced`/`order_status` 응답
-- `modify_order()` → 로컬 DB 가격/수량 즉시 반영 + `local_synced`
-- `get_order_history()` → 반환 전 `_reconcile_active_orders()` 자동 대사 (체결+미체결 양쪽 조회, 양쪽 다 없으면 CANCELLED)
+- **Write-Ahead 주문 패턴**: PENDING 선행 기록 → KIS API → 성공 시 PLACED / 실패 시 REJECTED (split-brain 방지)
+- `cancel_order()` → 로컬 DB 즉시 CANCELLED + `local_synced`/`order_status` 응답. 동기화 실패 시 로깅
+- `modify_order()` → 로컬 DB 가격/수량 즉시 반영 + `local_synced`. 동기화 실패 시 로깅
+- `get_order_history()` → **60초 쿨다운** 대사 (`_RECONCILE_COOLDOWN`). F5 연타 시 KIS API 호출 0회
+- `sync_orders()` → 쿨다운 무시, 강제 대사. 사용자 명시적 동기화 요청용
+- `_validate_market()`: 디스패치 함수(get_buyable/get_open_orders/get_executions) 진입부 시장 코드 검증
 - `_strip_leading_zeros()`: 10자리→8자리 주문번호 변환
 - **FNO**: `_is_fno_night_session()`으로 주간/야간 TR_ID 자동 선택. `KIS_ACNT_PRDT_CD_FNO` 미설정 시 `ConfigError` → 503
 

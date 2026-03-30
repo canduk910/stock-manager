@@ -78,16 +78,17 @@ def insert_order(
     order_no: str = None,
     org_no: str = None,
     kis_response: str = None,
+    status: str = "PLACED",
 ) -> dict:
     now = _now()
     with _conn() as conn:
         cursor = conn.execute(
             """INSERT INTO orders
                (order_no, org_no, symbol, symbol_name, market, side, order_type,
-                price, quantity, currency, memo, placed_at, updated_at, kis_response)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                price, quantity, currency, memo, status, placed_at, updated_at, kis_response)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (order_no, org_no, symbol, symbol_name, market, side, order_type,
-             price, quantity, currency, memo, now, now, kis_response),
+             price, quantity, currency, memo, status, now, now, kis_response),
         )
         row = conn.execute("SELECT * FROM orders WHERE id = ?", (cursor.lastrowid,)).fetchone()
         return row_to_dict(row)
@@ -183,10 +184,10 @@ def list_orders(
 
 
 def list_active_orders() -> list[dict]:
-    """PLACED 또는 PARTIAL 상태인 주문 목록."""
+    """PENDING, PLACED 또는 PARTIAL 상태인 주문 목록."""
     with _conn() as conn:
         rows = conn.execute(
-            "SELECT * FROM orders WHERE status IN ('PLACED', 'PARTIAL') ORDER BY id DESC"
+            "SELECT * FROM orders WHERE status IN ('PENDING', 'PLACED', 'PARTIAL') ORDER BY id DESC"
         ).fetchall()
         return [row_to_dict(r) for r in rows]
 

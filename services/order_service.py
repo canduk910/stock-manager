@@ -5,10 +5,14 @@ balance.py 패턴과 동일하게 requests 직접 호출.
 """
 
 import json
+import logging
 import os
+import time as _time
 from datetime import datetime
 
 import requests
+
+logger = logging.getLogger(__name__)
 from services.exceptions import ConfigError, ExternalAPIError, ServiceError
 
 from routers._kis_auth import (
@@ -42,6 +46,17 @@ _FNO_TR_ID_MODIFY = "TTTO1103U"       # 정정/취소 (주간)
 _FNO_TR_ID_MODIFY_NIGHT = "TTTN1103U" # 정정/취소 (야간)
 _FNO_TR_ID_PSBL = "TTTO5105R"         # 주문가능 조회
 _FNO_TR_ID_CCNL = "TTTO5201R"         # 주문체결내역 조회 (미체결 포함)
+
+
+_VALID_MARKETS = {"KR", "US", "FNO"}
+
+
+def _validate_market(market: str) -> str:
+    """시장 코드 검증. 유효하지 않으면 ServiceError."""
+    m = market.upper()
+    if m not in _VALID_MARKETS:
+        raise ServiceError(f"지원하지 않는 시장입니다: {market} (KR/US/FNO)")
+    return m
 
 
 def _is_fno_night_session() -> bool:
@@ -119,6 +134,15 @@ def _place_domestic_order(
     url = f"{BASE_URL}/uapi/domestic-stock/v1/trading/order-cash"
     tr_id = _KR_TR_IDS[side]
 
+    # 1단계: PENDING 선행 기록 (Write-Ahead)
+    pending = order_store.insert_order(
+        symbol=symbol, symbol_name=symbol_name, market="KR",
+        side=side, order_type=order_type, price=float(price),
+        quantity=quantity, currency="KRW", memo=memo,
+        status="PENDING",
+    )
+    pending_id = pending["id"]
+
     unpr = "0" if order_type == "01" else str(int(price))
     body = {
         "CANO": acnt_no,
@@ -138,36 +162,30 @@ def _place_domestic_order(
     headers["appkey"] = app_key
     headers["appsecret"] = app_secret
 
+    # 2단계: KIS API 호출
     try:
         res = requests.post(url, headers=headers, data=json.dumps(body), timeout=10)
     except requests.RequestException as e:
+        order_store.update_order_status(pending_id, "REJECTED")
         raise ExternalAPIError(f"KIS 주문 요청 실패: {e}")
 
     data = res.json()
     if data.get("rt_cd") != "0":
+        order_store.update_order_status(pending_id, "REJECTED")
         if "토큰" in data.get("msg1", "") or "Token" in data.get("msg1", ""):
             clear_token_cache()
         raise ServiceError(f"KIS 주문 오류: {data.get('msg1', '알 수 없는 오류')}")
 
+    # 3단계: KIS 성공 → PENDING → PLACED 갱신
     output = data.get("output", {})
     order_no = output.get("ODNO", "")
     org_no = output.get("KRX_FWDG_ORD_ORGNO", "")
 
-    order = order_store.insert_order(
-        symbol=symbol,
-        symbol_name=symbol_name,
-        market="KR",
-        side=side,
-        order_type=order_type,
-        price=float(price),
-        quantity=quantity,
-        currency="KRW",
-        memo=memo,
-        order_no=order_no,
-        org_no=org_no,
+    return order_store.update_order_status(
+        pending_id, "PLACED",
+        order_no=order_no, org_no=org_no,
         kis_response=json.dumps(data, ensure_ascii=False),
     )
-    return order
 
 
 def _place_overseas_order(
@@ -177,9 +195,17 @@ def _place_overseas_order(
     url = f"{BASE_URL}/uapi/overseas-stock/v1/trading/order"
     tr_id = _US_TR_IDS[side]
 
+    # 1단계: PENDING 선행 기록
+    pending = order_store.insert_order(
+        symbol=symbol, symbol_name=symbol_name, market=market,
+        side=side, order_type=order_type, price=float(price),
+        quantity=quantity, currency="USD", memo=memo,
+        status="PENDING",
+    )
+    pending_id = pending["id"]
+
     # 미국 지정가: ord_dvsn="00", 시장가: 매수="00" 매도 MOO="31"
     if order_type == "01":
-        # 시장가 처리 (매수=LOO, 매도=MOO)
         ord_dvsn = "32" if side == "buy" else "31"
     else:
         ord_dvsn = "00"
@@ -204,36 +230,30 @@ def _place_overseas_order(
     headers["appkey"] = app_key
     headers["appsecret"] = app_secret
 
+    # 2단계: KIS API 호출
     try:
         res = requests.post(url, headers=headers, data=json.dumps(body), timeout=10)
     except requests.RequestException as e:
+        order_store.update_order_status(pending_id, "REJECTED")
         raise ExternalAPIError(f"KIS 해외주문 요청 실패: {e}")
 
     data = res.json()
     if data.get("rt_cd") != "0":
+        order_store.update_order_status(pending_id, "REJECTED")
         if "토큰" in data.get("msg1", "") or "Token" in data.get("msg1", ""):
             clear_token_cache()
         raise ServiceError(f"KIS 해외주문 오류: {data.get('msg1', '알 수 없는 오류')}")
 
+    # 3단계: PENDING → PLACED
     output = data.get("output", {})
     order_no = output.get("ODNO", "")
     org_no = output.get("KRX_FWDG_ORD_ORGNO", "")
 
-    order = order_store.insert_order(
-        symbol=symbol,
-        symbol_name=symbol_name,
-        market=market,
-        side=side,
-        order_type=order_type,
-        price=float(price),
-        quantity=quantity,
-        currency="USD",
-        memo=memo,
-        order_no=order_no,
-        org_no=org_no,
+    return order_store.update_order_status(
+        pending_id, "PLACED",
+        order_no=order_no, org_no=org_no,
         kis_response=json.dumps(data, ensure_ascii=False),
     )
-    return order
 
 
 def _place_fno_order(
@@ -246,6 +266,15 @@ def _place_fno_order(
     """선물옵션 주문 발송. SLL_BUY_DVSN_CD: 02=매수, 01=매도."""
     url = f"{BASE_URL}/uapi/domestic-futureoption/v1/trading/order"
     tr_id = _FNO_TR_ID_ORDER_NIGHT if _is_fno_night_session() else _FNO_TR_ID_ORDER
+
+    # 1단계: PENDING 선행 기록
+    pending = order_store.insert_order(
+        symbol=symbol, symbol_name=symbol_name, market="FNO",
+        side=side, order_type="fno", price=float(price),
+        quantity=quantity, currency="KRW", memo=memo,
+        status="PENDING",
+    )
+    pending_id = pending["id"]
 
     sll_buy = "02" if side == "buy" else "01"
     body = {
@@ -270,40 +299,35 @@ def _place_fno_order(
 
     headers = make_headers(token, app_key, app_secret, tr_id, hashkey=hashkey)
 
+    # 2단계: KIS API 호출
     try:
         res = requests.post(url, headers=headers, data=json.dumps(body), timeout=10)
     except requests.RequestException as e:
+        order_store.update_order_status(pending_id, "REJECTED")
         raise ExternalAPIError(f"선물옵션 주문 요청 실패: {e}")
 
     data = res.json()
     if data.get("rt_cd") != "0":
+        order_store.update_order_status(pending_id, "REJECTED")
         if "토큰" in data.get("msg1", "") or "Token" in data.get("msg1", ""):
             clear_token_cache()
         raise ServiceError(f"선물옵션 주문 오류: {data.get('msg1', '알 수 없는 오류')}")
 
+    # 3단계: PENDING → PLACED
     output = data.get("output", {})
     order_no = output.get("ODNO", "")
     org_no = output.get("KRX_FWDG_ORD_ORGNO", "")
 
-    order = order_store.insert_order(
-        symbol=symbol,
-        symbol_name=symbol_name,
-        market="FNO",
-        side=side,
-        order_type="fno",
-        price=float(price),
-        quantity=quantity,
-        currency="KRW",
-        memo=memo,
-        order_no=order_no,
-        org_no=org_no,
+    return order_store.update_order_status(
+        pending_id, "PLACED",
+        order_no=order_no, org_no=org_no,
         kis_response=json.dumps(data, ensure_ascii=False),
     )
-    return order
 
 
 def get_buyable(symbol: str, market: str, price: float, order_type: str, side: str = "buy") -> dict:
     """매수가능 금액/수량 조회."""
+    market = _validate_market(market)
     app_key, app_secret, acnt_no, acnt_prdt_cd, acnt_prdt_cd_fno = get_kis_credentials()
     token = get_access_token()
 
@@ -411,6 +435,7 @@ def _get_fno_buyable(
 
 def get_open_orders(market: str = "KR") -> list[dict]:
     """미체결 주문 목록 (KIS)."""
+    market = _validate_market(market)
     app_key, app_secret, acnt_no, acnt_prdt_cd, acnt_prdt_cd_fno = get_kis_credentials()
     token = get_access_token()
 
@@ -910,6 +935,7 @@ def _cancel_fno_order(
 
 def get_executions(market: str = "KR") -> list[dict]:
     """당일 체결 내역 조회 (KIS)."""
+    market = _validate_market(market)
     app_key, app_secret, acnt_no, acnt_prdt_cd, acnt_prdt_cd_fno = get_kis_credentials()
     token = get_access_token()
 
@@ -1043,15 +1069,23 @@ def _get_overseas_executions(token, app_key, app_secret, acnt_no, acnt_prdt_cd) 
 
 
 def sync_orders() -> dict:
-    """로컬 DB와 KIS 상태 대사(Reconciliation).
+    """로컬 DB와 KIS 상태 대사(Reconciliation) — 쿨다운 무시, 강제 실행.
 
     로컬 PLACED/PARTIAL 주문을 KIS 체결+미체결 내역과 비교하여 상태를 갱신한다.
     체결에도 미체결에도 없는 주문은 CANCELLED로 처리한다.
     """
+    global _last_reconcile_ts
     synced, results = _reconcile_active_orders()
+    _last_reconcile_ts = _time.time()  # 강제 대사 후 쿨다운 타이머 리셋
     if results is None:
         return {"synced": 0, "message": "동기화할 활성 주문이 없습니다."}
     return {"synced": synced, "details": results}
+
+
+# ── 대사 쿨다운 ────────────────────────────────────────────────────────────────
+
+_last_reconcile_ts: float = 0.0
+_RECONCILE_COOLDOWN = 60  # 초 — 60초 내 재대사 방지 (F5 연타 대응)
 
 
 # ── 내부 헬퍼 ─────────────────────────────────────────────────────────────────
@@ -1064,8 +1098,9 @@ def _sync_local_order_status(order_no: str, market: str, new_status: str) -> boo
         if local:
             order_store.update_order_status(local["id"], new_status)
             return True
-    except Exception:
-        pass
+        logger.warning("로컬 DB에서 주문번호 %s 미발견 (market=%s)", order_no, market)
+    except Exception as e:
+        logger.error("로컬 DB 상태 동기화 실패 (order_no=%s, status=%s): %s", order_no, new_status, e)
     return False
 
 
@@ -1076,8 +1111,9 @@ def _sync_local_order_details(order_no: str, market: str, price: float, quantity
         if local:
             order_store.update_order_details(local["id"], price=price, quantity=quantity)
             return True
-    except Exception:
-        pass
+        logger.warning("로컬 DB에서 주문번호 %s 미발견 (market=%s)", order_no, market)
+    except Exception as e:
+        logger.error("로컬 DB 상세 동기화 실패 (order_no=%s): %s", order_no, e)
     return False
 
 
@@ -1164,16 +1200,21 @@ def get_order_history(
     date_to: str = None,
     limit: int = 100,
 ) -> list[dict]:
-    """주문 이력 조회. 반환 전 활성 주문을 KIS와 대사하여 최신화한다."""
+    """주문 이력 조회. 쿨다운(60초) 경과 시 활성 주문을 KIS와 대사하여 최신화한다."""
+    global _last_reconcile_ts
+
     # 기간 필터 검증
     if date_from and date_to and date_from > date_to:
         raise ServiceError("date_from이 date_to보다 클 수 없습니다.")
 
-    # 활성 주문 자동 대사 (best-effort)
-    try:
-        _reconcile_active_orders()
-    except Exception:
-        pass
+    # 활성 주문 자동 대사 (쿨다운 시간 게이팅 — F5 연타 방어)
+    now = _time.time()
+    if now - _last_reconcile_ts > _RECONCILE_COOLDOWN:
+        try:
+            _reconcile_active_orders()
+            _last_reconcile_ts = now
+        except Exception:
+            pass
 
     return order_store.list_orders(
         symbol=symbol,
@@ -1283,4 +1324,10 @@ def get_reservations(status: str = None) -> list[dict]:
 
 def delete_reservation(res_id: int) -> bool:
     """예약주문 삭제. WAITING 상태만 허용."""
+    from services.exceptions import NotFoundError
+    existing = order_store.get_reservation(res_id)
+    if not existing:
+        raise NotFoundError(f"예약주문 {res_id}를 찾을 수 없습니다.")
+    if existing.get("status") != "WAITING":
+        raise ServiceError(f"WAITING 상태의 예약주문만 삭제할 수 있습니다. (현재: {existing.get('status')})")
     return order_store.delete_reservation(res_id)

@@ -8,7 +8,7 @@ CLI와 API 라우터 양쪽에서 공용으로 사용한다. 데이터는 `~/sto
 |------|------|
 | `db_base.py` | SQLite 공용 유틸. `connect(db_name, init_fn)` contextmanager. WAL 모드 + timeout 10s. 4개 store 공용. |
 | `store.py` | 관심종목 CRUD. `watchlist.db`. 복합 PK `(code, market)`. |
-| `order_store.py` | 주문 이력 + 예약주문 CRUD. `orders.db`. `orders` + `reservations` 테이블. |
+| `order_store.py` | 주문 이력 + 예약주문 CRUD. `orders.db`. `orders`(`status` 파라미터: PENDING/PLACED/REJECTED 등) + `reservations` 테이블. `list_active_orders()`: PENDING/PLACED/PARTIAL 대상. |
 | `advisory_store.py` | AI자문 DB. `advisory.db`. `advisory_stocks` + `advisory_cache` + `advisory_reports` 3테이블. |
 | `advisory_fetcher.py` | AI자문 데이터 수집 + 기술지표 계산. |
 | `utils.py` | `is_domestic(code)` — 6자리 숫자=국내. `is_fno(code)` — FNO 단축코드 판별. |

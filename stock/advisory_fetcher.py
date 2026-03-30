@@ -6,9 +6,12 @@
 from __future__ import annotations
 
 import json
+import logging
 import math
 import time
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 import requests
 
@@ -540,7 +543,7 @@ def calc_technical_indicators(ohlcv: list[dict]) -> dict:
 
 # ── 타임프레임별 OHLCV 수집 ──────────────────────────────────────────────────
 
-def _yf_hist_to_ohlcv_list(hist, max_bars: int = 500) -> list[dict]:
+def _yf_hist_to_ohlcv_list(hist, max_bars: int = 3000) -> list[dict]:
     """yfinance history DataFrame → OHLCV list (최근 max_bars봉)."""
     if hist is None or hist.empty:
         return []
@@ -576,7 +579,8 @@ def _fetch_ohlcv_kr_yf(code: str, interval: str = "15m", period: str = "60d") ->
 
         hist = _ticker(ticker_str).history(period=period, interval=interval)
         return _yf_hist_to_ohlcv_list(hist)
-    except Exception:
+    except Exception as e:
+        logger.warning("OHLCV KR 조회 실패 (%s, %s, %s): %s", code, interval, period, e)
         return []
 
 
@@ -586,7 +590,8 @@ def _fetch_ohlcv_us_yf(code: str, interval: str = "15m", period: str = "60d") ->
         from stock.yf_client import _ticker
         hist = _ticker(code.upper()).history(period=period, interval=interval)
         return _yf_hist_to_ohlcv_list(hist)
-    except Exception:
+    except Exception as e:
+        logger.warning("OHLCV US 조회 실패 (%s, %s, %s): %s", code, interval, period, e)
         return []
 
 
