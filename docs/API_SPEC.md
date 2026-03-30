@@ -1033,3 +1033,22 @@ CREATE TABLE reservations (
     updated_at      TEXT NOT NULL
 );
 ```
+
+---
+
+## 부록: 해외주식 지원 범위 및 제약
+
+| 기능 | 지원 여부 | 비고 |
+|------|----------|------|
+| 관심종목 추가/삭제 | ✅ | 티커 코드 직접 입력 (AAPL, NVDA 등) |
+| 대시보드 시세 | ✅ | USD, 15분 지연 |
+| 대시보드 재무 | ✅ | USD, M 단위, 최대 4년 |
+| 종목 상세 재무 | ✅ | yfinance 최대 4년 |
+| CAGR 종합 리포트 | ✅ | yfinance 재무 기반 |
+| PER/PBR 히스토리 차트 | ✅ | 분기 EPS/BPS + 일별 주가 기반 추정. 최대 5년. |
+| 공시 조회 (SEC) | ✅ | 10-K/10-Q, 수익률 포함 |
+| 스크리너 | ❌ | 미지원 (국내 전용) |
+| 종목명 검색 | ❌ | 티커 코드만 가능 |
+| AI자문 (국내 KR) | ✅ | DART 재무 3종 + pykrx 계량지표 + KIS 15분봉(yfinance fallback) + GPT-4o |
+| AI자문 (해외 US) | ✅ | yfinance 재무 3종 + yfinance 계량지표 + yfinance 15분봉 + GPT-4o |
+| 지원 시장 | US | NASDAQ/NYSE/AMEX. 일본·홍콩 등 추후 확장 가능 구조 |
