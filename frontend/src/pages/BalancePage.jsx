@@ -70,10 +70,14 @@ export default function BalancePage() {
           )}
 
           {/* 국내선물옵션 */}
-          {data.futures_list && data.futures_list.length > 0 && (
+          {data.fno_enabled && (
             <div>
               <h2 className="text-lg font-semibold text-gray-800 mb-3">국내선물옵션</h2>
-              <FuturesTable positions={data.futures_list} />
+              {data.futures_list && data.futures_list.length > 0 ? (
+                <FuturesTable positions={data.futures_list} />
+              ) : (
+                <EmptyState message="보유 중인 선물옵션이 없습니다." />
+              )}
             </div>
           )}
         </div>

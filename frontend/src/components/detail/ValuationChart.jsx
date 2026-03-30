@@ -34,10 +34,10 @@ function StatCard({ label, value, sub }) {
   )
 }
 
-export default function ValuationChart({ data }) {
+export default function ValuationChart({ data, compact = false }) {
   if (!data) {
     return (
-      <div className="bg-white rounded-xl border border-gray-200 p-8 text-center text-gray-400 text-sm">
+      <div className={compact ? "text-center text-gray-400 text-sm py-4" : "bg-white rounded-xl border border-gray-200 p-8 text-center text-gray-400 text-sm"}>
         밸류에이션 데이터가 없습니다.
       </div>
     )
@@ -53,7 +53,7 @@ export default function ValuationChart({ data }) {
 
   if (history.length === 0) {
     return (
-      <div className="bg-white rounded-xl border border-gray-200 p-8 text-center text-gray-400 text-sm">
+      <div className={compact ? "text-center text-gray-400 text-sm py-4" : "bg-white rounded-xl border border-gray-200 p-8 text-center text-gray-400 text-sm"}>
         조회된 밸류에이션 히스토리가 없습니다.
       </div>
     )
@@ -63,8 +63,11 @@ export default function ValuationChart({ data }) {
   const perData = history.filter((h) => h.per != null)
   const pbrData = history.filter((h) => h.pbr != null)
 
+  const chartWrap = compact ? '' : 'bg-white rounded-xl border border-gray-200 p-5'
+  const chartHeight = compact ? 200 : 260
+
   return (
-    <div className="space-y-6">
+    <div className={compact ? "space-y-4" : "space-y-6"}>
       {/* 요약 카드 */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <StatCard label="현재 PER" value={perData.at(-1)?.per?.toFixed(1)} sub="배" />
@@ -75,9 +78,9 @@ export default function ValuationChart({ data }) {
 
       {/* PER 차트 */}
       {perData.length > 0 && (
-        <div className="bg-white rounded-xl border border-gray-200 p-5">
+        <div className={chartWrap}>
           <h3 className="text-sm font-semibold text-gray-700 mb-4">PER 추이</h3>
-          <ResponsiveContainer width="100%" height={260}>
+          <ResponsiveContainer width="100%" height={chartHeight}>
             <LineChart data={history} margin={{ top: 4, right: 16, left: 0, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
               <XAxis
@@ -117,9 +120,9 @@ export default function ValuationChart({ data }) {
 
       {/* PBR 차트 */}
       {pbrData.length > 0 && (
-        <div className="bg-white rounded-xl border border-gray-200 p-5">
+        <div className={chartWrap}>
           <h3 className="text-sm font-semibold text-gray-700 mb-4">PBR 추이</h3>
-          <ResponsiveContainer width="100%" height={260}>
+          <ResponsiveContainer width="100%" height={chartHeight}>
             <LineChart data={history} margin={{ top: 4, right: 16, left: 0, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
               <XAxis

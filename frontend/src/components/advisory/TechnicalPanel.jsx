@@ -1,6 +1,6 @@
 /**
  * 기술적 분석 탭
- * 캔들스틱 + MA + BB + 거래량 + MACD + RSI + Stochastic
+ * 캔들스틱 + MA + BB + 거래량 + MACD + RSI + Stochastic + PER/PBR 밸류에이션
  * 타임프레임 (15분/60분/1일/1주) + 기간 선택 지원
  */
 import { useState, useEffect, useMemo } from 'react'
@@ -9,14 +9,18 @@ import {
   ResponsiveContainer, ReferenceLine, LineChart,
 } from 'recharts'
 import { useAdvisoryOhlcv } from '../../hooks/useAdvisory'
+import { fetchDetailValuation } from '../../api/detail'
+import ValuationChart from '../detail/ValuationChart'
 import CandlestickChart, {
   INTERVAL_OPTS,
   PERIOD_OPTIONS,
   makeTickFormatter,
+  makeTooltipFormatter,
 } from '../common/CandlestickChart'
 
 const DEFAULT_PERIOD  = { '15m': '60d', '60m': '6mo', '1d': '1y', '1wk': '3y' }
 const INTERVAL_LABEL  = { '15m': '15분봉', '60m': '60분봉', '1d': '일봉', '1wk': '주봉' }
+const PERIOD_TO_YEARS = { '3mo': 1, '6mo': 1, '1y': 1, '3y': 3, '5y': 5, '10y': 10 }
 
 // ── 시그널 배지 ────────────────────────────────────────────────────────────
 function SignalBadge({ label, value, type }) {
@@ -40,11 +44,15 @@ function SignalBadge({ label, value, type }) {
 }
 
 // ── 메인 컴포넌트 ─────────────────────────────────────────────────────────
-export default function TechnicalPanel({ data, symbol, market }) {
+export default function TechnicalPanel({ data, symbol, market, valuationData }) {
   const [activeInterval, setActiveInterval] = useState('15m')
   const [activePeriod,   setActivePeriod]   = useState('60d')
 
   const { result: fetchedResult, loading: ohlcvLoading, load: loadOhlcv } = useAdvisoryOhlcv()
+
+  // PER/PBR 밸류에이션 상태
+  const [valData, setValData] = useState(valuationData || null)
+  const [valLoading, setValLoading] = useState(false)
 
   // interval/period 변경 시 API 호출
   useEffect(() => {
@@ -52,6 +60,28 @@ export default function TechnicalPanel({ data, symbol, market }) {
       loadOhlcv(symbol, market, activeInterval, activePeriod)
     }
   }, [symbol, market, activeInterval, activePeriod]) // eslint-disable-line
+
+  // 1d/1wk 전환 시 밸류에이션 데이터 fetch
+  useEffect(() => {
+    const isEligible = activeInterval === '1d' || activeInterval === '1wk'
+    if (!isEligible || !symbol) return
+
+    const years = PERIOD_TO_YEARS[activePeriod] || 5
+
+    // prop에서 받은 기본 데이터 사용 (최초 로드)
+    if (valuationData && years >= 10) {
+      setValData(valuationData)
+      return
+    }
+
+    let cancelled = false
+    setValLoading(true)
+    fetchDetailValuation(symbol, years)
+      .then(result => { if (!cancelled) setValData(result) })
+      .catch(() => { if (!cancelled) setValData(null) })
+      .finally(() => { if (!cancelled) setValLoading(false) })
+    return () => { cancelled = true }
+  }, [symbol, activeInterval, activePeriod]) // eslint-disable-line
 
   const handleIntervalChange = (newInterval) => {
     setActiveInterval(newInterval)
@@ -103,6 +133,7 @@ export default function TechnicalPanel({ data, symbol, market }) {
   [times, ohlcv, macd, rsi, stoch])
 
   const tickFormatter = makeTickFormatter(activeInterval)
+  const tooltipFormatter = makeTooltipFormatter(activeInterval)
   const xInterval     = Math.max(Math.floor(subChartData.length / 8), 1)
 
   if (!ohlcv.length && !ohlcvLoading) {
@@ -253,7 +284,7 @@ export default function TechnicalPanel({ data, symbol, market }) {
           <ComposedChart data={subChartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
             <XAxis {...commonXAxisProps} />
             <YAxis tick={{ fontSize: 9 }} width={50} />
-            <Tooltip formatter={v => v?.toFixed(4)} />
+            <Tooltip formatter={v => v?.toFixed(4)} labelFormatter={tooltipFormatter} />
             <ReferenceLine y={0} stroke="#e2e8f0" />
             <Bar
               dataKey="macdHist"
@@ -284,7 +315,7 @@ export default function TechnicalPanel({ data, symbol, market }) {
           <LineChart data={subChartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
             <XAxis {...commonXAxisProps} />
             <YAxis domain={[0, 100]} tick={{ fontSize: 9 }} width={30} />
-            <Tooltip formatter={v => v?.toFixed(1)} />
+            <Tooltip formatter={v => v?.toFixed(1)} labelFormatter={tooltipFormatter} />
             <ReferenceLine y={70} stroke="#ef4444" strokeDasharray="3 3" />
             <ReferenceLine y={30} stroke="#3b82f6" strokeDasharray="3 3" />
             <Line type="monotone" dataKey="rsi" stroke="#8b5cf6" strokeWidth={1.5} dot={false} name="RSI" />
@@ -299,7 +330,7 @@ export default function TechnicalPanel({ data, symbol, market }) {
           <LineChart data={subChartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
             <XAxis {...commonXAxisProps} />
             <YAxis domain={[0, 100]} tick={{ fontSize: 9 }} width={30} />
-            <Tooltip formatter={v => v?.toFixed(1)} />
+            <Tooltip formatter={v => v?.toFixed(1)} labelFormatter={tooltipFormatter} />
             <ReferenceLine y={80} stroke="#ef4444" strokeDasharray="3 3" />
             <ReferenceLine y={20} stroke="#3b82f6" strokeDasharray="3 3" />
             <Line type="monotone" dataKey="stochK" stroke="#10b981" strokeWidth={1.5} dot={false} name="%K" />
@@ -307,6 +338,21 @@ export default function TechnicalPanel({ data, symbol, market }) {
           </LineChart>
         </ResponsiveContainer>
       </div>
+
+      {/* ── PER/PBR 밸류에이션 (1d/1wk만) ────────────────────────────────── */}
+      {(activeInterval === '1d' || activeInterval === '1wk') && (
+        <div className="mt-4">
+          <p className="text-xs font-semibold text-gray-600 mb-2">PER / PBR 밸류에이션</p>
+          {valLoading ? (
+            <div className="flex items-center gap-1.5 text-xs text-gray-400 py-4 justify-center">
+              <div className="w-3.5 h-3.5 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin" />
+              로딩 중...
+            </div>
+          ) : (
+            <ValuationChart data={valData} compact />
+          )}
+        </div>
+      )}
 
     </div>
   )

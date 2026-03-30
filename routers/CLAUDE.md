@@ -110,7 +110,8 @@ GET  /api/order/fno-price      선물옵션 현재가
 
 - `bass_exrt`(기준환율)는 `CTRP6504R` output2 `frst_bltn_exrt`에만 존재 (`TTTS3012R`에 없음)
 - 해외 KRW 환산: ① `CTRP6504R` 환율 dict → ② `TTTS3012R` 종목별 계산
-- `CTFO6118R` 미결제수량: `thdt_nccs_qty`, 포지션: `trad_dvsn_name`
+- `CTFO6118R` 파라미터: `MGNA_DVSN`(증거금구분, `"01"`), `EXCC_STAT_CD`(정산상태, `"1"`)
+- `CTFO6118R` 응답 필드: `cblc_qty`(잔고수량), `sll_buy_dvsn_name`(포지션), `ccld_avg_unpr1`(평균단가), `idx_clpr`(현재가), `evlu_pfls_amt`(평가손익), `evlu_amt`(평가금액)
 - 해외/선물 조회 실패 → 해당 목록만 `[]`, 국내주식은 정상
 
 ## `/api/balance` 응답 구조
@@ -120,12 +121,14 @@ GET  /api/order/fno-price      선물옵션 현재가
   "total_evaluation": "...",
   "stock_eval": "...", "stock_eval_domestic": "...", "stock_eval_overseas_krw": "...",
   "deposit": "...", "deposit_domestic": "...", "deposit_overseas_krw": "...",
-  "stock_list": [...], "overseas_list": [...], "futures_list": [...]
+  "stock_list": [...], "overseas_list": [...], "futures_list": [...],
+  "fno_enabled": true
 }
 ```
 
 - `stock_list`: name, code, exchange, quantity, avg_price, current_price, profit_loss, profit_rate, eval_amount, mktcap, per, pbr, roe
 - `overseas_list`: + currency, profit_loss_krw, eval_amount_krw
 - `futures_list`: name, code, trade_type, quantity, avg_price, current_price, profit_loss, profit_rate, eval_amount
+- `fno_enabled`: `KIS_ACNT_PRDT_CD_FNO` 설정 여부 (프론트엔드에서 FNO 섹션 표시 제어)
 
 > API 파라미터/응답 스키마 상세 → `docs/API_SPEC.md`

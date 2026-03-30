@@ -144,7 +144,7 @@ KIS API의 토큰 발급 분당 1회 제한에 대응하기 위해 모듈 수준
 | `fetch_15min_ohlcv_us(code)` | yfinance `.history(period='5d', interval='15m')`. 최대 300봉 반환. |
 | `fetch_ohlcv_by_interval(code, market, interval, period)` | 타임프레임/기간 지정 OHLCV 수집 후 `calc_technical_indicators()` 자동 호출. `{"ohlcv": [...], "indicators": {...}}` 반환. interval=`15m`/`60m`/`1d`/`1wk`. yfinance 최대 기간 자동 조정. |
 | `calc_technical_indicators(ohlcv)` | 기술적 지표 계산. 데이터 부족 시 None 처리. 최대 300봉 입력 지원. **ATR(14, Wilder법)**, **MA배열** (`ma_alignment`: 정배열/역배열/혼합), **K=0.3·0.5·0.7 변동성 돌파 목표가** 추가. |
-| `fetch_segments_kr(code, name)` | OpenAI로 국내 기업 사업부문 추론 (AI추정 표시) |
+| `fetch_segments_kr(code, name)` | OpenAI로 국내 기업 사업부문+사업설명+테마키워드 통합 추론. 반환: `dict` (`{"segments": [...], "description": str, "keywords": [str]}`) |
 
 #### `fetch_15min_ohlcv_kr` 동작 방식
 
@@ -373,7 +373,7 @@ yfinance 기반 해외주식 데이터 수집. 일부 함수는 국내주식(`.K
 | `fetch_balance_sheet_yf(code, years)` | 대차대조표 (AI자문용) |
 | `fetch_cashflow_yf(code, years)` | 현금흐름표 (AI자문용) |
 | `fetch_metrics_yf(code)` | PER/PBR/PSR/EV·EBITDA/ROE/ROA (AI자문 계량지표) |
-| `fetch_segments_yf(code)` | 사업부문 매출비중 (best-effort) |
+| `fetch_segments_yf(code)` | 사업부문+사업설명+키워드. 반환: `dict` (`{"segments": [...], "description": str, "keywords": [str]}`). 캐시키 `yf:segments_v2:` |
 | `fetch_forward_estimates_yf(code, is_kr=False)` | 애널리스트 컨센서스 추정치. `is_kr=True` 시 `.KS`/`.KQ` suffix 자동. TTL 6시간. |
 
 #### `fetch_forward_estimates_yf(code, is_kr=False)` — 애널리스트 컨센서스 추정치

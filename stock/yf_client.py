@@ -613,32 +613,47 @@ def fetch_valuation_history_yf(code: str, years: int = 5) -> list[dict]:
 
 # ── 사업별 매출비중 ────────────────────────────────────────────────────────────
 
-def fetch_segments_yf(code: str) -> list[dict]:
-    """사업별 매출비중 (best effort). [{segment, revenue_pct}]
+def fetch_segments_yf(code: str) -> dict:
+    """사업별 매출비중 + 사업 설명 + 키워드 (best effort).
 
-    yfinance .info 에서 추출 가능한 세그먼트 정보만 반환.
-    데이터 없으면 빈 리스트.
+    yfinance .info 에서 추출 가능한 세그먼트/사업설명/섹터·산업 반환.
+    반환: {"segments": [...], "description": str, "keywords": [str]}
     """
-    key = f"yf:segments:{code.upper()}"
+    key = f"yf:segments_v2:{code.upper()}"
     cached = get_cached(key)
     if cached is not None:
         return cached
 
+    empty: dict = {"segments": [], "description": "", "keywords": []}
     try:
         t = _ticker(code)
         info = t.info or {}
 
-        # yfinance에는 공식 세그먼트 API가 없음 → sector/industry 수준만 반환
+        # 세그먼트 (yfinance에 공식 세그먼트 API 없음 → sector 수준)
         sector = info.get("sector", "")
         segments: list[dict] = []
         if sector:
             segments.append({"segment": sector, "revenue_pct": 100.0, "note": "섹터"})
 
-        set_cached(key, segments, ttl_hours=24)
-        return segments
+        # 사업 설명
+        description = info.get("longBusinessSummary", "")
+        if description and len(description) > 300:
+            description = description[:297] + "..."
+
+        # 키워드 (sector + industry)
+        keywords: list[str] = []
+        if sector:
+            keywords.append(sector)
+        industry = info.get("industry", "")
+        if industry:
+            keywords.append(industry)
+
+        result = {"segments": segments, "description": description, "keywords": keywords}
+        set_cached(key, result, ttl_hours=24)
+        return result
     except Exception:
-        set_cached(key, [], ttl_hours=6)
-        return []
+        set_cached(key, empty, ttl_hours=6)
+        return empty
 
 
 # ── 포워드 가이던스 / 애널리스트 컨센서스 ────────────────────────────────────

@@ -627,38 +627,46 @@ def fetch_ohlcv_by_interval(code: str, market: str, interval: str = "15m", perio
     return {"ohlcv": ohlcv, "indicators": indicators}
 
 
-# ── 사업별 매출비중 (KR — OpenAI 추론) ───────────────────────────────────────
+# ── 사업별 매출비중 + 사업 설명 + 테마 키워드 (KR — OpenAI 추론) ──────────────
 
-def fetch_segments_kr(code: str, name: str) -> list[dict]:
-    """KR: OpenAI GPT에게 사업부문 매출비중 추론 요청.
+def fetch_segments_kr(code: str, name: str) -> dict:
+    """KR: OpenAI GPT에게 사업부문 매출비중 + 사업 설명 + 투자 테마 키워드 추론 요청.
 
-    OPENAI_API_KEY 미설정 시 빈 리스트 반환.
-    반환: [{segment, revenue_pct, note}] (note: "AI추정")
+    OPENAI_API_KEY 미설정 시 빈 dict 반환.
+    반환: {"segments": [{segment, revenue_pct, note}], "description": str, "keywords": [str]}
     """
+    empty = {"segments": [], "description": "", "keywords": []}
     if not OPENAI_API_KEY:
-        return []
+        return empty
 
     try:
         from openai import OpenAI
         client = OpenAI(api_key=OPENAI_API_KEY)
 
         prompt = (
-            f"{name}(종목코드: {code})의 주요 사업부문과 대략적인 매출 비중을 "
-            f"JSON 배열로 알려주세요. 상위 4개 부문만, 각 항목은 {{segment: 사업명, revenue_pct: 숫자}} 형식으로. "
-            f"비중 합계가 100이 되도록 하고, 불확실하면 추정임을 알고 있어도 최선의 값을 주세요."
+            f"{name}(종목코드: {code})에 대해 다음 3가지를 JSON으로 알려주세요.\n"
+            f"1. segments: 주요 사업부문 상위 4개 (각 항목 {{segment: 사업명, revenue_pct: 숫자}}). 비중 합계 100.\n"
+            f"2. description: 이 기업이 무엇을 하는 회사인지 한국어로 2~3문장 서술.\n"
+            f"3. keywords: 관련 투자 테마·키워드 5~8개 배열 (예: 반도체, AI, 2차전지 등).\n"
+            f"불확실해도 최선의 추정값을 주세요."
         )
 
         resp = client.chat.completions.create(
             model=OPENAI_MODEL,
             messages=[{"role": "user", "content": prompt}],
-            max_completion_tokens=400,
+            max_completion_tokens=600,
             response_format={"type": "json_object"},
         )
 
         content = resp.choices[0].message.content or "{}"
         data = json.loads(content)
-        # 응답이 {"segments": [...]} 또는 [...]일 수 있음
+
+        # segments 파싱
         segs = data if isinstance(data, list) else data.get("segments", data.get("items", []))
+        if isinstance(segs, list):
+            pass
+        else:
+            segs = []
         result = []
         for s in segs[:4]:
             seg_name = s.get("segment") or s.get("name") or ""
@@ -669,6 +677,12 @@ def fetch_segments_kr(code: str, name: str) -> list[dict]:
                     "revenue_pct": float(pct),
                     "note": "AI추정",
                 })
-        return result
+
+        description = data.get("description", "") if isinstance(data, dict) else ""
+        keywords = data.get("keywords", []) if isinstance(data, dict) else []
+        if not isinstance(keywords, list):
+            keywords = []
+
+        return {"segments": result, "description": description, "keywords": keywords[:8]}
     except Exception:
-        return []
+        return empty

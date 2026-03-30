@@ -77,6 +77,7 @@ ServiceError (기본 400)
 - `max_completion_tokens=2500`
 - `response_format={"type":"json_object"}`
 - 출력 JSON에 `전략별평가` 섹션 포함
+- fundamental 응답에 `business_description`, `business_keywords` 필드 포함 (fetch_segments 반환 dict에서 추출, 구 캐시 list 형태 하위호환)
 - ServiceError 계층 사용 (HTTPException 직접 raise 없음)
 
 ### watchlist_service.py

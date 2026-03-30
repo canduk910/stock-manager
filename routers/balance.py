@@ -1,7 +1,10 @@
 """잔고 조회 API 라우터 (main.py에서 이동)."""
 
+import logging
 import requests
 from fastapi import APIRouter
+
+logger = logging.getLogger(__name__)
 
 from routers._kis_auth import BASE_URL, get_access_token, get_kis_credentials, clear_token_cache
 from services.exceptions import ExternalAPIError, ServiceError
@@ -197,39 +200,45 @@ def _fetch_futures_balance(token: str, app_key: str, app_secret: str, acnt_no: s
     params = {
         "CANO": acnt_no,
         "ACNT_PRDT_CD": acnt_prdt_cd,
-        "MGNA_DVSN_CD": "1",
-        "EXCC_YN": "N",
-        "PDNO": "",
+        "MGNA_DVSN": "01",
+        "EXCC_STAT_CD": "1",
         "CTX_AREA_FK200": "",
         "CTX_AREA_NK200": "",
     }
     try:
         res = requests.get(url, headers=headers, params=params, timeout=10)
         if res.status_code != 200:
+            logger.warning("FNO 잔고 조회 실패 (HTTP %s): %s", res.status_code, res.text[:200])
             return []
         data = res.json()
         if data.get("rt_cd") != "0":
+            logger.warning("FNO 잔고 API 오류 (rt_cd=%s, msg_cd=%s): %s", data.get("rt_cd"), data.get("msg_cd"), data.get("msg1", "unknown"))
             return []
         positions = []
         for item in data.get("output1", []):
             try:
-                qty = abs(int(item.get("thdt_nccs_qty", "0") or "0"))
+                qty = abs(int(item.get("cblc_qty", "0") or "0"))
                 if qty > 0:
+                    # 수익률 계산: evlu_pfls_amt / pchs_amt * 100
+                    pchs_amt = float(item.get("pchs_amt", "0") or "0")
+                    pfls_amt = float(item.get("evlu_pfls_amt", "0") or "0")
+                    profit_rate = round(pfls_amt / pchs_amt * 100, 2) if pchs_amt else 0
                     positions.append({
                         "name": item.get("prdt_name", ""),
-                        "code": item.get("pdno", ""),
-                        "trade_type": item.get("trad_dvsn_name", ""),
-                        "quantity": item.get("thdt_nccs_qty", "0"),
-                        "avg_price": item.get("pchs_avg_pric", "0"),
-                        "current_price": item.get("prpr", "0"),
+                        "code": item.get("shtn_pdno", "") or item.get("pdno", ""),
+                        "trade_type": item.get("sll_buy_dvsn_name", ""),
+                        "quantity": str(qty),
+                        "avg_price": item.get("ccld_avg_unpr1", "0"),
+                        "current_price": item.get("idx_clpr", "0"),
                         "profit_loss": item.get("evlu_pfls_amt", "0"),
-                        "profit_rate": item.get("evlu_pfls_rt", "0"),
+                        "profit_rate": str(profit_rate),
                         "eval_amount": item.get("evlu_amt", "0"),
                     })
             except Exception:
                 continue
         return positions
-    except Exception:
+    except Exception as e:
+        logger.warning("FNO 잔고 조회 예외: %s", e)
         return []
 
 
@@ -364,4 +373,5 @@ def get_balance():
         "stock_list": stocks,
         "overseas_list": overseas_list,
         "futures_list": futures_list,
+        "fno_enabled": bool(acnt_prdt_cd_fno),
     }

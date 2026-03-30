@@ -301,47 +301,76 @@ function CashflowChart({ rows, market }) {
   )
 }
 
-// ── 사업별 매출비중 파이차트 ──────────────────────────────────────────────
-function SegmentsChart({ segments }) {
-  if (!segments?.length) return <p className="text-xs text-gray-400 py-2">데이터 없음</p>
-  const isAiEstimate = segments.some(s => s.note === 'AI추정')
+// ── 사업 개요 (키워드 + 파이차트 + 사업설명) ─────────────────────────────
+function BusinessOverview({ segments, description, keywords }) {
+  const hasSegments = segments?.length > 0
+  const isAiEstimate = segments?.some(s => s.note === 'AI추정')
+
+  if (!hasSegments && !description && !keywords?.length) {
+    return <p className="text-xs text-gray-400 py-2">데이터 없음</p>
+  }
+
   return (
-    <div>
-      {isAiEstimate && (
-        <span className="inline-block text-xs bg-yellow-100 text-yellow-700 border border-yellow-300 rounded px-2 py-0.5 mb-2">
-          AI 추정 (참고용)
-        </span>
-      )}
-      <div className="flex items-center gap-4">
-        <ResponsiveContainer width={160} height={160}>
-          <PieChart>
-            <Pie
-              data={segments}
-              dataKey="revenue_pct"
-              nameKey="segment"
-              cx="50%"
-              cy="50%"
-              outerRadius={70}
-              label={({ revenue_pct }) => `${revenue_pct.toFixed(0)}%`}
-              labelLine={false}
+    <div className="space-y-3">
+      {/* 해시태그 키워드 */}
+      {keywords?.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {keywords.map((kw, i) => (
+            <span
+              key={i}
+              className="inline-block px-2.5 py-1 rounded-full text-xs font-medium bg-blue-50 text-blue-600 border border-blue-200"
             >
-              {segments.map((_, i) => (
-                <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
-              ))}
-            </Pie>
-            <Tooltip formatter={(v) => v.toFixed(1) + '%'} />
-          </PieChart>
-        </ResponsiveContainer>
-        <ul className="text-xs space-y-1.5">
-          {segments.map((s, i) => (
-            <li key={i} className="flex items-center gap-2">
-              <span className="inline-block w-3 h-3 rounded-sm" style={{ background: PIE_COLORS[i % PIE_COLORS.length] }} />
-              <span className="text-gray-700">{s.segment}</span>
-              <span className="text-gray-500">{s.revenue_pct.toFixed(1)}%</span>
-            </li>
+              #{kw}
+            </span>
           ))}
-        </ul>
-      </div>
+        </div>
+      )}
+
+      {/* 사업설명 */}
+      {description && (
+        <p className="text-sm text-gray-600 leading-relaxed">{description}</p>
+      )}
+
+      {/* 파이차트 + 범례 */}
+      {hasSegments && (
+        <div>
+          {isAiEstimate && (
+            <span className="inline-block text-xs bg-yellow-100 text-yellow-700 border border-yellow-300 rounded px-2 py-0.5 mb-2">
+              AI 추정 (참고용)
+            </span>
+          )}
+          <div className="flex items-center gap-4">
+            <ResponsiveContainer width={160} height={160}>
+              <PieChart>
+                <Pie
+                  data={segments}
+                  dataKey="revenue_pct"
+                  nameKey="segment"
+                  cx="50%"
+                  cy="50%"
+                  outerRadius={70}
+                  label={({ revenue_pct }) => `${revenue_pct.toFixed(0)}%`}
+                  labelLine={false}
+                >
+                  {segments.map((_, i) => (
+                    <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
+                  ))}
+                </Pie>
+                <Tooltip formatter={(v) => v.toFixed(1) + '%'} />
+              </PieChart>
+            </ResponsiveContainer>
+            <ul className="text-xs space-y-1.5">
+              {segments.map((s, i) => (
+                <li key={i} className="flex items-center gap-2">
+                  <span className="inline-block w-3 h-3 rounded-sm" style={{ background: PIE_COLORS[i % PIE_COLORS.length] }} />
+                  <span className="text-gray-700">{s.segment}</span>
+                  <span className="text-gray-500">{s.revenue_pct.toFixed(1)}%</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -432,10 +461,20 @@ export default function FundamentalPanel({ data, market }) {
   const balanceSheet = fundamental.balance_sheet || []
   const cashflow = fundamental.cashflow || []
   const segments = fundamental.segments || []
+  const businessDescription = fundamental.business_description || ''
+  const businessKeywords = fundamental.business_keywords || []
   const forwardEstimates = fundamental.forward_estimates || null
 
   return (
     <div className="space-y-2">
+      {/* 사업 개요 (키워드 + 사업설명 + 매출비중 파이차트) */}
+      <SectionTitle>사업 개요</SectionTitle>
+      <BusinessOverview
+        segments={segments}
+        description={businessDescription}
+        keywords={businessKeywords}
+      />
+
       {/* 포워드 가이던스 */}
       <ForwardEstimatesSection forward={forwardEstimates} market={market} />
 
@@ -465,10 +504,6 @@ export default function FundamentalPanel({ data, market }) {
       <SectionTitle>현금흐름표</SectionTitle>
       <CashflowTable rows={cashflow} market={market} />
       <CashflowChart rows={cashflow} market={market} />
-
-      {/* 사업별 매출비중 */}
-      <SectionTitle>사업별 매출비중</SectionTitle>
-      <SegmentsChart segments={segments} />
     </div>
   )
 }

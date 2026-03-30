@@ -156,16 +156,17 @@ KIS 실전계좌 잔고 조회. KIS API 키 필수.
   "total_evaluation": "100000000",
   "deposit": "5000000",
   "stock_eval": "95000000",
-  "stock_list": [
-    {
-      "name": "삼성전자", "code": "005930",
-      "quantity": "100", "current_price": "70000",
-      "profit_loss": "500000", "profit_rate": "5.00",
-      "eval_amount": "7000000", "avg_price": "65000.00"
-    }
-  ]
+  "stock_list": [...],
+  "overseas_list": [...],
+  "futures_list": [...],
+  "fno_enabled": true
 }
 ```
+
+- `stock_list`: name, code, exchange, quantity, avg_price, current_price, profit_loss, profit_rate, eval_amount, mktcap, per, pbr, roe, dividend_yield
+- `overseas_list`: + currency, profit_loss_krw, eval_amount_krw
+- `futures_list`: name, code, trade_type, quantity, avg_price, current_price, profit_loss, profit_rate, eval_amount
+- `fno_enabled`: `KIS_ACNT_PRDT_CD_FNO` 환경변수 설정 여부 (프론트에서 FNO 섹션 표시 제어)
 
 **에러**: 503 (KIS 키 미설정), 502 (KIS API 호출 실패), 400 (API 오류/토큰 만료)
 

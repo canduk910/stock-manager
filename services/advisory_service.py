@@ -122,12 +122,22 @@ def _collect_fundamental_kr(code: str, name: str) -> dict:
     metrics_raw = fetch_market_metrics(code)
     metrics = _build_metrics_kr(metrics_raw, balance_sheet, income_stmt)
 
-    # 사업별 매출비중 (OpenAI 추론)
-    segments = advisory_fetcher.fetch_segments_kr(code, name)
+    # 사업별 매출비중 + 사업 설명 + 키워드 (OpenAI 추론)
+    segments_data = advisory_fetcher.fetch_segments_kr(code, name)
 
     # 포워드 가이던스 (yfinance .KS/.KQ, 없으면 빈 dict)
     from stock.yf_client import fetch_forward_estimates_yf
     forward_estimates = fetch_forward_estimates_yf(code, is_kr=True)
+
+    # 하위호환: 구 캐시가 list일 수 있음
+    if isinstance(segments_data, dict):
+        segments = segments_data.get("segments", [])
+        biz_desc = segments_data.get("description", "")
+        biz_keywords = segments_data.get("keywords", [])
+    else:
+        segments = segments_data if isinstance(segments_data, list) else []
+        biz_desc = ""
+        biz_keywords = []
 
     return {
         "income_stmt": income_stmt,
@@ -135,6 +145,8 @@ def _collect_fundamental_kr(code: str, name: str) -> dict:
         "cashflow": cashflow,
         "metrics": metrics,
         "segments": segments,
+        "business_description": biz_desc,
+        "business_keywords": biz_keywords,
         "forward_estimates": forward_estimates,
     }
 
@@ -152,10 +164,20 @@ def _collect_fundamental_us(code: str) -> dict:
     balance_sheet = fetch_balance_sheet_yf(code, years=5)
     cashflow = fetch_cashflow_yf(code, years=5)
     metrics = fetch_metrics_yf(code)
-    segments = fetch_segments_yf(code)
+    segments_data = fetch_segments_yf(code)
 
     from stock.yf_client import fetch_forward_estimates_yf
     forward_estimates = fetch_forward_estimates_yf(code, is_kr=False)
+
+    # 하위호환: 구 캐시가 list일 수 있음
+    if isinstance(segments_data, dict):
+        segments = segments_data.get("segments", [])
+        biz_desc = segments_data.get("description", "")
+        biz_keywords = segments_data.get("keywords", [])
+    else:
+        segments = segments_data if isinstance(segments_data, list) else []
+        biz_desc = ""
+        biz_keywords = []
 
     return {
         "income_stmt": income_stmt,
@@ -163,6 +185,8 @@ def _collect_fundamental_us(code: str) -> dict:
         "cashflow": cashflow,
         "metrics": metrics,
         "segments": segments,
+        "business_description": biz_desc,
+        "business_keywords": biz_keywords,
         "forward_estimates": forward_estimates,
     }
 

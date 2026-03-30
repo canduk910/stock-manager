@@ -60,7 +60,7 @@ frontend/
       EarningsPage.jsx    /earnings  국내/미국 탭 선택 + 기간 조회
       BalancePage.jsx     /balance
       WatchlistPage.jsx   /watchlist
-      DetailPage.jsx      /detail/:symbol  탭 UI (재무분석/밸류에이션/종합 리포트[서브탭: CAGR요약/기본적분석/기술적분석/AI자문])
+      DetailPage.jsx      /detail/:symbol  탭 UI (재무분석/종합 리포트[서브탭: CAGR요약/기본적분석/기술적분석(+PER·PBR)/AI자문])
       OrderPage.jsx       /order     탭 UI (주문발송/미체결/체결내역/주문이력/예약주문)
       MarketBoardPage.jsx /market-board  시세판: 신고가/신저가 Top10 + 사용자 선택 종목. 실시간 WS.
 ```
@@ -87,9 +87,9 @@ frontend/
 
 - **ScreenerPage**: "조회하기" 버튼 클릭 시만 API 호출 (onChange 즉시 호출 안 함)
 - **EarningsPage**: 국내/미국 탭 선택 → 조회 시 필터 초기화. 종목명/종목코드 클라이언트 사이드 필터
-- **BalancePage**: 국내/해외/선물옵션 3섹션 분리. 보유분 있을 때만 해당 섹션 표시. KIS 키 없으면 안내 메시지 (에러 대신)
+- **BalancePage**: 국내/해외/선물옵션 3섹션 분리. 국내는 항상 표시, FNO는 `fno_enabled`일 때 표시(빈 목록이면 EmptyState). KIS 키 없으면 안내 메시지 (에러 대신)
 - **WatchlistDashboard**: 종목명 클릭 → `/detail/:symbol`. 통화 배지 (US=`[US]`). 삭제/편집 시 market 파라미터 포함
-- **DetailPage**: 종합 리포트 탭에 4개 서브탭 (CAGR요약/기본적분석/기술적분석/AI자문). advisory 데이터는 최초 서브탭 진입 시 lazy load
+- **DetailPage**: 2탭 구조 (재무분석/종합 리포트). 종합 리포트 내 4개 서브탭 (CAGR요약/기본적분석/기술적분석/AI자문). 밸류에이션(PER/PBR)은 기술적 분석 서브탭 하단에 내장 (1d/1wk만 표시). advisory 데이터는 최초 서브탭 진입 시 lazy load
 - **OrderPage**: 5탭 UI. **공유 상태**(symbol/symbolName/market) 최상단 관리. `isMounted` ref로 중복 API 호출 방지. 미체결/체결 탭 MARKET_TABS: KR/US/FNO
 - **MarketBoardPage**: `useDisplayStocks` 훅 사용 (api/ 직접 import 금지)
 
@@ -107,8 +107,8 @@ frontend/
 
 ### Advisory 컴포넌트
 
-- **FundamentalPanel**: 애널리스트 추정치(`forward_estimates` 있을 때만) + 계량지표 + 손익계산서 + 대차대조표 + 현금흐름표 + 사업별 매출비중 파이차트
-- **TechnicalPanel**: 타임프레임(15m/60m/1d/1wk) + 기간 선택. 시그널 카드 + 캔들스틱+MA+BB → 거래량 → MACD → RSI → Stochastic
+- **FundamentalPanel**: **사업 개요**(BusinessOverview: #키워드 + 사업설명 + 매출비중 파이차트) → 애널리스트 추정치 → 계량지표 → 손익계산서 → 대차대조표 → 현금흐름표
+- **TechnicalPanel**: 타임프레임(15m/60m/1d/1wk) + 기간 선택. 시그널 카드 + 캔들스틱+MA+BB → 거래량 → MACD → RSI → Stochastic → PER/PBR 밸류에이션(1d/1wk만, `valuationData` prop + `fetchDetailValuation` API)
 - **AIReportPanel**: 종합투자의견 배지 → 전략별평가 3컬럼 카드 → 기술적시그널 → 리스크/투자포인트
 
 > 컴포넌트 상세 → `docs/FRONTEND_SPEC.md`

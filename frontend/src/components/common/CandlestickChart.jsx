@@ -73,6 +73,22 @@ export function makeTickFormatter(interval) {
   }
 }
 
+// ── 툴팁 레이블 포맷 (연도 포함) ────────────────────────────────────────────
+export function makeTooltipFormatter(interval) {
+  if (interval === '1d' || interval === '1wk') {
+    return (val) => {
+      if (!val) return ''
+      return val.split('T')[0]   // YYYY-MM-DD
+    }
+  }
+  return (val) => {
+    if (!val) return ''
+    const [date, time] = val.split('T')
+    if (!time) return val.slice(0, 10)
+    return `${date} ${time.slice(0, 5)}`  // YYYY-MM-DD HH:mm
+  }
+}
+
 // ── 메인 컴포넌트 ─────────────────────────────────────────────────────────
 export default function CandlestickChart({
   ohlcv = [],
@@ -177,6 +193,7 @@ export default function CandlestickChart({
   [ohlcv, bb, ma, extraChartData])
 
   const tickFormatter = makeTickFormatter(interval)
+  const tooltipFormatter = makeTooltipFormatter(interval)
   const xInterval = Math.max(Math.floor(chartData.length / xTickDivisor), 1)
 
   const commonXAxisProps = {
@@ -207,7 +224,7 @@ export default function CandlestickChart({
               if (!d) return null
               return (
                 <div className="bg-white border border-gray-200 rounded shadow p-2 text-xs">
-                  <p className="text-gray-500 mb-1">{tickFormatter(d.time)}</p>
+                  <p className="text-gray-500 mb-1">{tooltipFormatter(d.time)}</p>
                   <p>시: {d.open?.toLocaleString()}</p>
                   <p>고: {d.high?.toLocaleString()}</p>
                   <p>저: {d.low?.toLocaleString()}</p>

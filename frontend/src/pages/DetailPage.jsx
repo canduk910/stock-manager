@@ -4,7 +4,6 @@ import { useDetailReport } from '../hooks/useDetail'
 import { useAdvisoryData, useAdvisoryReport } from '../hooks/useAdvisory'
 import StockHeader from '../components/detail/StockHeader'
 import FinancialTable from '../components/detail/FinancialTable'
-import ValuationChart from '../components/detail/ValuationChart'
 import ReportSummary from '../components/detail/ReportSummary'
 import FundamentalPanel from '../components/advisory/FundamentalPanel'
 import TechnicalPanel from '../components/advisory/TechnicalPanel'
@@ -12,7 +11,6 @@ import AIReportPanel from '../components/advisory/AIReportPanel'
 
 const TABS = [
   { id: 'financials', label: '재무분석' },
-  { id: 'valuation', label: '밸류에이션' },
   { id: 'report', label: '종합 리포트' },
 ]
 
@@ -148,9 +146,6 @@ export default function DetailPage() {
             {activeTab === 'financials' && (
               <FinancialTable data={data.financials} basic={data.basic} forward={data.forward_estimates} />
             )}
-            {activeTab === 'valuation' && (
-              <ValuationChart data={data.valuation} />
-            )}
             {activeTab === 'report' && (
               <div>
                 {/* 서브탭 네비게이션 + 액션 버튼 */}
@@ -231,7 +226,7 @@ export default function DetailPage() {
                       </p>
                     )}
                     {!advLoading && advData && (
-                      <TechnicalPanel data={advData} symbol={symbol} market={market} />
+                      <TechnicalPanel data={advData} symbol={symbol} market={market} valuationData={data?.valuation} />
                     )}
                   </div>
                 )}

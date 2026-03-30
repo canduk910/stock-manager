@@ -68,6 +68,7 @@ CLI와 API 라우터 양쪽에서 공용으로 사용한다. 데이터는 `~/sto
 - **KIS 토큰 모듈 캐시**: `_kis_token_cache`로 분당 1회 발급 제한 우회.
 - **yfinance interval 제한**: `15m` max 60d, `60m` max 2y, `1d`/`1wk` max 10y.
 - `calc_technical_indicators()`: MACD/RSI(Wilder)/Stochastic/BB/MA/ATR/MA배열/변동성돌파 목표가. 순수 pandas, 최대 300봉.
+- `fetch_segments_kr(code, name)` → `dict` 반환: `{"segments": [...], "description": "사업설명", "keywords": ["테마1", ...]}`  (GPT 1회 호출로 매출비중+설명+키워드 통합 추론)
 
 ### dart_fin.py
 - **`latest_year = today.year - 1`** (월 경계 제거) — 3월에도 전년도 보고서 조회.
@@ -78,6 +79,7 @@ CLI와 API 라우터 양쪽에서 공용으로 사용한다. 데이터는 `~/sto
 - **제약**: 시세 15분 지연, 재무 최대 4년, 종목 검색 불가.
 - `fetch_price_yf()`: `fast_info.last_price or previous_close` — 비개장일 직전 종가 반환.
 - `fetch_financials_multi_year_yf`: 캐시에 전체 연도 저장, 반환 시 슬라이싱 (부분 캐시 버그 방지).
+- `fetch_segments_yf(code)` → `dict` 반환: `{"segments": [...], "description": "longBusinessSummary(300자)", "keywords": ["sector", "industry"]}` (캐시키: `yf:segments_v2:`)
 - NaN → None 자동 정제.
 
 ### fno_master.py
