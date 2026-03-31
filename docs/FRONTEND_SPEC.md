@@ -55,12 +55,12 @@ frontend/
 | `screener.js` | `fetchStocks(params)` | `GET /api/screener/stocks` |
 | `earnings.js` | `fetchFilings(startDate, endDate)` | `GET /api/earnings/filings` |
 | `balance.js` | `fetchBalance()` | `GET /api/balance` |
-| `watchlist.js` | `fetchWatchlist()`, `addToWatchlist()`, `removeFromWatchlist()`, `updateMemo()`, `fetchDashboard()`, `fetchStockInfo()` | `/api/watchlist/*` |
+| `watchlist.js` | `fetchWatchlist()`, `addToWatchlist()`, `removeFromWatchlist()`, `updateMemo()`, `fetchDashboard()`, `fetchStockInfo()`, `fetchWatchlistOrder()`, `saveWatchlistOrder(items)` | `/api/watchlist/*` |
 | `detail.js` | `fetchDetailFinancials()`, `fetchDetailValuation()`, `fetchDetailReport()` | `/api/detail/*` |
 | `order.js` | `placeOrder()`, `fetchBuyable()`, `fetchOpenOrders()`, `cancelOrder()`, `modifyOrder()`, `fetchExecutions()`, `fetchOrderHistory()`, `syncOrders()`, `createReservation()`, `fetchReservations()`, `deleteReservation()` | `/api/order/*` |
 | `advisory.js` | `fetchAdvisoryStocks()`, `addAdvisoryStock()`, `removeAdvisoryStock()`, `refreshAdvisoryData(code, market, name)`, `fetchAdvisoryData()`, `generateReport()`, `fetchReport()`, `fetchReportHistory(code, market, limit)`, `fetchReportById(code, reportId, market)`, `fetchAdvisoryOhlcv(code, market, interval, period)` | `/api/advisory/*` |
 | `search.js` | `searchStocks(q, market)` | `GET /api/search` |
-| `marketBoard.js` | `fetchNewHighsLows(top)`, `fetchSparklines(items)` | `GET /api/market-board/new-highs-lows`, `POST /api/market-board/sparklines` |
+| `marketBoard.js` | `fetchNewHighsLows(top)`, `fetchSparklines(items)`, `fetchCustomStocks()`, `addCustomStock()`, `removeCustomStock()`, `fetchBoardOrder()`, `saveBoardOrder(items)` | `/api/market-board/*` |
 
 ---
 
@@ -72,7 +72,7 @@ frontend/
 | `useEarnings.js` | `useEarnings()` | `{ data, loading, error, load }` — `load(startDate, endDate)` |
 | `useBalance.js` | `useBalance()` | `{ data, loading, error, load }` |
 | `useWatchlist.js` | `useWatchlist()` | `{ items, loading, error, load, add, remove, memo }` |
-| | `useDashboard()` | `{ stocks, loading, error, load }` |
+| | `useDashboard()` | `{ stocks, loading, error, load, reorder }` — stocks는 orderMap 기반 정렬 적용. `reorder(newStocks)`: 낙관적 업데이트 + `saveWatchlistOrder()` |
 | | `useStockInfo()` | `{ data, loading, error, load, reset }` |
 | `useDetail.js` | `useDetailReport()` | `{ data, loading, error, load }` — `load(symbol, years)` |
 | `useOrder.js` | `useOrderPlace()`, `useBuyable()`, `useOpenOrders()`, `useExecutions()`, `useOrderHistory()`, `useOrderSync()`, `useReservations()` | 각각 `{ loading, error, ... }` + 액션 함수 |
@@ -84,7 +84,7 @@ frontend/
 | | `useAdvisoryReport()` | `{ report, history, loading, error, load, generate, loadById }` — AI 리포트 조회/생성/히스토리. `history`: 목록(본문 제외). `loadById(code, id, market)`: 특정 리포트 로드. |
 | | `useAdvisoryOhlcv()` | `{ result, loading, error, load }` — 타임프레임별 OHLCV+지표 조회. `load(code, market, interval, period)` → `{ ohlcv, indicators, interval, period }` |
 | `useMarketBoard.js` | `useMarketBoard()` | `{ data, sparklines, loading, error, load, loadSparklines }` — 신고가/신저가 REST 로드 + sparkline 배치 로드 |
-| | `useDisplayStocks()` | `{ watchlistStocks, customStocks, loaded, loadAll, addStock, removeStock }` — 관심종목+별도등록 종목 API 캡슐화. MarketBoardPage에서 api/ 직접 import 대신 이 훅 사용. |
+| | `useDisplayStocks()` | `{ watchlistStocks, customStocks, displayStocks, loaded, loadAll, addStock, removeStock, reorder }` — 관심종목+별도등록 종목 병합+정렬. `displayStocks`: orderMap 기반 정렬 적용. `reorder(newStocks)`: 낙관적 업데이트 + `saveBoardOrder()`. |
 | `useMarketBoardWS.js` | `useMarketBoardWS()` | `{ prices, connected, subscribe, unsubscribe }` — `useWebSocket` 기반. subscribe/unsubscribe 시 WS 구독 메시지 전송. 재연결 시 기존 구독 자동 복원. prices: `{ [symbol]: { price, change_pct, sign } }` |
 
 ---
@@ -136,7 +136,7 @@ frontend/
 | 컴포넌트 | 설명 |
 |---------|------|
 | `AddStockForm` | 종목 추가 폼 (코드/종목명 + 메모). 인라인 에러 표시. |
-| `WatchlistDashboard` | 관심종목 시세/재무 테이블. 컬럼: 종목코드/종목명/현재가/전일대비/시가총액/매출액/영업이익/순이익/영업이익률/**배당수익률**/보고서기준/메모/삭제. 종목명 클릭 → `/detail/:symbol` 이동. CSV 다운로드. 인라인 메모 편집(`MemoCell`). 삭제 확인 팝업. |
+| `WatchlistDashboard` | 관심종목 시세/재무 테이블. 컬럼: **⠿(드래그핸들)**/종목코드/종목명/현재가/전일대비/시가총액/매출액/영업이익/순이익/영업이익률/**배당수익률**/보고서기준/메모/삭제. **@dnd-kit 행 DnD**: `SortableRow`+`verticalListSortingStrategy`. 드래그 핸들에만 listeners 적용(클릭/편집 정상 동작). 종목명 클릭 → `/detail/:symbol` 이동. CSV 다운로드(정렬 순서 반영). 인라인 메모 편집(`MemoCell`). 삭제 확인 팝업. |
 | `StockInfoModal` | 단일 종목 상세 모달. 기본정보 그리드(현재가/전일대비/시가총액/상장주식수/PER/PBR/**ROE**/**배당수익률**/**주당배당금(DPS)**/52주고가/저가/시장·거래소/업종) + 최대 10년 재무 테이블(매출액/영업이익/**영업이익률**/당기순이익/**순이익률**, 연도 클릭→DART 링크) + 메모 편집. ESC로 닫기. `MarginRow` 컴포넌트로 영업이익률·순이익률 표시(서브행, 회색 배경, 이익률 수준별 색상). |
 
 ### 주문 (`src/components/order/`)
@@ -163,7 +163,7 @@ frontend/
 | `MarketBoardCard` | 종목 1개 카드 (컴팩트). 신고가/신저가 배지, 현재가+등락률(WS 실시간), 미니 스파크라인(`height` prop). 시총·52주 고저 미표시. 클릭 시 `/detail/:symbol` 이동. |
 | `SparklineChart` | Recharts AreaChart 기반 미니 차트. `data=[{date,close}]`, `trend='up'|'down'|null`, `height=48`. React `useId()`로 SVG gradient ID 고유화. |
 | `NewHighLowSection` | 신고가(빨강)/신저가(파랑) 2컬럼 그리드. 각 10종목. 카드 그리드: `grid-cols-2 sm:3 xl:4 2xl:5`. |
-| `CustomStockSection` | 시세판 하단 종목 목록. **stocks/onAdd/onRemove props 기반**. `_source='watchlist'` → ★ 배지(X 없음), `_source='custom'` → X 버튼. 별도 추가 최대 **30**개. 그리드: `grid-cols-3 sm:4 md:5 lg:6 xl:8 2xl:10`. |
+| `CustomStockSection` | 시세판 하단 종목 목록. **stocks/onAdd/onRemove/onReorder props 기반**. `_source='watchlist'` → ★ 배지(X 없음), `_source='custom'` → X 버튼. 별도 추가 최대 **30**개. **@dnd-kit 드래그앤드롭**: `DndContext`+`SortableContext(rectSortingStrategy)`. `SortableCardWrapper` 컴포넌트. `PointerSensor(distance:5)`+`TouchSensor(delay:200)`. |
 | `AddStockSlot` | "+" 빈 슬롯 버튼. 클릭 시 `MarketBoardSearchModal` 오픈. |
 | `MarketBoardSearchModal` | 종목 추가 모달. `SymbolSearchBar` 재사용. KR/US 시장 선택 + 종목 검색 + 추가 버튼. |
 

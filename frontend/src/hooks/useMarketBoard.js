@@ -1,5 +1,5 @@
-import { useState, useCallback } from 'react'
-import { fetchNewHighsLows, fetchSparklines, fetchCustomStocks, addCustomStock, removeCustomStock } from '../api/marketBoard'
+import { useState, useCallback, useMemo } from 'react'
+import { fetchNewHighsLows, fetchSparklines, fetchCustomStocks, addCustomStock, removeCustomStock, fetchBoardOrder, saveBoardOrder } from '../api/marketBoard'
 import { fetchWatchlist } from '../api/watchlist'
 
 export function useMarketBoard() {
@@ -49,25 +49,60 @@ export function useMarketBoard() {
 }
 
 
-/** 관심종목 + 시세판 별도 등록 종목 관리 */
+/** 관심종목 + 시세판 별도 등록 종목 관리 + 순서 */
 export function useDisplayStocks() {
   const [watchlistStocks, setWatchlistStocks] = useState([])
   const [customStocks, setCustomStocks] = useState([])
+  const [orderMap, setOrderMap] = useState(null)  // Map<"code:market", position>
   const [loaded, setLoaded] = useState(false)
 
   const loadAll = useCallback(async () => {
     try {
-      const [{ items: wl = [] }, { items: custom = [] }] = await Promise.all([
+      const [{ items: wl = [] }, { items: custom = [] }, { items: order = [] }] = await Promise.all([
         fetchWatchlist(),
         fetchCustomStocks(),
+        fetchBoardOrder(),
       ])
       setWatchlistStocks(wl)
       setCustomStocks(custom)
+      const map = new Map()
+      order.forEach(o => map.set(`${o.code}:${o.market}`, o.position))
+      setOrderMap(map)
       setLoaded(true)
       return { watchlist: wl, custom }
     } catch {
       setLoaded(true)
       return { watchlist: [], custom: [] }
+    }
+  }, [])
+
+  // watchlist + custom 병합 + 순서 적용
+  const displayStocks = useMemo(() => {
+    const wlKeys = new Set(watchlistStocks.map(s => `${s.code}:${s.market}`))
+    const merged = [
+      ...watchlistStocks.map(s => ({ ...s, _source: 'watchlist' })),
+      ...customStocks
+        .filter(s => !wlKeys.has(`${s.code}:${s.market}`))
+        .map(s => ({ ...s, _source: 'custom' })),
+    ]
+    if (!orderMap || orderMap.size === 0) return merged
+
+    return [...merged].sort((a, b) => {
+      const posA = orderMap.get(`${a.code}:${a.market}`) ?? Number.MAX_SAFE_INTEGER
+      const posB = orderMap.get(`${b.code}:${b.market}`) ?? Number.MAX_SAFE_INTEGER
+      return posA - posB
+    })
+  }, [watchlistStocks, customStocks, orderMap])
+
+  // 드래그앤드롭 순서 변경 (낙관적 업데이트 + 비동기 저장)
+  const reorder = useCallback(async (newOrderedStocks) => {
+    const map = new Map()
+    newOrderedStocks.forEach((s, idx) => map.set(`${s.code}:${s.market}`, idx))
+    setOrderMap(map)
+    try {
+      await saveBoardOrder(newOrderedStocks.map(s => ({ code: s.code, market: s.market })))
+    } catch (e) {
+      console.error('순서 저장 실패:', e)
     }
   }, [])
 
@@ -88,5 +123,5 @@ export function useDisplayStocks() {
     setCustomStocks(prev => prev.filter(s => !(s.code === code && s.market === market)))
   }, [])
 
-  return { watchlistStocks, customStocks, loaded, loadAll, addStock, removeStock }
+  return { watchlistStocks, customStocks, displayStocks, loaded, loadAll, addStock, removeStock, reorder }
 }

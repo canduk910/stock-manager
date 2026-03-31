@@ -32,13 +32,13 @@ frontend/
       useScreener.js      { data, loading, error, search }
       useEarnings.js      { data, loading, error, load(startDate, endDate, market) }
       useBalance.js       { data, loading, error, load }
-      useWatchlist.js     useWatchlist (CRUD, market 파라미터) + useDashboard + useStockInfo
+      useWatchlist.js     useWatchlist (CRUD, market 파라미터) + useDashboard (순서+reorder) + useStockInfo
       useDetail.js        useDetailReport
       useOrder.js         useOrderPlace / useBuyable(load(symbol,market,price,orderType,side)) / useOpenOrders / useExecutions / useOrderHistory / useOrderSync / useReservations
       useNotification.js  토스트 상태 관리 + 브라우저 Notification API 래퍼
       useWebSocket.js     공용 WebSocket 훅. 연결 수명주기 + 지수 백오프 재연결(500ms→10초) + visibilitychange. { connected, sendMessage }. buildWsUrl(path) 헬퍼 export.
       useQuote.js         실시간 호가 WebSocket 훅 (useWebSocket 기반). useQuote(symbol, market='KR'). rAF throttle 자체 관리.
-      useMarketBoard.js   useMarketBoard (신고가/신저가 + sparkline) + useDisplayStocks (관심종목+별도등록 종목 API 캡슐화)
+      useMarketBoard.js   useMarketBoard (신고가/신저가 + sparkline) + useDisplayStocks (관심종목+별도등록 종목 병합+순서+reorder)
       useAdvisory.js      useAdvisoryStocks / useAdvisoryData / useAdvisoryReport / useAdvisoryOhlcv
     components/
       layout/Header.jsx   네비게이션 바 (7개 메뉴, 로고: "DK STOCK")
@@ -91,7 +91,8 @@ frontend/
 - **WatchlistDashboard**: 종목명 클릭 → `/detail/:symbol`. 통화 배지 (US=`[US]`). 삭제/편집 시 market 파라미터 포함
 - **DetailPage**: 2탭 구조 (재무분석/종합 리포트). 종합 리포트 내 4개 서브탭 (CAGR요약/기본적분석/기술적분석/AI자문). 밸류에이션(PER/PBR)은 기술적 분석 서브탭 하단에 내장 (1d/1wk만 표시). advisory 데이터는 최초 서브탭 진입 시 lazy load
 - **OrderPage**: 5탭 UI. **공유 상태**(symbol/symbolName/market) 최상단 관리. `isMounted` ref로 중복 API 호출 방지. 미체결/체결 탭 MARKET_TABS: KR/US/FNO
-- **MarketBoardPage**: `useDisplayStocks` 훅 사용 (api/ 직접 import 금지)
+- **MarketBoardPage**: `useDisplayStocks` 훅 사용 (api/ 직접 import 금지). @dnd-kit 드래그앤드롭으로 종목 카드 순서 변경 가능 (DB 영속화)
+- **WatchlistDashboard**: @dnd-kit 행 DnD로 종목 순서 변경. 드래그 핸들(⠿)로 클릭/편집과 분리
 
 ### 잔고 테이블 컬럼 순서
 

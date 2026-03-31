@@ -256,6 +256,19 @@ KIS 실전계좌 잔고 조회. KIS API 키 필수.
 `financials_3y` 키 이름은 하위호환 유지 (실제 최대 10년). 금액 단위: **억원**.
 `year`는 정수(2024 등), `dart_url` 클릭 시 DART 사업보고서 열림.
 
+### `GET /api/watchlist/order`
+
+관심종목 표시 순서 조회.
+
+**응답**: `{"items": [{"code": "005930", "market": "KR", "position": 0}, ...]}`
+
+### `PUT /api/watchlist/order`
+
+관심종목 표시 순서 저장 (전체 교체). 배열 인덱스가 position.
+
+**요청 바디**: `{"items": [{"code": "005930", "market": "KR"}, ...]}`
+**응답**: `{"ok": true}`
+
 ---
 
 ## 종목 상세 분석 — `routers/detail.py`
@@ -1053,3 +1066,31 @@ CREATE TABLE reservations (
 | AI자문 (국내 KR) | ✅ | DART 재무 3종 + pykrx 계량지표 + KIS 15분봉(yfinance fallback) + GPT-4o |
 | AI자문 (해외 US) | ✅ | yfinance 재무 3종 + yfinance 계량지표 + yfinance 15분봉 + GPT-4o |
 | 지원 시장 | US | NASDAQ/NYSE/AMEX. 일본·홍콩 등 추후 확장 가능 구조 |
+
+---
+
+## 시세판 — `routers/market_board.py`
+
+### `GET /api/market-board/new-highs-lows`
+당일 신고가/신저가 종목 조회 (시총 상위 기준). `?top=10`
+
+### `POST /api/market-board/sparklines`
+복수 종목 1년 주봉 종가 배치 조회. 바디: `{"items": [{"code": "005930", "market": "KR"}]}`
+
+### `GET /api/market-board/custom-stocks`
+시세판 별도 등록 종목 목록. 응답: `{"items": [...]}`
+
+### `POST /api/market-board/custom-stocks`
+별도 종목 추가. 바디: `{"code": "005930", "name": "삼성전자", "market": "KR"}`. 에러: 409(중복)
+
+### `DELETE /api/market-board/custom-stocks/{code}?market=KR`
+별도 종목 삭제. 에러: 404(미등록)
+
+### `GET /api/market-board/order`
+시세판 종목 표시 순서 조회. 응답: `{"items": [{"code": "005930", "market": "KR", "position": 0}, ...]}`
+
+### `PUT /api/market-board/order`
+시세판 종목 표시 순서 저장 (전체 교체). 바디: `{"items": [{"code": "005930", "market": "KR"}, ...]}`. 응답: `{"ok": true}`
+
+### `WS /ws/market-board`
+다중심볼 실시간 시세 WebSocket. 구독: `{"action": "subscribe", "symbols": ["005930"]}`. 시세: `{"type": "prices", "data": {...}}`

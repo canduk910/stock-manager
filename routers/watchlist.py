@@ -22,6 +22,30 @@ class MemoBody(BaseModel):
     memo: str
 
 
+class OrderItem(BaseModel):
+    code: str
+    market: str = "KR"
+
+
+class SaveOrderBody(BaseModel):
+    items: list[OrderItem]
+
+
+# ── 종목 순서 (/{code} 라우트보다 앞에 등록해야 경로 충돌 방지) ────────────────
+
+@router.get("/order")
+def get_watchlist_order():
+    """관심종목 표시 순서 조회."""
+    return {"items": store.get_order()}
+
+
+@router.put("/order")
+def save_watchlist_order(body: SaveOrderBody):
+    """관심종목 표시 순서 저장 (전체 교체)."""
+    store.save_order([item.model_dump() for item in body.items])
+    return {"ok": True}
+
+
 # ── CRUD ────────────────────────────────────────────────────────────────────
 
 @router.get("")

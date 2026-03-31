@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useMemo } from 'react'
 import {
   fetchWatchlist,
   addToWatchlist,
@@ -6,6 +6,8 @@ import {
   updateMemo,
   fetchDashboard,
   fetchStockInfo,
+  fetchWatchlistOrder,
+  saveWatchlistOrder,
 } from '../api/watchlist'
 
 /** 관심종목 목록 CRUD */
@@ -49,9 +51,10 @@ export function useWatchlist() {
   return { items, loading, error, load, add, remove, memo }
 }
 
-/** 대시보드 데이터 */
+/** 대시보드 데이터 + 순서 관리 */
 export function useDashboard() {
-  const [stocks, setStocks] = useState(null)
+  const [rawStocks, setRawStocks] = useState(null)
+  const [orderMap, setOrderMap] = useState(null)  // Map<"code:market", position>
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
 
@@ -59,8 +62,14 @@ export function useDashboard() {
     setLoading(true)
     setError(null)
     try {
-      const data = await fetchDashboard()
-      setStocks(data.stocks)
+      const [data, { items: order = [] }] = await Promise.all([
+        fetchDashboard(),
+        fetchWatchlistOrder(),
+      ])
+      setRawStocks(data.stocks)
+      const map = new Map()
+      order.forEach(o => map.set(`${o.code}:${o.market}`, o.position))
+      setOrderMap(map)
     } catch (e) {
       setError(e.message)
     } finally {
@@ -68,7 +77,32 @@ export function useDashboard() {
     }
   }, [])
 
-  return { stocks, loading, error, load }
+  // 순서 적용
+  const stocks = useMemo(() => {
+    if (!rawStocks) return null
+    if (!orderMap || orderMap.size === 0) return rawStocks
+    return [...rawStocks].sort((a, b) => {
+      const mktA = a.market || 'KR'
+      const mktB = b.market || 'KR'
+      const posA = orderMap.get(`${a.code}:${mktA}`) ?? Number.MAX_SAFE_INTEGER
+      const posB = orderMap.get(`${b.code}:${mktB}`) ?? Number.MAX_SAFE_INTEGER
+      return posA - posB
+    })
+  }, [rawStocks, orderMap])
+
+  // 드래그앤드롭 순서 변경
+  const reorder = useCallback(async (newOrderedStocks) => {
+    const map = new Map()
+    newOrderedStocks.forEach((s, idx) => map.set(`${s.code}:${s.market || 'KR'}`, idx))
+    setOrderMap(map)
+    try {
+      await saveWatchlistOrder(newOrderedStocks.map(s => ({ code: s.code, market: s.market || 'KR' })))
+    } catch (e) {
+      console.error('관심종목 순서 저장 실패:', e)
+    }
+  }, [])
+
+  return { stocks, loading, error, load, reorder }
 }
 
 /** 단일 종목 상세 */

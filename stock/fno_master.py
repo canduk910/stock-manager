@@ -8,6 +8,7 @@
 
 import io
 import ssl
+import time
 import urllib.request
 import zipfile
 
@@ -19,6 +20,11 @@ _STK_MASTER_URL = "https://new.real.download.dws.co.kr/common/master/fo_stk_code
 
 _CACHE_KEY = "fno:master"
 _CACHE_TTL_HOURS = 24 * 7  # 7일
+
+# 모듈 레벨 인메모리 캐시 (cache.db 반복 조회 방지)
+_fno_cache: dict | None = None
+_fno_cache_at: float = 0
+_FNO_MEM_TTL = 24 * 3600  # 24시간
 
 
 def _download_and_parse(url: str, filename: str) -> list[dict]:
@@ -64,12 +70,22 @@ def _download_and_parse(url: str, filename: str) -> list[dict]:
 def get_fno_symbol_map() -> dict:
     """선물옵션 전체 종목 맵 반환. {단축코드: {name, std_code, product_type, ...}}
 
-    캐시 TTL 7일. 실패 시 빈 dict 반환.
+    인메모리 캐시(24시간) → cache.db(7일) → ZIP 다운로드 순으로 조회.
     """
+    global _fno_cache, _fno_cache_at
+
+    # 1) 인메모리 캐시 히트
+    if _fno_cache is not None and (time.time() - _fno_cache_at) < _FNO_MEM_TTL:
+        return _fno_cache
+
+    # 2) cache.db 조회
     cached = get_cached(_CACHE_KEY)
     if cached:
-        return cached
+        _fno_cache = cached
+        _fno_cache_at = time.time()
+        return _fno_cache
 
+    # 3) ZIP 다운로드
     symbol_map = {}
     errors = []
 
@@ -95,7 +111,9 @@ def get_fno_symbol_map() -> dict:
         # 모두 실패 시 빈 맵이라도 1시간 캐시 (반복 실패 방지)
         set_cached(_CACHE_KEY, {}, ttl_hours=1)
 
-    return symbol_map
+    _fno_cache = symbol_map
+    _fno_cache_at = time.time()
+    return _fno_cache
 
 
 def search_fno_symbols(query: str, limit: int = 10) -> list[dict]:

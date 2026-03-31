@@ -1,5 +1,29 @@
 # 변경 이력
 
+## 2026-03-30 — FNO 캐싱 + 예약주문 수정 + DnD 순서변경
+
+### FNO 마스터 인메모리 캐싱
+- `stock/fno_master.py`: 인메모리 캐시(24h TTL) → cache.db(7일) → ZIP 다운로드 3단계 캐싱
+- `main.py` lifespan: FNO pre-warm 추가 (기존 symbol_map 스레드에 병합)
+
+### 예약주문 국내 시세 버그 수정
+- `services/reservation_service.py`: `_fetch_current_price()` pykrx → `stock.market.fetch_price()` 교체
+- pykrx KRX 서버 변경(2026-02-27) 이후 국내 가격조건 예약주문이 실패하던 문제 해결
+
+### 시세판 드래그앤드롭 순서 변경
+- `stock/market_board_store.py`: `market_board_order` 테이블 + `get_order()`/`save_order()`
+- `routers/market_board.py`: `GET/PUT /api/market-board/order`
+- 프론트엔드: `@dnd-kit/core` + `@dnd-kit/sortable` — 카드 그리드 DnD (`rectSortingStrategy`)
+- `useDisplayStocks()`: orderMap 기반 정렬 + `reorder()` 낙관적 업데이트
+
+### 관심종목 드래그앤드롭 순서 변경
+- `stock/store.py`: `watchlist_order` 테이블 + `get_order()`/`save_order()`
+- `routers/watchlist.py`: `GET/PUT /api/watchlist/order`
+- 프론트엔드: 테이블 행 DnD (`verticalListSortingStrategy`) + 드래그 핸들(⠿)
+- `useDashboard()`: orderMap 기반 정렬 + `reorder()` 낙관적 업데이트
+
+---
+
 ## 시세 수신 개선 이력 (Phase 1 → Phase 4)
 
 ### Phase 1 (2026-03 완료)

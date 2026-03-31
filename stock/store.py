@@ -23,6 +23,14 @@ def _create_tables(conn):
             PRIMARY KEY (code, market)
         )
     """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS watchlist_order (
+            code     TEXT NOT NULL,
+            market   TEXT NOT NULL DEFAULT 'KR',
+            position INTEGER NOT NULL,
+            PRIMARY KEY (code, market)
+        )
+    """)
     # 기존 테이블에 market 컬럼이 없는 경우 추가 (안전한 마이그레이션)
     try:
         conn.execute("ALTER TABLE watchlist ADD COLUMN market TEXT NOT NULL DEFAULT 'KR'")
@@ -102,3 +110,24 @@ def update_memo(code: str, memo: str, market: str = "KR") -> bool:
     with _conn() as conn:
         cursor = conn.execute("UPDATE watchlist SET memo = ? WHERE code = ? AND market = ?", (memo, code, market))
         return cursor.rowcount > 0
+
+
+# ── 종목 순서 관리 ──────────────────────────────────────────────────────────────
+
+def get_order() -> list[dict]:
+    """순서 테이블 조회 (position ASC)."""
+    with _conn() as conn:
+        rows = conn.execute(
+            "SELECT code, market, position FROM watchlist_order ORDER BY position"
+        ).fetchall()
+        return [{"code": r["code"], "market": r["market"], "position": r["position"]} for r in rows]
+
+
+def save_order(items: list[dict]) -> None:
+    """순서 전체 교체. items: [{code, market}, ...] — 인덱스가 position."""
+    with _conn() as conn:
+        conn.execute("DELETE FROM watchlist_order")
+        conn.executemany(
+            "INSERT INTO watchlist_order (code, market, position) VALUES (?, ?, ?)",
+            [(it["code"], it["market"], i) for i, it in enumerate(items)],
+        )

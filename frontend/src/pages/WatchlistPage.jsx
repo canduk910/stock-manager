@@ -8,7 +8,7 @@ import ErrorAlert from '../components/common/ErrorAlert'
 
 export default function WatchlistPage() {
   const { items, loading: listLoading, error: listError, load: loadList, add, remove, memo } = useWatchlist()
-  const { stocks, loading: dashLoading, error: dashError, load: loadDash } = useDashboard()
+  const { stocks, loading: dashLoading, error: dashError, load: loadDash, reorder } = useDashboard()
   const [modal, setModal] = useState(null) // { code, name, market }
 
   // 첫 마운트 시 목록 + 대시보드 동시 로드
@@ -58,6 +58,7 @@ export default function WatchlistPage() {
           onRefresh={handleRefresh}
           onDelete={handleDelete}
           onMemoSave={handleMemoSave}
+          onReorder={reorder}
           onShowInfo={(code, name, market) => setModal({ code, name, market })}
         />
       )}

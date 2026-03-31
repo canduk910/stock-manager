@@ -1,5 +1,20 @@
-import { useState } from 'react'
+import { useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
+import {
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  TouchSensor,
+  useSensor,
+  useSensors,
+} from '@dnd-kit/core'
+import {
+  SortableContext,
+  verticalListSortingStrategy,
+  useSortable,
+  arrayMove,
+} from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 
 // ── 포맷 유틸 ────────────────────────────────────────────────────────────────
 
@@ -121,6 +136,93 @@ function MemoCell({ code, market, memo, onSave }) {
   )
 }
 
+// ── 드래그 가능한 테이블 행 ───────────────────────────────────────────────────
+
+function SortableRow({ id, stock, onDelete, onMemoSave, onShowInfo }) {
+  const navigate = useNavigate()
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id })
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+    position: 'relative',
+    zIndex: isDragging ? 50 : 'auto',
+  }
+
+  const currency = stock.currency || 'KRW'
+  const mkt = stock.market || 'KR'
+
+  return (
+    <tr ref={setNodeRef} style={style} className="border-b border-gray-100 hover:bg-gray-50">
+      {/* 드래그 핸들 */}
+      <td className="px-2 py-2.5 text-center" {...attributes} {...listeners}>
+        <span className="cursor-grab active:cursor-grabbing text-gray-300 hover:text-gray-500 select-none">⠿</span>
+      </td>
+      <td className="px-3 py-2.5 font-mono text-xs">
+        <button
+          onClick={() => onShowInfo && onShowInfo(stock.code, stock.name, mkt)}
+          className="text-blue-600 hover:underline hover:text-blue-800"
+          title="재무 상세보기"
+        >
+          {stock.code}
+        </button>
+        <MarketBadge market={mkt !== 'KR' ? mkt : null} />
+      </td>
+      <td className="px-3 py-2.5">
+        <button
+          onClick={() => navigate(`/detail/${stock.code}`)}
+          className="font-medium text-blue-700 hover:underline text-left"
+        >
+          {stock.name}
+        </button>
+      </td>
+      <td className="px-3 py-2.5 text-right font-medium">{fmtPrice(stock.price, currency)}</td>
+      <td className="px-3 py-2.5 text-right whitespace-nowrap">
+        <ChangeCell change={stock.change} changePct={stock.change_pct} currency={currency} />
+      </td>
+      <td className="px-3 py-2.5 text-right text-xs">
+        {fmtCap(stock.market_cap, currency)}
+        {stock.market_cap != null && <span className="text-gray-400 ml-0.5">{currency === 'USD' ? 'M' : '억'}</span>}
+      </td>
+      <td className="px-3 py-2.5 text-right text-xs">
+        {fmtFinVal(stock.revenue, currency)}
+        {stock.revenue != null && <span className="text-gray-400 ml-0.5">{currency === 'USD' ? 'M' : '억'}</span>}
+      </td>
+      <td className="px-3 py-2.5 text-right text-xs">
+        {fmtFinVal(stock.operating_profit, currency)}
+        {stock.operating_profit != null && <span className="text-gray-400 ml-0.5">{currency === 'USD' ? 'M' : '억'}</span>}
+      </td>
+      <td className="px-3 py-2.5 text-right text-xs">
+        {fmtFinVal(stock.net_income, currency)}
+        {stock.net_income != null && <span className="text-gray-400 ml-0.5">{currency === 'USD' ? 'M' : '억'}</span>}
+      </td>
+      <td className="px-3 py-2.5 text-right">{fmtPct(stock.oi_margin)}</td>
+      <td className="px-3 py-2.5 text-right">{stock.dividend_yield != null ? fmtPct(stock.dividend_yield, 2) : '-'}</td>
+      <td className="px-3 py-2.5 text-center text-xs text-gray-500">{stock.report_date || '-'}</td>
+      <td className="px-3 py-2.5">
+        <MemoCell code={stock.code} market={mkt} memo={stock.memo} onSave={onMemoSave} />
+      </td>
+      <td className="px-3 py-2.5">
+        <button
+          onClick={() => onDelete(stock.code, mkt)}
+          className="text-xs text-gray-400 hover:text-red-500 transition-colors"
+          title="삭제"
+        >
+          ✕
+        </button>
+      </td>
+    </tr>
+  )
+}
+
 // ── 메인 대시보드 컴포넌트 ───────────────────────────────────────────────────
 
 export default function WatchlistDashboard({
@@ -130,10 +232,19 @@ export default function WatchlistDashboard({
   onRefresh,
   onDelete,
   onMemoSave,
+  onReorder,
   onShowInfo,
 }) {
-  const navigate = useNavigate()
   const [confirmItem, setConfirmItem] = useState(null) // { code, market }
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: { distance: 5 },
+    }),
+    useSensor(TouchSensor, {
+      activationConstraint: { delay: 200, tolerance: 5 },
+    }),
+  )
 
   const handleDeleteClick = (code, market) => setConfirmItem({ code, market })
   const handleDeleteConfirm = async () => {
@@ -142,7 +253,21 @@ export default function WatchlistDashboard({
     setConfirmItem(null)
   }
 
+  const handleDragEnd = useCallback((event) => {
+    const { active, over } = event
+    if (!over || active.id === over.id || !stocks) return
+
+    const oldIndex = stocks.findIndex(s => `${s.market || 'KR'}:${s.code}` === active.id)
+    const newIndex = stocks.findIndex(s => `${s.market || 'KR'}:${s.code}` === over.id)
+    if (oldIndex === -1 || newIndex === -1) return
+
+    const newOrder = arrayMove(stocks, oldIndex, newIndex)
+    onReorder?.(newOrder)
+  }, [stocks, onReorder])
+
   if (!stocks && !loading) return null
+
+  const sortableIds = stocks?.map(s => `${s.market || 'KR'}:${s.code}`) ?? []
 
   return (
     <div className="space-y-3">
@@ -186,83 +311,36 @@ export default function WatchlistDashboard({
       {/* 테이블 */}
       {stocks && !loading && (
         <div className="overflow-x-auto rounded-xl border border-gray-200">
-          <table className="min-w-full text-sm">
-            <thead className="bg-gray-50 border-b border-gray-200">
-              <tr>
-                {[
-                  '종목코드','종목명','현재가','전일대비','시가총액',
-                  '매출액','영업이익','순이익','영업이익률','배당수익률','보고서기준','메모','',
-                ].map((h) => (
-                  <th key={h} className="px-3 py-2.5 text-left text-xs font-semibold text-gray-600 whitespace-nowrap">
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {stocks.map((s) => {
-                const currency = s.currency || 'KRW'
-                const mkt = s.market || 'KR'
-                return (
-                  <tr key={`${mkt}:${s.code}`} className="border-b border-gray-100 hover:bg-gray-50">
-                    <td className="px-3 py-2.5 font-mono text-xs">
-                      <button
-                        onClick={() => onShowInfo && onShowInfo(s.code, s.name, mkt)}
-                        className="text-blue-600 hover:underline hover:text-blue-800"
-                        title="재무 상세보기"
-                      >
-                        {s.code}
-                      </button>
-                      <MarketBadge market={mkt !== 'KR' ? mkt : null} />
-                    </td>
-                    <td className="px-3 py-2.5">
-                      <button
-                        onClick={() => navigate(`/detail/${s.code}`)}
-                        className="font-medium text-blue-700 hover:underline text-left"
-                      >
-                        {s.name}
-                      </button>
-                    </td>
-                    <td className="px-3 py-2.5 text-right font-medium">{fmtPrice(s.price, currency)}</td>
-                    <td className="px-3 py-2.5 text-right whitespace-nowrap">
-                      <ChangeCell change={s.change} changePct={s.change_pct} currency={currency} />
-                    </td>
-                    <td className="px-3 py-2.5 text-right text-xs">
-                      {fmtCap(s.market_cap, currency)}
-                      {s.market_cap != null && <span className="text-gray-400 ml-0.5">{currency === 'USD' ? 'M' : '억'}</span>}
-                    </td>
-                    <td className="px-3 py-2.5 text-right text-xs">
-                      {fmtFinVal(s.revenue, currency)}
-                      {s.revenue != null && <span className="text-gray-400 ml-0.5">{currency === 'USD' ? 'M' : '억'}</span>}
-                    </td>
-                    <td className="px-3 py-2.5 text-right text-xs">
-                      {fmtFinVal(s.operating_profit, currency)}
-                      {s.operating_profit != null && <span className="text-gray-400 ml-0.5">{currency === 'USD' ? 'M' : '억'}</span>}
-                    </td>
-                    <td className="px-3 py-2.5 text-right text-xs">
-                      {fmtFinVal(s.net_income, currency)}
-                      {s.net_income != null && <span className="text-gray-400 ml-0.5">{currency === 'USD' ? 'M' : '억'}</span>}
-                    </td>
-                    <td className="px-3 py-2.5 text-right">{fmtPct(s.oi_margin)}</td>
-                    <td className="px-3 py-2.5 text-right">{s.dividend_yield != null ? fmtPct(s.dividend_yield, 2) : '-'}</td>
-                    <td className="px-3 py-2.5 text-center text-xs text-gray-500">{s.report_date || '-'}</td>
-                    <td className="px-3 py-2.5">
-                      <MemoCell code={s.code} market={mkt} memo={s.memo} onSave={onMemoSave} />
-                    </td>
-                    <td className="px-3 py-2.5">
-                      <button
-                        onClick={() => handleDeleteClick(s.code, mkt)}
-                        className="text-xs text-gray-400 hover:text-red-500 transition-colors"
-                        title="삭제"
-                      >
-                        ✕
-                      </button>
-                    </td>
+          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+            <SortableContext items={sortableIds} strategy={verticalListSortingStrategy}>
+              <table className="min-w-full text-sm">
+                <thead className="bg-gray-50 border-b border-gray-200">
+                  <tr>
+                    {[
+                      '','종목코드','종목명','현재가','전일대비','시가총액',
+                      '매출액','영업이익','순이익','영업이익률','배당수익률','보고서기준','메모','',
+                    ].map((h, i) => (
+                      <th key={`${h}-${i}`} className={`px-3 py-2.5 text-left text-xs font-semibold text-gray-600 whitespace-nowrap ${i === 0 ? 'w-8 px-2' : ''}`}>
+                        {h}
+                      </th>
+                    ))}
                   </tr>
-                )
-              })}
-            </tbody>
-          </table>
+                </thead>
+                <tbody>
+                  {stocks.map((s) => (
+                    <SortableRow
+                      key={`${s.market || 'KR'}:${s.code}`}
+                      id={`${s.market || 'KR'}:${s.code}`}
+                      stock={s}
+                      onDelete={handleDeleteClick}
+                      onMemoSave={onMemoSave}
+                      onShowInfo={onShowInfo}
+                    />
+                  ))}
+                </tbody>
+              </table>
+            </SortableContext>
+          </DndContext>
         </div>
       )}
 

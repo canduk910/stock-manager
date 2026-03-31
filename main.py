@@ -39,6 +39,12 @@ async def lifespan(app: FastAPI):
             print("[정보] 종목 심볼맵 로딩 완료")
         except Exception as e:
             print(f"[경고] 종목 심볼맵 로딩 실패: {e}")
+        try:
+            from stock.fno_master import get_fno_symbol_map
+            fno_map = get_fno_symbol_map()
+            print(f"[정보] FNO 마스터 로딩 완료 ({len(fno_map)}종목)")
+        except Exception as e:
+            print(f"[경고] FNO 마스터 로딩 실패: {e}")
     threading.Thread(target=_prewarm_symbol_map, daemon=True).start()
 
     # 실시간 호가 WebSocket 관리자 시작

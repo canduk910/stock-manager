@@ -51,6 +51,15 @@ class CustomStockBody(BaseModel):
     market: str = "KR"
 
 
+class OrderItem(BaseModel):
+    code: str
+    market: str = "KR"
+
+
+class SaveOrderBody(BaseModel):
+    items: list[OrderItem]
+
+
 @router.get("/api/market-board/custom-stocks")
 def list_custom_stocks():
     """시세판 별도 등록 종목 목록."""
@@ -75,6 +84,23 @@ def remove_custom_stock(code: str, market: str = Query("KR")):
     ok = remove_item(code, market)
     if not ok:
         raise HTTPException(status_code=404, detail="등록되지 않은 종목입니다.")
+
+
+# ── 종목 순서 ────────────────────────────────────────────────────────────────
+
+@router.get("/api/market-board/order")
+def get_board_order():
+    """시세판 종목 표시 순서 조회."""
+    from stock.market_board_store import get_order
+    return {"items": get_order()}
+
+
+@router.put("/api/market-board/order")
+def save_board_order(body: SaveOrderBody):
+    """시세판 종목 표시 순서 저장 (전체 교체)."""
+    from stock.market_board_store import save_order
+    save_order([item.model_dump() for item in body.items])
+    return {"ok": True}
 
 
 # ── 다중심볼 WebSocket ────────────────────────────────────────────────────────

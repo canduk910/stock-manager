@@ -44,3 +44,22 @@ export async function removeCustomStock(code, market = 'KR') {
   })
   if (!res.ok && res.status !== 404) throw new Error('종목 삭제 실패')
 }
+
+// ── 종목 순서 ─────────────────────────────────────────────────────────────────
+
+export async function fetchBoardOrder() {
+  const res = await fetch(`${BASE}/order`)
+  if (!res.ok) throw new Error('순서 조회 실패')
+  return res.json()  // { items: [{code, market, position}] }
+}
+
+export async function saveBoardOrder(items) {
+  // items: [{code, market}, ...]
+  const res = await fetch(`${BASE}/order`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ items }),
+  })
+  if (!res.ok) throw new Error('순서 저장 실패')
+  return res.json()
+}

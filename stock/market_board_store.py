@@ -18,6 +18,14 @@ def _create_tables(conn):
             PRIMARY KEY (code, market)
         )
     """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS market_board_order (
+            code     TEXT NOT NULL,
+            market   TEXT NOT NULL DEFAULT 'KR',
+            position INTEGER NOT NULL,
+            PRIMARY KEY (code, market)
+        )
+    """)
     conn.commit()
 
 
@@ -63,3 +71,24 @@ def remove_item(code: str, market: str = "KR") -> bool:
             (code, market),
         )
         return cur.rowcount > 0
+
+
+# ── 종목 순서 관리 ──────────────────────────────────────────────────────────────
+
+def get_order() -> list[dict]:
+    """순서 테이블 조회 (position ASC)."""
+    with _conn() as conn:
+        rows = conn.execute(
+            "SELECT code, market, position FROM market_board_order ORDER BY position"
+        ).fetchall()
+        return [{"code": r["code"], "market": r["market"], "position": r["position"]} for r in rows]
+
+
+def save_order(items: list[dict]) -> None:
+    """순서 전체 교체. items: [{code, market}, ...] — 인덱스가 position."""
+    with _conn() as conn:
+        conn.execute("DELETE FROM market_board_order")
+        conn.executemany(
+            "INSERT INTO market_board_order (code, market, position) VALUES (?, ?, ?)",
+            [(it["code"], it["market"], i) for i, it in enumerate(items)],
+        )

@@ -71,6 +71,7 @@ ServiceError (기본 400)
 ### reservation_service.py
 - `asyncio` 20초 간격 폴링
 - 가격 조건(`price_below`/`price_above`) + 시간 조건(`scheduled`) 체크 후 자동 주문 발송
+- `_fetch_current_price(symbol, market)`: 국내=`stock.market.fetch_price()`, 해외=`stock.yf_client.fetch_price_yf()` (yfinance 통일)
 
 ### advisory_service.py
 - **3전략 프레임워크**:

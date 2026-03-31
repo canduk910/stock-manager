@@ -7,7 +7,7 @@ CLI와 API 라우터 양쪽에서 공용으로 사용한다. 데이터는 `~/sto
 | 파일 | 역할 |
 |------|------|
 | `db_base.py` | SQLite 공용 유틸. `connect(db_name, init_fn)` contextmanager. WAL 모드 + timeout 10s. 4개 store 공용. |
-| `store.py` | 관심종목 CRUD. `watchlist.db`. 복합 PK `(code, market)`. |
+| `store.py` | 관심종목 CRUD + 순서 관리. `watchlist.db`. 복합 PK `(code, market)`. `watchlist_order` 테이블로 DnD 순서 영속화. |
 | `order_store.py` | 주문 이력 + 예약주문 CRUD. `orders.db`. `orders`(`status` 파라미터: PENDING/PLACED/REJECTED 등) + `reservations` 테이블. `list_active_orders()`: PENDING/PLACED/PARTIAL 대상. |
 | `advisory_store.py` | AI자문 DB. `advisory.db`. `advisory_stocks` + `advisory_cache` + `advisory_reports` 3테이블. |
 | `advisory_fetcher.py` | AI자문 데이터 수집 + 기술지표 계산. |
@@ -15,10 +15,10 @@ CLI와 API 라우터 양쪽에서 공용으로 사용한다. 데이터는 `~/sto
 | `symbol_map.py` | 종목코드↔종목명 매핑 (7일 캐시). `code_to_name()`. |
 | `market.py` | yfinance 기반 시세/시가총액/PER/PBR/배당수익률. |
 | `market_board.py` | 시세판: 신고가/신저가 탐지 + sparkline. |
-| `market_board_store.py` | 시세판 별도 등록 종목 CRUD. `market_board.db`. |
+| `market_board_store.py` | 시세판 별도 등록 종목 CRUD + 순서 관리. `market_board.db`. `market_board_order` 테이블로 DnD 순서 영속화. |
 | `dart_fin.py` | OpenDart 재무제표 조회 (최대 10년). |
 | `yf_client.py` | yfinance 기반 해외주식 데이터. |
-| `fno_master.py` | KIS 선물옵션 마스터파일 다운로드/파싱/검색. |
+| `fno_master.py` | KIS 선물옵션 마스터파일 다운로드/파싱/검색. 인메모리 캐시(24h) → cache.db(7일) → ZIP 3단계. main.py에서 pre-warm. |
 | `sec_filings.py` | SEC EDGAR 미국 10-K/10-Q 공시 조회. |
 | `cache.py` | SQLite TTL 캐시. `cache.db`. NaN/Inf → None 자동 sanitize. |
 | `display.py` | Rich 테이블 출력 + CSV 내보내기. |

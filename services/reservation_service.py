@@ -118,16 +118,11 @@ def _process_reservation(res: dict):
 def _fetch_current_price(symbol: str, market: str) -> float:
     """현재가 조회 (조건 체크용)."""
     if is_domestic(symbol):
-        from stock.market import fetch_market_metrics
-        metrics = fetch_market_metrics(symbol)
-        # fetch_market_metrics는 시가총액·PER 등을 반환하므로 pykrx로 현재가 직접 조회
-        from pykrx import stock as pykrx_stock
-        from datetime import date
-        today = date.today().strftime("%Y%m%d")
-        price_data = pykrx_stock.get_market_ohlcv_by_date(today, today, symbol)
-        if price_data.empty:
+        from stock.market import fetch_price
+        data = fetch_price(symbol)
+        if not data or not data.get("close"):
             raise ValueError(f"현재가 조회 실패: {symbol}")
-        return float(price_data.iloc[-1]["종가"])
+        return float(data["close"])
     else:
         from stock.yf_client import fetch_price_yf
         price = fetch_price_yf(symbol)

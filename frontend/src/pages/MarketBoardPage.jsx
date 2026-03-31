@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useMemo } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useMarketBoard, useDisplayStocks } from '../hooks/useMarketBoard'
 import { useMarketBoardWS } from '../hooks/useMarketBoardWS'
 import NewHighLowSection from '../components/market-board/NewHighLowSection'
@@ -7,19 +7,8 @@ import CustomStockSection from '../components/market-board/CustomStockSection'
 export default function MarketBoardPage() {
   const { data, sparklines, loading, error, load, loadSparklines } = useMarketBoard()
   const { prices, connected, subscribe, unsubscribe } = useMarketBoardWS()
-  const { watchlistStocks, customStocks, loadAll, addStock, removeStock } = useDisplayStocks()
+  const { watchlistStocks, customStocks, displayStocks, loadAll, addStock, removeStock, reorder } = useDisplayStocks()
   const subscribedRef = useRef(new Set())
-
-  // 표시 목록: watchlist(★) + custom(X), 중복 제거
-  const displayStocks = useMemo(() => {
-    const wlKeys = new Set(watchlistStocks.map(s => `${s.code}:${s.market}`))
-    return [
-      ...watchlistStocks.map(s => ({ ...s, _source: 'watchlist' })),
-      ...customStocks
-        .filter(s => !wlKeys.has(`${s.code}:${s.market}`))
-        .map(s => ({ ...s, _source: 'custom' })),
-    ]
-  }, [watchlistStocks, customStocks])
 
   // 초기 데이터 로드
   useEffect(() => {
@@ -147,6 +136,7 @@ export default function MarketBoardPage() {
               stocks={displayStocks}
               onAdd={handleAddStock}
               onRemove={handleRemoveStock}
+              onReorder={reorder}
               prices={prices}
               sparklines={sparklines}
             />

@@ -21,3 +21,13 @@ export const fetchDashboard = () => apiFetch('/api/watchlist/dashboard')
 
 export const fetchStockInfo = (code, market = 'KR') =>
   apiFetch(`/api/watchlist/info/${code}?market=${market}`)
+
+// ── 종목 순서 ─────────────────────────────────────────────────────────────────
+
+export const fetchWatchlistOrder = () => apiFetch('/api/watchlist/order')
+
+export const saveWatchlistOrder = (items) =>
+  apiFetch('/api/watchlist/order', {
+    method: 'PUT',
+    body: JSON.stringify({ items }),
+  })
