@@ -13,6 +13,7 @@
 | `reservation_service.py` | 예약주문 실행 엔진 (asyncio 20초 폴링) |
 | `quote_service.py` | 실시간 시세 WebSocket 관리 (국내 KIS WS + 해외 Finnhub/yfinance) |
 | `advisory_service.py` | AI자문 데이터 수집 + GPT-4o 리포트 생성 |
+| `macro_service.py` | 매크로 분석 오케스트레이션: 병렬 수집 + GPT 번역/추출 + 섹션별 독립 실패 허용 |
 
 ---
 

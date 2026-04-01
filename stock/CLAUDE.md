@@ -20,6 +20,7 @@ CLI와 API 라우터 양쪽에서 공용으로 사용한다. 데이터는 `~/sto
 | `yf_client.py` | yfinance 기반 해외주식 데이터. |
 | `fno_master.py` | KIS 선물옵션 마스터파일 다운로드/파싱/검색. 인메모리 캐시(24h) → cache.db(7일) → ZIP 3단계. main.py에서 pre-warm. |
 | `sec_filings.py` | SEC EDGAR 미국 10-K/10-Q 공시 조회. |
+| `macro_fetcher.py` | 매크로 분석 데이터 수집: yfinance 지수/VIX/버핏/공포탐욕, feedparser RSS(뉴스/투자자), 캐시 키 `macro:*` |
 | `cache.py` | SQLite TTL 캐시. `cache.db`. NaN/Inf → None 자동 sanitize. |
 | `display.py` | Rich 테이블 출력 + CSV 내보내기. |
 | `cli.py` | Click CLI. `stock watch add/remove/list/memo/dashboard/info`. |

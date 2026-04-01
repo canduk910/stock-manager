@@ -15,6 +15,7 @@
 | `advisory.py` | `/api/advisory/*` | AI자문 종목 관리 + 데이터 수집/조회 + AI 리포트 생성 |
 | `search.py` | `GET /api/search` | 종목 검색 (KR=자동완성, US=티커 검증, FNO=마스터 검색) |
 | `market_board.py` | `/api/market-board/*`, `WS /ws/market-board` | 신고가/신저가 + sparkline + 시세판 종목 CRUD + 순서 관리(`GET/PUT /api/market-board/order`) + 실시간 WS |
+| `macro.py` | `/api/macro/*` | 매크로 분석: 지수(4대)/뉴스(네이버+NYT)/심리지표(VIX+버핏+공포탐욕)/투자자 코멘트. 5개 GET 엔드포인트 |
 
 ---
 

@@ -9,6 +9,7 @@ import WatchlistPage from './pages/WatchlistPage'
 import DetailPage from './pages/DetailPage'
 import OrderPage from './pages/OrderPage'
 import MarketBoardPage from './pages/MarketBoardPage'
+import MacroPage from './pages/MacroPage'
 import ToastNotification from './components/common/ToastNotification'
 import { useNotification } from './hooks/useNotification'
 
@@ -44,6 +45,7 @@ export default function App() {
           <Route path="/detail/:symbol" element={<DetailPage />} />
           <Route path="/order" element={<OrderPage notify={notify} />} />
           <Route path="/market-board" element={<MarketBoardPage />} />
+          <Route path="/macro" element={<MacroPage />} />
         </Routes>
       </main>
       <ToastNotification toasts={toasts} removeToast={removeToast} />

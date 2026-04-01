@@ -9,3 +9,4 @@ pykrx
 yfinance
 websockets
 openai
+feedparser

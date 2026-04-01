@@ -8,6 +8,7 @@ const NAV_ITEMS = [
   { to: '/watchlist', label: '관심종목' },
   { to: '/market-board', label: '시세판' },
   { to: '/order', label: '주문' },
+  { to: '/macro', label: '매크로' },
 ]
 
 const WIDTH_OPTIONS = [

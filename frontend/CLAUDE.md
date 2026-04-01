@@ -28,6 +28,7 @@ frontend/
                           fetchReport / fetchReportHistory(code, market, limit) / fetchReportById(code, id, market) /
                           fetchAdvisoryOhlcv(code, market, interval, period)
       search.js           searchStocks(q, market) → GET /api/search
+      macro.js            fetchMacroIndices / fetchMacroNews / fetchMacroSentiment / fetchMacroInvestorQuotes / fetchMacroSummary
     hooks/
       useScreener.js      { data, loading, error, search }
       useEarnings.js      { data, loading, error, load(startDate, endDate, market) }
@@ -40,8 +41,9 @@ frontend/
       useQuote.js         실시간 호가 WebSocket 훅 (useWebSocket 기반). useQuote(symbol, market='KR'). rAF throttle 자체 관리.
       useMarketBoard.js   useMarketBoard (신고가/신저가 + sparkline) + useDisplayStocks (관심종목+별도등록 종목 병합+순서+reorder)
       useAdvisory.js      useAdvisoryStocks / useAdvisoryData / useAdvisoryReport / useAdvisoryOhlcv
+      useMacro.js         useMacroIndices / useMacroNews / useMacroSentiment / useMacroInvestorQuotes (섹션별 독립 훅)
     components/
-      layout/Header.jsx   네비게이션 바 (7개 메뉴, 로고: "DK STOCK")
+      layout/Header.jsx   네비게이션 바 (8개 메뉴, 로고: "DK STOCK")
       common/             LoadingSpinner, ErrorAlert, EmptyState, DataTable, ToastNotification
                           WatchlistButton (code/market/alreadyAdded props, ★/+ 버튼, StockTable·FilingsTable 공용)
                           CandlestickChart (ohlcv/indicators props, 캔들+MA5/20/60+BB+거래량, PriceChartPanel·TechnicalPanel 공용)
@@ -54,6 +56,8 @@ frontend/
                           ExecutionsTable, OrderHistoryTable, ReservationForm, ReservationsTable, SyncButton,
                           OrderbookPanel (실시간 호가창)
       advisory/           FundamentalPanel, TechnicalPanel, AIReportPanel
+      macro/              IndexSection (4지수+1년스파크라인+툴팁), SentimentSection (VIX+버핏+공포탐욕),
+                          NewsSection (한국+NYT 2컬럼), InvestorSection (4명 투자자 코멘트 카드)
     pages/
       DashboardPage.jsx   /         잔고 요약 + 오늘 공시 + 시총 상위
       ScreenerPage.jsx    /screener
@@ -63,6 +67,7 @@ frontend/
       DetailPage.jsx      /detail/:symbol  탭 UI (재무분석/종합 리포트[서브탭: CAGR요약/기본적분석/기술적분석(+PER·PBR)/AI자문])
       OrderPage.jsx       /order     탭 UI (주문발송/미체결/체결내역/주문이력/예약주문)
       MarketBoardPage.jsx /market-board  시세판: 신고가/신저가 Top10 + 사용자 선택 종목. 실시간 WS.
+      MacroPage.jsx       /macro         매크로 분석: 지수+심리+뉴스+투자자 코멘트. 4섹션 독립 로딩.
 ```
 
 ---

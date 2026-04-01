@@ -1,5 +1,19 @@
 # 변경 이력
 
+## 2026-04-01 — 매크로 분석 페이지 신규
+
+### 매크로 분석 (Macro Analysis) 메뉴 추가
+- `stock/macro_fetcher.py`: yfinance 지수(KOSPI/KOSDAQ/S&P500/NASDAQ), RSS 뉴스, VIX/버핏지수/공포탐욕 심리지표, Google News 투자자 코멘트
+- `services/macro_service.py`: 병렬 수집(ThreadPoolExecutor) + GPT 번역/추출 + 캐싱 오케스트레이션
+- `routers/macro.py`: 5개 GET 엔드포인트 (`/api/macro/indices|news|sentiment|investor-quotes|summary`)
+- `main.py`: macro 라우터 등록
+- `requirements.txt`: `feedparser` 추가 (RSS 파싱)
+- 프론트엔드: MacroPage + IndexSection(1년 스파크라인+툴팁) + SentimentSection + NewsSection + InvestorSection
+- 데이터 소스: yfinance(지수/VIX/버핏), Google News RSS(한국 뉴스), NYT RSS + GPT 번역, Google News + GPT 추출(투자자 코멘트)
+- 새 API 키 불필요 (기존 OPENAI_API_KEY만 활용, 없으면 영문 표시 graceful degradation)
+
+---
+
 ## 2026-03-30 — FNO 캐싱 + 예약주문 수정 + DnD 순서변경
 
 ### FNO 마스터 인메모리 캐싱
