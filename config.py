@@ -27,3 +27,6 @@ FINNHUB_API_KEY = os.getenv("FINNHUB_API_KEY", "")
 # ── KRX 인증 (스크리너용, 선택) ──────────────────────────────────────────────
 KRX_ID = os.getenv("KRX_ID", "")
 KRX_PASSWORD = os.getenv("KRX_PASSWORD", "")
+
+# ── KIS WS 체결통보 ────────────────────────────────────────────────────────
+KIS_HTS_ID = os.getenv("KIS_HTS_ID", "")

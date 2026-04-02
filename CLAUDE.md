@@ -119,6 +119,7 @@ frontend/           React SPA (Vite + Tailwind + Recharts)
 | `OPENAI_API_KEY` | AI자문 리포트 생성 시 필수 | https://platform.openai.com 에서 발급. 미설정 시 `/analyze` → 503. 크레딧 부족 시 402 반환. |
 | `OPENAI_MODEL` | 선택 | AI자문 리포트 생성 모델. 기본값: `gpt-4o`. `max_completion_tokens` 사용 (신규 모델 호환). |
 | `FINNHUB_API_KEY` | 선택 | 해외주식 실시간 시세 (Finnhub WS). 미설정 시 yfinance 2초 폴링(15분 지연). |
+| `KIS_HTS_ID` | 선택 | KIS HTS ID. 체결통보(H0STCNI0) WS 실시간 수신용. 미설정 시 폴링만 동작. |
 | `TEST_KIS_*` | 선택 | 모의계좌용 (`test.py`에서 사용) |
 
 모의투자 BASE_URL: `https://openapivts.koreainvestment.com:29443`
@@ -148,6 +149,7 @@ frontend/           React SPA (Vite + Tailwind + Recharts)
 | `~/stock-watchlist/orders.db` | 주문 이력 + 예약주문 | 영구 |
 | `~/stock-watchlist/market_board.db` | 시세판 별도 등록 종목 | 영구 |
 | `~/stock-watchlist/advisory.db` | AI자문 (자문종목/캐시/리포트) | 영구 |
+| `~/stock-watchlist/macro.db` | 매크로 GPT 결과 일일 캐시 (KST 날짜 기반) | 영구 (30일 자동 정리) |
 
 - **NaN 주의**: `cache.py`의 `_sanitize()`가 get/set 양쪽에서 NaN → None 변환 보장
 - **시작 시 초기화**: `entrypoint.sh`에서 `cache.db` 삭제 (구버전 캐시 방지). 다른 DB는 영향 없음

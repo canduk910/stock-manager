@@ -117,3 +117,25 @@ async def _stream_overseas(websocket: WebSocket, symbol: str):
                 await websocket.send_json({"type": "ping"})
     finally:
         manager.unsubscribe(symbol, queue)
+
+
+@router.websocket("/ws/execution-notice")
+async def execution_notice_ws(websocket: WebSocket):
+    """체결통보(H0STCNI0) 실시간 수신 WebSocket."""
+    await websocket.accept()
+    manager = get_manager()
+    queue: asyncio.Queue = asyncio.Queue(maxsize=50)
+    await manager.subscribe_notice(queue)
+    try:
+        while True:
+            try:
+                msg = await asyncio.wait_for(queue.get(), timeout=30.0)
+                await websocket.send_json(msg)
+            except asyncio.TimeoutError:
+                await websocket.send_json({"type": "ping"})
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        logger.error("[ExecutionNoticeWS] %s", e)
+    finally:
+        manager.unsubscribe_notice(queue)

@@ -4,7 +4,6 @@
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -13,7 +12,7 @@ from typing import Optional
 
 from config import OPENAI_API_KEY, OPENAI_MODEL
 from stock import macro_fetcher
-from stock.cache import get_cached, set_cached
+from stock.macro_store import get_today as get_macro_today, save_today as save_macro_today
 from services.exceptions import ExternalAPIError, PaymentRequiredError
 
 logger = logging.getLogger(__name__)
@@ -218,10 +217,8 @@ def _translate_headlines(
     if not OPENAI_API_KEY:
         return {}
 
-    # 캐시 확인 (내용 해시 기반)
-    content_hash = hashlib.md5(json.dumps(titles, ensure_ascii=False).encode()).hexdigest()[:12]
-    cache_key = f"macro:translate:{content_hash}"
-    cached = get_cached(cache_key)
+    # 당일(KST) GPT 결과 재사용
+    cached = get_macro_today("nyt_translation")
     if cached is not None:
         return {int(k): v for k, v in cached.items()} if isinstance(cached, dict) else {}
 
@@ -254,7 +251,7 @@ def _translate_headlines(
         content = resp.choices[0].message.content or "{}"
         parsed = json.loads(content)
         result = {int(k): v for k, v in parsed.items() if isinstance(v, dict)}
-        set_cached(cache_key, parsed, ttl_hours=6)
+        save_macro_today("nyt_translation", parsed)
         return result
     except Exception as e:
         _handle_openai_error(e)
@@ -268,12 +265,9 @@ def _extract_investor_opinions(
     if not articles:
         return []
 
-    # 캐시
-    content_hash = hashlib.md5(
-        json.dumps([a["title"] for a in articles], ensure_ascii=False).encode()
-    ).hexdigest()[:12]
-    cache_key = f"macro:investor_quotes:{name[:15]}:{content_hash}"
-    cached = get_cached(cache_key)
+    # 당일(KST) GPT 결과 재사용
+    category = f"investor:{name}"
+    cached = get_macro_today(category)
     if cached is not None:
         return cached
 
@@ -287,7 +281,7 @@ def _extract_investor_opinions(
                 "source_url": a.get("link", ""),
                 "date": a.get("published", ""),
             }
-            for a in articles[:3]
+            for a in articles[:5]
         ]
 
     article_text = "\n".join(
@@ -302,7 +296,7 @@ def _extract_investor_opinions(
         "발언이 없으면 뉴스 내용을 간결하게 요약하세요.\n"
         "JSON: {\"quotes\": [{\"text_ko\": \"한국어 번역\", \"text_original\": \"원문\", "
         "\"source\": \"출처\", \"date\": \"날짜\"}]}\n"
-        "최대 3개."
+        "최대 5개."
     )
 
     try:
@@ -314,7 +308,7 @@ def _extract_investor_opinions(
                 {"role": "system", "content": "투자 전문가 발언 추출/번역기. JSON으로만 응답."},
                 {"role": "user", "content": prompt},
             ],
-            max_completion_tokens=600,
+            max_completion_tokens=1000,
             response_format={"type": "json_object"},
         )
         content = resp.choices[0].message.content or "{}"
@@ -332,7 +326,7 @@ def _extract_investor_opinions(
                 else:
                     q["source_url"] = articles[0].get("link", "") if articles else ""
 
-        set_cached(cache_key, quotes, ttl_hours=6)
+        save_macro_today(category, quotes)
         return quotes
     except Exception as e:
         _handle_openai_error(e)
@@ -344,7 +338,7 @@ def _extract_investor_opinions(
                 "source_url": a.get("link", ""),
                 "date": a.get("published", ""),
             }
-            for a in articles[:3]
+            for a in articles[:5]
         ]
 
 

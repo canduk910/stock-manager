@@ -11,7 +11,7 @@
 | `detail.py` | `/api/detail/*` | 10년 재무 + PER/PBR 히스토리 + 종합 리포트 |
 | `_kis_auth.py` | (내부 모듈) | KIS 인증 공통 (토큰 관리, hashkey 발급). `balance.py`·`order.py` 공용 |
 | `order.py` | `/api/order/*` | 주문 발송/정정/취소/미체결/체결/이력/예약주문 |
-| `quote.py` | `WS /ws/quote/{symbol}` | 실시간 호가 WebSocket (KR/FNO/US) |
+| `quote.py` | `WS /ws/quote/{symbol}`, `WS /ws/execution-notice` | 실시간 호가 WebSocket (KR/FNO/US) + 체결통보 WS |
 | `advisory.py` | `/api/advisory/*` | AI자문 종목 관리 + 데이터 수집/조회 + AI 리포트 생성 |
 | `search.py` | `GET /api/search` | 종목 검색 (KR=자동완성, US=티커 검증, FNO=마스터 검색) |
 | `market_board.py` | `/api/market-board/*`, `WS /ws/market-board` | 신고가/신저가 + sparkline + 시세판 종목 CRUD + 순서 관리(`GET/PUT /api/market-board/order`) + 실시간 WS |

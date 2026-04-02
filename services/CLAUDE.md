@@ -11,9 +11,9 @@
 | `detail_service.py` | 재무 테이블 + PER/PBR 히스토리 + CAGR 종합 리포트 |
 | `order_service.py` | 국내/해외/FNO 주문 전체 관리 (KIS API 직접 호출) |
 | `reservation_service.py` | 예약주문 실행 엔진 (asyncio 20초 폴링) |
-| `quote_service.py` | 실시간 시세 WebSocket 관리 (국내 KIS WS + 해외 Finnhub/yfinance) |
+| `quote_service.py` | 실시간 시세 WebSocket 관리 (국내 KIS WS + 해외 Finnhub/yfinance) + 체결통보(H0STCNI0) 수신 |
 | `advisory_service.py` | AI자문 데이터 수집 + GPT-4o 리포트 생성 |
-| `macro_service.py` | 매크로 분석 오케스트레이션: 병렬 수집 + GPT 번역/추출 + 섹션별 독립 실패 허용 |
+| `macro_service.py` | 매크로 분석 오케스트레이션: 병렬 수집 + GPT 번역/추출 + 섹션별 독립 실패 허용. GPT 결과는 `macro.db`에 일일 캐싱 (KST 기준) |
 
 ---
 
@@ -46,7 +46,7 @@ ServiceError (기본 400)
 - **Write-Ahead 주문 패턴**: PENDING 선행 기록 → KIS API → 성공 시 PLACED / 실패 시 REJECTED (split-brain 방지)
 - `cancel_order()` → 로컬 DB 즉시 CANCELLED + `local_synced`/`order_status` 응답. 동기화 실패 시 로깅
 - `modify_order()` → 로컬 DB 가격/수량 즉시 반영 + `local_synced`. 동기화 실패 시 로깅
-- `get_order_history()` → **60초 쿨다운** 대사 (`_RECONCILE_COOLDOWN`). F5 연타 시 KIS API 호출 0회
+- `get_order_history()` / `get_executions()` → **30초 쿨다운** 대사 (`_maybe_reconcile()`). F5 연타 시 KIS API 호출 0회
 - `sync_orders()` → 쿨다운 무시, 강제 대사. 사용자 명시적 동기화 요청용
 - `_validate_market()`: 디스패치 함수(get_buyable/get_open_orders/get_executions) 진입부 시장 코드 검증
 - `_strip_leading_zeros()`: 10자리→8자리 주문번호 변환
@@ -65,6 +65,12 @@ ServiceError (기본 400)
   - 지수옵션(2xxx): H0IOASP0/H0IOCNT0
   - 주식선물(3xxx): H0ZFASP0/H0ZFCNT0
   - 주식옵션(3xxx): H0ZOASP0/H0ZOCNT0
+- **체결통보(H0STCNI0)**: `KIS_HTS_ID` 설정 시 WS로 본인 주문 체결/거부/접수 실시간 수신
+  - AES-CBC 복호화 (`pycryptodome`). `_aes_key`/`_aes_iv`는 구독 응답에서 자동 캡처
+  - `_parse_notice()`: 22개 필드 파싱 (주문번호, 체결수량, 체결단가, 체결여부 등)
+  - `subscribe_notice()`/`unsubscribe_notice()`: 심볼 무관, 계정 단위 pub/sub
+  - `_broadcast_notice()`: 모든 notice 구독자에게 전송. `/ws/execution-notice` WS 엔드포인트
+  - 미설정 시 폴링만 동작 (에러 없음)
 - **OverseasQuoteManager**: Finnhub WS(30 심볼) 또는 yfinance 2초 폴링
   - `fast_info.last_price or previous_close` 패턴 (비개장일 직전 종가)
   - 구독자 0 → on-demand cancel

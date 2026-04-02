@@ -28,6 +28,7 @@ import {
   useOrderSync,
   useReservations,
 } from '../hooks/useOrder'
+import { useExecutionNotice } from '../hooks/useExecutionNotice'
 
 const TABS = [
   { key: 'order', label: '주문 발송' },
@@ -98,6 +99,33 @@ export default function OrderPage({ notify }) {
     if (activeTab === 'reservation') loadReservations()
   }, [activeTab, market])
 
+  // 체결/미체결 탭 10초 자동 폴링
+  useEffect(() => {
+    if (activeTab === 'open') {
+      const id = setInterval(() => loadOpen(market), 10000)
+      return () => clearInterval(id)
+    }
+    if (activeTab === 'executions') {
+      const id = setInterval(() => loadExec(market), 10000)
+      return () => clearInterval(id)
+    }
+  }, [activeTab, market, loadOpen, loadExec])
+
+  // 체결통보 실시간 수신
+  useExecutionNotice(useCallback((notice) => {
+    const sideLabel = notice.side === 'buy' ? '매수' : '매도'
+    if (notice.is_filled === '2') {
+      notify?.(`체결: ${notice.symbol_name || notice.symbol} ${sideLabel} ${notice.filled_qty}주 @ ${Number(notice.filled_price).toLocaleString()}원`, 'success')
+    } else if (notice.is_rejected === '1') {
+      notify?.(`거부: ${notice.symbol_name || notice.symbol} ${sideLabel}`, 'error')
+    } else if (notice.is_accepted === '1') {
+      notify?.(`접수: ${notice.symbol_name || notice.symbol} ${sideLabel} ${notice.order_qty}주`, 'info')
+    }
+    // 체결/미체결 자동 갱신
+    loadOpen(market)
+    loadExec(market)
+  }, [market, notify, loadOpen, loadExec]))
+
   // 주문발송 탭에서 symbol 변경 시 미체결 재조회 (마운트 시 중복 호출 방지)
   useEffect(() => {
     if (!isMounted.current) { isMounted.current = true; return }
@@ -110,6 +138,11 @@ export default function OrderPage({ notify }) {
       await place(order)
       setPendingOrder(null)
       notify?.(`주문 발송 완료: ${order.symbol_name || order.symbol} ${order.side === 'buy' ? '매수' : '매도'} ${order.quantity}주`, 'success')
+      // 3초 뒤 미체결/체결 자동 갱신
+      setTimeout(() => {
+        loadOpen(market)
+        loadExec(market)
+      }, 3000)
     } catch (e) {
       notify?.(e.message, 'error')
     }

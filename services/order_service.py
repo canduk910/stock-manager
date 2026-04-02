@@ -935,6 +935,7 @@ def _cancel_fno_order(
 
 def get_executions(market: str = "KR") -> list[dict]:
     """당일 체결 내역 조회 (KIS)."""
+    _maybe_reconcile()  # 활성 주문 대사 트리거
     market = _validate_market(market)
     app_key, app_secret, acnt_no, acnt_prdt_cd, acnt_prdt_cd_fno = get_kis_credentials()
     token = get_access_token()
@@ -1085,7 +1086,19 @@ def sync_orders() -> dict:
 # ── 대사 쿨다운 ────────────────────────────────────────────────────────────────
 
 _last_reconcile_ts: float = 0.0
-_RECONCILE_COOLDOWN = 60  # 초 — 60초 내 재대사 방지 (F5 연타 대응)
+_RECONCILE_COOLDOWN = 30  # 초 — 30초 내 재대사 방지 (F5 연타 대응)
+
+
+def _maybe_reconcile():
+    """쿨다운(30초) 경과 시 활성 주문을 KIS와 자동 대사."""
+    global _last_reconcile_ts
+    now = _time.time()
+    if now - _last_reconcile_ts > _RECONCILE_COOLDOWN:
+        try:
+            _reconcile_active_orders()
+            _last_reconcile_ts = now
+        except Exception:
+            pass
 
 
 # ── 내부 헬퍼 ─────────────────────────────────────────────────────────────────
@@ -1200,21 +1213,13 @@ def get_order_history(
     date_to: str = None,
     limit: int = 100,
 ) -> list[dict]:
-    """주문 이력 조회. 쿨다운(60초) 경과 시 활성 주문을 KIS와 대사하여 최신화한다."""
-    global _last_reconcile_ts
-
+    """주문 이력 조회. 쿨다운(30초) 경과 시 활성 주문을 KIS와 대사하여 최신화한다."""
     # 기간 필터 검증
     if date_from and date_to and date_from > date_to:
         raise ServiceError("date_from이 date_to보다 클 수 없습니다.")
 
     # 활성 주문 자동 대사 (쿨다운 시간 게이팅 — F5 연타 방어)
-    now = _time.time()
-    if now - _last_reconcile_ts > _RECONCILE_COOLDOWN:
-        try:
-            _reconcile_active_orders()
-            _last_reconcile_ts = now
-        except Exception:
-            pass
+    _maybe_reconcile()
 
     return order_store.list_orders(
         symbol=symbol,

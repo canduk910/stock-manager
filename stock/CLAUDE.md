@@ -21,6 +21,7 @@ CLI와 API 라우터 양쪽에서 공용으로 사용한다. 데이터는 `~/sto
 | `fno_master.py` | KIS 선물옵션 마스터파일 다운로드/파싱/검색. 인메모리 캐시(24h) → cache.db(7일) → ZIP 3단계. main.py에서 pre-warm. |
 | `sec_filings.py` | SEC EDGAR 미국 10-K/10-Q 공시 조회. |
 | `macro_fetcher.py` | 매크로 분석 데이터 수집: yfinance 지수/VIX/버핏/공포탐욕, feedparser RSS(뉴스/투자자), 캐시 키 `macro:*` |
+| `macro_store.py` | 매크로 GPT 결과 일일 캐시. `macro.db`. KST 날짜 기반 `(category, date_kst)` PK. `get_today()`/`save_today()`. 30일 자동 정리. |
 | `cache.py` | SQLite TTL 캐시. `cache.db`. NaN/Inf → None 자동 sanitize. |
 | `display.py` | Rich 테이블 출력 + CSV 내보내기. |
 | `cli.py` | Click CLI. `stock watch add/remove/list/memo/dashboard/info`. |
@@ -36,6 +37,7 @@ CLI와 API 라우터 양쪽에서 공용으로 사용한다. 데이터는 `~/sto
 | `advisory.db` | `~/stock-watchlist/` | AI자문 (자문종목/분석캐시/리포트) |
 | `market_board.db` | `~/stock-watchlist/` | 시세판 별도 등록 종목 |
 | `cache.db` | `~/stock-watchlist/` | TTL 캐시 (시세/재무/종목코드 등) |
+| `macro.db` | `~/stock-watchlist/` | 매크로 GPT 결과 일일 캐시 (KST 날짜 기반) |
 
 ---
 

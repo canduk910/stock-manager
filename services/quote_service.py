@@ -18,7 +18,7 @@ import requests  # approval_key / REST fallback (동기)
 import websockets
 from collections import defaultdict
 
-from config import KIS_APP_KEY, KIS_APP_SECRET, KIS_BASE_URL, FINNHUB_API_KEY
+from config import KIS_APP_KEY, KIS_APP_SECRET, KIS_BASE_URL, FINNHUB_API_KEY, KIS_HTS_ID
 
 KIS_WS_URL = "ws://ops.koreainvestment.com:21000"
 
@@ -111,6 +111,10 @@ class KISQuoteManager:
         # FNO 구독 관리
         self._fno_symbols: set[str] = set()
         self._fno_types: dict[str, str] = {}  # symbol → 'IF'|'IO'|'ZF'|'ZO'
+        # 체결통보
+        self._aes_key: str | None = None
+        self._aes_iv: str | None = None
+        self._notice_subscribers: set[asyncio.Queue] = set()
 
     # ── lifecycle ──────────────────────────────────────────────────
 
@@ -171,6 +175,13 @@ class KISQuoteManager:
             self._subscribed_symbols.discard(symbol)
             self._fno_symbols.discard(symbol)
             self._fno_types.pop(symbol, None)
+
+    async def subscribe_notice(self, queue: asyncio.Queue):
+        """체결통보(H0STCNI0) 구독."""
+        self._notice_subscribers.add(queue)
+
+    def unsubscribe_notice(self, queue: asyncio.Queue):
+        self._notice_subscribers.discard(queue)
 
     # ── 초기 가격 push ─────────────────────────────────────────────
 
@@ -248,6 +259,24 @@ class KISQuoteManager:
         self._subscribed_symbols.add(symbol)
         logger.debug("[QuoteService] FNO 구독 등록: %s (%s)", symbol, fno_type)
 
+    async def _send_subscribe_notice(self):
+        """H0STCNI0 체결통보 구독 등록."""
+        if not KIS_HTS_ID:
+            return
+        approval_key = self._get_approval_key()
+        msg = {
+            "header": {
+                "approval_key": approval_key,
+                "personalseckey": "1",
+                "custtype": "P",
+                "tr_type": "1",
+                "content-type": "utf-8",
+            },
+            "body": {"input": {"tr_id": "H0STCNI0", "tr_key": KIS_HTS_ID}},
+        }
+        await self._ws.send(json.dumps(msg))
+        logger.info("[QuoteService] 체결통보(H0STCNI0) 구독 등록")
+
     _APPROVAL_KEY_TTL = 12 * 3600  # 12시간
 
     def _get_approval_key(self) -> str:
@@ -299,6 +328,8 @@ class KISQuoteManager:
                     await self._send_subscribe_fno(symbol)
                 else:
                     await self._send_subscribe(symbol)
+            # 체결통보 구독
+            await self._send_subscribe_notice()
             async for message in ws:
                 if not self._running:
                     break
@@ -330,12 +361,25 @@ class KISQuoteManager:
                 parsed = self._parse_fno_orderbook(tokens[3], levels)
                 if parsed:
                     await self._broadcast(parsed["symbol"], {"type": "orderbook", **parsed})
+            elif tr_id == "H0STCNI0":
+                parsed = self._parse_notice(tokens[3])
+                if parsed:
+                    await self._broadcast_notice(parsed)
         else:
             try:
                 ctrl = json.loads(data)
             except json.JSONDecodeError:
                 return
             tr_id = ctrl.get("header", {}).get("tr_id")
+            # AES key/iv 캡처 (체결통보 복호화용)
+            if tr_id in ("H0STCNI0", "H0STCNI9", "H0STASP0"):
+                output = ctrl.get("body", {}).get("output", {})
+                aes_key = output.get("key")
+                aes_iv = output.get("iv")
+                if aes_key and aes_iv:
+                    self._aes_key = aes_key
+                    self._aes_iv = aes_iv
+                    logger.debug("[QuoteService] AES key/iv 수신 (tr_id=%s)", tr_id)
             if tr_id == "PINGPONG":
                 await self._ws.send(data)
 
@@ -534,6 +578,71 @@ class KISQuoteManager:
                 "total_ask_volume": sf(t[54]),
                 "total_bid_volume": sf(t[55]),
             }
+
+    def _parse_notice(self, encrypted_data: str) -> dict | None:
+        """H0STCNI0 체결통보 AES 복호화 + 파싱."""
+        if not self._aes_key or not self._aes_iv:
+            logger.warning("[QuoteService] AES key/iv 없음 — 체결통보 복호화 불가")
+            return None
+        try:
+            from Crypto.Cipher import AES as AES_Cipher
+            from Crypto.Util.Padding import unpad
+            from base64 import b64decode
+            cipher = AES_Cipher.new(
+                self._aes_key.encode('utf-8'),
+                AES_Cipher.MODE_CBC,
+                self._aes_iv.encode('utf-8'),
+            )
+            dec = unpad(cipher.decrypt(b64decode(encrypted_data)), AES_Cipher.block_size).decode('utf-8')
+            tokens = dec.split('^')
+            if len(tokens) < 22:
+                logger.warning("[QuoteService] 체결통보 필드 부족: %d개", len(tokens))
+                return None
+            return {
+                "type": "execution_notice",
+                "order_no": tokens[2],
+                "org_order_no": tokens[3],
+                "symbol": tokens[8],
+                "side": "buy" if tokens[4] == "02" else "sell",
+                "filled_qty": tokens[9],
+                "filled_price": tokens[10],
+                "filled_time": tokens[11],
+                "is_rejected": tokens[12],
+                "is_filled": tokens[13],
+                "is_accepted": tokens[14],
+                "order_qty": tokens[16],
+                "symbol_name": tokens[21],
+                "order_price": tokens[22] if len(tokens) > 22 else "",
+            }
+        except ImportError:
+            logger.error("[QuoteService] pycryptodome 미설치 — pip install pycryptodome")
+            return None
+        except Exception as e:
+            logger.error("[QuoteService] 체결통보 복호화 실패: %s", e)
+            return None
+
+    async def _broadcast_notice(self, message: dict):
+        """체결통보를 모든 notice 구독자에게 전송."""
+        for q in list(self._notice_subscribers):
+            try:
+                q.put_nowait(message)
+            except asyncio.QueueFull:
+                try:
+                    q.get_nowait()
+                except asyncio.QueueEmpty:
+                    pass
+                try:
+                    q.put_nowait(message)
+                except asyncio.QueueFull:
+                    pass
+        if message.get("is_filled") == "2":
+            logger.info(
+                "[QuoteService] 체결통보: %s %s %s주 @ %s",
+                message.get("symbol_name", ""),
+                message.get("side", ""),
+                message.get("filled_qty", ""),
+                message.get("filled_price", ""),
+            )
 
     def _fetch_fno_rest_price_sync(self, symbol: str) -> dict | None:
         """FNO 현재가 REST 조회 (동기). FHMIF10000000 사용."""

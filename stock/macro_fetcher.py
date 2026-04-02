@@ -31,6 +31,10 @@ INVESTORS = [
      "query": '"Howard Marks" Oaktree market'},
     {"name": "Ken Fisher", "name_ko": "켄 피셔",
      "query": '"Ken Fisher" market OR stocks'},
+    {"name": "Mohnish Pabrai", "name_ko": "모니시 파브라이",
+     "query": '"Mohnish Pabrai" investing OR market OR stocks'},
+    {"name": "Stanley Druckenmiller", "name_ko": "스탠리 드러켄밀러",
+     "query": '"Stanley Druckenmiller" market OR economy'},
 ]
 
 _NAVER_RSS_URL = "https://news.google.com/rss/search?q=한국+경제+주식&hl=ko&gl=KR&ceid=KR:ko"
