@@ -1,4 +1,5 @@
-import { useState, useCallback } from 'react'
+import { useCallback } from 'react'
+import { useAsyncState } from './useAsyncState'
 import {
   fetchMacroIndices,
   fetchMacroNews,
@@ -7,85 +8,25 @@ import {
 } from '../api/macro'
 
 export function useMacroIndices() {
-  const [data, setData] = useState(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState(null)
-
-  const load = useCallback(async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      const result = await fetchMacroIndices()
-      setData(result)
-    } catch (e) {
-      setError(e.message)
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
+  const { data, loading, error, run } = useAsyncState()
+  const load = useCallback(() => run(() => fetchMacroIndices()).catch(() => {}), [run])
   return { data, loading, error, load }
 }
 
 export function useMacroNews() {
-  const [data, setData] = useState(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState(null)
-
-  const load = useCallback(async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      const result = await fetchMacroNews()
-      setData(result)
-    } catch (e) {
-      setError(e.message)
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
+  const { data, loading, error, run } = useAsyncState()
+  const load = useCallback(() => run(() => fetchMacroNews()).catch(() => {}), [run])
   return { data, loading, error, load }
 }
 
 export function useMacroSentiment() {
-  const [data, setData] = useState(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState(null)
-
-  const load = useCallback(async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      const result = await fetchMacroSentiment()
-      setData(result)
-    } catch (e) {
-      setError(e.message)
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
+  const { data, loading, error, run } = useAsyncState()
+  const load = useCallback(() => run(() => fetchMacroSentiment()).catch(() => {}), [run])
   return { data, loading, error, load }
 }
 
 export function useMacroInvestorQuotes() {
-  const [data, setData] = useState(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState(null)
-
-  const load = useCallback(async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      const result = await fetchMacroInvestorQuotes()
-      setData(result)
-    } catch (e) {
-      setError(e.message)
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
+  const { data, loading, error, run } = useAsyncState()
+  const load = useCallback(() => run(() => fetchMacroInvestorQuotes()).catch(() => {}), [run])
   return { data, loading, error, load }
 }

@@ -1,4 +1,5 @@
 import { useState, useCallback, useMemo } from 'react'
+import { useAsyncState } from './useAsyncState'
 import {
   fetchWatchlist,
   addToWatchlist,
@@ -12,33 +13,23 @@ import {
 
 /** 관심종목 목록 CRUD */
 export function useWatchlist() {
-  const [items, setItems] = useState(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState(null)
+  const { data: items, setData: setItems, loading, error, run } = useAsyncState()
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      const data = await fetchWatchlist()
-      setItems(data.items)
-    } catch (e) {
-      setError(e.message)
-    } finally {
-      setLoading(false)
-    }
-  }, [])
+  const load = useCallback(
+    () => run(() => fetchWatchlist().then(d => d.items)).catch(() => {}),
+    [run]
+  )
 
   const add = useCallback(async (code, memo, market = 'KR') => {
     const data = await addToWatchlist(code, memo, market)
     setItems((prev) => (prev ? [...prev, data.item] : [data.item]))
     return data.item
-  }, [])
+  }, [setItems])
 
   const remove = useCallback(async (code, market = 'KR') => {
     await removeFromWatchlist(code, market)
     setItems((prev) => prev?.filter((i) => !(i.code === code && i.market === market)) ?? [])
-  }, [])
+  }, [setItems])
 
   const memo = useCallback(async (code, text, market = 'KR') => {
     const data = await updateMemo(code, text, market)
@@ -46,7 +37,7 @@ export function useWatchlist() {
       prev?.map((i) => (i.code === code && i.market === market ? data.item : i)) ?? []
     )
     return data.item
-  }, [])
+  }, [setItems])
 
   return { items, loading, error, load, add, remove, memo }
 }
@@ -107,28 +98,17 @@ export function useDashboard() {
 
 /** 단일 종목 상세 */
 export function useStockInfo() {
-  const [data, setData] = useState(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState(null)
+  const { data, setData, loading, error, setError, run } = useAsyncState()
 
-  const load = useCallback(async (code, market = 'KR') => {
-    setLoading(true)
-    setError(null)
+  const load = useCallback((code, market = 'KR') => {
     setData(null)
-    try {
-      const result = await fetchStockInfo(code, market)
-      setData(result)
-    } catch (e) {
-      setError(e.message)
-    } finally {
-      setLoading(false)
-    }
-  }, [])
+    return run(() => fetchStockInfo(code, market)).catch(() => {})
+  }, [run, setData])
 
   const reset = useCallback(() => {
     setData(null)
     setError(null)
-  }, [])
+  }, [setData, setError])
 
   return { data, loading, error, load, reset }
 }

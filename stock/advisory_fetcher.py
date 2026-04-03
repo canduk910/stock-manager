@@ -8,7 +8,6 @@ from __future__ import annotations
 import json
 import logging
 import math
-import time
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -16,45 +15,7 @@ logger = logging.getLogger(__name__)
 import requests
 
 from config import KIS_APP_KEY, KIS_APP_SECRET, KIS_BASE_URL, OPENAI_API_KEY, OPENAI_MODEL
-
-
-# ── KIS 토큰 캐시 (모듈 수준, 분당 1회 제한 대응) ────────────────────────────
-_kis_token_cache: dict = {"token": None, "expires_at": 0.0}
-
-
-def _get_kis_token() -> str | None:
-    """KIS access_token 반환. 유효한 토큰이 캐시에 있으면 재사용, 없으면 새로 발급."""
-    now = time.time()
-    if _kis_token_cache["token"] and now < _kis_token_cache["expires_at"]:
-        return _kis_token_cache["token"]
-
-    if not KIS_APP_KEY or not KIS_APP_SECRET:
-        return None
-
-    try:
-        resp = requests.post(
-            f"{KIS_BASE_URL}/oauth2/tokenP",
-            headers={"content-type": "application/json"},
-            data=json.dumps({
-                "grant_type": "client_credentials",
-                "appkey": KIS_APP_KEY,
-                "appsecret": KIS_APP_SECRET,
-            }),
-            timeout=10,
-        )
-        if resp.status_code != 200:
-            return None
-        data = resp.json()
-        token = data.get("access_token")
-        if not token:
-            return None
-        # 만료 여유시간 60초 확보
-        expires_in = int(data.get("expires_in", 86400))
-        _kis_token_cache["token"] = token
-        _kis_token_cache["expires_at"] = now + expires_in - 60
-        return token
-    except Exception:
-        return None
+from routers._kis_auth import get_access_token_safe
 
 
 # ── KIS 1분봉 → 15분봉 리샘플 ────────────────────────────────────────────────
@@ -103,13 +64,11 @@ def fetch_15min_ohlcv_kr(code: str) -> list[dict]:
     KIS 키 미설정 시 즉시 yfinance fallback.
     반환: [{time, open, high, low, close, volume}] 최근 300봉.
     """
-    if not KIS_APP_KEY or not KIS_APP_SECRET:
+    token = get_access_token_safe()
+    if not token:
         return _fetch_15min_ohlcv_kr_yf(code)
 
     try:
-        token = _get_kis_token()
-        if not token:
-            return _fetch_15min_ohlcv_kr_yf(code)
 
         headers = {
             "content-type": "application/json",

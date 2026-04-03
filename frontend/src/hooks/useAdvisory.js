@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react'
+import { useAsyncState } from './useAsyncState'
 import {
   fetchAdvisoryStocks,
   addAdvisoryStock,
@@ -14,22 +15,9 @@ import {
 
 /** 자문종목 목록 + CRUD */
 export function useAdvisoryStocks() {
-  const [stocks, setStocks] = useState([])
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState(null)
+  const { data: stocks, loading, error, run } = useAsyncState([])
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      const data = await fetchAdvisoryStocks()
-      setStocks(data)
-    } catch (e) {
-      setError(e.message)
-    } finally {
-      setLoading(false)
-    }
-  }, [])
+  const load = useCallback(() => run(() => fetchAdvisoryStocks()).catch(() => {}), [run])
 
   const add = useCallback(async (code, market, memo = '') => {
     const result = await addAdvisoryStock(code, market, memo)
@@ -47,36 +35,20 @@ export function useAdvisoryStocks() {
 
 /** 분석 데이터 새로고침 + 조회 */
 export function useAdvisoryData() {
-  const [data, setData] = useState(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState(null)
+  const { data, setData, loading, error, run } = useAsyncState()
 
   const load = useCallback(async (code, market) => {
-    setLoading(true)
-    setError(null)
     try {
-      const result = await fetchAdvisoryData(code, market)
-      setData(result)
-    } catch (e) {
-      setError(e.message)
+      await run(() => fetchAdvisoryData(code, market))
+    } catch {
       setData(null)
-    } finally {
-      setLoading(false)
     }
-  }, [])
+  }, [run, setData])
 
-  const refresh = useCallback(async (code, market, name = null) => {
-    setLoading(true)
-    setError(null)
-    try {
-      const result = await refreshAdvisoryData(code, market, name)
-      setData(result)
-    } catch (e) {
-      setError(e.message)
-    } finally {
-      setLoading(false)
-    }
-  }, [])
+  const refresh = useCallback(
+    (code, market, name = null) => run(() => refreshAdvisoryData(code, market, name)).catch(() => {}),
+    [run]
+  )
 
   return { data, loading, error, load, refresh }
 }
@@ -145,22 +117,10 @@ export function useAdvisoryReport() {
 
 /** OHLCV 타임프레임별 데이터 조회 */
 export function useAdvisoryOhlcv() {
-  const [result, setResult] = useState(null)  // { ohlcv, indicators, interval, period }
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState(null)
-
-  const load = useCallback(async (code, market, interval, period) => {
-    setLoading(true)
-    setError(null)
-    try {
-      const data = await fetchAdvisoryOhlcv(code, market, interval, period)
-      setResult(data)
-    } catch (e) {
-      setError(e.message)
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
+  const { data: result, loading, error, run } = useAsyncState()
+  const load = useCallback(
+    (code, market, interval, period) => run(() => fetchAdvisoryOhlcv(code, market, interval, period)).catch(() => {}),
+    [run]
+  )
   return { result, loading, error, load }
 }

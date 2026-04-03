@@ -5,6 +5,7 @@ balance.py, order.py 등에서 공용으로 사용한다.
 """
 
 import json
+import time
 
 import requests
 
@@ -13,8 +14,9 @@ from services.exceptions import ConfigError, ExternalAPIError
 
 BASE_URL = KIS_BASE_URL
 
-# 인메모리 토큰 캐시 (재시작 시 재발급)
+# 인메모리 토큰 캐시 (재시작 시 재발급, TTL 관리)
 _access_token: str | None = None
+_token_expires_at: float = 0.0
 
 
 def get_kis_credentials() -> tuple[str, str, str, str, str]:
@@ -39,9 +41,10 @@ def get_kis_credentials() -> tuple[str, str, str, str, str]:
 
 
 def get_access_token() -> str:
-    """OAuth2 토큰을 발급/캐싱하여 반환한다."""
-    global _access_token
-    if _access_token:
+    """OAuth2 토큰을 발급/캐싱하여 반환한다. TTL(만료 60초 전) 자동 재발급."""
+    global _access_token, _token_expires_at
+    now = time.time()
+    if _access_token and now < _token_expires_at:
         return _access_token
 
     if not KIS_APP_KEY or not KIS_APP_SECRET:
@@ -61,14 +64,26 @@ def get_access_token() -> str:
     if res.status_code != 200:
         raise ExternalAPIError(f"KIS 토큰 발급 실패: {res.text}")
 
-    _access_token = res.json()["access_token"]
+    data = res.json()
+    _access_token = data["access_token"]
+    expires_in = int(data.get("expires_in", 86400))
+    _token_expires_at = now + expires_in - 60
     return _access_token
+
+
+def get_access_token_safe() -> str | None:
+    """토큰 반환. 키 미설정 또는 발급 실패 시 None (예외 없음)."""
+    try:
+        return get_access_token()
+    except Exception:
+        return None
 
 
 def clear_token_cache():
     """토큰 캐시 초기화 (만료 시)."""
-    global _access_token
+    global _access_token, _token_expires_at
     _access_token = None
+    _token_expires_at = 0.0
 
 
 def issue_hashkey(data: dict) -> str:
