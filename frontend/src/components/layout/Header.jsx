@@ -10,6 +10,7 @@ const NAV_ITEMS = [
   { to: '/order', label: '주문' },
   { to: '/macro', label: '매크로' },
   { to: '/advisor', label: 'AI자문' },
+  { to: '/portfolio', label: '포트폴리오' },
 ]
 
 const WIDTH_OPTIONS = [

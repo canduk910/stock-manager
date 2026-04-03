@@ -1,5 +1,19 @@
 # 변경 이력
 
+## 2026-04-03 — 포트폴리오 대시보드
+
+### 포트폴리오 대시보드 (`/portfolio`) 신규
+- `PortfolioPage.jsx` — 5개 섹션 대시보드 (매크로 배너 + 자산 요약 + 배분 차트 + 수익률 바 + 보유종목)
+- `usePortfolio.js` — balance + macro sentiment 병렬 로드 + Graham 안전마진 등급 프론트 계산
+- `RegimeBanner.jsx` — 공포탐욕지수 기반 매크로 체제 배너 (공포/신중/중립/탐욕 4단계)
+- `AllocationChart.jsx` — Recharts PieChart 자산 배분 (국내/해외/현금)
+- `ProfitChart.jsx` — Recharts BarChart 종목별 수익률 비교
+- `HoldingsOverview.jsx` — 보유 종목 테이블 + 안전마진 등급(A~D) + PER/PBR/ROE
+- 신규 백엔드 없음 — 기존 `/api/balance` + `/api/macro/sentiment` API 100% 재활용
+- Header 메뉴 추가 (10개)
+
+---
+
 ## 2026-04-03 — AI 포트폴리오 자문 + 인프라 개선
 
 ### AI 포트폴리오 자문 기능 신규

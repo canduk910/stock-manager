@@ -46,8 +46,9 @@ frontend/
       useAdvisory.js      useAdvisoryStocks / useAdvisoryData / useAdvisoryReport / useAdvisoryOhlcv
       useMacro.js         useMacroIndices / useMacroNews / useMacroSentiment / useMacroInvestorQuotes (섹션별 독립 훅)
       usePortfolioAdvisor.js  포트폴리오 AI 자문 훅. analyze(balanceData, forceRefresh). useAsyncState 기반.
+      usePortfolio.js     포트폴리오 대시보드 훅. balance+sentiment 병렬 로드 + 자산배분/안전마진등급 계산.
     components/
-      layout/Header.jsx   네비게이션 바 (9개 메뉴, 로고: "DK STOCK")
+      layout/Header.jsx   네비게이션 바 (10개 메뉴, 로고: "DK STOCK")
       common/             LoadingSpinner, ErrorAlert, EmptyState, DataTable, ToastNotification
                           WatchlistButton (code/market/alreadyAdded props, ★/+ 버튼, StockTable·FilingsTable 공용)
                           CandlestickChart (ohlcv/indicators props, 캔들+MA5/20/60+BB+거래량, PriceChartPanel·TechnicalPanel 공용)
@@ -60,6 +61,8 @@ frontend/
                           ExecutionsTable, OrderHistoryTable, ReservationForm, ReservationsTable, SyncButton,
                           OrderbookPanel (실시간 호가창)
       advisory/           FundamentalPanel, TechnicalPanel, AIReportPanel
+      portfolio/          RegimeBanner (매크로 체제 배너), AllocationChart (자산 배분 파이),
+                          ProfitChart (종목별 수익률 바), HoldingsOverview (보유종목+안전마진 등급)
       advisor/            AdvisorPanel (포트폴리오 자문 컨테이너), DiagnosisCard (진단 게이지+섹터),
                           RebalanceCard (리밸런싱 제안), TradeTable (매매안+주문실행),
                           TradeConfirmModal (AI 추천 주문 확인 모달)
@@ -76,6 +79,7 @@ frontend/
       MarketBoardPage.jsx /market-board  시세판: 신고가/신저가 Top10 + 사용자 선택 종목. 실시간 WS.
       MacroPage.jsx       /macro         매크로 분석: 지수+심리+뉴스+투자자 코멘트. 4섹션 독립 로딩.
       AdvisorPage.jsx     /advisor       AI 포트폴리오 자문: 잔고 로드→분석→이력 조회. showHistory 모드.
+      PortfolioPage.jsx   /portfolio     포트폴리오 대시보드: 체제배너+자산배분+수익률+안전마진등급. balance+macro 병렬 로드.
 ```
 
 ---
