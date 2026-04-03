@@ -13,8 +13,9 @@ import logging
 from typing import Optional
 
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
-from fastapi.exceptions import HTTPException
 from pydantic import BaseModel
+
+from services.exceptions import NotFoundError, ConflictError
 
 from services.quote_service import get_manager, get_overseas_manager
 from stock.utils import is_domestic
@@ -73,7 +74,7 @@ def add_custom_stock(body: CustomStockBody):
     from stock.market_board_store import add_item
     ok = add_item(body.code, body.name, body.market)
     if not ok:
-        raise HTTPException(status_code=409, detail="이미 등록된 종목입니다.")
+        raise ConflictError("이미 등록된 종목입니다.")
     return {"item": {"code": body.code, "market": body.market, "name": body.name}}
 
 
@@ -83,7 +84,7 @@ def remove_custom_stock(code: str, market: str = Query("KR")):
     from stock.market_board_store import remove_item
     ok = remove_item(code, market)
     if not ok:
-        raise HTTPException(status_code=404, detail="등록되지 않은 종목입니다.")
+        raise NotFoundError("등록되지 않은 종목입니다.")
 
 
 # ── 종목 순서 ────────────────────────────────────────────────────────────────

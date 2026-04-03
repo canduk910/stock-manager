@@ -4,6 +4,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from fastapi import APIRouter, HTTPException, Query
 
+from services.exceptions import ExternalAPIError
 from screener.dart import fetch_filings
 from screener.krx import get_all_stocks
 from screener.service import (
@@ -95,14 +96,14 @@ def get_stocks(
     try:
         stocks, actual_date = get_all_stocks(target_date)
     except RuntimeError as e:
-        raise HTTPException(status_code=502, detail=str(e))
+        raise ExternalAPIError(str(e))
 
     # 당일 실적발표 종목 필터
     if earnings_only:
         try:
             filings = fetch_filings(target_date, target_date)
         except RuntimeError as e:
-            raise HTTPException(status_code=502, detail=str(e))
+            raise ExternalAPIError(str(e))
         filing_codes = {f["stock_code"] for f in filings}
         stocks = [s for s in stocks if s["code"] in filing_codes]
 

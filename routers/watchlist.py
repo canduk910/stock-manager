@@ -1,8 +1,9 @@
 """관심종목 API 라우터."""
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Query
 from pydantic import BaseModel
 
+from services.exceptions import NotFoundError, ConflictError, ExternalAPIError
 from services.watchlist_service import WatchlistService
 from stock import store
 
@@ -60,11 +61,11 @@ def add_watchlist(body: AddBody):
     try:
         code, name, market = _svc.resolve_symbol(body.code, body.market)
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise NotFoundError(str(e))
 
     added = store.add_item(code, name, body.memo, market)
     if not added:
-        raise HTTPException(status_code=409, detail=f"이미 등록된 종목입니다: {name} ({code})")
+        raise ConflictError(f"이미 등록된 종목입니다: {name} ({code})")
 
     item = store.get_item(code, market)
     return {"item": item}
@@ -74,7 +75,7 @@ def add_watchlist(body: AddBody):
 def remove_watchlist(code: str, market: str = Query("KR")):
     """관심종목 삭제."""
     if not store.remove_item(code, market):
-        raise HTTPException(status_code=404, detail=f"관심종목에 없는 종목코드입니다: {code}")
+        raise NotFoundError(f"관심종목에 없는 종목코드입니다: {code}")
     return {"deleted": True}
 
 
@@ -82,7 +83,7 @@ def remove_watchlist(code: str, market: str = Query("KR")):
 def update_memo(code: str, body: MemoBody, market: str = Query("KR")):
     """메모 수정."""
     if not store.update_memo(code, body.memo, market):
-        raise HTTPException(status_code=404, detail=f"관심종목에 없는 종목코드입니다: {code}")
+        raise NotFoundError(f"관심종목에 없는 종목코드입니다: {code}")
     item = store.get_item(code, market)
     return {"item": item}
 
@@ -105,9 +106,9 @@ def get_stock_info(code: str, market: str = Query("KR")):
     try:
         detail = _svc.get_stock_detail(code, market)
     except Exception as e:
-        raise HTTPException(status_code=502, detail=str(e))
+        raise ExternalAPIError(str(e))
 
     if not detail["basic"]:
-        raise HTTPException(status_code=404, detail=f"종목 정보를 찾을 수 없습니다: {code}")
+        raise NotFoundError(f"종목 정보를 찾을 수 없습니다: {code}")
 
     return detail

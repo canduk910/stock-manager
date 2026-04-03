@@ -5,11 +5,12 @@ KIS API 키 미설정 시 503 반환.
 모든 엔드포인트는 services.order_service를 통해서만 데이터에 접근한다.
 """
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Query
 from pydantic import BaseModel
 from typing import Optional
 
 from services import order_service
+from services.exceptions import NotFoundError
 
 router = APIRouter(prefix="/api/order", tags=["order"])
 
@@ -233,8 +234,5 @@ def delete_reservation(res_id: int):
     """예약주문 삭제 (WAITING 상태만 가능)."""
     deleted = order_service.delete_reservation(res_id)
     if not deleted:
-        raise HTTPException(
-            status_code=404,
-            detail="예약주문을 찾을 수 없거나 WAITING 상태가 아닙니다.",
-        )
+        raise NotFoundError("예약주문을 찾을 수 없거나 WAITING 상태가 아닙니다.")
     return {"deleted": True}

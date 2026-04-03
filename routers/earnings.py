@@ -2,6 +2,7 @@
 
 from fastapi import APIRouter, HTTPException, Query
 
+from services.exceptions import ExternalAPIError
 from screener.dart import fetch_filings
 from screener.service import ScreenerValidationError, normalize_date
 from stock.dart_fin import fetch_financials
@@ -62,7 +63,7 @@ def _get_filings_kr(s: str, e: str) -> dict:
     try:
         filings = fetch_filings(s, e)
     except RuntimeError as ex:
-        raise HTTPException(status_code=502, detail=str(ex))
+        raise ExternalAPIError(str(ex))
 
     # 종목별 수익률 일괄 조회
     unique_codes = list({f["stock_code"] for f in filings})
@@ -112,7 +113,7 @@ def _get_filings_us(s: str, e: str) -> dict:
     try:
         filings = fetch_sec_filings(s, e)
     except Exception as ex:
-        raise HTTPException(status_code=502, detail=f"SEC EDGAR 조회 실패: {ex}")
+        raise ExternalAPIError(f"SEC EDGAR 조회 실패: {ex}")
 
     # 수익률은 ticker가 있는 경우만 조회
     unique_codes = list({f["stock_code"] for f in filings if f.get("stock_code")})

@@ -6,6 +6,7 @@
 
 from typing import Optional
 
+from services.exceptions import ExternalAPIError
 from stock import symbol_map
 from stock.dart_fin import fetch_financials_multi_year
 from stock.market import fetch_detail, fetch_valuation_history, fetch_market_metrics
@@ -65,10 +66,13 @@ class DetailService:
                 ]  # 과거 → 최신 순
             }
         """
-        if is_domestic(code):
-            return self._get_financials_kr(code, years)
-        else:
-            return self._get_financials_us(code, min(years, 4))
+        try:
+            if is_domestic(code):
+                return self._get_financials_kr(code, years)
+            else:
+                return self._get_financials_us(code, min(years, 4))
+        except RuntimeError as e:
+            raise ExternalAPIError(str(e))
 
     def _get_financials_kr(self, code: str, years: int) -> dict:
         multi_rows = fetch_financials_multi_year(code, years)
@@ -123,6 +127,12 @@ class DetailService:
 
         해외주식: 분기 EPS/BPS + 일별 주가 조합으로 추정 히스토리 산출.
         """
+        try:
+            return self._get_valuation_chart_inner(code, years)
+        except RuntimeError as e:
+            raise ExternalAPIError(str(e))
+
+    def _get_valuation_chart_inner(self, code: str, years: int = 10) -> dict:
         if not is_domestic(code):
             history = yf_client.fetch_valuation_history_yf(code, min(years, 5))
             pers = [h["per"] for h in history if h.get("per") and 0 < h["per"] < 500]
@@ -153,10 +163,13 @@ class DetailService:
 
     def get_report(self, code: str, years: int = 10) -> dict:
         """재무 + 밸류에이션 + 종합 요약 + 기본 시세 통합 반환."""
-        if is_domestic(code):
-            return self._get_report_kr(code, years)
-        else:
-            return self._get_report_us(code, min(years, 4))
+        try:
+            if is_domestic(code):
+                return self._get_report_kr(code, years)
+            else:
+                return self._get_report_us(code, min(years, 4))
+        except RuntimeError as e:
+            raise ExternalAPIError(str(e))
 
     def _get_report_kr(self, code: str, years: int) -> dict:
         financials = self.get_financials(code, years)

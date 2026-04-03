@@ -3,11 +3,12 @@
 자문종목 CRUD + 데이터 새로고침 + AI 리포트 생성.
 """
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Query
 from pydantic import BaseModel
 from typing import Optional
 
 from services import advisory_service
+from services.exceptions import ServiceError, NotFoundError, ConflictError
 from stock import advisory_store
 from stock.utils import is_domestic
 
@@ -61,21 +62,18 @@ def add_stock(body: AddStockBody):
                     code, name = results[0][0], results[0][1]
                 elif results:
                     candidates = ", ".join(f"{r[1]}({r[0]})" for r in results[:3])
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"'{raw}' 검색 결과가 여러 개입니다: {candidates}. 6자리 종목코드로 입력해주세요.",
+                    raise ServiceError(
+                        f"'{raw}' 검색 결과가 여러 개입니다: {candidates}. 6자리 종목코드로 입력해주세요.",
                     )
                 else:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"'{raw}' 종목을 찾을 수 없습니다. 6자리 종목코드로 입력해주세요.",
+                    raise ServiceError(
+                        f"'{raw}' 종목을 찾을 수 없습니다. 6자리 종목코드로 입력해주세요.",
                     )
-            except HTTPException:
+            except ServiceError:
                 raise
             except Exception:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"'{raw}' 종목을 찾을 수 없습니다. 6자리 종목코드로 입력해주세요.",
+                raise ServiceError(
+                    f"'{raw}' 종목을 찾을 수 없습니다. 6자리 종목코드로 입력해주세요.",
                 )
         else:
             code = raw
@@ -86,7 +84,7 @@ def add_stock(body: AddStockBody):
 
     ok = advisory_store.add_stock(code, market, name, body.memo)
     if not ok:
-        raise HTTPException(status_code=409, detail="이미 등록된 종목입니다.")
+        raise ConflictError("이미 등록된 종목입니다.")
     return advisory_store.get_stock(code, market)
 
 
@@ -95,7 +93,7 @@ def remove_stock(code: str, market: str = Query("KR")):
     """자문종목 삭제."""
     ok = advisory_store.remove_stock(code.upper(), market.upper())
     if not ok:
-        raise HTTPException(status_code=404, detail="종목을 찾을 수 없습니다.")
+        raise NotFoundError("종목을 찾을 수 없습니다.")
     return {"ok": True}
 
 
@@ -121,7 +119,7 @@ def get_data(code: str, market: str = Query("KR")):
     """캐시된 분석 데이터 조회."""
     cache = advisory_store.get_cache(code.upper(), market.upper())
     if not cache:
-        raise HTTPException(status_code=404, detail="데이터 없음. 새로고침을 먼저 해주세요.")
+        raise NotFoundError("데이터 없음. 새로고침을 먼저 해주세요.")
     return cache
 
 
@@ -170,7 +168,7 @@ def get_report_by_id(code: str, report_id: int, market: str = Query("KR")):
     """특정 ID의 AI 리포트 조회."""
     report = advisory_store.get_report_by_id(report_id)
     if not report or report["code"] != code.upper():
-        raise HTTPException(status_code=404, detail="리포트를 찾을 수 없습니다.")
+        raise NotFoundError("리포트를 찾을 수 없습니다.")
     return report
 
 
@@ -179,7 +177,7 @@ def get_report(code: str, market: str = Query("KR")):
     """최신 AI 리포트 조회."""
     report = advisory_store.get_latest_report(code.upper(), market.upper())
     if not report:
-        raise HTTPException(status_code=404, detail="생성된 리포트가 없습니다.")
+        raise NotFoundError("생성된 리포트가 없습니다.")
     return report
 
 

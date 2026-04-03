@@ -35,6 +35,13 @@ class ConfigError(ServiceError):
         super().__init__(message, status_code=503)
 
 
+class ConflictError(ServiceError):
+    """리소스 충돌 (409)."""
+
+    def __init__(self, message: str = "리소스가 이미 존재합니다."):
+        super().__init__(message, status_code=409)
+
+
 class PaymentRequiredError(ServiceError):
     """결제/크레딧 부족 (402)."""
 
