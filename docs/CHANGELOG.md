@@ -1,5 +1,38 @@
 # 변경 이력
 
+## 2026-04-03 — AI 에이전트 팀 (하네스) 구성
+
+### 에이전트 7명 (`.claude/agents/`)
+
+**도메인 전문가 4명:**
+- `macro-sentinel.md` — 매크로 환경 분석 (버핏지수/VIX/공포탐욕 → 시장 체제 판단)
+- `value-screener.md` — Graham 기준 PER/PBR/ROE 동적 필터 스크리닝
+- `margin-analyst.md` — Graham Number + 재무 건전성 + 기술적 타이밍 심층 분석
+- `order-advisor.md` — 포지션 사이징 + 지정가/손절/익절 주문 추천 (자동 주문 금지)
+
+**빌더 3명:**
+- `dev-architect.md` — 통합자산관리 풀스택 개발 (도메인 전문가 자문 기반)
+- `qa-inspector.md` — 경계면 교차 비교 통합 정합성 검증
+- `refactor-engineer.md` — 도메인 인지 리팩토링 (도메인 전문가 확인 후 변경)
+
+### 스킬 9개 (`.claude/skills/`)
+- `macro-analysis/` — MacroSentinel 전용: 매크로 데이터 수집 + 체제 판단
+- `value-screening/` — ValueScreener 전용: Graham 멀티팩터 스크리닝
+- `graham-analysis/` — MarginAnalyst 전용: 내재가치 + 재무 건전성 + 기술적 분석
+- `portfolio-check/` — OrderAdvisor 전용: 포트폴리오 상태 + 포지션 사이징
+- `order-recommend/` — OrderAdvisor 전용: 주문 추천 생성 + 예약주문 보조
+- `value-invest/` — 오케스트레이터: 분석 파이프라인 (Macro→Screener→Analyst→Advisor)
+- `asset-dev/` — 오케스트레이터: 개발 파이프라인 (자문→설계→구현→QA→보고)
+- `qa-verify/` — QA Inspector 전용: 교차 비교 검증 체크리스트
+- `refactor-audit/` — 오케스트레이터: 리팩토링 파이프라인 (감사→자문→실행→QA)
+
+### 특징
+- 기존 서비스 코드 변경 없음 — 에이전트는 기존 API 엔드포인트를 HTTP로 호출
+- 도메인 전문가 4명이 분석/개발/리팩토링 3개 파이프라인 모두에서 자문 역할
+- 워크스페이스 산출물: `_workspace/` 디렉토리에 단계별 JSON 파일 저장
+
+---
+
 ## 2026-04-01 — 매크로 분석 페이지 신규
 
 ### 매크로 분석 (Macro Analysis) 메뉴 추가

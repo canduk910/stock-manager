@@ -1094,3 +1094,30 @@ CREATE TABLE reservations (
 
 ### `WS /ws/market-board`
 다중심볼 실시간 시세 WebSocket. 구독: `{"action": "subscribe", "symbols": ["005930"]}`. 시세: `{"type": "prices", "data": {...}}`
+
+---
+
+## 에이전트 API 활용 맵
+
+AI 에이전트 팀(`.claude/agents/`)이 호출하는 엔드포인트 매핑. 에이전트는 HTTP API를 통해서만 접근하며, 서비스/DB에 직접 접근하지 않는다.
+
+| 에이전트 | 엔드포인트 | 용도 |
+|---------|-----------|------|
+| MacroSentinel | `GET /api/macro/sentiment` | VIX + 버핏지수 + 공포탐욕 → 체제 판단 |
+| MacroSentinel | `GET /api/macro/indices` | 4대 지수 동향 |
+| MacroSentinel | `GET /api/macro/investor-quotes` | 투자대가 발언 |
+| MacroSentinel | `GET /api/macro/news` | 시장 뉴스 |
+| ValueScreener | `GET /api/screener/stocks` | PER/PBR/ROE 멀티팩터 스크리닝 |
+| ValueScreener | `GET /api/detail/{code}/report` | 상위 후보 CAGR 확인 |
+| MarginAnalyst | `POST /api/advisory/{code}/refresh` | 기본적+기술적 데이터 수집 |
+| MarginAnalyst | `GET /api/advisory/{code}/data` | 캐시된 분석 데이터 |
+| MarginAnalyst | `POST /api/advisory/{code}/analyze` | GPT 3전략 리포트 |
+| MarginAnalyst | `GET /api/advisory/{code}/ohlcv` | 기간별 OHLCV + 기술지표 |
+| MarginAnalyst | `GET /api/detail/{code}/report` | 10년 재무 + CAGR |
+| MarginAnalyst | `GET /api/detail/{code}/valuation` | PER/PBR 히스토리 |
+| OrderAdvisor | `GET /api/balance` | 현재 포트폴리오 + 예수금 |
+| OrderAdvisor | `GET /api/order/buyable` | 매수 가능 금액 |
+| OrderAdvisor | `GET /api/order/open` | 미체결 주문 (중복 방지) |
+| OrderAdvisor | `POST /api/order/reserve` | 예약주문 등록 (사용자 승인 후) |
+
+> 에이전트 정의: `.claude/agents/`, 오케스트레이터: `.claude/skills/value-invest/skill.md`

@@ -563,3 +563,24 @@ OpenAI 응답 JSON 파싱 실패 시 `raw` 필드에 원문 저장 → 프론트
 - 발동 시 `order_service.place_order()`로 자동 주문 발송
 - 발동 성공: `TRIGGERED` → `EXECUTED` 상태 갱신, `result_order_no` 기록
 - 발동 실패: `FAILED` 상태 갱신
+
+---
+
+## 에이전트 서비스 매핑
+
+AI 에이전트 팀(`.claude/agents/`)은 `routers/` 엔드포인트를 HTTP로 호출한다. 아래는 라우터가 위임하는 서비스와 에이전트의 매핑:
+
+| 서비스 | 에이전트 | 호출 경로 |
+|--------|---------|----------|
+| `macro_service.py` | MacroSentinel | `/api/macro/*` → 체제 판단용 매크로 데이터 |
+| `advisory_service.py` | MarginAnalyst | `/api/advisory/*/refresh\|data\|analyze` → 기본적+기술적 분석 |
+| `detail_service.py` | MarginAnalyst, ValueScreener | `/api/detail/*/report\|valuation` → 재무/CAGR/밸류에이션 |
+| `order_service.py` | OrderAdvisor | `/api/order/buyable\|open\|reserve`, `/api/balance` → 포지션 사이징+주문 |
+| `watchlist_service.py` | ValueScreener (fallback) | `/api/watchlist` → KRX 스크리너 불가 시 관심종목 기반 분석 |
+| `reservation_service.py` | OrderAdvisor (간접) | 예약주문 등록 후 스케줄러가 자동 발동 |
+
+### 동시성 참고
+
+- 에이전트가 병렬로 API를 호출해도 SQLite WAL 모드 + timeout 10초로 안전
+- `advisory_service.py`의 `refresh_stock_data()`는 순차 호출 권장 (DART API rate limit)
+- `order_service.py`의 KIS API 호출은 토큰 분당 1회 제한 주의 (캐시 활용)

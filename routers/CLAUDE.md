@@ -107,6 +107,21 @@ GET  /api/order/fno-price      선물옵션 현재가
 
 ---
 
+## 에이전트 호출 엔드포인트
+
+AI 에이전트 팀(`.claude/agents/`)은 아래 라우터의 HTTP API를 호출한다. 서비스/DB 직접 접근 없음.
+
+| 라우터 | 에이전트 | 호출 엔드포인트 |
+|--------|---------|---------------|
+| `macro.py` | MacroSentinel | `/api/macro/sentiment\|indices\|investor-quotes\|news` |
+| `screener.py` | ValueScreener | `/api/screener/stocks` |
+| `detail.py` | MarginAnalyst, ValueScreener | `/api/detail/{code}/report\|valuation` |
+| `advisory.py` | MarginAnalyst | `/api/advisory/{code}/refresh\|data\|analyze\|ohlcv` |
+| `balance.py` | OrderAdvisor | `/api/balance` |
+| `order.py` | OrderAdvisor | `/api/order/buyable\|open\|reserve` |
+
+---
+
 ## KIS API 주의사항 (잔고)
 
 - `bass_exrt`(기준환율)는 `CTRP6504R` output2 `frst_bltn_exrt`에만 존재 (`TTTS3012R`에 없음)

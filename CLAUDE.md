@@ -176,3 +176,52 @@ Stage 2  python:3.11-slim → pip install + 앱 소스 + COPY --from Stage 1
 `requirements.txt` 포함: `websockets` (KIS WS 연결용, `services/quote_service.py`)
 
 미포함 (별도 설치): `pycryptodome` — `KoreaInvestmentWS` 체결통보 AES 복호화용
+
+---
+
+## AI 에이전트 팀 (하네스)
+
+Graham 안전마진 가치투자 에이전트 팀. 기존 API를 HTTP로 호출하여 동작하며 서비스 코드를 변경하지 않는다.
+
+### 에이전트 7명 (`.claude/agents/`)
+
+| 에이전트 | 파일 | 역할 |
+|---------|------|------|
+| MacroSentinel | `macro-sentinel.md` | 매크로 환경 → 시장 체제 판단 |
+| ValueScreener | `value-screener.md` | Graham 기준 종목 스크리닝 |
+| MarginAnalyst | `margin-analyst.md` | 내재가치 + 재무 건전성 심층 분석 |
+| OrderAdvisor | `order-advisor.md` | 포지션 사이징 + 주문 추천 |
+| DevArchitect | `dev-architect.md` | 통합자산관리 풀스택 개발 |
+| QA Inspector | `qa-inspector.md` | 경계면 교차 비교 검증 |
+| RefactorEngineer | `refactor-engineer.md` | 도메인 인지 리팩토링 |
+
+### 스킬 9개 (`.claude/skills/`)
+
+| 스킬 | 사용 에이전트 | 용도 |
+|------|-------------|------|
+| `macro-analysis/` | MacroSentinel | 매크로 데이터 수집 + 체제 판단 |
+| `value-screening/` | ValueScreener | Graham 멀티팩터 스크리닝 |
+| `graham-analysis/` | MarginAnalyst | 내재가치 + 기술적 분석 |
+| `portfolio-check/` | OrderAdvisor | 포트폴리오 상태 + 포지션 사이징 |
+| `order-recommend/` | OrderAdvisor | 주문 추천 + 예약주문 보조 |
+| `value-invest/` | 오케스트레이터 | 분석 파이프라인: Macro→Screener→Analyst→Advisor |
+| `asset-dev/` | 오케스트레이터 | 개발 파이프라인: 자문→설계→구현→QA→보고 |
+| `qa-verify/` | QA Inspector | 교차 비교 검증 체크리스트 |
+| `refactor-audit/` | 오케스트레이터 | 리팩토링 파이프라인: 감사→자문→실행→QA |
+
+### 트리거
+
+| 요청 | 오케스트레이터 |
+|------|-------------|
+| "종목 발굴", "저평가 종목", "안전마진 분석", "가치투자" | `value-invest` |
+| "대시보드 만들어줘", "리밸런싱 기능", "자산관리 개발" | `asset-dev` |
+| "리팩토링 해줘", "코드 감사", "구조 개선" | `refactor-audit` |
+
+### 에이전트 API 활용
+
+| 에이전트 | 호출 엔드포인트 |
+|---------|---------------|
+| MacroSentinel | `/api/macro/sentiment`, `/indices`, `/investor-quotes`, `/news` |
+| ValueScreener | `/api/screener/stocks`, `/api/detail/{code}/report` |
+| MarginAnalyst | `/api/advisory/{code}/refresh\|data\|analyze\|ohlcv`, `/api/detail/{code}/report\|valuation` |
+| OrderAdvisor | `/api/balance`, `/api/order/buyable\|open\|reserve` |

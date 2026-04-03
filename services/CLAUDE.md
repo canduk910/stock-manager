@@ -101,3 +101,19 @@ ServiceError (기본 400)
 - `_get_report_kr()`/`_get_report_us()` 모두 `fetch_forward_estimates_yf()` 호출 — 응답에 `forward_estimates` 필드 포함
 
 > 메서드 시그니처 상세 → `docs/SERVICES.md`
+
+---
+
+## 에이전트 서비스 활용
+
+AI 에이전트 팀(`.claude/agents/`)은 `routers/` 엔드포인트를 HTTP로 호출하며, 라우터가 아래 서비스에 위임한다:
+
+| 서비스 | 에이전트 |
+|--------|---------|
+| `macro_service.py` | MacroSentinel (체제 판단) |
+| `advisory_service.py` | MarginAnalyst (기본적+기술적 분석) |
+| `detail_service.py` | MarginAnalyst, ValueScreener (재무/밸류에이션) |
+| `order_service.py` | OrderAdvisor (포지션 사이징+주문) |
+| `watchlist_service.py` | ValueScreener (KRX 불가 시 fallback) |
+
+에이전트 병렬 호출 시 SQLite WAL 모드 + async 패턴으로 동시성 안전. 상세 → `docs/SERVICES.md`
