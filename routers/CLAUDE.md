@@ -16,6 +16,7 @@
 | `search.py` | `GET /api/search` | 종목 검색 (KR=자동완성, US=티커 검증, FNO=마스터 검색) |
 | `market_board.py` | `/api/market-board/*`, `WS /ws/market-board` | 신고가/신저가 + sparkline + 시세판 종목 CRUD + 순서 관리(`GET/PUT /api/market-board/order`) + 실시간 WS |
 | `macro.py` | `/api/macro/*` | 매크로 분석: 지수(4대)/뉴스(네이버+NYT)/심리지표(VIX+버핏+공포탐욕)/투자자 코멘트. 5개 GET 엔드포인트 |
+| `portfolio_advisor.py` | `/api/portfolio-advisor/*` | AI 포트폴리오 자문: `POST /analyze` (GPT 분석), `GET /history` (이력 목록), `GET /history/{id}` (리포트 상세) |
 
 ---
 
@@ -40,7 +41,7 @@
 ## `main.py` — FastAPI 서버 진입점
 
 - CORS 미들웨어: `localhost:5173` 허용 (Vite 개발 서버)
-- 10개 라우터 등록 (screener, earnings, balance, watchlist, detail, order, quote, advisory, search, market_board)
+- 12개 라우터 등록 (screener, earnings, balance, watchlist, detail, order, quote, advisory, search, market_board, macro, portfolio_advisor)
 - **lifespan**: ① `quote_manager.start()` ② 예약주문 스케줄러 시작 ③ `symbol_map` background pre-warm — 종료 시 역순 정리
 - **SPA 라우팅**: `/assets` StaticFiles 마운트 + `/{full_path:path}` 캐치올로 index.html 반환 (라우터 등록 **이후** 마지막)
 - `index.html` 응답에 `Cache-Control: no-cache, no-store, must-revalidate` 헤더

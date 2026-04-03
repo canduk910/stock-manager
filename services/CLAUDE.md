@@ -7,7 +7,7 @@
 | 파일 | 역할 |
 |------|------|
 | `exceptions.py` | 공용 예외 계층 |
-| `watchlist_service.py` | 관심종목 대시보드 + 종목 상세 (국내=pykrx+DART, 해외=yfinance) |
+| `watchlist_service.py` | 관심종목 대시보드(ThreadPoolExecutor 병렬) + 종목 상세 (국내=pykrx+DART, 해외=yfinance) |
 | `detail_service.py` | 재무 테이블 + PER/PBR 히스토리 + CAGR 종합 리포트 |
 | `order_service.py` | 주문 오케스트레이션 + 대사 (시장별 실행은 order_kr/us/fno에 위임) |
 | `order_kr.py` | 국내주식 KIS API 주문 실행 (발주/조회/정정/취소) |
@@ -19,6 +19,7 @@
 | `quote_overseas.py` | 해외주식 시세 (Finnhub WS 또는 yfinance 2초 폴링). OverseasQuoteManager 클래스. |
 | `advisory_service.py` | AI자문 데이터 수집 + GPT-4o 리포트 생성 |
 | `macro_service.py` | 매크로 분석 오케스트레이션: 병렬 수집 + GPT 번역/추출 + 섹션별 독립 실패 허용. GPT 결과는 `macro.db`에 일일 캐싱 (KST 기준) |
+| `portfolio_advisor_service.py` | AI 포트폴리오 자문: 잔고 컨텍스트 구성 + OpenAI 호출 → 진단/리밸런싱/매매안. `cache.db`에 30분 TTL 캐싱. |
 
 ---
 

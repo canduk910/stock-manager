@@ -9,6 +9,7 @@ const NAV_ITEMS = [
   { to: '/market-board', label: '시세판' },
   { to: '/order', label: '주문' },
   { to: '/macro', label: '매크로' },
+  { to: '/advisor', label: 'AI자문' },
 ]
 
 const WIDTH_OPTIONS = [

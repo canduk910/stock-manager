@@ -1,9 +1,8 @@
 """주문/예약주문 저장소 (~/stock-watchlist/orders.db — SQLite)."""
 
-from datetime import datetime
 from typing import Optional
 
-from .db_base import connect, row_to_dict
+from .db_base import connect, now_kst_iso, row_to_dict
 
 _DB = "orders.db"
 
@@ -60,7 +59,7 @@ def _conn():
 
 
 def _now() -> str:
-    return datetime.now().isoformat(timespec="seconds")
+    return now_kst_iso()
 
 
 # ── 주문 CRUD ────────────────────────────────────────────────────────────────

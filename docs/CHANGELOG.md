@@ -1,5 +1,39 @@
 # 변경 이력
 
+## 2026-04-03 — AI 포트폴리오 자문 + 인프라 개선
+
+### AI 포트폴리오 자문 기능 신규
+- `services/portfolio_advisor_service.py` — 잔고 데이터 기반 GPT 포트폴리오 분석 (진단/리밸런싱/매매안)
+- `routers/portfolio_advisor.py` — `POST /analyze`, `GET /history`, `GET /history/{id}` 3개 엔드포인트
+- `stock/advisory_store.py` — `portfolio_reports` 테이블 추가 (자문 이력 영구 저장)
+- `config.py` — `ADVISOR_CACHE_TTL_HOURS` 환경변수 (기본 0.5=30분)
+- `stock/cache.py` — `ttl_hours` 타입 `int → float` (30분 TTL 지원)
+- 프론트엔드: `AdvisorPage`(/advisor) + `AdvisorPanel`/`DiagnosisCard`/`RebalanceCard`/`TradeTable`/`TradeConfirmModal` 5개 컴포넌트
+- `BalancePage` 하단에 AdvisorPanel 통합 + "AI자문 페이지에서 이력 보기" 링크
+- 페이지 진입 시 최신 리포트 자동 로드 (이력 있으면 버튼 클릭 불필요)
+- Header에 "AI자문" 메뉴 추가 (9개 메뉴)
+
+### KST 타임존 통일
+- `stock/db_base.py` — `KST`, `now_kst()`, `now_kst_iso()` 공용 헬퍼 신규
+- `stock/cache.py` — `datetime.utcnow()` → `now_kst()` (캐시 만료 비교/저장)
+- `stock/order_store.py` — `_now()` → `now_kst_iso()`
+- `stock/advisory_store.py` — `datetime.now()` 4곳 → `now_kst_iso()`
+- `stock/macro_store.py` — 자체 `_KST` 상수 제거, `db_base.KST` 공용 사용
+- `services/macro_service.py` — `datetime.now(timezone.utc)` → `now_kst_iso()`
+- `services/portfolio_advisor_service.py` — `datetime.now()` → `now_kst_iso()`
+- 프론트: `EarningsPage`/`WatchlistDashboard` — `.toISOString()` → 로컬 날짜 헬퍼
+
+### 관심종목 대시보드 속도 개선
+- `services/watchlist_service.py` — 순차 for 루프 → `ThreadPoolExecutor` 병렬 (max 10 workers)
+- `_fetch_dashboard_row()` 함수 추출, `time.sleep(0.05)` 제거
+- 10종목 기준 12-30초 → 2-4초로 단축
+
+### 기타
+- `TradeTable` 매매근거 텍스트 잘림 수정 (`truncate` → `whitespace-pre-line`)
+- `AdvisorPage` 불필요한 "잔고 새로고침" 버튼 제거
+
+---
+
 ## 2026-04-03 — 시스템 리팩토링
 
 ### 시스템 리팩토링 (2026-04-03)

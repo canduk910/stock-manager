@@ -6,10 +6,10 @@ CLI와 API 라우터 양쪽에서 공용으로 사용한다. 데이터는 `~/sto
 
 | 파일 | 역할 |
 |------|------|
-| `db_base.py` | SQLite 공용 유틸. `connect(db_name, init_fn)` contextmanager. WAL 모드 + timeout 10s. 4개 store 공용. |
+| `db_base.py` | SQLite 공용 유틸. `connect(db_name, init_fn)` contextmanager. WAL 모드 + timeout 10s. 4개 store 공용. `KST`/`now_kst()`/`now_kst_iso()` 타임존 헬퍼. |
 | `store.py` | 관심종목 CRUD + 순서 관리. `watchlist.db`. 복합 PK `(code, market)`. `watchlist_order` 테이블로 DnD 순서 영속화. |
 | `order_store.py` | 주문 이력 + 예약주문 CRUD. `orders.db`. `orders`(`status` 파라미터: PENDING/PLACED/REJECTED 등) + `reservations` 테이블. `list_active_orders()`: PENDING/PLACED/PARTIAL 대상. |
-| `advisory_store.py` | AI자문 DB. `advisory.db`. `advisory_stocks` + `advisory_cache` + `advisory_reports` 3테이블. |
+| `advisory_store.py` | AI자문 DB. `advisory.db`. `advisory_stocks` + `advisory_cache` + `advisory_reports` + `portfolio_reports` 4테이블. 포트폴리오 자문 CRUD 포함. |
 | `advisory_fetcher.py` | AI자문 OHLCV 수집 + 사업부문 추론. 기술지표 계산은 indicators.py 위임. |
 | `indicators.py` | 기술적 지표 순수 계산 (MACD/RSI/Stochastic/BB/MA/ATR). 외부 의존 없음 (math만). |
 | `utils.py` | `is_domestic(code)` — 6자리 숫자=국내. `is_fno(code)` — FNO 단축코드 판별. |

@@ -84,7 +84,9 @@ function downloadCsv(stocks) {
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
-  a.download = `watchlist_${new Date().toISOString().slice(0, 10)}.csv`
+  const d = new Date()
+  const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  a.download = `watchlist_${dateStr}.csv`
   a.click()
   URL.revokeObjectURL(url)
 }

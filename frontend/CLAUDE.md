@@ -29,6 +29,7 @@ frontend/
                           fetchAdvisoryOhlcv(code, market, interval, period)
       search.js           searchStocks(q, market) → GET /api/search
       macro.js            fetchMacroIndices / fetchMacroNews / fetchMacroSentiment / fetchMacroInvestorQuotes / fetchMacroSummary
+      advisor.js          analyzePortfolio / fetchAdvisorHistory / fetchAdvisorReport → /api/portfolio-advisor/*
     hooks/
       useAsyncState.js    useAsyncState(initialData) — 비동기 data/loading/error 상태 관리 공통 훅. run(asyncFn)으로 자동 관리.
       useScreener.js      { data, loading, error, search }
@@ -44,8 +45,9 @@ frontend/
       useMarketBoard.js   useMarketBoard (신고가/신저가 + sparkline) + useDisplayStocks (관심종목+별도등록 종목 병합+순서+reorder)
       useAdvisory.js      useAdvisoryStocks / useAdvisoryData / useAdvisoryReport / useAdvisoryOhlcv
       useMacro.js         useMacroIndices / useMacroNews / useMacroSentiment / useMacroInvestorQuotes (섹션별 독립 훅)
+      usePortfolioAdvisor.js  포트폴리오 AI 자문 훅. analyze(balanceData, forceRefresh). useAsyncState 기반.
     components/
-      layout/Header.jsx   네비게이션 바 (8개 메뉴, 로고: "DK STOCK")
+      layout/Header.jsx   네비게이션 바 (9개 메뉴, 로고: "DK STOCK")
       common/             LoadingSpinner, ErrorAlert, EmptyState, DataTable, ToastNotification
                           WatchlistButton (code/market/alreadyAdded props, ★/+ 버튼, StockTable·FilingsTable 공용)
                           CandlestickChart (ohlcv/indicators props, 캔들+MA5/20/60+BB+거래량, PriceChartPanel·TechnicalPanel 공용)
@@ -58,6 +60,9 @@ frontend/
                           ExecutionsTable, OrderHistoryTable, ReservationForm, ReservationsTable, SyncButton,
                           OrderbookPanel (실시간 호가창)
       advisory/           FundamentalPanel, TechnicalPanel, AIReportPanel
+      advisor/            AdvisorPanel (포트폴리오 자문 컨테이너), DiagnosisCard (진단 게이지+섹터),
+                          RebalanceCard (리밸런싱 제안), TradeTable (매매안+주문실행),
+                          TradeConfirmModal (AI 추천 주문 확인 모달)
       macro/              IndexSection (4지수+1년스파크라인+툴팁), SentimentSection (VIX+버핏+공포탐욕),
                           NewsSection (한국+NYT 2컬럼), InvestorSection (4명 투자자 코멘트 카드)
     pages/
@@ -70,6 +75,7 @@ frontend/
       OrderPage.jsx       /order     탭 UI (주문발송/미체결/체결내역/주문이력/예약주문)
       MarketBoardPage.jsx /market-board  시세판: 신고가/신저가 Top10 + 사용자 선택 종목. 실시간 WS.
       MacroPage.jsx       /macro         매크로 분석: 지수+심리+뉴스+투자자 코멘트. 4섹션 독립 로딩.
+      AdvisorPage.jsx     /advisor       AI 포트폴리오 자문: 잔고 로드→분석→이력 조회. showHistory 모드.
 ```
 
 ---

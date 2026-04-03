@@ -1,11 +1,25 @@
 """SQLite 저장소 공통 유틸리티.
 
-모든 store 모듈이 공유하는 DB 디렉토리, 연결 contextmanager, 초기화 관리.
+모든 store 모듈이 공유하는 DB 디렉토리, 연결 contextmanager, 초기화 관리, KST 시간.
 """
 
 import sqlite3
 from contextlib import contextmanager
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+# ── KST 타임존 (한국 표준시 UTC+9) ──────────────────────────────────────────
+KST = timezone(timedelta(hours=9))
+
+
+def now_kst() -> datetime:
+    """현재 KST 시각 (timezone-aware datetime)."""
+    return datetime.now(KST)
+
+
+def now_kst_iso(timespec: str = "seconds") -> str:
+    """현재 KST 시각 ISO 문자열."""
+    return datetime.now(KST).isoformat(timespec=timespec)
 
 DB_DIR = Path.home() / "stock-watchlist"
 

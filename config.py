@@ -24,6 +24,9 @@ OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5-mini")
 # ── Finnhub ──────────────────────────────────────────────────────────────────
 FINNHUB_API_KEY = os.getenv("FINNHUB_API_KEY", "")
 
+# ── Portfolio Advisor ─────────────────────────────────────────────────────────
+ADVISOR_CACHE_TTL_HOURS = float(os.getenv("ADVISOR_CACHE_TTL_HOURS", "0.5"))
+
 # ── KRX 인증 (스크리너용, 선택) ──────────────────────────────────────────────
 KRX_ID = os.getenv("KRX_ID", "")
 KRX_PASSWORD = os.getenv("KRX_PASSWORD", "")

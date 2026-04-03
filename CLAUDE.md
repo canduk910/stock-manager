@@ -79,12 +79,12 @@ python test.py                      # 삼성전자 현재가 조회
 config.py           환경변수 중앙 관리 (os.getenv 단일 진입점)
 wrapper.py          KIS API 완전 래퍼 (standalone)
 main.py             FastAPI 서버 진입점 (라우터 등록 + SPA 정적 파일 서빙)
-routers/            API 라우터 패키지 (10개, quote/market_board는 WebSocket 포함)
-services/           서비스 레이어 (watchlist_service, detail_service, order_service, advisory_service, macro_service, quote_kis/quote_overseas, order_kr/order_us/order_fno)
+routers/            API 라우터 패키지 (12개, quote/market_board는 WebSocket 포함)
+services/           서비스 레이어 (watchlist_service, detail_service, order_service, advisory_service, macro_service, portfolio_advisor_service, quote_kis/quote_overseas, order_kr/order_us/order_fno)
 services/exceptions.py  서비스 레이어 공용 예외 계층 (ServiceError / NotFoundError / ExternalAPIError / ConfigError / PaymentRequiredError / ConflictError)
 screener/           스크리너 패키지 (CLI + API 공용, pykrx + OpenDart)
 stock/              관심종목 패키지 (CLI + API 공용, pykrx + OpenDart + yfinance + advisory_store/fetcher)
-stock/db_base.py    SQLite 공용 유틸 (connect contextmanager + row_to_dict, 4개 store 공용)
+stock/db_base.py    SQLite 공용 유틸 (connect contextmanager + row_to_dict + KST 시간 헬퍼, 4개 store 공용)
 frontend/           React SPA (Vite + Tailwind + Recharts)
 ```
 
@@ -120,6 +120,7 @@ frontend/           React SPA (Vite + Tailwind + Recharts)
 | `OPENAI_MODEL` | 선택 | AI자문 리포트 생성 모델. 기본값: `gpt-4o`. `max_completion_tokens` 사용 (신규 모델 호환). |
 | `FINNHUB_API_KEY` | 선택 | 해외주식 실시간 시세 (Finnhub WS). 미설정 시 yfinance 2초 폴링(15분 지연). |
 | `KIS_HTS_ID` | 선택 | KIS HTS ID. 체결통보(H0STCNI0) WS 실시간 수신용. 미설정 시 폴링만 동작. |
+| `ADVISOR_CACHE_TTL_HOURS` | 선택 | 포트폴리오 자문 캐시 유효기간 (시간). 기본값: `0.5` (30분). |
 | `TEST_KIS_*` | 선택 | 모의계좌용 (`test.py`에서 사용) |
 
 모의투자 BASE_URL: `https://openapivts.koreainvestment.com:29443`

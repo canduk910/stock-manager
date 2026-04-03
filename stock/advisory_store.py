@@ -1,14 +1,13 @@
-"""AI자문 종목 목록 + 캐시 + 리포트 CRUD.
+"""AI자문 종목 목록 + 캐시 + 리포트 + 포트폴리오 자문 CRUD.
 
 DB 위치: ~/stock-watchlist/advisory.db
 """
 
 import json
 import sqlite3
-from datetime import datetime
 from typing import Optional
 
-from .db_base import connect, row_to_dict
+from .db_base import connect, now_kst_iso, row_to_dict
 
 _DB = "advisory.db"
 
@@ -41,6 +40,13 @@ def _create_tables(conn):
             model        TEXT NOT NULL,
             report       TEXT NOT NULL
         );
+
+        CREATE TABLE IF NOT EXISTS portfolio_reports (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            generated_at TEXT NOT NULL,
+            model        TEXT NOT NULL,
+            report       TEXT NOT NULL
+        );
     """)
 
 
@@ -56,7 +62,7 @@ def add_stock(code: str, market: str, name: str, memo: str = "") -> bool:
         with _conn() as con:
             con.execute(
                 "INSERT INTO advisory_stocks (code, market, name, added_date, memo) VALUES (?,?,?,?,?)",
-                (code.upper(), market.upper(), name, datetime.now().isoformat(), memo),
+                (code.upper(), market.upper(), name, now_kst_iso(), memo),
             )
         return True
     except sqlite3.IntegrityError:
@@ -107,7 +113,7 @@ def save_cache(code: str, market: str, fundamental: dict, technical: dict) -> No
             (
                 code.upper(),
                 market.upper(),
-                datetime.now().isoformat(),
+                now_kst_iso(),
                 json.dumps(fundamental, ensure_ascii=False),
                 json.dumps(technical, ensure_ascii=False),
             ),
@@ -142,7 +148,7 @@ def save_report(code: str, market: str, model: str, report: dict) -> int:
             (
                 code.upper(),
                 market.upper(),
-                datetime.now().isoformat(),
+                now_kst_iso(),
                 model,
                 json.dumps(report, ensure_ascii=False),
             ),
@@ -196,6 +202,69 @@ def get_latest_report(code: str, market: str) -> Optional[dict]:
         "id": row["id"],
         "code": row["code"],
         "market": row["market"],
+        "generated_at": row["generated_at"],
+        "model": row["model"],
+        "report": json.loads(row["report"] or "{}"),
+    }
+
+
+# ── 포트폴리오 자문 리포트 CRUD ──────────────────────────────────────────────
+
+def save_portfolio_report(model: str, report: dict) -> int:
+    """포트폴리오 자문 리포트 저장. 생성된 ID 반환."""
+    with _conn() as con:
+        cur = con.execute(
+            "INSERT INTO portfolio_reports (generated_at, model, report) VALUES (?,?,?)",
+            (
+                now_kst_iso(),
+                model,
+                json.dumps(report, ensure_ascii=False),
+            ),
+        )
+        return cur.lastrowid
+
+
+def get_portfolio_report_history(limit: int = 20) -> list[dict]:
+    """포트폴리오 자문 이력 목록 (최신순, 본문 제외)."""
+    with _conn() as con:
+        rows = con.execute(
+            """SELECT id, generated_at, model
+               FROM portfolio_reports
+               ORDER BY id DESC LIMIT ?""",
+            (limit,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_portfolio_report_by_id(report_id: int) -> Optional[dict]:
+    """특정 ID의 포트폴리오 자문 리포트 조회."""
+    with _conn() as con:
+        row = con.execute(
+            "SELECT id, generated_at, model, report FROM portfolio_reports WHERE id=?",
+            (report_id,),
+        ).fetchone()
+    if not row:
+        return None
+    return {
+        "id": row["id"],
+        "generated_at": row["generated_at"],
+        "model": row["model"],
+        "report": json.loads(row["report"] or "{}"),
+    }
+
+
+def get_latest_portfolio_report() -> Optional[dict]:
+    """최신 포트폴리오 자문 리포트 조회."""
+    with _conn() as con:
+        row = con.execute(
+            """SELECT id, generated_at, model, report
+               FROM portfolio_reports
+               ORDER BY id DESC LIMIT 1""",
+        ).fetchone()
+    if not row:
+        return None
+    return {
+        "id": row["id"],
         "generated_at": row["generated_at"],
         "model": row["model"],
         "report": json.loads(row["report"] or "{}"),

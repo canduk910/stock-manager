@@ -5,7 +5,7 @@ broker(KoreaInvestment)는 선택 인자로, 미설정 시 pykrx로 대체한다
 """
 
 import logging
-import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -36,6 +36,100 @@ def _growth(cur: Optional[int], prev: Optional[int]) -> Optional[float]:
 def _period_label(fin: dict) -> str:
     bsns_year = fin.get("bsns_year")
     return f"{bsns_year}/12" if bsns_year else "-"
+
+
+def _fetch_dashboard_row(item: dict) -> dict:
+    """단일 종목 대시보드 행 데이터 수집 (ThreadPoolExecutor에서 실행)."""
+    code = item["code"]
+    market = item.get("market", "KR")
+    domestic = is_domestic(code) and market == "KR"
+
+    row: dict = {
+        "code": code,
+        "market": market,
+        "name": item["name"],
+        "memo": item.get("memo", ""),
+        "currency": "KRW" if domestic else "USD",
+        "price": None,
+        "change": None,
+        "change_pct": None,
+        "market_cap": None,
+        "revenue": None,
+        "operating_profit": None,
+        "net_income": None,
+        "oi_margin": None,
+        "report_date": None,
+        "dividend_yield": None,
+    }
+
+    if domestic:
+        try:
+            price = fetch_price(code)
+            if price:
+                row["price"] = price["close"]
+                row["change"] = price.get("change")
+                row["change_pct"] = price.get("change_pct")
+                row["market_cap"] = _awk(price.get("mktcap"))
+        except Exception as e:
+            logger.debug("시세 조회 실패 (%s): %s", code, e)
+
+        try:
+            metrics = fetch_market_metrics(code)
+            row["dividend_yield"] = metrics.get("dividend_yield")
+        except Exception as e:
+            logger.debug("지표 조회 실패 (%s): %s", code, e)
+
+        try:
+            fin = fetch_financials(code)
+            if fin and fin.get("bsns_year"):
+                rev = fin.get("revenue")
+                op = fin.get("operating_income")
+                net = fin.get("net_income")
+                row["revenue"] = _awk(rev)
+                row["operating_profit"] = _awk(op)
+                row["net_income"] = _awk(net)
+                row["oi_margin"] = (
+                    round(op / rev * 100, 1) if rev and op and rev != 0 else None
+                )
+                row["report_date"] = _period_label(fin)
+        except Exception as e:
+            logger.debug("재무 조회 실패 (%s): %s", code, e)
+    else:
+        try:
+            price = yf_client.fetch_price_yf(code)
+            if price:
+                row["price"] = price["close"]
+                row["change"] = price.get("change")
+                row["change_pct"] = price.get("change_pct")
+                mktcap = price.get("mktcap")
+                row["market_cap"] = _usd_m(mktcap)
+        except Exception as e:
+            logger.debug("해외 시세 조회 실패 (%s): %s", code, e)
+
+        try:
+            detail = yf_client.fetch_detail_yf(code)
+            if detail:
+                row["dividend_yield"] = detail.get("dividend_yield")
+        except Exception as e:
+            logger.debug("해외 상세 조회 실패 (%s): %s", code, e)
+
+        try:
+            fin = yf_client.fetch_financials_yf(code)
+            if fin:
+                rev = fin.get("revenue")
+                op = fin.get("operating_income")
+                net = fin.get("net_income")
+                row["revenue"] = _usd_m(rev)
+                row["operating_profit"] = _usd_m(op)
+                row["net_income"] = _usd_m(net)
+                row["oi_margin"] = (
+                    round(op / rev * 100, 1) if rev and op and rev != 0 else None
+                )
+                row["report_date"] = str(fin.get("year", "")) if fin.get("year") else None
+        except Exception as e:
+            logger.debug("해외 재무 조회 실패 (%s): %s", code, e)
+
+    return row
 
 
 class WatchlistService:
@@ -78,107 +172,16 @@ class WatchlistService:
     def get_dashboard_data(self, items: list[dict]) -> list[dict]:
         """관심종목 목록 → 대시보드 행 데이터 리스트.
 
-        pykrx 배치 호출은 내부 캐싱되므로 종목 수에 관계없이 빠름.
-        DART API는 캐싱 후 종목당 1회 호출, 0.1초 간격 rate-limit.
+        ThreadPoolExecutor로 종목별 데이터 수집을 병렬 처리.
+        각 API 호출은 내부 캐시(stock/cache.py)로 rate-limit 자동 관리.
         """
-        results = []
-        for item in items:
-            code = item["code"]
-            market = item.get("market", "KR")
-            domestic = is_domestic(code) and market == "KR"
-
-            row: dict = {
-                "code": code,
-                "market": market,
-                "name": item["name"],
-                "memo": item.get("memo", ""),
-                "currency": "KRW" if domestic else "USD",
-                # 시세
-                "price": None,
-                "change": None,
-                "change_pct": None,
-                "market_cap": None,
-                # 재무
-                "revenue": None,
-                "operating_profit": None,
-                "net_income": None,
-                "oi_margin": None,
-                "report_date": None,
-                # 배당
-                "dividend_yield": None,
-            }
-
-            if domestic:
-                try:
-                    price = fetch_price(code)
-                    if price:
-                        row["price"] = price["close"]
-                        row["change"] = price.get("change")
-                        row["change_pct"] = price.get("change_pct")
-                        row["market_cap"] = _awk(price.get("mktcap"))
-                except Exception as e:
-                    logger.debug("시세 조회 실패 (%s): %s", code, e)
-
-                try:
-                    metrics = fetch_market_metrics(code)
-                    row["dividend_yield"] = metrics.get("dividend_yield")
-                except Exception as e:
-                    logger.debug("지표 조회 실패 (%s): %s", code, e)
-
-                try:
-                    fin = fetch_financials(code)
-                    if fin and fin.get("bsns_year"):
-                        rev = fin.get("revenue")
-                        op = fin.get("operating_income")
-                        net = fin.get("net_income")
-                        row["revenue"] = _awk(rev)
-                        row["operating_profit"] = _awk(op)
-                        row["net_income"] = _awk(net)
-                        row["oi_margin"] = (
-                            round(op / rev * 100, 1) if rev and op and rev != 0 else None
-                        )
-                        row["report_date"] = _period_label(fin)
-                except Exception as e:
-                    logger.debug("재무 조회 실패 (%s): %s", code, e)
-            else:
-                # 해외: yfinance
-                try:
-                    price = yf_client.fetch_price_yf(code)
-                    if price:
-                        row["price"] = price["close"]
-                        row["change"] = price.get("change")
-                        row["change_pct"] = price.get("change_pct")
-                        mktcap = price.get("mktcap")
-                        row["market_cap"] = _usd_m(mktcap)  # M USD
-                except Exception as e:
-                    logger.debug("해외 시세 조회 실패 (%s): %s", code, e)
-
-                try:
-                    detail = yf_client.fetch_detail_yf(code)
-                    if detail:
-                        row["dividend_yield"] = detail.get("dividend_yield")
-                except Exception as e:
-                    logger.debug("해외 상세 조회 실패 (%s): %s", code, e)
-
-                try:
-                    fin = yf_client.fetch_financials_yf(code)
-                    if fin:
-                        rev = fin.get("revenue")
-                        op = fin.get("operating_income")
-                        net = fin.get("net_income")
-                        row["revenue"] = _usd_m(rev)
-                        row["operating_profit"] = _usd_m(op)
-                        row["net_income"] = _usd_m(net)
-                        row["oi_margin"] = (
-                            round(op / rev * 100, 1) if rev and op and rev != 0 else None
-                        )
-                        row["report_date"] = str(fin.get("year", "")) if fin.get("year") else None
-                except Exception as e:
-                    logger.debug("해외 재무 조회 실패 (%s): %s", code, e)
-
-            results.append(row)
-            time.sleep(0.05)  # rate-limit 여유
-
+        if not items:
+            return []
+        results: list[dict | None] = [None] * len(items)
+        with ThreadPoolExecutor(max_workers=min(10, len(items))) as ex:
+            futures = {ex.submit(_fetch_dashboard_row, item): i for i, item in enumerate(items)}
+            for fut in as_completed(futures):
+                results[futures[fut]] = fut.result()
         return results
 
     # ── 단일 종목 상세 ───────────────────────────────────────────────────────

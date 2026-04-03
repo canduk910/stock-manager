@@ -6,6 +6,8 @@ import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from stock.db_base import now_kst
+
 
 def _sanitize(obj):
     """재귀적으로 NaN/Inf를 None으로 변환 (JSON 직렬화 안전 보장)."""
@@ -48,16 +50,16 @@ def get_cached(key: str):
         if not row:
             return None
         value, expires = row
-        if datetime.utcnow() > datetime.fromisoformat(expires):
+        if now_kst() > datetime.fromisoformat(expires):
             return None
         return _sanitize(json.loads(value))
     except Exception:
         return None
 
 
-def set_cached(key: str, value, ttl_hours: int = 24) -> None:
+def set_cached(key: str, value, ttl_hours: float = 24) -> None:
     """데이터를 캐시에 저장. NaN/Inf는 None으로 변환 후 저장."""
-    expires = (datetime.utcnow() + timedelta(hours=ttl_hours)).isoformat()
+    expires = (now_kst() + timedelta(hours=ttl_hours)).isoformat()
     try:
         sanitized = _sanitize(value)
         with _conn() as con:

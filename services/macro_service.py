@@ -7,7 +7,7 @@ from __future__ import annotations
 import json
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, timezone
+from stock.db_base import now_kst_iso
 from typing import Optional
 
 from config import OPENAI_API_KEY, OPENAI_MODEL
@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 def get_indices() -> dict:
     """4대 지수 현재가 + 스파크라인. 병렬 수집."""
     results = []
-    now = datetime.now(timezone.utc).isoformat()
+    now = now_kst_iso()
 
     with ThreadPoolExecutor(max_workers=4) as pool:
         futures = {}
@@ -132,7 +132,7 @@ def get_sentiment() -> dict:
     except Exception as e:
         errors.append(f"공포탐욕: {e}")
 
-    now = datetime.now(timezone.utc).isoformat()
+    now = now_kst_iso()
     return {
         "vix": vix,
         "buffett_indicator": buffett,

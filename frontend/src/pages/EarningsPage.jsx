@@ -5,8 +5,12 @@ import LoadingSpinner from '../components/common/LoadingSpinner'
 import ErrorAlert from '../components/common/ErrorAlert'
 import EmptyState from '../components/common/EmptyState'
 
+function localDateStr(d = new Date()) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
 function todayStr() {
-  return new Date().toISOString().slice(0, 10)
+  return localDateStr()
 }
 
 function fmtDate8(s) {
@@ -119,8 +123,8 @@ export default function EarningsPage() {
                   const end = new Date()
                   const start = new Date()
                   start.setDate(start.getDate() - days)
-                  setStartDate(start.toISOString().slice(0, 10))
-                  setEndDate(end.toISOString().slice(0, 10))
+                  setStartDate(localDateStr(start))
+                  setEndDate(localDateStr(end))
                 }}
                 className="px-2.5 py-1 text-xs border border-gray-300 rounded-lg hover:bg-gray-50 text-gray-600 whitespace-nowrap"
               >

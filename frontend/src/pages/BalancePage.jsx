@@ -6,8 +6,9 @@ import OverseasHoldingsTable from '../components/balance/OverseasHoldingsTable'
 import FuturesTable from '../components/balance/FuturesTable'
 import LoadingSpinner from '../components/common/LoadingSpinner'
 import EmptyState from '../components/common/EmptyState'
+import AdvisorPanel from '../components/advisor/AdvisorPanel'
 
-export default function BalancePage() {
+export default function BalancePage({ notify }) {
   const { data, loading, error, load } = useBalance()
 
   useEffect(() => {
@@ -80,6 +81,9 @@ export default function BalancePage() {
               )}
             </div>
           )}
+
+          {/* AI 포트폴리오 자문 */}
+          <AdvisorPanel balanceData={data} notify={notify} />
         </div>
       )}
     </div>

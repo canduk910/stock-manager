@@ -7,13 +7,12 @@ from __future__ import annotations
 
 import json
 import random
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 from typing import Optional
 
-from .db_base import connect
+from .db_base import KST, connect, now_kst
 
 _DB = "macro.db"
-_KST = timezone(timedelta(hours=9))
 
 
 def _create_tables(conn):
@@ -33,13 +32,13 @@ def _conn():
 
 
 def _today_kst() -> str:
-    return datetime.now(_KST).strftime("%Y-%m-%d")
+    return now_kst().strftime("%Y-%m-%d")
 
 
 def _maybe_cleanup(conn):
     """~5% 확률로 30일 이전 데이터 삭제."""
     if random.random() < 0.05:
-        cutoff = (datetime.now(_KST) - timedelta(days=30)).strftime("%Y-%m-%d")
+        cutoff = (now_kst() - timedelta(days=30)).strftime("%Y-%m-%d")
         conn.execute("DELETE FROM macro_gpt_cache WHERE date_kst < ?", (cutoff,))
 
 
@@ -60,7 +59,7 @@ def get_today(category: str) -> Optional[any]:
 def save_today(category: str, result) -> None:
     """당일(KST) GPT 결과 저장 (upsert)."""
     today = _today_kst()
-    now = datetime.now(_KST).isoformat()
+    now = now_kst().isoformat()
     with _conn() as con:
         con.execute(
             """INSERT INTO macro_gpt_cache (category, date_kst, result, created_at)
