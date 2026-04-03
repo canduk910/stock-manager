@@ -1,5 +1,26 @@
 # 변경 이력
 
+## 2026-04-03 — 시스템 리팩토링
+
+### 시스템 리팩토링 (2026-04-03)
+
+**HIGH (5건)**
+- H1: `search.js`/`marketBoard.js` → `apiFetch()` 경유로 에러 처리 통일
+- H2: `useAsyncState` 공통 훅 추출, 15개 훅 보일러플레이트 제거
+- H3: `order_service.py`(1,338줄) → 4파일 분할 (order_service + order_kr/us/fno). Write-Ahead 패턴 dispatcher 중앙화
+- H4: `quote_service.py`(964줄) → 3파일 분할 (quote_service + quote_kis + quote_overseas)
+- H5: KIS 토큰 캐시 3곳 → `_kis_auth.py` 단일화 + TTL 관리
+
+**MEDIUM (3건)**
+- M2: `watchlist_service.py` silent `except: pass` 7건 → `logger.debug` 전환
+- M5: 라우터 HTTPException 22건 → ServiceError 계층 통일. `ConflictError(409)` 신규
+- M6: `advisory_fetcher.py` 기술지표 8개 순수 함수 → `stock/indicators.py` 분리
+
+**LOW (1건)**
+- L4: 미사용 import 정리 (Optional, math 등)
+
+---
+
 ## 2026-04-03 — AI 에이전트 팀 (하네스) 구성
 
 ### 에이전트 7명 (`.claude/agents/`)

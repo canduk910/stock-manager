@@ -11,8 +11,14 @@
 | `exceptions.py` | 서비스 레이어 공용 예외 계층 (FastAPI HTTPException 의존 제거) |
 | `watchlist_service.py` | `WatchlistService` — 관심종목 대시보드 + 상세 조회 |
 | `detail_service.py` | `DetailService` — 종목 상세 분석 (재무/밸류에이션/리포트) |
-| `quote_service.py` | `KISQuoteManager` 싱글턴 — KIS WebSocket 단일 연결 + 심볼별 pub/sub (국내 + FNO 모두 지원) |
+| `quote_service.py` | 실시간 시세 공개 API 진입점 (싱글턴 `get_manager`/`get_overseas_manager`) |
+| `quote_kis.py` | KIS WebSocket 단일 연결 + 심볼별 pub/sub (국내+FNO) + 체결통보(H0STCNI0) |
+| `quote_overseas.py` | 해외주식 시세 (Finnhub WS 또는 yfinance 2초 폴링) |
 | `advisory_service.py` | 자문종목 데이터 수집 + OpenAI 리포트 생성 |
+| `order_service.py` | 주문 오케스트레이션 + Write-Ahead 패턴 + 대사(Reconciliation). 시장별 실행은 order_kr/us/fno에 위임. |
+| `order_kr.py` | 국내주식 KIS API 주문 실행 (발주/조회/정정/취소) |
+| `order_us.py` | 해외주식 KIS API 주문 실행 |
+| `order_fno.py` | 선물옵션 KIS API 주문 실행 |
 
 ---
 
@@ -30,6 +36,7 @@ class NotFoundError(ServiceError): ...      # 404
 class ExternalAPIError(ServiceError): ...   # 502
 class ConfigError(ServiceError): ...        # 503
 class PaymentRequiredError(ServiceError):... # 402
+class ConflictError(ServiceError): ...      # 409
 ```
 
 | 예외 | HTTP | 사용 예 |
@@ -38,6 +45,7 @@ class PaymentRequiredError(ServiceError):... # 402
 | `ExternalAPIError` | 502 | KIS·OpenAI API 오류 |
 | `ConfigError` | 503 | API 키 미설정 |
 | `PaymentRequiredError` | 402 | OpenAI 크레딧 부족(429) |
+| `ConflictError` | 409 | 리소스 중복 (예: 관심종목/시세판 종목 중복 등록) |
 
 ---
 

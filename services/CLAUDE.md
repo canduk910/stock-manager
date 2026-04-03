@@ -9,9 +9,14 @@
 | `exceptions.py` | 공용 예외 계층 |
 | `watchlist_service.py` | 관심종목 대시보드 + 종목 상세 (국내=pykrx+DART, 해외=yfinance) |
 | `detail_service.py` | 재무 테이블 + PER/PBR 히스토리 + CAGR 종합 리포트 |
-| `order_service.py` | 국내/해외/FNO 주문 전체 관리 (KIS API 직접 호출) |
+| `order_service.py` | 주문 오케스트레이션 + 대사 (시장별 실행은 order_kr/us/fno에 위임) |
+| `order_kr.py` | 국내주식 KIS API 주문 실행 (발주/조회/정정/취소) |
+| `order_us.py` | 해외주식 KIS API 주문 실행 |
+| `order_fno.py` | 선물옵션 KIS API 주문 실행 |
 | `reservation_service.py` | 예약주문 실행 엔진 (asyncio 20초 폴링) |
-| `quote_service.py` | 실시간 시세 WebSocket 관리 (국내 KIS WS + 해외 Finnhub/yfinance) + 체결통보(H0STCNI0) 수신 |
+| `quote_service.py` | 실시간 시세 공개 API 진입점 (get_manager/get_overseas_manager 싱글턴) |
+| `quote_kis.py` | KIS WebSocket 단일 연결 + 심볼별 pub/sub (국내+FNO). KISQuoteManager 클래스. |
+| `quote_overseas.py` | 해외주식 시세 (Finnhub WS 또는 yfinance 2초 폴링). OverseasQuoteManager 클래스. |
 | `advisory_service.py` | AI자문 데이터 수집 + GPT-4o 리포트 생성 |
 | `macro_service.py` | 매크로 분석 오케스트레이션: 병렬 수집 + GPT 번역/추출 + 섹션별 독립 실패 허용. GPT 결과는 `macro.db`에 일일 캐싱 (KST 기준) |
 
@@ -22,6 +27,7 @@
 ```
 ServiceError (기본 400)
 ├── NotFoundError (404)
+├── ConflictError (409)
 ├── ExternalAPIError (502)
 ├── ConfigError (503)
 └── PaymentRequiredError (402)
@@ -43,7 +49,8 @@ ServiceError (기본 400)
 
 ### order_service.py
 - **`routers/order.py`의 유일한 의존 대상** — `order_store` 직접 import 금지
-- **Write-Ahead 주문 패턴**: PENDING 선행 기록 → KIS API → 성공 시 PLACED / 실패 시 REJECTED (split-brain 방지)
+- **시장별 분할**: 실제 KIS API 호출은 `order_kr.py`/`order_us.py`/`order_fno.py`에 위임. `order_store`는 `order_service.py`에서만 접근.
+- **Write-Ahead 중앙화**: `place_order()` dispatcher가 PENDING→API→PLACED/REJECTED 전체 흐름 관리
 - `cancel_order()` → 로컬 DB 즉시 CANCELLED + `local_synced`/`order_status` 응답. 동기화 실패 시 로깅
 - `modify_order()` → 로컬 DB 가격/수량 즉시 반영 + `local_synced`. 동기화 실패 시 로깅
 - `get_order_history()` / `get_executions()` → **30초 쿨다운** 대사 (`_maybe_reconcile()`). F5 연타 시 KIS API 호출 0회
@@ -52,8 +59,12 @@ ServiceError (기본 400)
 - `_strip_leading_zeros()`: 10자리→8자리 주문번호 변환
 - **FNO**: `_is_fno_night_session()`으로 주간/야간 TR_ID 자동 선택. `KIS_ACNT_PRDT_CD_FNO` 미설정 시 `ConfigError` → 503
 
-### quote_service.py
-- **KISQuoteManager**: KIS WS 단일 연결 + 심볼별 `asyncio.Queue` pub/sub
+### quote_service.py (공개 API 진입점)
+- `get_manager()` → `KISQuoteManager` 싱글턴, `get_overseas_manager()` → `OverseasQuoteManager` 싱글턴
+- **실제 구현은 분할 파일에 위임**:
+
+### quote_kis.py (KISQuoteManager)
+- KIS WS 단일 연결 + 심볼별 `asyncio.Queue` pub/sub
   - WS 끊김 → REST fallback(`FHKST01010100`) 3초 폴링, 재연결 시 자동 해제
   - 재연결 지수 백오프 (1→30초)
   - Approval key 12시간 TTL: `_get_approval_key()` 자동 재발급
@@ -71,7 +82,9 @@ ServiceError (기본 400)
   - `subscribe_notice()`/`unsubscribe_notice()`: 심볼 무관, 계정 단위 pub/sub
   - `_broadcast_notice()`: 모든 notice 구독자에게 전송. `/ws/execution-notice` WS 엔드포인트
   - 미설정 시 폴링만 동작 (에러 없음)
-- **OverseasQuoteManager**: Finnhub WS(30 심볼) 또는 yfinance 2초 폴링
+
+### quote_overseas.py (OverseasQuoteManager)
+- Finnhub WS(30 심볼) 또는 yfinance 2초 폴링
   - `fast_info.last_price or previous_close` 패턴 (비개장일 직전 종가)
   - 구독자 0 → on-demand cancel
 

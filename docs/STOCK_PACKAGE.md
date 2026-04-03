@@ -14,7 +14,8 @@
 | `store.py` | 관심종목 CRUD (SQLite) |
 | `order_store.py` | 주문 이력 + 예약주문 CRUD (SQLite, `orders.db`) |
 | `advisory_store.py` | AI자문 종목/캐시/리포트 CRUD (SQLite, `advisory.db`). 리포트 히스토리 조회 지원. |
-| `advisory_fetcher.py` | 15분봉 OHLCV 수집 + 기술적 지표 계산 + 사업부문 추론 |
+| `advisory_fetcher.py` | OHLCV 수집 + 사업부문 추론. 기술지표 계산은 `indicators.py` 위임. |
+| `indicators.py` | 기술적 지표 순수 계산 (MACD/RSI/Stochastic/BB/MA/ATR). 외부 의존 없음. |
 | `symbol_map.py` | 종목코드 ↔ 종목명 매핑 (pykrx 기반, fallback 포함). 서버 시작 시 background thread로 pre-warm. |
 | `market.py` | yfinance 기반 국내 시세/펀더멘털 수집. `_is_kr_trading_hours()` / `_is_us_trading_hours()` 장중판별 헬퍼 포함. TTL 장중/장외 자동 분리. |
 | `dart_fin.py` | OpenDart 재무데이터 수집 (IS + BS + CF) |
@@ -127,9 +128,9 @@ advisory_reports  -- AI 리포트 이력 (autoincrement id)
 
 ---
 
-## `advisory_fetcher.py` — 기술적 분석 데이터 수집
+## `advisory_fetcher.py` — OHLCV 수집 + 사업부문 추론
 
-15분봉 OHLCV 수집 + 순수 Python 기술적 지표 계산 + 사업부문 추론.
+15분봉 OHLCV 수집 + 사업부문 추론. 기술적 지표 계산은 `indicators.py`에 위임한다.
 
 ### 토큰 캐싱 (`_get_kis_token`)
 
@@ -142,8 +143,7 @@ KIS API의 토큰 발급 분당 1회 제한에 대응하기 위해 모듈 수준
 |------|------|
 | `fetch_15min_ohlcv_kr(code)` | KIS 1분봉 4회 호출 → 15분 resample. 30봉 미만 시 yfinance fallback. 최대 300봉 반환. |
 | `fetch_15min_ohlcv_us(code)` | yfinance `.history(period='5d', interval='15m')`. 최대 300봉 반환. |
-| `fetch_ohlcv_by_interval(code, market, interval, period)` | 타임프레임/기간 지정 OHLCV 수집 후 `calc_technical_indicators()` 자동 호출. `{"ohlcv": [...], "indicators": {...}}` 반환. interval=`15m`/`60m`/`1d`/`1wk`. yfinance 최대 기간 자동 조정. |
-| `calc_technical_indicators(ohlcv)` | 기술적 지표 계산. 데이터 부족 시 None 처리. 최대 300봉 입력 지원. **ATR(14, Wilder법)**, **MA배열** (`ma_alignment`: 정배열/역배열/혼합), **K=0.3·0.5·0.7 변동성 돌파 목표가** 추가. |
+| `fetch_ohlcv_by_interval(code, market, interval, period)` | 타임프레임/기간 지정 OHLCV 수집 후 `indicators.calc_technical_indicators()` 자동 호출. `{"ohlcv": [...], "indicators": {...}}` 반환. interval=`15m`/`60m`/`1d`/`1wk`. yfinance 최대 기간 자동 조정. |
 | `fetch_segments_kr(code, name)` | OpenAI로 국내 기업 사업부문+사업설명+테마키워드 통합 추론. 반환: `dict` (`{"segments": [...], "description": str, "keywords": [str]}`) |
 
 #### `fetch_15min_ohlcv_kr` 동작 방식
@@ -187,7 +187,9 @@ period가 최대치를 초과하면 자동으로 최대값으로 조정.
 
 KIS 키 미설정 시 즉시 yfinance fallback 시도. yfinance도 실패 시 `[]` 반환.
 
-#### `calc_technical_indicators` 반환 구조
+#### `indicators.calc_technical_indicators` 반환 구조
+
+> `stock/indicators.py`에서 제공. `advisory_fetcher.py`의 `fetch_ohlcv_by_interval()`이 내부적으로 호출한다.
 
 ```python
 {
@@ -217,7 +219,7 @@ KIS 키 미설정 시 즉시 yfinance fallback 시도. yfinance도 실패 시 `[
 }
 ```
 
-기술지표 구현 방식 (외부 TA 라이브러리 미사용):
+기술지표 구현 방식 (`stock/indicators.py`, 외부 TA 라이브러리 미사용):
 - MACD: EMA(12) - EMA(26), Signal = EMA(9)
 - RSI: Wilder's RSI (14기간)
 - Stochastic: %K 14기간, %D = SMA(%K, 3)

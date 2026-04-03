@@ -30,6 +30,7 @@ frontend/
       search.js           searchStocks(q, market) → GET /api/search
       macro.js            fetchMacroIndices / fetchMacroNews / fetchMacroSentiment / fetchMacroInvestorQuotes / fetchMacroSummary
     hooks/
+      useAsyncState.js    useAsyncState(initialData) — 비동기 data/loading/error 상태 관리 공통 훅. run(asyncFn)으로 자동 관리.
       useScreener.js      { data, loading, error, search }
       useEarnings.js      { data, loading, error, load(startDate, endDate, market) }
       useBalance.js       { data, loading, error, load }

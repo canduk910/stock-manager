@@ -22,7 +22,7 @@
 ## 핸들러 규칙
 
 - **모든 핸들러는 `def`(sync)** — pykrx/requests가 동기 라이브러리이므로 FastAPI가 threadpool에서 자동 실행
-- **예외는 ServiceError 계층 사용** — `HTTPException` 직접 raise 금지. `main.py`에서 `@app.exception_handler(ServiceError)`로 일괄 HTTP 변환
+- **예외는 ServiceError 계층 사용** — `HTTPException` 직접 raise 금지. earnings.py/screener.py만 입력 검증(422)에 HTTPException 유지. `main.py`에서 `@app.exception_handler(ServiceError)`로 일괄 HTTP 변환
 - `_kis_auth.py` 예외도 `ConfigError`/`ExternalAPIError` 사용 (ServiceError 계층 통일)
 
 ## 환경변수 미설정 동작

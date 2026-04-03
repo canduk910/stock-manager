@@ -80,8 +80,8 @@ config.py           환경변수 중앙 관리 (os.getenv 단일 진입점)
 wrapper.py          KIS API 완전 래퍼 (standalone)
 main.py             FastAPI 서버 진입점 (라우터 등록 + SPA 정적 파일 서빙)
 routers/            API 라우터 패키지 (10개, quote/market_board는 WebSocket 포함)
-services/           서비스 레이어 (watchlist_service, detail_service, quote_service, advisory_service)
-services/exceptions.py  서비스 레이어 공용 예외 계층 (ServiceError / NotFoundError / ExternalAPIError / ConfigError / PaymentRequiredError)
+services/           서비스 레이어 (watchlist_service, detail_service, order_service, advisory_service, macro_service, quote_kis/quote_overseas, order_kr/order_us/order_fno)
+services/exceptions.py  서비스 레이어 공용 예외 계층 (ServiceError / NotFoundError / ExternalAPIError / ConfigError / PaymentRequiredError / ConflictError)
 screener/           스크리너 패키지 (CLI + API 공용, pykrx + OpenDart)
 stock/              관심종목 패키지 (CLI + API 공용, pykrx + OpenDart + yfinance + advisory_store/fetcher)
 stock/db_base.py    SQLite 공용 유틸 (connect contextmanager + row_to_dict, 4개 store 공용)
@@ -99,7 +99,7 @@ frontend/           React SPA (Vite + Tailwind + Recharts)
 
 ### 예외 계층
 
-`ServiceError`(400) → `NotFoundError`(404) / `ExternalAPIError`(502) / `ConfigError`(503) / `PaymentRequiredError`(402). `main.py`에서 일괄 HTTP 변환. 모든 서비스/라우터에서 `HTTPException` 직접 raise 금지.
+`ServiceError`(400) → `NotFoundError`(404) / `ExternalAPIError`(502) / `ConfigError`(503) / `PaymentRequiredError`(402) / `ConflictError`(409). `main.py`에서 일괄 HTTP 변환. 모든 서비스/라우터에서 `HTTPException` 직접 raise 금지.
 
 ---
 
@@ -173,7 +173,7 @@ Stage 2  python:3.11-slim → pip install + 앱 소스 + COPY --from Stage 1
 
 ## 패키지 주의사항
 
-`requirements.txt` 포함: `websockets` (KIS WS 연결용, `services/quote_service.py`)
+`requirements.txt` 포함: `websockets` (KIS WS 연결용, `services/quote_kis.py`)
 
 미포함 (별도 설치): `pycryptodome` — `KoreaInvestmentWS` 체결통보 AES 복호화용
 
