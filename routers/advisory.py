@@ -5,7 +5,6 @@
 
 from fastapi import APIRouter, Query
 from pydantic import BaseModel
-from typing import Optional
 
 from services import advisory_service
 from services.exceptions import ServiceError, NotFoundError, ConflictError

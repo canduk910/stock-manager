@@ -10,7 +10,6 @@ WS     /ws/market-board                         다중심볼 실시간 시세
 import asyncio
 import json
 import logging
-from typing import Optional
 
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
