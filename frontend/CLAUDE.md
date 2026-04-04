@@ -48,7 +48,7 @@ frontend/
       usePortfolioAdvisor.js  포트폴리오 AI 자문 훅. analyze/loadLatest/loadById. stale closure 해결 (loadHistory 의존성 없음).
       usePortfolio.js     포트폴리오 대시보드 훅. balance+sentiment 병렬 로드 + 자산배분/안전마진등급 계산.
     components/
-      layout/Header.jsx   네비게이션 바 (9개 메뉴, 로고: "DK STOCK")
+      layout/Header.jsx   네비게이션 바 (5개 탑레벨: 포트폴리오|분석▼|관심종목|매매▼|시세판, 드롭다운 hover)
       common/             LoadingSpinner, ErrorAlert, EmptyState, DataTable, ToastNotification
                           WatchlistButton (code/market/alreadyAdded props, ★/+ 버튼, StockTable·FilingsTable 공용)
                           CandlestickChart (ohlcv/indicators props, 캔들+MA5/20/60+BB+거래량, PriceChartPanel·TechnicalPanel 공용)
@@ -69,7 +69,7 @@ frontend/
       macro/              IndexSection (4지수+1년스파크라인+툴팁), SentimentSection (VIX+버핏+공포탐욕),
                           NewsSection (한국+NYT 2컬럼), InvestorSection (4명 투자자 코멘트 카드)
     pages/
-      DashboardPage.jsx   /         잔고 요약 + 오늘 공시 + 시총 상위
+      DashboardPage.jsx   /         포트폴리오 요약(체제배너+자산현황+배분차트) + 오늘 공시
       ScreenerPage.jsx    /screener
       EarningsPage.jsx    /earnings  국내/미국 탭 선택 + 기간 조회
       BalancePage.jsx     /balance
