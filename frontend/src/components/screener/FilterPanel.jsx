@@ -10,6 +10,7 @@ const DEFAULT_FILTERS = {
   per_max: '',
   pbr_max: '',
   roe_min: '',
+  drop_from_high: '',
   include_negative: false,
   earnings_only: false,
 }
@@ -38,6 +39,7 @@ export default function FilterPanel({ onSearch, loading }) {
     if (filters.per_max !== '') params.per_max = Number(filters.per_max)
     if (filters.pbr_max !== '') params.pbr_max = Number(filters.pbr_max)
     if (filters.roe_min !== '') params.roe_min = Number(filters.roe_min)
+    if (filters.drop_from_high !== '') params.drop_from_high = Number(filters.drop_from_high)
     if (filters.include_negative) params.include_negative = true
     if (filters.earnings_only) params.earnings_only = true
     onSearch(params)
@@ -96,8 +98,8 @@ export default function FilterPanel({ onSearch, loading }) {
         </div>
       </div>
 
-      {/* PBR 최대 & ROE 최소 */}
-      <div className="grid grid-cols-2 gap-3">
+      {/* PBR 최대 & ROE 최소 & 52주 하락률 */}
+      <div className="grid grid-cols-3 gap-3">
         <label className="flex flex-col gap-1">
           <span className="text-xs font-medium text-gray-500">PBR 최대</span>
           <input
@@ -118,6 +120,17 @@ export default function FilterPanel({ onSearch, loading }) {
             onChange={(e) => set('roe_min', e.target.value)}
             className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
             step="0.1"
+          />
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-xs font-medium text-gray-500">52주 고점 대비 (%)</span>
+          <input
+            type="number"
+            placeholder="예: -30"
+            value={filters.drop_from_high}
+            onChange={(e) => set('drop_from_high', e.target.value)}
+            className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+            step="5"
           />
         </label>
       </div>

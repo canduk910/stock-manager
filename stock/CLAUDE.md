@@ -61,7 +61,7 @@ CLI와 API 라우터 양쪽에서 공용으로 사용한다. 비즈니스 데이
 ### market.py — yfinance 기반 (중요)
 - 2026-02 KRX 서버 변경으로 pykrx 전면 yfinance 전환.
 - `_kr_yf_ticker_str(code)`: `.KS`(KOSPI)/`.KQ`(KOSDAQ) suffix 자동 선택 (7일 캐시).
-- `fetch_market_metrics(code)`: 시가총액·PER·PBR·ROE·배당수익률·주당배당금 (6시간 캐시).
+- `fetch_market_metrics(code)`: 시가총액·PER·PBR·ROE·배당수익률·주당배당금·52주고가·52주저가 (6시간 캐시). PBR fallback: `priceToBook` None 시 대차대조표 자본총계/주식수로 직접 계산.
 
 ### 배당수익률 우선순위 (중요)
 1. `dividendYield` — 이미 % 형태 (0.4, 1.3). KR/US 공통. **우선 사용**

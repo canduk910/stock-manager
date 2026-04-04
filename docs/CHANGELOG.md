@@ -1,8 +1,31 @@
 # 변경 이력
 
-## 2026-04-04 — 관심종목 자동완성 검색
+## 2026-04-04 — 역발상 매수 전략 + 밸류에이션 차트 확장 + UI 개선
+
+### 프롬프트 개선
+- 포트폴리오 AI자문: cautious/selective 체제에서 역발상 매수 규칙 10개 추가 (규칙 19~28)
+- 역발상 매수 5대 적격 조건 (52주 -30%+, PBR<1.0, 부채비율<100%, 영업이익 흑자, FCF 양수)
+- 보유종목 vs 신규종목 판단 분리, 포지션 한도 (cautious 1.5%/7.5%)
+- 포트폴리오 자문 컨텍스트에 종목별 52주 고가·하락률 추가
+
+### 신규 기능
+- 스크리너 API: `drop_from_high` 쿼리 파라미터 추가 (52주 고점 대비 하락률 필터)
+- 스크리너 enrichment: `high_52`, `low_52`, `drop_from_high` 필드 추가
+- FilterPanel: "52주 고점 대비 (%)" 입력 필드 추가
 
 ### UI 개선
+- 메뉴바 순서 변경: 시세판→관심종목→분석▼→포트폴리오→매매▼, 그룹 구분선 3개
+- ValuationChart: 시가총액 추이(보라) + 발행주식수 추이(주황) 차트 추가
+- 발행주식수: 분기별 시계열 반영 (자사주 소각 등 변동 추적)
+
+### 버그 수정
+- EPS fallback: DART EPS 미제공 종목(SK하이닉스 등)에서 net_income/shares로 직접 계산
+- PBR fallback: yfinance priceToBook None 시 대차대조표 자본총계/주식수로 계산 (골프존 등)
+- yf_client: tz-aware/tz-naive 비교 버그 수정 (밸류에이션 히스토리 빈 배열 반환)
+- KRX 경로: pykrx 빈 결과 시 yfinance fallback 전환
+- fetch_market_metrics: high_52/low_52 필드 추가
+
+### UI 개선 (자동완성)
 - AddStockForm에 자동완성 검색 추가 (KR: 400ms debounce + 드롭다운, US: 티커 직접 입력)
 - 기존 searchStocks API 재사용, 외부 클릭 닫기, 시장 변경 시 상태 초기화
 

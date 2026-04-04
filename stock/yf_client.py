@@ -574,14 +574,21 @@ def fetch_valuation_history_yf(code: str, years: int = 5) -> list[dict]:
                     eq_series = qbs.loc[name].sort_index()
                     break
 
-        # 3. 발행주식수 (BPS 계산용)
-        shares = None
+        # 3. 발행주식수 시계열 (분기별) + 현재값 fallback
+        shares_series = None
+        if qbs is not None and not qbs.empty:
+            for name in ("Ordinary Shares Number", "Share Issued"):
+                if name in qbs.index:
+                    shares_series = qbs.loc[name].dropna().sort_index()
+                    break
+
+        shares_current = None
         try:
-            shares = _safe(t.fast_info.shares)
+            shares_current = _safe(t.fast_info.shares)
         except Exception:
             pass
-        if not shares:
-            shares = _safe((t.info or {}).get("sharesOutstanding"))
+        if not shares_current:
+            shares_current = _safe((t.info or {}).get("sharesOutstanding"))
 
         # 4. 일별 주가 → 월별 마지막 종가
         hist = t.history(period=f"{years}y")
@@ -598,11 +605,13 @@ def fetch_valuation_history_yf(code: str, years: int = 5) -> list[dict]:
                 continue
 
             date_label = ts.strftime("%Y-%m")
+            # tz-aware→tz-naive 변환 (eps/eq_series는 tz-naive)
+            ts_naive = ts.tz_localize(None) if ts.tzinfo else ts
 
             # PER: TTM EPS (해당 날짜 이전 최근 4분기 합산)
             per = None
             if eps_series is not None:
-                past = eps_series[eps_series.index <= ts]
+                past = eps_series[eps_series.index <= ts_naive]
                 if len(past) >= 4:
                     ttm = _safe(float(past.iloc[-4:].sum()))
                     if ttm and ttm > 0:
@@ -613,10 +622,17 @@ def fetch_valuation_history_yf(code: str, years: int = 5) -> list[dict]:
                     if latest and latest > 0:
                         per = _safe(round(price_val / (latest * 4), 1))
 
+            # 해당 월 기준 발행주식수 (분기별 시계열에서 최근값)
+            shares = shares_current  # fallback
+            if shares_series is not None and len(shares_series) > 0:
+                past_shares = shares_series[shares_series.index <= ts_naive]
+                if len(past_shares) >= 1:
+                    shares = int(past_shares.iloc[-1])
+
             # PBR: BPS = equity ÷ shares
             pbr = None
             if eq_series is not None and shares:
-                past_eq = eq_series[eq_series.index <= ts]
+                past_eq = eq_series[eq_series.index <= ts_naive]
                 if len(past_eq) >= 1:
                     eq = _safe(float(past_eq.iloc[-1]))
                     if eq and eq > 0:
@@ -628,7 +644,11 @@ def fetch_valuation_history_yf(code: str, years: int = 5) -> list[dict]:
             if per is not None and (per <= 0 or per > 500):
                 per = None
 
-            result.append({"date": date_label, "per": per, "pbr": pbr})
+            mktcap = None
+            if price_val and shares:
+                mktcap = round(price_val * shares)
+            result.append({"date": date_label, "per": per, "pbr": pbr,
+                           "mktcap": mktcap, "shares": int(shares) if shares else None})
 
         set_cached(key, result, ttl_hours=24)
         return result

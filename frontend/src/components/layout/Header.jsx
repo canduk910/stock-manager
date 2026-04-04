@@ -1,25 +1,32 @@
 import { useState } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
 
-const NAV_ITEMS = [
-  { to: '/portfolio', label: '포트폴리오' },
-  {
-    label: '분석',
-    children: [
-      { to: '/macro', label: '매크로' },
-      { to: '/screener', label: '스크리너' },
-      { to: '/earnings', label: '공시' },
-    ],
-  },
-  { to: '/watchlist', label: '관심종목' },
-  {
-    label: '매매',
-    children: [
-      { to: '/order', label: '주문' },
-      { to: '/balance', label: '잔고' },
-    ],
-  },
-  { to: '/market-board', label: '시세판' },
+// 그룹별 구분: 종목 정보 | 자산 관리
+const NAV_GROUPS = [
+  // 그룹 1: 종목 정보
+  [
+    { to: '/market-board', label: '시세판' },
+    { to: '/watchlist', label: '관심종목' },
+    {
+      label: '분석',
+      children: [
+        { to: '/macro', label: '매크로' },
+        { to: '/screener', label: '스크리너' },
+        { to: '/earnings', label: '공시' },
+      ],
+    },
+  ],
+  // 그룹 2: 자산 관리
+  [
+    { to: '/portfolio', label: '포트폴리오' },
+    {
+      label: '매매',
+      children: [
+        { to: '/order', label: '주문' },
+        { to: '/balance', label: '잔고' },
+      ],
+    },
+  ],
 ]
 
 const WIDTH_OPTIONS = [
@@ -85,27 +92,36 @@ export default function Header({ widthKey, onWidthChange, maxCls }) {
         <NavLink to="/" className="font-bold text-lg tracking-tight hover:text-blue-400 transition-colors">
           DK STOCK
         </NavLink>
-        <nav className="flex gap-1">
-          {NAV_ITEMS.map((item) =>
-            item.children ? (
-              <DropdownMenu key={item.label} item={item} />
-            ) : (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                className={({ isActive }) =>
-                  `px-3 py-1.5 rounded text-sm font-medium transition-colors ${
-                    isActive
-                      ? 'bg-blue-600 text-white'
-                      : 'text-gray-300 hover:bg-gray-700 hover:text-white'
-                  }`
-                }
-              >
-                {item.label}
-              </NavLink>
-            )
-          )}
+        <div className="w-px h-5 bg-gray-600" />
+        <nav className="flex items-center gap-1">
+          {NAV_GROUPS.map((group, gi) => (
+            <div key={gi} className="flex items-center gap-1">
+              {gi > 0 && (
+                <div className="w-px h-5 bg-gray-600 mx-2" />
+              )}
+              {group.map((item) =>
+                item.children ? (
+                  <DropdownMenu key={item.label} item={item} />
+                ) : (
+                  <NavLink
+                    key={item.to}
+                    to={item.to}
+                    className={({ isActive }) =>
+                      `px-3 py-1.5 rounded text-sm font-medium transition-colors ${
+                        isActive
+                          ? 'bg-blue-600 text-white'
+                          : 'text-gray-300 hover:bg-gray-700 hover:text-white'
+                      }`
+                    }
+                  >
+                    {item.label}
+                  </NavLink>
+                )
+              )}
+            </div>
+          ))}
         </nav>
+        <div className="w-px h-5 bg-gray-600" />
 
         {/* 너비 선택 */}
         <div className="ml-auto flex rounded-md border border-gray-600 overflow-hidden text-xs font-medium">

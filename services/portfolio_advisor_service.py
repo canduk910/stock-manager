@@ -45,6 +45,21 @@ def _safe_float(val, default=0.0) -> float:
         return default
 
 
+def _fetch_52w_high(code: str, market: str) -> int | float | None:
+    """종목의 52주 고가를 가져온다."""
+    try:
+        if market == "KR":
+            from stock.market import fetch_market_metrics
+            m = fetch_market_metrics(code)
+            return m.get("high_52")
+        else:
+            from stock.yf_client import _ticker, _safe
+            t = _ticker(code)
+            return _safe(t.fast_info.year_high)
+    except Exception:
+        return None
+
+
 def _build_context(balance_data: dict) -> dict:
     """잔고 API 응답 → GPT 프롬프트용 컨텍스트 구조체 변환."""
     total_eval = _safe_float(balance_data.get("total_evaluation"))
@@ -60,9 +75,13 @@ def _build_context(balance_data: dict) -> dict:
     for s in balance_data.get("stock_list") or []:
         eval_amt = _safe_float(s.get("eval_amount"))
         weight = (eval_amt / total_eval * 100) if total_eval > 0 else 0
+        code = s.get("code", "")
+        cur = _safe_float(s.get("current_price"))
+        h52 = _fetch_52w_high(code, "KR")
+        drop = round((cur - h52) / h52 * 100, 1) if cur and h52 and h52 > 0 else None
         holdings.append({
             "name": s.get("name", ""),
-            "code": s.get("code", ""),
+            "code": code,
             "market": "KR",
             "exchange": s.get("exchange"),
             "quantity": s.get("quantity", "0"),
@@ -75,15 +94,21 @@ def _build_context(balance_data: dict) -> dict:
             "pbr": s.get("pbr"),
             "roe": s.get("roe"),
             "dividend_yield": s.get("dividend_yield"),
+            "high_52": h52,
+            "drop_from_high": drop,
         })
 
     # 해외주식
     for s in balance_data.get("overseas_list") or []:
         eval_krw = _safe_float(s.get("eval_amount_krw"))
         weight = (eval_krw / total_eval * 100) if total_eval > 0 else 0
+        code_us = s.get("code", "")
+        cur_us = _safe_float(s.get("current_price"))
+        h52_us = _fetch_52w_high(code_us, "US")
+        drop_us = round((cur_us - h52_us) / h52_us * 100, 1) if cur_us and h52_us and h52_us > 0 else None
         holdings.append({
             "name": s.get("name", ""),
-            "code": s.get("code", ""),
+            "code": code_us,
             "market": "US",
             "exchange": s.get("exchange"),
             "currency": s.get("currency", "USD"),
@@ -98,6 +123,8 @@ def _build_context(balance_data: dict) -> dict:
             "pbr": s.get("pbr"),
             "roe": s.get("roe"),
             "dividend_yield": s.get("dividend_yield"),
+            "high_52": h52_us,
+            "drop_from_high": drop_us,
         })
 
     # 집중도 계산
@@ -160,9 +187,39 @@ def _get_macro_context() -> dict:
         return {}
 
 
+_CONTRARIAN_RULES = """
+역발상 매수 (Contrarian Buy) — cautious/selective 체제 한정:
+19. 역발상 매수 후보 조건 — 아래 5개를 모두 충족해야 한다:
+    a. 52주 고점 대비 -30% 이상 하락
+    b. PBR < 1.0 (자산 가치 대비 저평가)
+    c. 부채비율 < 100%
+    d. 최근 4분기 영업이익 흑자 유지
+    e. FCF(잉여현금흐름) 양수
+20. 다음 중 하나라도 해당하면 역발상 매수 제외 ("가치 함정" 경고):
+    a. 분기 영업이익 적자 전환
+    b. 부채비율 전년 대비 30%p 이상 급증
+    c. 업종 구조적 쇠퇴
+    d. 2년 이상 연속 적자
+21. trades.reason에 "[역발상]" 접두어 필수 표기.
+22. 역발상 매수 긴급도: -30~40% → this_month, -40~50% → this_week. immediate 금지.
+23. 역발상 매수 손절: 진입가 대비 -20% (일반 -10~15%보다 넓음). 분기 영업적자 전환 시 즉시 손절.
+24. 역발상 매수 포지션 한도:
+    - selective: 종목당 3%, 역발상 총합 10%
+    - cautious: 종목당 1.5%, 역발상 총합 7.5%
+25. 분할 매수: 1차 30%(진입) → 2차 30%(-10% 추가 하락 시) → 3차 40%(-20% 추가 하락 시). 1차에서 전량 매수 금지.
+
+보유종목 vs 신규종목 판단 분리:
+26. 이미 보유 중인 -15% 초과 종목: 기존 규칙 13-15 적용 (물타기/손절).
+27. 미보유 종목 -30% 이상: 역발상 매수 조건(규칙 19) 판별.
+28. 보유 중 + 역발상 추가 매수: 물타기 조건(14) + 역발상 조건(19) 양쪽 모두 충족 시만 허용. trades.reason에 "[역발상 물타기]" 명시.
+
+"""
+
+
 def _build_system_prompt(regime: str, cash_pct: float) -> str:
     """체제별 투자 원칙이 포함된 포트폴리오 자문 시스템 프롬프트."""
     cash_min, stock_max, cash_guidance = _REGIME_CASH_RULES.get(regime, _REGIME_CASH_RULES["selective"])
+    contrarian_section = _CONTRARIAN_RULES if regime in ("cautious", "selective") else ""
     cash_warning = ""
     if regime == "defensive":
         cash_warning = f"\n【중요】 현재 현금 비중 {cash_pct}%는 defensive 체제 권고({cash_min}) 대비 {'부족' if cash_pct < 75 else '적정'}합니다. 신규 매수를 추천하지 마세요."
@@ -239,7 +296,7 @@ def _build_system_prompt(regime: str, cash_pct: float) -> str:
 17. this_week: MACD 데드크로스 고비중(>5%) 비중 축소, 실적 발표 D-3 선제 조정
 18. this_month: 리밸런싱 비중 조정, 분할 매수 진행, 현금 비중 복원
 
-매크로 체제: {regime} ({cash_guidance}){cash_warning}"""
+{contrarian_section}매크로 체제: {regime} ({cash_guidance}){cash_warning}"""
 
 
 def _build_prompt(context: dict, macro_ctx: dict, regime: str, regime_desc: str) -> tuple[str, str]:

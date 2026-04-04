@@ -210,13 +210,18 @@ def _fetch_valuation_history_yf_kr(code: str, years: int) -> list[dict]:
     """KRX 인증 없을 때 yfinance로 국내 종목 PER/PBR 히스토리 추정.
 
     fetch_valuation_history_yf()와 동일한 로직. .KS/.KQ ticker 자동 선택.
+    결과를 market:val_hist 캐시에도 저장하여 일관된 응답 보장.
     """
     ticker_str = _kr_yf_ticker_str(code)
     if not ticker_str:
         return []
     try:
         from stock.yf_client import fetch_valuation_history_yf
-        return fetch_valuation_history_yf(ticker_str, min(years, 5))
+        result = fetch_valuation_history_yf(ticker_str, min(years, 5))
+        if result:
+            cache_key = f"market:val_hist:{code}:{years}"
+            set_cached(cache_key, result, ttl_hours=24)
+        return result
     except Exception:
         return []
 
@@ -253,16 +258,50 @@ def fetch_valuation_history(code: str, years: int = 10) -> list[dict]:
             code,
         )
     except Exception:
-        return []
+        return _fetch_valuation_history_yf_kr(code, years)
 
     if df is None or df.empty:
-        return []
+        return _fetch_valuation_history_yf_kr(code, years)
+
+    # 시가총액 계산용: 종가 + 발행주식수
+    try:
+        ohlcv = krx.get_market_ohlcv_by_date(
+            start.strftime("%Y%m%d"), end.strftime("%Y%m%d"), code
+        )
+    except Exception:
+        ohlcv = pd.DataFrame()
+
+    shares_current = None
+    shares_series = None
+    try:
+        ticker_str = _kr_yf_ticker_str(code)
+        if ticker_str:
+            import yfinance as yf
+            t_yf = yf.Ticker(ticker_str)
+            shares_current = int(t_yf.fast_info.shares or 0) or None
+            qbs = t_yf.quarterly_balance_sheet
+            if qbs is not None and not qbs.empty:
+                for name in ("Ordinary Shares Number", "Share Issued"):
+                    if name in qbs.index:
+                        shares_series = qbs.loc[name].dropna().sort_index()
+                        break
+    except Exception:
+        pass
 
     # 월말 기준 리샘플 (pandas 2.2+: "ME", 이전: "M")
     try:
         df = df.resample("ME").last()
     except Exception:
         df = df.resample("M").last()
+
+    # 종가 월말 리샘플
+    close_monthly = {}
+    if not ohlcv.empty and "종가" in ohlcv.columns:
+        try:
+            cm = ohlcv["종가"].resample("ME").last().dropna()
+        except Exception:
+            cm = ohlcv["종가"].resample("M").last().dropna()
+        close_monthly = {ts.strftime("%Y-%m"): float(v) for ts, v in cm.items()}
 
     result = []
     for dt, row in df.iterrows():
@@ -272,10 +311,22 @@ def fetch_valuation_history(code: str, years: int = 10) -> list[dict]:
         pbr = round(float(pbr_val), 2) if pbr_val and float(pbr_val) not in (0.0,) else None
         if per is None and pbr is None:
             continue
+        date_label = dt.strftime("%Y-%m")
+        close = close_monthly.get(date_label)
+        # 해당 월 기준 발행주식수 (분기별 시계열에서 최근값)
+        shares = shares_current
+        if shares_series is not None and len(shares_series) > 0:
+            dt_naive = dt.tz_localize(None) if hasattr(dt, 'tz_localize') and dt.tzinfo else dt
+            past_s = shares_series[shares_series.index <= dt_naive]
+            if len(past_s) >= 1:
+                shares = int(past_s.iloc[-1])
+        mktcap = round(close * shares) if close and shares else None
         result.append({
-            "date": dt.strftime("%Y-%m"),
+            "date": date_label,
             "per": per,
             "pbr": pbr,
+            "mktcap": mktcap,
+            "shares": int(shares) if shares else None,
         })
 
     set_cached(cache_key, result, ttl_hours=24)
@@ -318,6 +369,8 @@ def fetch_market_metrics(code: str) -> dict:
         result["market_type"] = _market_type(ticker_str)
         result["mktcap"] = int(fi.market_cap) if fi.market_cap else None
         result["shares"] = int(fi.shares) if fi.shares else None
+        result["high_52"] = int(fi.year_high) if fi.year_high else None
+        result["low_52"] = int(fi.year_low) if fi.year_low else None
 
         per_raw = info.get("trailingPE") or info.get("forwardPE")
         pbr_raw = info.get("priceToBook")
@@ -342,6 +395,20 @@ def fetch_market_metrics(code: str) -> dict:
         div_per_share_raw = info.get("dividendRate")  # 연간 주당배당금 (원)
         result["per"] = round(per_raw, 2) if per_raw else None
         result["pbr"] = round(pbr_raw, 2) if pbr_raw else None
+        # PBR fallback: priceToBook이 None이면 자본총계/주식수로 직접 계산
+        if result["pbr"] is None and fi.last_price and fi.shares:
+            try:
+                qbs = t.quarterly_balance_sheet
+                if qbs is not None and not qbs.empty:
+                    for eq_name in ("Stockholders Equity", "Common Stock Equity"):
+                        if eq_name in qbs.index:
+                            eq_val = float(qbs.loc[eq_name].dropna().iloc[0])
+                            if eq_val > 0:
+                                bps = eq_val / fi.shares
+                                result["pbr"] = round(fi.last_price / bps, 2)
+                            break
+            except Exception:
+                pass
         result["roe"] = round(roe_raw * 100, 2) if roe_raw else None
         result["dividend_yield"] = div_yield
         result["dividend_per_share"] = round(float(div_per_share_raw)) if div_per_share_raw else None

@@ -53,8 +53,20 @@ def _enrich_stock(stock: dict) -> dict:
     try:
         metrics = fetch_market_metrics(code)
         enriched["dividend_yield"] = metrics.get("dividend_yield")
+        enriched["high_52"] = metrics.get("high_52")
+        enriched["low_52"] = metrics.get("low_52")
+        # 52주 고점 대비 하락률 (%)
+        h52 = metrics.get("high_52")
+        cur = enriched.get("current_price")
+        if h52 and cur and h52 > 0:
+            enriched["drop_from_high"] = round((cur - h52) / h52 * 100, 1)
+        else:
+            enriched["drop_from_high"] = None
     except Exception:
         enriched["dividend_yield"] = None
+        enriched["high_52"] = None
+        enriched["low_52"] = None
+        enriched["drop_from_high"] = None
 
     return enriched
 
@@ -71,6 +83,7 @@ def get_stocks(
     market: str | None = Query(None, description="시장 필터 (KOSPI 또는 KOSDAQ)"),
     include_negative: bool = Query(False, description="적자기업(PER 음수) 포함 여부"),
     earnings_only: bool = Query(False, description="당일 실적발표 종목만 대상"),
+    drop_from_high: float | None = Query(None, description="52주 고점 대비 최대 하락률 (%, 예: -30)"),
 ):
     """전종목 멀티팩터 스크리닝."""
     # 날짜 정규화
@@ -125,7 +138,7 @@ def get_stocks(
     if top is not None and top > 0:
         stocks = stocks[:top]
 
-    # 현재가 · 수익률 · 배당수익률 병렬 enrichment
+    # 현재가 · 수익률 · 배당수익률 · 52주 고저가 병렬 enrichment
     if stocks:
         enriched: list[dict | None] = [None] * len(stocks)
         with ThreadPoolExecutor(max_workers=min(20, len(stocks))) as ex:
@@ -133,6 +146,14 @@ def get_stocks(
             for fut in as_completed(futures):
                 enriched[futures[fut]] = fut.result()
         stocks = enriched
+
+    # 52주 고점 대비 하락률 필터 (enrichment 후 적용)
+    if drop_from_high is not None:
+        threshold = drop_from_high if drop_from_high < 0 else -drop_from_high
+        stocks = [
+            s for s in stocks
+            if s.get("drop_from_high") is not None and s["drop_from_high"] <= threshold
+        ]
 
     return {
         "date": actual_date,

@@ -4,7 +4,7 @@
 
 | 파일 | 엔드포인트 | 설명 |
 |------|-----------|------|
-| `screener.py` | `GET /api/screener/stocks` | 멀티팩터 스크리닝 + yfinance enrichment(ThreadPoolExecutor 병렬) |
+| `screener.py` | `GET /api/screener/stocks` | 멀티팩터 스크리닝 + yfinance enrichment(ThreadPoolExecutor 병렬) + 52주 하락률 필터(`drop_from_high`) |
 | `earnings.py` | `GET /api/earnings/filings` | 정기보고서 (국내 DART / 미국 SEC EDGAR) |
 | `balance.py` | `GET /api/balance` | KIS 실전계좌 잔고 (국내+해외+선물옵션) |
 | `watchlist.py` | `/api/watchlist/*` | 관심종목 CRUD + 대시보드 + 종목정보 + 순서 관리 (국내/해외). `GET/PUT /api/watchlist/order` (/{code} 라우트보다 앞에 등록) |

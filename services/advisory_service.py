@@ -248,10 +248,14 @@ def _build_metrics_kr(
     if pbr is None and mktcap and total_equity and total_equity > 0:
         pbr = round(mktcap / total_equity, 2)
 
-    # EPS (주당순이익)
+    # EPS (주당순이익) — DART 우선, 없으면 net_income/shares fallback
     eps = None
     if is_latest:
         eps = is_latest.get("eps")
+    if not eps and net_income and net_income > 0:
+        shares = base.get("shares")
+        if shares and shares > 0:
+            eps = round(net_income / shares)
 
     # Graham Number = sqrt(22.5 × EPS × BPS)
     graham_number = None
