@@ -55,7 +55,7 @@ class AdvisoryReport(Base):
     report = Column(JSON, nullable=False)
 
     __table_args__ = (
-        Index("idx_advisory_reports_code_market", "code", "market", generated_at.desc()),
+        Index("idx_advisory_reports_code_market", "code", "market", "generated_at"),
     )
 
     def to_dict(self) -> dict:

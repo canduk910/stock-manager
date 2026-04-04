@@ -39,7 +39,7 @@ def upgrade() -> None:
     sa.PrimaryKeyConstraint('id')
     )
     with op.batch_alter_table('advisory_reports', schema=None) as batch_op:
-        batch_op.create_index('idx_advisory_reports_code_market', ['code', 'market', sa.literal_column('generated_at DESC')], unique=False)
+        batch_op.create_index('idx_advisory_reports_code_market', ['code', 'market', 'generated_at'], unique=False)
 
     op.create_table('advisory_stocks',
     sa.Column('code', sa.String(), nullable=False),
@@ -94,7 +94,7 @@ def upgrade() -> None:
     with op.batch_alter_table('orders', schema=None) as batch_op:
         batch_op.create_index('idx_orders_order_no_market', ['order_no', 'market'], unique=False)
         batch_op.create_index('idx_orders_status', ['status'], unique=False)
-        batch_op.create_index('idx_orders_symbol_market', ['symbol', 'market', sa.literal_column('placed_at DESC')], unique=False)
+        batch_op.create_index('idx_orders_symbol_market', ['symbol', 'market', 'placed_at'], unique=False)
 
     op.create_table('portfolio_reports',
     sa.Column('id', sa.Integer(), autoincrement=True, nullable=False),

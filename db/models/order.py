@@ -1,6 +1,6 @@
 """Order + Reservation models."""
 
-from sqlalchemy import Column, Float, Index, Integer, String, Text
+from sqlalchemy import Column, Float, Index, Integer, String, Text, text
 
 from db.base import Base
 
@@ -19,10 +19,10 @@ class Order(Base):
     price = Column(Float, nullable=False)
     quantity = Column(Integer, nullable=False)
     filled_price = Column(Float)
-    filled_quantity = Column(Integer, default=0)
-    status = Column(String, nullable=False, default="PLACED")
-    currency = Column(String, default="KRW")
-    memo = Column(Text, default="")
+    filled_quantity = Column(Integer, default=0, server_default=text("0"))
+    status = Column(String, nullable=False, default="PLACED", server_default=text("'PLACED'"))
+    currency = Column(String, default="KRW", server_default=text("'KRW'"))
+    memo = Column(Text, default="", server_default=text("''"))
     placed_at = Column(String, nullable=False)
     filled_at = Column(String)
     updated_at = Column(String, nullable=False)
@@ -31,7 +31,7 @@ class Order(Base):
     __table_args__ = (
         Index("idx_orders_status", "status"),
         Index("idx_orders_order_no_market", "order_no", "market"),
-        Index("idx_orders_symbol_market", "symbol", "market", placed_at.desc()),
+        Index("idx_orders_symbol_market", "symbol", "market", "placed_at"),
     )
 
     def to_dict(self) -> dict:
