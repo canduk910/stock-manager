@@ -124,8 +124,8 @@ frontend/
 
 ### Advisory 컴포넌트
 
-- **FundamentalPanel**: **사업 개요**(BusinessOverview: #키워드 + 사업설명 + 매출비중 파이차트) → 애널리스트 추정치 → 계량지표 → 손익계산서 → 대차대조표 → 현금흐름표
+- **FundamentalPanel**: **사업 개요**(BusinessOverview: #키워드 + 사업설명 + 매출비중 파이차트) → 애널리스트 추정치(매출/순이익/EPS 현재E+차기E) → 계량지표(10개: +EPS+안전마진가격) → 손익계산서(+추정치 바 반투명) → 대차대조표 → 현금흐름표
 - **TechnicalPanel**: 타임프레임(15m/60m/1d/1wk) + 기간 선택. 시그널 카드 + 캔들스틱+MA+BB → 거래량 → MACD → RSI → Stochastic → PER/PBR 밸류에이션(1d/1wk만, `valuationData` prop + `fetchDetailValuation` API)
-- **AIReportPanel**: 종합투자의견 배지 → 전략별평가 3컬럼 카드 → 기술적시그널 → 리스크/투자포인트
+- **AIReportPanel**: 종합투자의견 배지 → 전략별평가 3컬럼 카드(안전마진가격 표시) → 기술적시그널 → 리스크/투자포인트
 
 > 컴포넌트 상세 → `docs/FRONTEND_SPEC.md`

@@ -175,12 +175,12 @@ export default function AIReportPanel({ report, history = [], loading, error, on
               return (
                 <div className="border border-gray-200 rounded-lg p-3 space-y-1.5">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-semibold text-gray-600">안전마진 (Graham)</span>
+                    <span className="text-xs font-semibold text-gray-600">안전마진</span>
                     <GradeBadge grade={s.신호} />
                   </div>
                   {s.graham_number != null && (
                     <p className="text-xs text-gray-500">
-                      Graham Number: <span className="font-semibold text-gray-800">
+                      안전마진가격: <span className="font-semibold text-gray-800">
                         {Number(s.graham_number).toLocaleString()}
                       </span>
                     </p>

@@ -505,6 +505,13 @@ def fetch_metrics_yf(code: str) -> dict:
         roe = _safe(round(roe_raw * 100, 2)) if roe_raw is not None else None
         roa = _safe(round(roa_raw * 100, 2)) if roa_raw is not None else None
 
+        eps = _safe(info.get("trailingEps"))
+        bps = _safe(info.get("bookValue"))
+        graham_number = None
+        if eps and eps > 0 and bps and bps > 0:
+            import math
+            graham_number = round(math.sqrt(22.5 * eps * bps), 2)
+
         result = {
             "per":             _safe(info.get("trailingPE") or info.get("forwardPE")),
             "pbr":             _safe(info.get("priceToBook")),
@@ -517,6 +524,8 @@ def fetch_metrics_yf(code: str) -> dict:
             "roa":             roa,
             "debt_to_equity":  _safe(info.get("debtToEquity")),
             "current_ratio":   _safe(info.get("currentRatio")),
+            "eps":             eps,
+            "graham_number":   graham_number,
         }
         ttl = 0.5 if _is_us_trading_hours() else 6  # 장중 30분, 장외 6시간
         set_cached(key, result, ttl_hours=ttl)
@@ -726,28 +735,66 @@ def fetch_forward_estimates_yf(code: str, is_kr: bool = False) -> dict:
         t = yf.Ticker(ticker_str)
         info = t.info or {}
 
-        # 매출 추정치: ticker.analysis DataFrame에서 추출 (불안정 → 실패 허용)
+        # 매출 추정치: 3단계 fallback (revenue_estimate → analysis → totalRevenue×growth)
         rev_estimate: Optional[float] = None
         rev_forward: Optional[float] = None
         try:
             import pandas as pd
-            analysis = t.analysis
-            if analysis is not None and not analysis.empty:
-                if "Revenue Estimate" in analysis.columns:
-                    # 현재 회계연도 (0y)
-                    if "0y" in analysis.index:
-                        val = analysis.loc["0y", "Revenue Estimate"]
+
+            # 1단계: t.revenue_estimate (yfinance 0.2.30+, 더 안정적)
+            try:
+                rev_df = getattr(t, 'revenue_estimate', None)
+                if rev_df is not None and not rev_df.empty:
+                    # avg 컬럼 우선, 없으면 첫 컬럼
+                    col = 'avg' if 'avg' in rev_df.columns else rev_df.columns[0]
+                    if '0y' in rev_df.index:
+                        val = rev_df.loc['0y', col]
                         if not pd.isna(val):
                             rev_estimate = float(val)
-                    elif len(analysis.index) > 0:
-                        val = analysis.iloc[0]["Revenue Estimate"]
+                    elif len(rev_df.index) > 0:
+                        val = rev_df.iloc[0][col]
                         if not pd.isna(val):
                             rev_estimate = float(val)
-                    # 차기 회계연도 (+1y)
-                    if "+1y" in analysis.index:
-                        val2 = analysis.loc["+1y", "Revenue Estimate"]
+                    if '+1y' in rev_df.index:
+                        val2 = rev_df.loc['+1y', col]
                         if not pd.isna(val2):
                             rev_forward = float(val2)
+                    elif len(rev_df.index) > 1:
+                        val2 = rev_df.iloc[1][col]
+                        if not pd.isna(val2):
+                            rev_forward = float(val2)
+            except Exception:
+                pass
+
+            # 2단계: t.analysis (레거시 방식)
+            if rev_estimate is None:
+                try:
+                    analysis = t.analysis
+                    if analysis is not None and not analysis.empty and "Revenue Estimate" in analysis.columns:
+                        if "0y" in analysis.index:
+                            val = analysis.loc["0y", "Revenue Estimate"]
+                            if not pd.isna(val):
+                                rev_estimate = float(val)
+                        elif len(analysis.index) > 0:
+                            val = analysis.iloc[0]["Revenue Estimate"]
+                            if not pd.isna(val):
+                                rev_estimate = float(val)
+                        if rev_forward is None and "+1y" in analysis.index:
+                            val2 = analysis.loc["+1y", "Revenue Estimate"]
+                            if not pd.isna(val2):
+                                rev_forward = float(val2)
+                except Exception:
+                    pass
+
+            # 3단계: totalRevenue × (1 + revenueGrowth) fallback
+            if rev_estimate is None:
+                total_rev = _safe(info.get("totalRevenue"))
+                rev_growth = _safe(info.get("revenueGrowth"))
+                if total_rev and total_rev > 0:
+                    if rev_growth is not None:
+                        rev_estimate = total_rev * (1 + rev_growth)
+                    else:
+                        rev_estimate = total_rev  # 성장률 미지 시 현재 매출 그대로
         except Exception:
             pass
 

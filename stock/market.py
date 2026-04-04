@@ -298,6 +298,7 @@ def fetch_market_metrics(code: str) -> dict:
     result: dict = {
         "market_type": None,
         "mktcap": None,
+        "shares": None,
         "per": None,
         "pbr": None,
         "roe": None,
@@ -316,6 +317,7 @@ def fetch_market_metrics(code: str) -> dict:
 
         result["market_type"] = _market_type(ticker_str)
         result["mktcap"] = int(fi.market_cap) if fi.market_cap else None
+        result["shares"] = int(fi.shares) if fi.shares else None
 
         per_raw = info.get("trailingPE") or info.get("forwardPE")
         pbr_raw = info.get("priceToBook")

@@ -19,7 +19,7 @@ CLI와 API 라우터 양쪽에서 공용으로 사용한다. 데이터는 `~/sto
 | `market_board.py` | 시세판: 신고가/신저가 탐지 + sparkline. |
 | `market_board_store.py` | 시세판 별도 등록 종목 CRUD + 순서 관리. `market_board.db`. `market_board_order` 테이블로 DnD 순서 영속화. |
 | `dart_fin.py` | OpenDart 재무제표 조회 (최대 10년). |
-| `yf_client.py` | yfinance 기반 해외주식 데이터. |
+| `yf_client.py` | yfinance 기반 해외주식 데이터. EPS/Graham Number 지표 제공. 매출추정 3단계 fallback (revenue_estimate→analysis→totalRevenue×growth). |
 | `fno_master.py` | KIS 선물옵션 마스터파일 다운로드/파싱/검색. 인메모리 캐시(24h) → cache.db(7일) → ZIP 3단계. main.py에서 pre-warm. |
 | `sec_filings.py` | SEC EDGAR 미국 10-K/10-Q 공시 조회. |
 | `macro_fetcher.py` | 매크로 분석 데이터 수집: yfinance 지수/VIX/버핏/공포탐욕, feedparser RSS(뉴스/투자자), 캐시 키 `macro:*` |

@@ -248,6 +248,21 @@ def _build_metrics_kr(
     if pbr is None and mktcap and total_equity and total_equity > 0:
         pbr = round(mktcap / total_equity, 2)
 
+    # EPS (주당순이익)
+    eps = None
+    if is_latest:
+        eps = is_latest.get("eps")
+
+    # Graham Number = sqrt(22.5 × EPS × BPS)
+    graham_number = None
+    if eps and eps > 0 and pbr and pbr > 0:
+        shares = base.get("shares")
+        if mktcap and shares and shares > 0:
+            price = mktcap / shares
+            bps = price / pbr
+            import math
+            graham_number = round(math.sqrt(22.5 * eps * bps))
+
     return {
         "per": per,
         "pbr": pbr,
@@ -259,6 +274,8 @@ def _build_metrics_kr(
         "roa": roa,
         "debt_to_equity": debt_to_equity,
         "current_ratio": current_ratio,
+        "eps": eps,
+        "graham_number": graham_number,
     }
 
 

@@ -1,5 +1,18 @@
 # 변경 이력
 
+## 2026-04-04 — 계량지표 확장 + 포워드차트 + 매출추정 개선
+
+### 기본적분석 개선
+- 계량지표 8개→10개 확장: EPS + 안전마진가격(Graham Number) 추가 (MarginAnalyst 자문)
+- MetricCard integer prop: 부채/자본, 유동비율, EPS, 안전마진가격 소수점 제거
+- 프론트엔드 "Graham" 표기 → "안전마진/안전마진가격"으로 통일 (백엔드 키명 유지)
+- ForwardEstimatesSection: 매출/순이익 현재E+차기E sub 텍스트 추가
+- IncomeChart: 추정치 연도(xxE) 반투명 바 추가 (매출E+순이익E, opacity 0.35)
+
+### 버그 수정
+- fetch_market_metrics()에 shares 필드 누락 → Graham Number 계산 불가 수정
+- 매출 추정치 수집 3단계 fallback: revenue_estimate(신API) → analysis(레거시) → totalRevenue×growth
+
 ## 2026-04-04 — 성능 최적화 리팩토링 (DB 캐시 + 병렬화)
 
 ### 성능 최적화

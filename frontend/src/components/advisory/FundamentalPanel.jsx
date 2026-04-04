@@ -35,13 +35,14 @@ function pctColor(v) {
 }
 
 // ── 계량지표 카드 ─────────────────────────────────────────────────────────
-function MetricCard({ label, value }) {
+function MetricCard({ label, value, integer }) {
+  const formatted = value == null ? '-'
+    : typeof value === 'number' ? (integer ? Math.floor(value).toLocaleString() : value.toFixed(1))
+    : value
   return (
     <div className="bg-white border border-gray-200 rounded-lg p-3 text-center">
       <div className="text-xs text-gray-500 mb-1">{label}</div>
-      <div className="text-base font-bold text-gray-800">
-        {value == null ? '-' : typeof value === 'number' ? value.toFixed(1) : value}
-      </div>
+      <div className="text-base font-bold text-gray-800">{formatted}</div>
     </div>
   )
 }
@@ -167,18 +168,39 @@ function IncomeTable({ rows, market, forward }) {
 }
 
 // ── 매출/영업이익 막대차트 ────────────────────────────────────────────────
-function IncomeChart({ rows, market }) {
+function IncomeChart({ rows, market, forward }) {
   if (!rows?.length) return null
   const unit = market === 'KR' ? '억원' : 'M USD'
   const divisor = market === 'KR' ? 1e8 : 1e6
+  const fmt = v => v != null ? Math.round(v / divisor) : null
+
   const data = rows.map(r => ({
     year: String(r.year),
-    매출: r.revenue != null ? Math.round(r.revenue / divisor) : null,
-    영업이익: r.operating_income != null ? Math.round(r.operating_income / divisor) : null,
-    순이익: r.net_income != null ? Math.round(r.net_income / divisor) : null,
+    매출: fmt(r.revenue), 영업이익: fmt(r.operating_income), 순이익: fmt(r.net_income),
+    매출E: null, 순이익E: null,
   }))
+
+  // 추정치 연도 추가
+  if (forward) {
+    const fyYear = forward.current_fiscal_year_end?.split('-')[0]
+    if (forward.revenue_current || forward.net_income_estimate) {
+      data.push({
+        year: fyYear ? `${fyYear}E` : '현재E',
+        매출: null, 영업이익: null, 순이익: null,
+        매출E: fmt(forward.revenue_current), 순이익E: fmt(forward.net_income_estimate),
+      })
+    }
+    if (forward.revenue_forward || forward.net_income_forward) {
+      data.push({
+        year: fyYear ? `${Number(fyYear) + 1}E` : '차기E',
+        매출: null, 영업이익: null, 순이익: null,
+        매출E: fmt(forward.revenue_forward), 순이익E: fmt(forward.net_income_forward),
+      })
+    }
+  }
+
   return (
-    <ResponsiveContainer width="100%" height={180}>
+    <ResponsiveContainer width="100%" height={200}>
       <BarChart data={data} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
         <XAxis dataKey="year" tick={{ fontSize: 11 }} />
         <YAxis tick={{ fontSize: 10 }} tickFormatter={v => v.toLocaleString()} unit="" />
@@ -187,6 +209,8 @@ function IncomeChart({ rows, market }) {
         <Bar dataKey="매출" fill="#3b82f6" radius={[2, 2, 0, 0]} />
         <Bar dataKey="영업이익" fill="#10b981" radius={[2, 2, 0, 0]} />
         <Bar dataKey="순이익" fill="#f59e0b" radius={[2, 2, 0, 0]} />
+        <Bar dataKey="매출E" fill="#3b82f6" fillOpacity={0.35} radius={[2, 2, 0, 0]} />
+        <Bar dataKey="순이익E" fill="#f59e0b" fillOpacity={0.35} radius={[2, 2, 0, 0]} />
       </BarChart>
     </ResponsiveContainer>
   )
@@ -391,10 +415,14 @@ function ForwardEstimatesSection({ forward, market }) {
     num_analysts, recommendation, current_fiscal_year_end,
   } = forward
 
+  const { revenue_forward, net_income_estimate, net_income_forward } = forward
   const hasAny = [eps_current_year, eps_forward, forward_pe, target_mean_price, revenue_current].some(v => v != null)
   if (!hasAny) return null
 
   const fy = current_fiscal_year_end ? `FY${current_fiscal_year_end.slice(0, 4)}E` : '추정치'
+  const fyYear = current_fiscal_year_end?.slice(0, 4)
+  const curLabel = fyYear ? `${fyYear}E` : '현재E'
+  const fwdLabel = fyYear ? `${Number(fyYear) + 1}E` : '차기E'
   const rec = FW_REC_MAP[recommendation] || null
 
   const fmtEps = (v) => {
@@ -418,10 +446,11 @@ function ForwardEstimatesSection({ forward, market }) {
 
   const items = [
     forward_pe != null && { label: '포워드 PER', value: `${forward_pe.toFixed(1)}x`, sub: null },
-    eps_current_year != null && { label: `추정 EPS (${fy})`, value: fmtEps(eps_current_year), sub: eps_forward != null ? `차기: ${fmtEps(eps_forward)}` : null },
-    revenue_current != null && { label: '매출 추정', value: fmtRev(revenue_current), sub: null },
+    eps_current_year != null && { label: `EPS ${curLabel}`, value: fmtEps(eps_current_year), sub: eps_forward != null ? `${fwdLabel}: ${fmtEps(eps_forward)}` : null },
+    revenue_current != null && { label: `매출 ${curLabel}`, value: fmtRev(revenue_current), sub: revenue_forward != null ? `${fwdLabel}: ${fmtRev(revenue_forward)}` : null },
+    net_income_estimate != null && { label: `순이익 ${curLabel}`, value: fmtRev(net_income_estimate), sub: net_income_forward != null ? `${fwdLabel}: ${fmtRev(net_income_forward)}` : null },
     target_mean_price != null && {
-      label: '목표주가 (평균)',
+      label: '목표주가',
       value: fmtPrice(target_mean_price),
       sub: (target_low_price != null || target_high_price != null) ? `${fmtPrice(target_low_price)} ~ ${fmtPrice(target_high_price)}` : null,
     },
@@ -480,21 +509,23 @@ export default function FundamentalPanel({ data, market }) {
 
       {/* 계량지표 */}
       <SectionTitle>계량지표</SectionTitle>
-      <div className="grid grid-cols-4 gap-2 sm:grid-cols-4 lg:grid-cols-8">
+      <div className="grid grid-cols-5 gap-2">
         <MetricCard label="PER" value={metrics.per} />
         <MetricCard label="PBR" value={metrics.pbr} />
         <MetricCard label="PSR" value={metrics.psr} />
         <MetricCard label="EV/EBITDA" value={metrics.ev_ebitda} />
         <MetricCard label="ROE (%)" value={metrics.roe} />
         <MetricCard label="ROA (%)" value={metrics.roa} />
-        <MetricCard label="부채/자본" value={metrics.debt_to_equity} />
-        <MetricCard label="유동비율" value={metrics.current_ratio} />
+        <MetricCard label="부채/자본" value={metrics.debt_to_equity} integer />
+        <MetricCard label="유동비율" value={metrics.current_ratio} integer />
+        <MetricCard label="EPS" value={metrics.eps} integer />
+        <MetricCard label="안전마진가격" value={metrics.graham_number} integer />
       </div>
 
       {/* 손익계산서 */}
       <SectionTitle>손익계산서</SectionTitle>
       <IncomeTable rows={incomeStmt} market={market} forward={forwardEstimates} />
-      <IncomeChart rows={incomeStmt} market={market} />
+      <IncomeChart rows={incomeStmt} market={market} forward={forwardEstimates} />
 
       {/* 대차대조표 */}
       <SectionTitle>대차대조표</SectionTitle>
