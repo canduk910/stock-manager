@@ -55,7 +55,7 @@ frontend/
       screener/           FilterPanel, StockTable
       earnings/           FilingsTable (국내/미국 컬럼 분기, market prop)
       balance/            PortfolioSummary, HoldingsTable, OverseasHoldingsTable, FuturesTable
-      watchlist/          AddStockForm, WatchlistDashboard, StockInfoModal
+      watchlist/          AddStockForm (자동완성 검색, searchStocks API 사용), WatchlistDashboard, StockInfoModal
       detail/             StockHeader, FinancialTable, ValuationChart, ReportSummary
       order/              OrderForm, OrderConfirmModal, OpenOrdersTable, ModifyOrderModal,
                           ExecutionsTable, OrderHistoryTable, ReservationForm, ReservationsTable, SyncButton,
