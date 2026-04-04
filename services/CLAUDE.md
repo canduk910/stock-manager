@@ -19,7 +19,7 @@
 | `quote_overseas.py` | 해외주식 시세 (Finnhub WS 또는 yfinance 2초 폴링). OverseasQuoteManager 클래스. |
 | `advisory_service.py` | AI자문 데이터 수집 + GPT-4o 리포트 생성 |
 | `macro_service.py` | 매크로 분석 오케스트레이션: 병렬 수집 + GPT 번역/추출 + 섹션별 독립 실패 허용. GPT 결과는 `macro.db`에 일일 캐싱 (KST 기준) |
-| `portfolio_advisor_service.py` | AI 포트폴리오 자문: 잔고 컨텍스트 구성 + OpenAI 호출 → 진단/리밸런싱/매매안. `cache.db`에 30분 TTL 캐싱. |
+| `portfolio_advisor_service.py` | AI 포트폴리오 자문: 잔고 컨텍스트 + 매크로 체제 → OpenAI 호출(체제별 프롬프트 동적 구성) → 진단/리밸런싱/매매안. `cache.db` 30분 TTL + `advisory.db` 영구 저장. `max_completion_tokens=8000`. |
 
 ---
 

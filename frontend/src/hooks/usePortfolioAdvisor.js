@@ -7,12 +7,24 @@ export function usePortfolioAdvisor() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
 
+  // 이력 목록만 가져옴 (리포트 자동 로드 없음)
   const loadHistory = useCallback(async () => {
     try {
       const h = await fetchAdvisorHistory()
       setHistory(h)
-      // 현재 표시 중인 결과가 없고, 이력이 있으면 최신 리포트 자동 로드
-      if (!result && h.length > 0) {
+      return h
+    } catch {
+      return []
+    }
+  }, [])
+
+  // 최신 리포트 로드 (마운트 시 1회 호출)
+  const loadLatest = useCallback(async () => {
+    setLoading(true)
+    try {
+      const h = await fetchAdvisorHistory()
+      setHistory(h)
+      if (h.length > 0) {
         const latest = await fetchAdvisorReport(h[0].id)
         setResult({
           data: latest.report,
@@ -23,16 +35,19 @@ export function usePortfolioAdvisor() {
       }
     } catch {
       // 이력 로드 실패는 무시
+    } finally {
+      setLoading(false)
     }
-  }, [result])
+  }, [])
 
+  // 새 분석 실행
   const analyze = useCallback(async (balanceData, forceRefresh = false) => {
     setLoading(true)
     setError(null)
     try {
       const res = await analyzePortfolio(balanceData, forceRefresh)
       setResult(res)
-      await loadHistory()
+      loadHistory()  // 이력 목록만 갱신 (fire-and-forget, result 덮어쓰기 없음)
     } catch (e) {
       setError(e.message)
     } finally {
@@ -40,6 +55,7 @@ export function usePortfolioAdvisor() {
     }
   }, [loadHistory])
 
+  // 이력에서 특정 리포트 로드
   const loadById = useCallback(async (reportId) => {
     setLoading(true)
     setError(null)
@@ -58,5 +74,5 @@ export function usePortfolioAdvisor() {
     }
   }, [])
 
-  return { result, history, loading, error, analyze, loadHistory, loadById }
+  return { result, history, loading, error, analyze, loadLatest, loadById }
 }

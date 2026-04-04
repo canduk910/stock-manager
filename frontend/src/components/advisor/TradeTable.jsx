@@ -27,6 +27,8 @@ export default function TradeTable({ trades, notify }) {
                 <th className="px-3 py-2 text-center font-medium">방향</th>
                 <th className="px-3 py-2 text-right font-medium">수량</th>
                 <th className="px-3 py-2 text-right font-medium">목표가</th>
+                <th className="px-3 py-2 text-right font-medium">손절가</th>
+                <th className="px-3 py-2 text-center font-medium">비중</th>
                 <th className="px-3 py-2 text-center font-medium">긴급도</th>
                 <th className="px-3 py-2 text-left font-medium">근거</th>
                 <th className="px-3 py-2 text-center font-medium">실행</th>
@@ -54,10 +56,19 @@ export default function TradeTable({ trades, notify }) {
                     <td className="px-3 py-2 text-right text-gray-900">
                       {Number(t.target_price).toLocaleString()}
                     </td>
+                    <td className="px-3 py-2 text-right text-blue-600">
+                      {t.stop_loss != null ? Number(t.stop_loss).toLocaleString() : '-'}
+                    </td>
+                    <td className="px-3 py-2 text-center text-gray-600 text-xs">
+                      {t.position_pct != null ? `${t.position_pct}%` : '-'}
+                    </td>
                     <td className="px-3 py-2 text-center">
                       <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${urg.bg} ${urg.text}`}>
                         {urg.label}
                       </span>
+                      {t.urgency_reason && (
+                        <p className="text-xs text-gray-400 mt-0.5 max-w-[120px]">{t.urgency_reason}</p>
+                      )}
                     </td>
                     <td className="px-3 py-2 text-xs text-gray-600 max-w-[300px]">
                       <p className="whitespace-pre-line leading-relaxed">{t.reason}</p>

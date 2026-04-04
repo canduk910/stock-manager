@@ -1,5 +1,44 @@
 # 변경 이력
 
+## 2026-04-04 — AI자문 프롬프트 고도화 + 포트폴리오 통합 + 버그 수정
+
+### AI자문 프롬프트 고도화 (도메인 전문가 3명 자문)
+- `advisory_service.py` 시스템 프롬프트: 재무 건전성 체크리스트, 적자 기업 규칙, PBR 역산 한계, 업종 상대평가, 체제별 투자 원칙 동적 삽입
+- `advisory_service.py` 유저 프롬프트: `## 매크로 환경` 섹션 추가 (VIX/버핏/공포탐욕/체제/요구 안전마진)
+- `advisory_service.py` 출력: `포지션가이드` 섹션 추가 (진입가/손절가/익절가/R:R/분할매수)
+- `portfolio_advisor_service.py`: `_SYSTEM_PROMPT` → `_build_system_prompt(regime, cash_pct)` 함수화
+  - 포지션 사이징 규칙 (단일 5%, 1회 30%, 현금 체제별), 손실 종목 3단계, urgency 3단계
+  - 체제별 현금 비중 동적 삽입 (accumulation 25%/selective 35%/cautious 50%/defensive 75%)
+  - trades JSON 확장: stop_loss, position_pct, urgency_reason
+- `AIReportPanel.jsx`: 포지션가이드 4카드 섹션 (PosGuideCard 컴포넌트)
+- `TradeTable.jsx`: 손절가/비중/긴급도 근거 컬럼 추가 (하위 호환)
+
+### "AI자문" + "포트폴리오" 메뉴 통합
+- `PortfolioPage.jsx` 재작성: 매크로 배너 + 자산 요약 + 차트 + AdvisorPanel(진단+리밸런싱+매매안) 통합
+- `AdvisorPage.jsx` 라우트 제거 (App.jsx, Header.jsx)
+- `BalancePage.jsx`: AdvisorPanel 제거 → "포트폴리오에서 AI 자문 보기 →" 링크
+- Header: "AI자문" 메뉴 제거 (9개 메뉴)
+
+### usePortfolioAdvisor 훅 재설계 (stale closure 버그 수정)
+- `loadHistory()`: `[result]` 의존성 제거 → 이력 목록만 가져옴 (자동 리포트 로드 제거)
+- `loadLatest()`: 마운트 시 최신 리포트 자동 로드 (신규)
+- `analyze()`: `setResult(res)` 후 `loadHistory()` fire-and-forget (await 제거, 덮어쓰기 방지)
+
+### max_completion_tokens 부족 버그 수정
+- `advisory_service.py` + `portfolio_advisor_service.py`: 3500 → 8000
+- 토큰 제한 잘림 감지 (`finish_reason == "length"` 로깅)
+- JSON 파싱 실패 시 `ExternalAPIError` 반환 (빈 화면 대신 에러 메시지)
+- `AdvisorPanel.jsx`: `analysis.raw` 존재 시 "다시 시도" 안내 표시
+
+### 기타 버그 수정
+- `cache.py`: aware/naive datetime 비교 TypeError → `.replace(tzinfo=None)` 통일
+- `RegimeBanner.jsx`: `sentiment.buffett` → `sentiment.buffett_indicator` 필드명 수정
+- `RegimeBanner.jsx`: `fg?.value` → `fg?.score` 우선 (실제 백엔드 필드)
+- `TradeTable.jsx`: 매매근거 `truncate` 제거 → `whitespace-pre-line` 전체 표시
+- `AdvisorPanel.jsx`: 링크 `/advisor` → `/portfolio`
+
+---
+
 ## 2026-04-03 — 포트폴리오 대시보드
 
 ### 포트폴리오 대시보드 (`/portfolio`) 신규

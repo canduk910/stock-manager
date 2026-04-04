@@ -45,10 +45,10 @@ frontend/
       useMarketBoard.js   useMarketBoard (신고가/신저가 + sparkline) + useDisplayStocks (관심종목+별도등록 종목 병합+순서+reorder)
       useAdvisory.js      useAdvisoryStocks / useAdvisoryData / useAdvisoryReport / useAdvisoryOhlcv
       useMacro.js         useMacroIndices / useMacroNews / useMacroSentiment / useMacroInvestorQuotes (섹션별 독립 훅)
-      usePortfolioAdvisor.js  포트폴리오 AI 자문 훅. analyze(balanceData, forceRefresh). useAsyncState 기반.
+      usePortfolioAdvisor.js  포트폴리오 AI 자문 훅. analyze/loadLatest/loadById. stale closure 해결 (loadHistory 의존성 없음).
       usePortfolio.js     포트폴리오 대시보드 훅. balance+sentiment 병렬 로드 + 자산배분/안전마진등급 계산.
     components/
-      layout/Header.jsx   네비게이션 바 (10개 메뉴, 로고: "DK STOCK")
+      layout/Header.jsx   네비게이션 바 (9개 메뉴, 로고: "DK STOCK")
       common/             LoadingSpinner, ErrorAlert, EmptyState, DataTable, ToastNotification
                           WatchlistButton (code/market/alreadyAdded props, ★/+ 버튼, StockTable·FilingsTable 공용)
                           CandlestickChart (ohlcv/indicators props, 캔들+MA5/20/60+BB+거래량, PriceChartPanel·TechnicalPanel 공용)
@@ -78,8 +78,7 @@ frontend/
       OrderPage.jsx       /order     탭 UI (주문발송/미체결/체결내역/주문이력/예약주문)
       MarketBoardPage.jsx /market-board  시세판: 신고가/신저가 Top10 + 사용자 선택 종목. 실시간 WS.
       MacroPage.jsx       /macro         매크로 분석: 지수+심리+뉴스+투자자 코멘트. 4섹션 독립 로딩.
-      AdvisorPage.jsx     /advisor       AI 포트폴리오 자문: 잔고 로드→분석→이력 조회. showHistory 모드.
-      PortfolioPage.jsx   /portfolio     포트폴리오 대시보드: 체제배너+자산배분+수익률+안전마진등급. balance+macro 병렬 로드.
+      PortfolioPage.jsx   /portfolio     포트폴리오 통합: 체제배너+자산배분+수익률+AI자문(진단+리밸런싱+매매안+이력). balance+macro+advisor 통합.
 ```
 
 ---

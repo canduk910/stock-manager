@@ -50,7 +50,9 @@ def get_cached(key: str):
         if not row:
             return None
         value, expires = row
-        if now_kst() > datetime.fromisoformat(expires):
+        now = now_kst().replace(tzinfo=None)
+        exp = datetime.fromisoformat(expires).replace(tzinfo=None)
+        if now > exp:
             return None
         return _sanitize(json.loads(value))
     except Exception:

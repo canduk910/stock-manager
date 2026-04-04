@@ -17,6 +17,29 @@ function GradeBadge({ grade }) {
   )
 }
 
+function fmtPrice(val) {
+  if (val == null) return '-'
+  return Number(val).toLocaleString()
+}
+
+function PosGuideCard({ label, value, sub, color = 'gray' }) {
+  const colorMap = {
+    red: 'text-red-600 bg-red-50 border-red-200',
+    blue: 'text-blue-600 bg-blue-50 border-blue-200',
+    green: 'text-green-600 bg-green-50 border-green-200',
+    yellow: 'text-yellow-600 bg-yellow-50 border-yellow-200',
+    gray: 'text-gray-700 bg-gray-50 border-gray-200',
+  }
+  const cls = colorMap[color] || colorMap.gray
+  return (
+    <div className={`border rounded-lg p-3 ${cls}`}>
+      <p className="text-xs font-medium opacity-70 mb-1">{label}</p>
+      <p className="text-lg font-bold">{value}</p>
+      {sub && <p className="text-xs mt-1 opacity-70 leading-relaxed">{sub}</p>}
+    </div>
+  )
+}
+
 function Section({ title, icon, children }) {
   return (
     <div className="border border-gray-200 rounded-lg overflow-hidden">
@@ -38,6 +61,7 @@ export default function AIReportPanel({ report, history = [], loading, error, on
   const technical = reportData['기술적시그널'] || reportData.technical_signal || {}
   const risks = reportData['리스크요인'] || reportData.risk_factors || []
   const points = reportData['투자포인트'] || reportData.investment_points || []
+  const posGuide = reportData['포지션가이드'] || {}
 
   // 원문 fallback
   const rawText = reportData.raw
@@ -257,6 +281,45 @@ export default function AIReportPanel({ report, history = [], loading, error, on
           </ul>
         </Section>
       )}
+
+      {/* 포지션 가이드 */}
+      {!loading && !rawText && posGuide['추천진입가'] != null && (() => {
+        const rr = posGuide['리스크보상비율']
+        return (
+          <Section title="포지션 가이드" icon="🎯">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <PosGuideCard
+                label="추천 진입가"
+                value={fmtPrice(posGuide['추천진입가'])}
+                sub={posGuide['진입가근거']}
+              />
+              <PosGuideCard
+                label="손절가"
+                value={fmtPrice(posGuide['손절가'])}
+                sub={posGuide['손절근거']}
+                color="blue"
+              />
+              <PosGuideCard
+                label="1차 익절가"
+                value={fmtPrice(posGuide['1차익절가'])}
+                sub={posGuide['익절근거']}
+                color="red"
+              />
+              <PosGuideCard
+                label="R:R 비율"
+                value={rr != null ? Number(rr).toFixed(1) : '-'}
+                sub={rr != null ? (rr >= 2 ? '양호 (2.0 이상)' : '주의 (2.0 미만)') : ''}
+                color={rr != null ? (rr >= 2 ? 'green' : 'yellow') : 'gray'}
+              />
+            </div>
+            {posGuide['분할매수제안'] && (
+              <p className="text-xs text-gray-600 mt-3 p-2 bg-gray-50 rounded">
+                분할매수: {posGuide['분할매수제안']}
+              </p>
+            )}
+          </Section>
+        )
+      })()}
 
       {/* 리포트 없음 안내 */}
       {!loading && !rawText && !opinion.등급 && !error && (

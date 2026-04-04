@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { Link } from 'react-router-dom'
 import { useBalance } from '../hooks/useBalance'
 import PortfolioSummary from '../components/balance/PortfolioSummary'
 import HoldingsTable from '../components/balance/HoldingsTable'
@@ -6,7 +7,6 @@ import OverseasHoldingsTable from '../components/balance/OverseasHoldingsTable'
 import FuturesTable from '../components/balance/FuturesTable'
 import LoadingSpinner from '../components/common/LoadingSpinner'
 import EmptyState from '../components/common/EmptyState'
-import AdvisorPanel from '../components/advisor/AdvisorPanel'
 
 export default function BalancePage({ notify }) {
   const { data, loading, error, load } = useBalance()
@@ -82,8 +82,12 @@ export default function BalancePage({ notify }) {
             </div>
           )}
 
-          {/* AI 포트폴리오 자문 */}
-          <AdvisorPanel balanceData={data} notify={notify} />
+          {/* 포트폴리오 분석 링크 */}
+          <div className="text-center py-3">
+            <Link to="/portfolio" className="text-sm text-indigo-500 hover:text-indigo-700 font-medium">
+              포트폴리오에서 AI 자문 보기 →
+            </Link>
+          </div>
         </div>
       )}
     </div>

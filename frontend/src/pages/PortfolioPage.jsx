@@ -1,17 +1,25 @@
+import { useEffect } from 'react'
 import { usePortfolio } from '../hooks/usePortfolio'
+import { usePortfolioAdvisor } from '../hooks/usePortfolioAdvisor'
 import PortfolioSummary from '../components/balance/PortfolioSummary'
 import LoadingSpinner from '../components/common/LoadingSpinner'
 import ErrorAlert from '../components/common/ErrorAlert'
 import RegimeBanner from '../components/portfolio/RegimeBanner'
 import AllocationChart from '../components/portfolio/AllocationChart'
 import ProfitChart from '../components/portfolio/ProfitChart'
-import HoldingsOverview from '../components/portfolio/HoldingsOverview'
+import AdvisorPanel from '../components/advisor/AdvisorPanel'
 
-export default function PortfolioPage() {
+export default function PortfolioPage({ notify }) {
   const {
     balance, sentiment, loading, error, load,
     allocation, holdings, totalReturn, cashRatio,
   } = usePortfolio()
+
+  const advisor = usePortfolioAdvisor()
+
+  useEffect(() => {
+    advisor.loadLatest()
+  }, [])
 
   const isKeyMissing = error && (error.includes('설정되지 않았습니다') || error.includes('503'))
 
@@ -56,17 +64,22 @@ export default function PortfolioPage() {
           {/* 매크로 체제 배너 */}
           <RegimeBanner sentiment={sentiment} />
 
-          {/* 자산 현황 요약 (기존 컴포넌트 재사용) */}
+          {/* 자산 현황 요약 */}
           <PortfolioSummary data={balance} />
 
-          {/* 차트 영역: 배분 + 수익률 */}
+          {/* 차트: 자산 배분 + 종목별 수익률 */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <AllocationChart allocation={allocation} />
             <ProfitChart holdings={holdings} />
           </div>
 
-          {/* 보유 종목 테이블 (안전마진 등급 포함) */}
-          <HoldingsOverview holdings={holdings} />
+          {/* AI 포트폴리오 자문 (진단 + 리밸런싱 + 매매실행안 + 이력) */}
+          <AdvisorPanel
+            balanceData={balance}
+            notify={notify}
+            advisor={advisor}
+            showHistory={true}
+          />
         </div>
       )}
     </div>

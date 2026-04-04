@@ -8,6 +8,8 @@ from __future__ import annotations
 import json
 from typing import Optional
 
+import logging
+
 from config import OPENAI_API_KEY, OPENAI_MODEL
 
 from stock import advisory_store, advisory_fetcher
@@ -15,6 +17,8 @@ from stock.utils import is_domestic
 from services.exceptions import (
     ConfigError, ExternalAPIError, NotFoundError, PaymentRequiredError,
 )
+
+logger = logging.getLogger(__name__)
 
 
 # ── 공개 API ──────────────────────────────────────────────────────────────────
@@ -50,7 +54,13 @@ def generate_ai_report(code: str, market: str, name: str) -> dict:
 
     model = OPENAI_MODEL
     graham_data = _calc_graham_number(fundamental, market)
-    prompt = _build_prompt(code, market, name, fundamental, technical, graham_data)
+
+    # 매크로 컨텍스트 수집 (캐시 활용, 실패 시 빈 dict)
+    macro_ctx = _get_macro_context()
+    regime, regime_desc = _determine_regime(macro_ctx)
+
+    prompt = _build_prompt(code, market, name, fundamental, technical, graham_data, macro_ctx, regime, regime_desc)
+    system_prompt = _build_system_prompt(regime, regime_desc)
 
     try:
         from openai import OpenAI
@@ -58,30 +68,18 @@ def generate_ai_report(code: str, market: str, name: str) -> dict:
         resp = client.chat.completions.create(
             model=model,
             messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "당신은 전문 주식 애널리스트입니다. "
-                        "다음 세 가지 전략 프레임워크를 반드시 평가하여 종합 투자 의견을 JSON 형식으로 작성해주세요.\n\n"
-                        "【전략 1: 변동성 돌파 전략】\n"
-                        "래리 윌리엄스 기반. 당일 시가 + (전일 고저 범위 × K값) 돌파 시 매수 진입. "
-                        "K=0.5가 표준이며, ATR 기반 변동성 수준도 함께 판단하세요.\n\n"
-                        "【전략 2: 안전마진 전략 (벤자민 그레이엄)】\n"
-                        "Graham Number = sqrt(22.5 × EPS × BPS). "
-                        "할인율 >30%: 강한 매수, 10~30%: 매수, 0~10%: 중립, 음수: 고평가. "
-                        "EPS/BPS 계산 불가 시 PER/PBR 상대 비교로 평가하세요.\n\n"
-                        "【전략 3: 추세추종 전략】\n"
-                        "MA5>MA20>MA60 정배열 + MACD 방향 + RSI 모멘텀으로 추세 강도 판단. "
-                        "정배열+MACD 골든크로스+RSI 55이상: 강한 추세. 역배열: 하락추세.\n\n"
-                        "각 전략 신호를 독립적으로 평가하고, 전략 간 일치/불일치도 종합 의견에 반영하세요."
-                    ),
-                },
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": prompt},
             ],
-            max_completion_tokens=2500,
+            max_completion_tokens=8000,
             response_format={"type": "json_object"},
         )
         content = resp.choices[0].message.content or "{}"
+
+        # 토큰 제한으로 응답 잘림 감지
+        if resp.choices[0].finish_reason == "length":
+            logger.warning("종목 자문 응답이 토큰 제한으로 잘렸습니다 (%s)", code)
+
         report = _parse_report(content)
     except (ConfigError, NotFoundError, PaymentRequiredError, ExternalAPIError):
         raise
@@ -323,8 +321,118 @@ def _calc_graham_number(fundamental: dict, market: str) -> dict:
     }
 
 
+def _get_macro_context() -> dict:
+    """매크로 심리 데이터 수집 (캐시 활용, 실패 시 빈 dict)."""
+    try:
+        from services import macro_service
+        return macro_service.get_sentiment()
+    except Exception as e:
+        logger.debug("매크로 컨텍스트 수집 실패: %s", e)
+        return {}
+
+
+def _determine_regime(sentiment: dict) -> tuple[str, str]:
+    """sentiment → (regime, regime_desc) 반환."""
+    fg = sentiment.get("fear_greed") or {}
+    fg_val = fg.get("value") if fg.get("value") is not None else fg.get("score")
+    if fg_val is None:
+        return "selective", "중립 (적극적)"
+    fg_val = float(fg_val)
+    if fg_val <= 25:
+        return "defensive", "공포 (방어적)"
+    if fg_val <= 45:
+        return "cautious", "신중 (선별적)"
+    if fg_val <= 60:
+        return "selective", "중립 (적극적)"
+    return "accumulation", "탐욕 (축적)"
+
+
+_REGIME_MARGIN = {
+    "accumulation": 20, "selective": 25, "cautious": 30, "defensive": 40,
+}
+
+
+def _build_macro_section(macro_ctx: Optional[dict], regime: str, regime_desc: str) -> str:
+    """유저 프롬프트에 삽입할 매크로 환경 섹션."""
+    if not macro_ctx:
+        return ""
+    fg = macro_ctx.get("fear_greed") or {}
+    fg_val = fg.get("value") if fg.get("value") is not None else fg.get("score")
+    vix = macro_ctx.get("vix") or {}
+    buffett = macro_ctx.get("buffett") or {}
+    vix_val = vix.get("value")
+    buf_ratio = buffett.get("ratio")
+    req_margin = _REGIME_MARGIN.get(regime, 25)
+    lines = [f"## 매크로 환경 (시장 체제: {regime_desc})"]
+    if fg_val is not None:
+        lines.append(f"- 공포탐욕지수: {fg_val}")
+    if vix_val is not None:
+        lines.append(f"- VIX: {vix_val}")
+    if buf_ratio is not None:
+        lines.append(f"- 버핏지수: {buf_ratio}%")
+    lines.append(f"- 시장 체제: {regime} ({regime_desc})")
+    lines.append(f"- 요구 안전마진: {req_margin}% 이상")
+    return "\n".join(lines)
+
+
+_REGIME_RULES = {
+    "accumulation": (
+        "시장 체제: accumulation (탐욕 — 축적 구간)\n"
+        "안전마진 20% 이상이면 적극 매수 가능. 기술적 신호가 약해도 밸류에이션이 좋으면 진입 검토.\n"
+        "현금 비중 25% 이상 유지."
+    ),
+    "selective": (
+        "시장 체제: selective (중립 — 선별 매수)\n"
+        "안전마진 25% 이상인 종목만 매수 권고. 기술적 추세와 펀더멘털이 모두 양호한 경우에만.\n"
+        "현금 비중 35% 이상 유지."
+    ),
+    "cautious": (
+        "시장 체제: cautious (신중 — 방어적 운용)\n"
+        "안전마진 30% 이상인 종목만 조건부 매수. 추세 하락 신호는 하향 조정.\n"
+        "하방 리스크를 강조하고 손절 기준을 명시할 것. 현금 비중 50% 이상 유지."
+    ),
+    "defensive": (
+        "시장 체제: defensive (공포 — 방어 구간)\n"
+        "【중요】 매수 등급을 부여하지 마세요. 최대 '관망'까지만 허용.\n"
+        "매도 검토 우선, 현금 보존 최우선. 안전마진 40% 이상이면 관심 목록에만 추가.\n"
+        "현금 비중 75% 이상 유지."
+    ),
+}
+
+
+def _build_system_prompt(regime: str, regime_desc: str) -> str:
+    """체제별 투자 원칙이 포함된 시스템 프롬프트."""
+    regime_rule = _REGIME_RULES.get(regime, _REGIME_RULES["selective"])
+    return (
+        "당신은 전문 주식 애널리스트입니다. "
+        "다음 세 가지 전략 프레임워크를 반드시 평가하여 종합 투자 의견을 JSON 형식으로 작성해주세요.\n\n"
+        "【전략 1: 변동성 돌파 전략 (래리 윌리엄스)】\n"
+        "당일 시가 + (전일 고저 범위 × K값) 돌파 시 매수 진입. K=0.5 표준. ATR 기반 변동성 수준 판단.\n\n"
+        "【전략 2: 안전마진 전략 (벤자민 그레이엄)】\n"
+        "Graham Number = sqrt(22.5 × EPS × BPS). "
+        "할인율 >30%: 강한 매수, 10~30%: 매수, 0~10%: 중립, 음수: 고평가.\n"
+        "- 적자 기업(EPS≤0): 3년 이상 연속 적자면 '구조적 적자'로 안전마진 전략 평가 불가. "
+        "일시적 적자(과거 흑자 이력)면 '조건부 관망'까지만 허용.\n"
+        "- BPS가 PBR 역산인 경우 '시장가 기반 참고치'임을 명시.\n\n"
+        "【전략 3: 추세추종 전략】\n"
+        "MA5>MA20>MA60 정배열 + MACD 방향 + RSI 모멘텀. "
+        "정배열+골든크로스+RSI 55↑: 강한 추세. 역배열: 하락추세.\n\n"
+        "【재무 건전성 체크리스트】\n"
+        "부채비율 >200% 위험, 유동비율 <100% 위험, FCF 3년 연속 음수 위험. "
+        "2개 이상 '위험'이면 안전마진 전략 매수 판정 금지 + '가치 함정 주의' 경고.\n\n"
+        "【업종 상대평가】\n"
+        "종목의 섹터/업종을 감안하여 동종 업종 평균 PER/PBR 대비 상대적 위치를 평가하세요 (참고용).\n\n"
+        f"【현재 매크로 환경】\n{regime_rule}\n\n"
+        "각 전략 신호를 독립적으로 평가하고, 전략 간 일치/불일치도 종합 의견에 반영하세요.\n"
+        "매크로 체제가 defensive이면 어떤 경우에도 '매수' 등급을 부여하지 마세요."
+    )
+
+
 def _build_prompt(code: str, market: str, name: str, fundamental: dict, technical: dict,
-                  graham_data: Optional[dict] = None) -> str:
+                  graham_data: Optional[dict] = None,
+                  macro_ctx: Optional[dict] = None,
+                  regime: str = "selective",
+                  regime_desc: str = "중립 (적극적)") -> str:
     """GPT 프롬프트 구성."""
     currency = "KRW(억원)" if market == "KR" else "USD(백만달러)"
 
@@ -456,6 +564,8 @@ def _build_prompt(code: str, market: str, name: str, fundamental: dict, technica
 - MACD 크로스: {macd_cross}
 - RSI: {rsi_val} ({rsi_signal})
 
+{_build_macro_section(macro_ctx, regime, regime_desc)}
+
 위 데이터를 세 가지 전략 프레임워크(변동성 돌파/안전마진/추세추종)로 종합 분석하여 다음 JSON 형식으로 투자 의견을 작성해주세요:
 {{
   "종합투자의견": {{
@@ -489,6 +599,16 @@ def _build_prompt(code: str, market: str, name: str, fundamental: dict, technica
       "rsi": "해석",
       "stoch": "해석"
     }}
+  }},
+  "포지션가이드": {{
+    "추천진입가": 현재가 또는 기술적 지지선 기반 정수,
+    "진입가근거": "진입가 산정 근거",
+    "손절가": 진입가 대비 -10~-15% 정수,
+    "손절근거": "손절가 산정 근거 (등급별 차등: 강한매수 -15%, 매수 -12%, 조건부 -10%)",
+    "1차익절가": Graham Number 또는 목표가 정수,
+    "익절근거": "익절가 산정 근거",
+    "리스크보상비율": (익절가-진입가)/(진입가-손절가) 소수점1자리,
+    "분할매수제안": "1차 50%(현재) - 2차 30%(지지선-3%) - 3차 20%(전저점)"
   }},
   "리스크요인": [
     {{"요인": "리스크명", "설명": "설명"}},

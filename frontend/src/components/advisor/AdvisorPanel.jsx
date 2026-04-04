@@ -95,6 +95,13 @@ export default function AdvisorPanel({ balanceData, notify, advisor: externalAdv
         {/* 결과 */}
         {analysis && !loading && (
           <div className="space-y-4">
+            {/* 파싱 실패 안내 */}
+            {analysis.raw && !analysis.diagnosis && (
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-700">
+                AI 분석 결과를 표시할 수 없습니다. "새로 분석" 버튼을 클릭해 다시 시도해주세요.
+              </div>
+            )}
+
             {/* 시장 코멘트 */}
             {analysis.market_context && (
               <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-700">
@@ -123,8 +130,8 @@ export default function AdvisorPanel({ balanceData, notify, advisor: externalAdv
         {/* BalancePage에서: AI자문 페이지 링크 */}
         {!showHistory && (
           <div className="text-center pt-2">
-            <Link to="/advisor" className="text-xs text-indigo-500 hover:text-indigo-700">
-              AI자문 페이지에서 이력 보기 →
+            <Link to="/portfolio" className="text-xs text-indigo-500 hover:text-indigo-700">
+              포트폴리오에서 이력 보기 →
             </Link>
           </div>
         )}

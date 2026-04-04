@@ -14,12 +14,12 @@ export default function RegimeBanner({ sentiment }) {
   if (!sentiment) return null
 
   const fg = sentiment.fear_greed
-  const fgValue = fg?.value ?? fg?.score
+  const fgValue = fg?.score ?? fg?.value
   const regime = getRegime(fgValue)
   if (!regime) return null
 
   const vix = sentiment.vix
-  const buffett = sentiment.buffett
+  const buffett = sentiment.buffett_indicator
 
   return (
     <div className={`rounded-xl border ${regime.border} ${regime.bg} px-5 py-3 flex items-center justify-between`}>
