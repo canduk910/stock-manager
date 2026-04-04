@@ -47,6 +47,9 @@ def _create_tables(conn):
             model        TEXT NOT NULL,
             report       TEXT NOT NULL
         );
+
+        CREATE INDEX IF NOT EXISTS idx_advisory_reports_code_market
+            ON advisory_reports(code, market, generated_at DESC);
     """)
 
 

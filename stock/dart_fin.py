@@ -334,7 +334,13 @@ def fetch_financials(stock_code: str, refresh: bool = False) -> Optional[dict]:
                 "fs_div": fs_div,
                 **accounts,
             }
-            set_cached(cache_key, result)
+            set_cached(cache_key, result, ttl_hours=168)
+            # 영속 캐시 write-through
+            try:
+                from .stock_info_store import upsert_financials
+                upsert_financials(stock_code, "KR", result)
+            except Exception:
+                pass
             return result
 
     # 재무데이터 없음 (신규상장 등)
@@ -445,10 +451,9 @@ def fetch_financials_multi_year(
             fs_div_used = found_fs
 
     # 과거 → 최신 정렬, 최대 years개
-    result = sorted(collected.values(), key=lambda x: x["year"])
-    result = result[-years:]
+    result = sorted(collected.values(), key=lambda x: x["year"])[-years:]
 
-    set_cached(cache_key, result, ttl_hours=24)
+    set_cached(cache_key, result, ttl_hours=168)
     return result
 
 
@@ -593,7 +598,7 @@ def fetch_bs_cf_annual(stock_code: str, years: int = 5) -> dict:
     cf_result = sorted(cf_collected.values(), key=lambda x: x["year"])[-years:]
 
     result = {"balance_sheet": bs_result, "cashflow": cf_result}
-    set_cached(cache_key, result, ttl_hours=24)
+    set_cached(cache_key, result, ttl_hours=168)
     return result
 
 
@@ -676,5 +681,5 @@ def fetch_income_detail_annual(stock_code: str, years: int = 5) -> list[dict]:
             fs_div_used = found_fs
 
     result = sorted(collected.values(), key=lambda x: x["year"])[-years:]
-    set_cached(cache_key, result, ttl_hours=24)
+    set_cached(cache_key, result, ttl_hours=168)
     return result

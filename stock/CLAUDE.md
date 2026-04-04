@@ -8,9 +8,10 @@ CLI와 API 라우터 양쪽에서 공용으로 사용한다. 데이터는 `~/sto
 |------|------|
 | `db_base.py` | SQLite 공용 유틸. `connect(db_name, init_fn)` contextmanager. WAL 모드 + timeout 10s. 4개 store 공용. `KST`/`now_kst()`/`now_kst_iso()` 타임존 헬퍼. |
 | `store.py` | 관심종목 CRUD + 순서 관리. `watchlist.db`. 복합 PK `(code, market)`. `watchlist_order` 테이블로 DnD 순서 영속화. |
-| `order_store.py` | 주문 이력 + 예약주문 CRUD. `orders.db`. `orders`(`status` 파라미터: PENDING/PLACED/REJECTED 등) + `reservations` 테이블. `list_active_orders()`: PENDING/PLACED/PARTIAL 대상. |
-| `advisory_store.py` | AI자문 DB. `advisory.db`. `advisory_stocks` + `advisory_cache` + `advisory_reports` + `portfolio_reports` 4테이블. 포트폴리오 자문 CRUD 포함. |
-| `advisory_fetcher.py` | AI자문 OHLCV 수집 + 사업부문 추론. 기술지표 계산은 indicators.py 위임. |
+| `order_store.py` | 주문 이력 + 예약주문 CRUD. `orders.db`. `orders`(인덱스: status, order_no+market, symbol+market) + `reservations` 테이블. `list_active_orders()`: PENDING/PLACED/PARTIAL 대상. |
+| `advisory_store.py` | AI자문 DB. `advisory.db`. `advisory_stocks` + `advisory_cache` + `advisory_reports`(인덱스: code+market+generated_at) + `portfolio_reports` 4테이블. 포트폴리오 자문 CRUD 포함. |
+| `advisory_fetcher.py` | AI자문 OHLCV 수집 + 사업부문 추론. 기술지표 계산은 indicators.py 위임. KIS 1분봉 4시간대 병렬 수집(ThreadPoolExecutor). |
+| `stock_info_store.py` | 종목 정보 영속 캐시. `stock_info.db`. 시세/지표/재무/수익률 영역별 TTL 관리. Docker 재시작에도 유지. write-through 패턴. |
 | `indicators.py` | 기술적 지표 순수 계산 (MACD/RSI/Stochastic/BB/MA/ATR). 외부 의존 없음 (math만). |
 | `utils.py` | `is_domestic(code)` — 6자리 숫자=국내. `is_fno(code)` — FNO 단축코드 판별. |
 | `symbol_map.py` | 종목코드↔종목명 매핑 (7일 캐시). `code_to_name()`. |
@@ -38,6 +39,7 @@ CLI와 API 라우터 양쪽에서 공용으로 사용한다. 데이터는 `~/sto
 | `advisory.db` | `~/stock-watchlist/` | AI자문 (자문종목/분석캐시/리포트) |
 | `market_board.db` | `~/stock-watchlist/` | 시세판 별도 등록 종목 |
 | `cache.db` | `~/stock-watchlist/` | TTL 캐시 (시세/재무/종목코드 등) |
+| `stock_info.db` | `~/stock-watchlist/` | 종목 정보 영속 캐시 (Docker 재시작에도 유지) |
 | `macro.db` | `~/stock-watchlist/` | 매크로 GPT 결과 일일 캐시 (KST 날짜 기반) |
 
 ---
@@ -106,10 +108,17 @@ CLI와 API 라우터 양쪽에서 공용으로 사용한다. 데이터는 `~/sto
 |---------|-----|
 | `corpCode.xml` | 30일 |
 | `symbol_map` | 7일 |
-| `market:metrics:` | 6시간 (장중 1시간/장외 12시간) |
-| `market:period_returns:` | 1시간 |
-| 시세/재무 | 24시간 |
+| `dart:fin*` / `dart:income*` / `dart:bs*` / `dart:cf*` | **7일 (168시간)** |
+| `market:metrics:` | 장중 1시간 / 장외 12시간 |
+| `market:period_returns:` | 장중 15분 / 장외 6시간 |
+| `market:price:` | 장중 6분 / 장외 6시간 |
 | `yf:*` | 1~24시간 (장중/장외 분리) |
 | `yf:forward:` | 6시간 |
+
+### stock_info_store.py (영속 캐시)
+- **Docker 재시작에도 유지**: `stock_info.db`는 `entrypoint.sh`에서 초기화하지 않음
+- **영역별 TTL**: price(10분/6시간), metrics(2시간/12시간), financials(7일), returns(30분/6시간)
+- **write-through**: `market.py`, `dart_fin.py`, `yf_client.py`의 fetch 함수가 결과를 자동 저장
+- **대시보드 우선 조회**: `watchlist_service.py`에서 stock_info 먼저 조회, stale 시에만 외부 API 호출
 
 > 함수 시그니처 상세 → `docs/STOCK_PACKAGE.md`

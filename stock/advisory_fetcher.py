@@ -78,9 +78,8 @@ def fetch_15min_ohlcv_kr(code: str) -> list[dict]:
             "custtype": "P",
         }
 
-        # 여러 시간대 호출로 하루 전체 데이터 수집 (각 30봉씩, 총 120봉 ≈ 2시간치 1분봉)
-        raw_bars_all: list[dict] = []
-        for hour_str in ["153000", "143000", "133000", "123000"]:
+        # 여러 시간대 병렬 호출로 하루 전체 데이터 수집 (각 30봉씩, 총 120봉 ≈ 2시간치 1분봉)
+        def _fetch_single_hour(hour_str: str) -> list[dict]:
             params = {
                 "fid_cond_mrkt_div_code": "J",
                 "fid_input_iscd": code,
@@ -88,6 +87,7 @@ def fetch_15min_ohlcv_kr(code: str) -> list[dict]:
                 "fid_pw_data_incu_yn": "Y",
                 "fid_etc_cls_code": "",
             }
+            bars = []
             try:
                 resp = requests.get(
                     f"{KIS_BASE_URL}/uapi/domestic-stock/v1/quotations/inquire-time-itemchartprice",
@@ -96,7 +96,7 @@ def fetch_15min_ohlcv_kr(code: str) -> list[dict]:
                     timeout=20,
                 )
                 if resp.status_code != 200:
-                    continue
+                    return bars
                 output2 = resp.json().get("output2") or []
                 for item in output2:
                     t_str = item.get("stck_cntg_hour", "")
@@ -110,7 +110,7 @@ def fetch_15min_ohlcv_kr(code: str) -> list[dict]:
                     c = float(item.get("stck_prpr") or 0)
                     if c == 0:
                         continue
-                    raw_bars_all.append({
+                    bars.append({
                         "time": dt_str,
                         "open": float(item.get("stck_oprc") or c),
                         "high": float(item.get("stck_hgpr") or c),
@@ -119,7 +119,15 @@ def fetch_15min_ohlcv_kr(code: str) -> list[dict]:
                         "volume": int(item.get("cntg_vol") or 0),
                     })
             except Exception:
-                continue
+                pass
+            return bars
+
+        from concurrent.futures import ThreadPoolExecutor
+        raw_bars_all: list[dict] = []
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            futures = [pool.submit(_fetch_single_hour, h) for h in ["153000", "143000", "133000", "123000"]]
+            for fut in futures:
+                raw_bars_all.extend(fut.result())
 
         # 중복 제거 + 시간순 정렬
         seen: set[str] = set()

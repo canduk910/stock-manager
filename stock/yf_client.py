@@ -102,6 +102,12 @@ def fetch_price_yf(code: str) -> Optional[dict]:
         }
         ttl = 2 / 60 if _is_us_trading_hours() else 0.5  # 장중 2분, 장외 30분
         set_cached(key, result, ttl_hours=ttl)
+        # 영속 캐시 write-through
+        try:
+            from .stock_info_store import upsert_price
+            upsert_price(code, "US", result)
+        except Exception:
+            pass
         return result
     except Exception:
         set_cached(key, {}, ttl_hours=1)
@@ -177,6 +183,12 @@ def fetch_detail_yf(code: str) -> Optional[dict]:
         }
         ttl = 0.5 if _is_us_trading_hours() else 6  # 장중 30분, 장외 6시간
         set_cached(key, result, ttl_hours=ttl)
+        # 영속 캐시 write-through
+        try:
+            from .stock_info_store import upsert_metrics
+            upsert_metrics(code, "US", result)
+        except Exception:
+            pass
         return result
     except Exception:
         set_cached(key, {}, ttl_hours=1)
@@ -239,6 +251,12 @@ def fetch_financials_yf(code: str) -> Optional[dict]:
         return None
     result = rows[-1]
     set_cached(key, result, ttl_hours=24)
+    # 영속 캐시 write-through
+    try:
+        from .stock_info_store import upsert_financials
+        upsert_financials(code, "US", {**result, "bsns_year": result.get("year")})
+    except Exception:
+        pass
     return result
 
 

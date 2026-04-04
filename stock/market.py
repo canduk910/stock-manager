@@ -145,6 +145,12 @@ def fetch_price(code: str, refresh: bool = False) -> Optional[dict]:
         }
         ttl = 0.1 if _is_kr_trading_hours() else 6  # 장중 6분, 장외 6시간
         set_cached(cache_key, result, ttl_hours=ttl)
+        # 영속 캐시 write-through
+        try:
+            from .stock_info_store import upsert_price
+            upsert_price(code, "KR", result)
+        except Exception:
+            pass
         return result
 
     except Exception as e:
@@ -343,6 +349,12 @@ def fetch_market_metrics(code: str) -> dict:
 
     ttl = 1 if _is_kr_trading_hours() else 12  # 장중 1시간, 장외 12시간
     set_cached(cache_key, result, ttl_hours=ttl)
+    # 영속 캐시 write-through
+    try:
+        from .stock_info_store import upsert_metrics
+        upsert_metrics(code, "KR", result)
+    except Exception:
+        pass
     return result
 
 
@@ -413,4 +425,10 @@ def fetch_period_returns(code: str) -> dict:
     }
     ttl = 0.25 if _is_kr_trading_hours() else 6  # 장중 15분, 장외 6시간
     set_cached(cache_key, result, ttl_hours=ttl)
+    # 영속 캐시 write-through
+    try:
+        from .stock_info_store import upsert_returns
+        upsert_returns(code, "KR", result)
+    except Exception:
+        pass
     return result

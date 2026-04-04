@@ -105,27 +105,27 @@ def _collect_fundamental(code: str, market: str, name: str) -> dict:
 
 
 def _collect_fundamental_kr(code: str, name: str) -> dict:
+    from concurrent.futures import ThreadPoolExecutor
     from stock import dart_fin
     from stock.market import fetch_market_metrics
-
-    # 손익계산서 세부
-    income_stmt = dart_fin.fetch_income_detail_annual(code, years=5)
-
-    # 대차대조표 + 현금흐름표
-    bs_cf = dart_fin.fetch_bs_cf_annual(code, years=5)
-    balance_sheet = bs_cf.get("balance_sheet", [])
-    cashflow = bs_cf.get("cashflow", [])
-
-    # 계량지표 (시가총액, PER, PBR, ROE) — balance_sheet/income_stmt도 전달해 추가 지표 계산
-    metrics_raw = fetch_market_metrics(code)
-    metrics = _build_metrics_kr(metrics_raw, balance_sheet, income_stmt)
-
-    # 사업별 매출비중 + 사업 설명 + 키워드 (OpenAI 추론)
-    segments_data = advisory_fetcher.fetch_segments_kr(code, name)
-
-    # 포워드 가이던스 (yfinance .KS/.KQ, 없으면 빈 dict)
     from stock.yf_client import fetch_forward_estimates_yf
-    forward_estimates = fetch_forward_estimates_yf(code, is_kr=True)
+
+    # 5개 독립 데이터 소스 병렬 수집
+    with ThreadPoolExecutor(max_workers=5) as pool:
+        f_income = pool.submit(dart_fin.fetch_income_detail_annual, code, 5)
+        f_bs_cf = pool.submit(dart_fin.fetch_bs_cf_annual, code, 5)
+        f_metrics = pool.submit(fetch_market_metrics, code)
+        f_segments = pool.submit(advisory_fetcher.fetch_segments_kr, code, name)
+        f_forward = pool.submit(fetch_forward_estimates_yf, code, True)
+
+        income_stmt = f_income.result()
+        bs_cf = f_bs_cf.result()
+        balance_sheet = bs_cf.get("balance_sheet", [])
+        cashflow = bs_cf.get("cashflow", [])
+        metrics_raw = f_metrics.result()
+        metrics = _build_metrics_kr(metrics_raw, balance_sheet, income_stmt)
+        segments_data = f_segments.result()
+        forward_estimates = f_forward.result()
 
     # 하위호환: 구 캐시가 list일 수 있음
     if isinstance(segments_data, dict):
@@ -150,22 +150,31 @@ def _collect_fundamental_kr(code: str, name: str) -> dict:
 
 
 def _collect_fundamental_us(code: str) -> dict:
+    from concurrent.futures import ThreadPoolExecutor
     from stock.yf_client import (
         fetch_income_detail_yf,
         fetch_balance_sheet_yf,
         fetch_cashflow_yf,
         fetch_metrics_yf,
         fetch_segments_yf,
+        fetch_forward_estimates_yf,
     )
 
-    income_stmt = fetch_income_detail_yf(code, years=5)
-    balance_sheet = fetch_balance_sheet_yf(code, years=5)
-    cashflow = fetch_cashflow_yf(code, years=5)
-    metrics = fetch_metrics_yf(code)
-    segments_data = fetch_segments_yf(code)
+    # 6개 독립 데이터 소스 병렬 수집
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        f_income = pool.submit(fetch_income_detail_yf, code, 5)
+        f_bs = pool.submit(fetch_balance_sheet_yf, code, 5)
+        f_cf = pool.submit(fetch_cashflow_yf, code, 5)
+        f_metrics = pool.submit(fetch_metrics_yf, code)
+        f_segments = pool.submit(fetch_segments_yf, code)
+        f_forward = pool.submit(fetch_forward_estimates_yf, code, False)
 
-    from stock.yf_client import fetch_forward_estimates_yf
-    forward_estimates = fetch_forward_estimates_yf(code, is_kr=False)
+        income_stmt = f_income.result()
+        balance_sheet = f_bs.result()
+        cashflow = f_cf.result()
+        metrics = f_metrics.result()
+        segments_data = f_segments.result()
+        forward_estimates = f_forward.result()
 
     # 하위호환: 구 캐시가 list일 수 있음
     if isinstance(segments_data, dict):

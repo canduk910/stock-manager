@@ -51,6 +51,10 @@ def _create_tables(conn):
             updated_at      TEXT NOT NULL
         )
     """)
+    # ── 인덱스 ──
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_orders_order_no_market ON orders(order_no, market)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_orders_symbol_market ON orders(symbol, market, placed_at DESC)")
     conn.commit()
 
 

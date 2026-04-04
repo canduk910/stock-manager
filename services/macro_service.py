@@ -25,32 +25,34 @@ def get_indices() -> dict:
     results = []
     now = now_kst_iso()
 
-    with ThreadPoolExecutor(max_workers=4) as pool:
-        futures = {}
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        q_futures = {}
+        s_futures = {}
         for idx in macro_fetcher.INDICES:
             sym = idx["symbol"]
-            futures[pool.submit(macro_fetcher.fetch_index_quote, sym)] = idx
-            futures[pool.submit(macro_fetcher.fetch_index_sparkline, sym)] = None
+            q_futures[pool.submit(macro_fetcher.fetch_index_quote, sym)] = sym
+            s_futures[pool.submit(macro_fetcher.fetch_index_sparkline, sym)] = sym
 
         quotes = {}
-        sparklines = {}
-        for fut in as_completed(futures):
-            meta = futures[fut]
+        for fut in as_completed(q_futures):
+            sym = q_futures[fut]
             try:
-                val = fut.result()
+                quotes[sym] = fut.result()
             except Exception:
-                val = None
-            if meta is not None:
-                quotes[meta["symbol"]] = val
-            else:
-                # sparkline — 결과에서 symbol 식별이 필요하므로 다른 방법 사용
-                pass
+                quotes[sym] = None
 
-    # sparkline은 순차 (이미 캐시 사용)
+        sparklines = {}
+        for fut in as_completed(s_futures):
+            sym = s_futures[fut]
+            try:
+                sparklines[sym] = fut.result()
+            except Exception:
+                sparklines[sym] = []
+
     for idx in macro_fetcher.INDICES:
         sym = idx["symbol"]
         quote = quotes.get(sym)
-        spark = macro_fetcher.fetch_index_sparkline(sym)
+        spark = sparklines.get(sym, [])
 
         entry = {
             "symbol": sym,

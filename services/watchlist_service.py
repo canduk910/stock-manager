@@ -39,7 +39,11 @@ def _period_label(fin: dict) -> str:
 
 
 def _fetch_dashboard_row(item: dict) -> dict:
-    """단일 종목 대시보드 행 데이터 수집 (ThreadPoolExecutor에서 실행)."""
+    """단일 종목 대시보드 행 데이터 수집 (ThreadPoolExecutor에서 실행).
+
+    stock_info.db에 fresh한 데이터가 있으면 외부 API 호출 없이 즉시 반환.
+    stale한 영역만 선택적으로 외부 API를 호출한다.
+    """
     code = item["code"]
     market = item.get("market", "KR")
     domestic = is_domestic(code) and market == "KR"
@@ -61,6 +65,44 @@ def _fetch_dashboard_row(item: dict) -> dict:
         "report_date": None,
         "dividend_yield": None,
     }
+
+    # ── stock_info.db 영속 캐시 우선 조회 ──
+    _fmt_cap = _awk if domestic else _usd_m
+    try:
+        from stock.stock_info_store import get_stock_info, is_stale
+        info = get_stock_info(code, market)
+        if info:
+            price_fresh = not is_stale(code, market, "price")
+            metrics_fresh = not is_stale(code, market, "metrics")
+            fin_fresh = not is_stale(code, market, "financials")
+
+            if price_fresh and info.get("price"):
+                row["price"] = info["price"]
+                row["change"] = info.get("change_val")
+                row["change_pct"] = info.get("change_pct")
+                row["market_cap"] = _fmt_cap(info.get("mktcap"))
+
+            if metrics_fresh and info.get("dividend_yield") is not None:
+                row["dividend_yield"] = info["dividend_yield"]
+
+            if fin_fresh and info.get("revenue") is not None:
+                rev = info.get("revenue")
+                op = info.get("operating_income")
+                net = info.get("net_income")
+                row["revenue"] = _fmt_cap(rev)
+                row["operating_profit"] = _fmt_cap(op)
+                row["net_income"] = _fmt_cap(net)
+                row["oi_margin"] = (
+                    round(op / rev * 100, 1) if rev and op and rev != 0 else None
+                )
+                yr = info.get("bsns_year")
+                row["report_date"] = f"{yr}/12" if yr else None
+
+            # 모든 영역이 fresh하면 외부 API 호출 건너뛰기
+            if price_fresh and metrics_fresh and fin_fresh:
+                return row
+    except Exception:
+        pass
 
     if domestic:
         try:

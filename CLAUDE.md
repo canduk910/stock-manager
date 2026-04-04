@@ -146,6 +146,7 @@ frontend/           React SPA (Vite + Tailwind + Recharts)
 |------|------|-----|
 | `screener_cache.db` (프로젝트 루트) | 스크리너 KRX/DART 캐시 | 만료 없음 (날짜키) |
 | `~/stock-watchlist/cache.db` | 시세/재무/종목코드/수익률 캐시 | 키별 상이 |
+| `~/stock-watchlist/stock_info.db` | 종목 정보 영속 캐시 (시세/지표/재무/수익률) | 영역별 TTL (재시작 유지) |
 | `~/stock-watchlist/watchlist.db` | 관심종목 목록 | 영구 |
 | `~/stock-watchlist/orders.db` | 주문 이력 + 예약주문 | 영구 |
 | `~/stock-watchlist/market_board.db` | 시세판 별도 등록 종목 | 영구 |

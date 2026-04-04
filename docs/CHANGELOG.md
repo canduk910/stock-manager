@@ -1,5 +1,23 @@
 # 변경 이력
 
+## 2026-04-04 — 성능 최적화 리팩토링 (DB 캐시 + 병렬화)
+
+### 성능 최적화
+- `stock/stock_info_store.py` 신규: 종목 정보 영속 캐시 DB (`stock_info.db`). Docker 재시작에도 유지
+- `watchlist_service.py`: stock_info DB 우선 조회 → stale 영역만 외부 API 호출 (대시보드 응답 속도 개선)
+- `advisory_service.py`: `_collect_fundamental_kr/us` 5~6개 데이터 소스 ThreadPoolExecutor 병렬 수집
+- `advisory_fetcher.py`: KIS 1분봉 4시간대 순차→병렬 수집 (최악 80초→20초)
+- `macro_service.py`: sparkline 병렬 결과 미사용 버그 수정 (결과 버려지고 순차 재호출되던 문제)
+- `dart_fin.py`: 재무 캐시 TTL 24시간→7일(168시간) 확장 (사업보고서 분기 변동 주기에 맞춤)
+- `market.py`/`yf_client.py`: write-through 패턴으로 stock_info DB에 시세/지표/재무 자동 저장
+
+### DB 인덱스 추가
+- `order_store.py`: orders 테이블에 status, order_no+market, symbol+market 인덱스 3개 추가
+- `advisory_store.py`: advisory_reports 테이블에 code+market+generated_at 인덱스 추가
+
+### 프론트엔드 최적화
+- `OrderPage.jsx`: 탭/마켓 전환 useEffect 분리 — market 변경 시 현재 활성 탭만 리로드
+
 ## 2026-04-04 — 메뉴바 드롭다운 + 대시보드 재설계 + doc-commit 스킬
 
 ### UI 개선

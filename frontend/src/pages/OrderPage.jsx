@@ -90,14 +90,25 @@ export default function OrderPage({ notify }) {
   // 초기 마운트 여부 추적 (quoteSymbol 변경 useEffect 중복 호출 방지)
   const isMounted = useRef(false)
 
-  // 탭 변경 시 데이터 로드
+  // 탭 변경 시 해당 탭 데이터 로드
   useEffect(() => {
     if (activeTab === 'order') loadOpen(market)
-    if (activeTab === 'open') loadOpen(market)
-    if (activeTab === 'executions') loadExec(market)
-    if (activeTab === 'history') loadHistory({})
-    if (activeTab === 'reservation') loadReservations()
-  }, [activeTab, market])
+    else if (activeTab === 'open') loadOpen(market)
+    else if (activeTab === 'executions') loadExec(market)
+    else if (activeTab === 'history') loadHistory({})
+    else if (activeTab === 'reservation') loadReservations()
+  }, [activeTab]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 마켓 변경 시 현재 탭 데이터만 리로드 (초기 마운트 스킵 — [activeTab]에서 처리)
+  const marketInitRef = useRef(false)
+  useEffect(() => {
+    if (!marketInitRef.current) {
+      marketInitRef.current = true
+      return
+    }
+    if (activeTab === 'order' || activeTab === 'open') loadOpen(market)
+    else if (activeTab === 'executions') loadExec(market)
+  }, [market]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // 체결/미체결 탭 10초 자동 폴링
   useEffect(() => {
