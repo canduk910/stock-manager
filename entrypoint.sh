@@ -60,6 +60,10 @@ except Exception as e:
     print(f'[경고] 캐시 초기화 실패: {e}', file=sys.stderr)
 PYEOF
 
+# ── DB 마이그레이션 (Alembic) ─────────────────────────────────
+echo "[정보] DB 마이그레이션 실행 (alembic upgrade head)..."
+python3 -m alembic upgrade head 2>&1 || echo "[경고] DB 마이그레이션 실패 (서버 시작 시 재시도)" >&2
+
 # ── uvicorn 실행 ─────────────────────────────────────────────
 echo "[시작] uvicorn main:app --host 0.0.0.0 --port ${PORT}"
 exec uvicorn main:app --host 0.0.0.0 --port "$PORT" "$@"

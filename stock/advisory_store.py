@@ -1,274 +1,102 @@
-"""AI자문 종목 목록 + 캐시 + 리포트 + 포트폴리오 자문 CRUD.
+"""AI자문 종목 목록 + 캐시 + 리포트 + 포트폴리오 자문 CRUD — SQLAlchemy ORM adapter.
 
-DB 위치: ~/stock-watchlist/advisory.db
+기존 함수 시그니처 100% 유지. 내부는 AdvisoryRepository에 위임.
+services/, routers/ 변경 없음.
 """
 
-import json
-import sqlite3
 from typing import Optional
 
-from .db_base import connect, now_kst_iso, row_to_dict
-
-_DB = "advisory.db"
-
-
-def _create_tables(conn):
-    conn.executescript("""
-        CREATE TABLE IF NOT EXISTS advisory_stocks (
-            code       TEXT NOT NULL,
-            market     TEXT NOT NULL DEFAULT 'KR',
-            name       TEXT NOT NULL,
-            added_date TEXT NOT NULL,
-            memo       TEXT NOT NULL DEFAULT '',
-            PRIMARY KEY (code, market)
-        );
-
-        CREATE TABLE IF NOT EXISTS advisory_cache (
-            code        TEXT NOT NULL,
-            market      TEXT NOT NULL DEFAULT 'KR',
-            updated_at  TEXT NOT NULL,
-            fundamental TEXT,
-            technical   TEXT,
-            PRIMARY KEY (code, market)
-        );
-
-        CREATE TABLE IF NOT EXISTS advisory_reports (
-            id           INTEGER PRIMARY KEY AUTOINCREMENT,
-            code         TEXT NOT NULL,
-            market       TEXT NOT NULL DEFAULT 'KR',
-            generated_at TEXT NOT NULL,
-            model        TEXT NOT NULL,
-            report       TEXT NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS portfolio_reports (
-            id           INTEGER PRIMARY KEY AUTOINCREMENT,
-            generated_at TEXT NOT NULL,
-            model        TEXT NOT NULL,
-            report       TEXT NOT NULL
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_advisory_reports_code_market
-            ON advisory_reports(code, market, generated_at DESC);
-    """)
-
-
-def _conn():
-    return connect(_DB, _create_tables)
+from db.repositories.advisory_repo import AdvisoryRepository
+from db.session import get_session
 
 
 # ── 자문종목 CRUD ─────────────────────────────────────────────────────────────
 
 def add_stock(code: str, market: str, name: str, memo: str = "") -> bool:
     """종목 추가. 이미 존재하면 False."""
-    try:
-        with _conn() as con:
-            con.execute(
-                "INSERT INTO advisory_stocks (code, market, name, added_date, memo) VALUES (?,?,?,?,?)",
-                (code.upper(), market.upper(), name, now_kst_iso(), memo),
-            )
-        return True
-    except sqlite3.IntegrityError:
-        return False
+    with get_session() as db:
+        return AdvisoryRepository(db).add_stock(code, market, name, memo)
 
 
 def remove_stock(code: str, market: str) -> bool:
     """종목 삭제. 삭제된 행이 있으면 True."""
-    with _conn() as con:
-        cur = con.execute(
-            "DELETE FROM advisory_stocks WHERE code=? AND market=?",
-            (code.upper(), market.upper()),
-        )
-        return cur.rowcount > 0
+    with get_session() as db:
+        return AdvisoryRepository(db).remove_stock(code, market)
 
 
 def all_stocks() -> list[dict]:
     """전체 자문종목 목록 (added_date 역순)."""
-    with _conn() as con:
-        rows = con.execute(
-            "SELECT code, market, name, added_date, memo FROM advisory_stocks ORDER BY added_date DESC"
-        ).fetchall()
-    return [dict(r) for r in rows]
+    with get_session() as db:
+        return AdvisoryRepository(db).all_stocks()
 
 
 def get_stock(code: str, market: str) -> Optional[dict]:
     """단일 종목 조회."""
-    with _conn() as con:
-        row = con.execute(
-            "SELECT code, market, name, added_date, memo FROM advisory_stocks WHERE code=? AND market=?",
-            (code.upper(), market.upper()),
-        ).fetchone()
-    return dict(row) if row else None
+    with get_session() as db:
+        return AdvisoryRepository(db).get_stock(code, market)
 
 
 # ── 캐시 CRUD ─────────────────────────────────────────────────────────────────
 
 def save_cache(code: str, market: str, fundamental: dict, technical: dict) -> None:
     """분석 데이터 캐시 저장 (upsert)."""
-    with _conn() as con:
-        con.execute(
-            """INSERT INTO advisory_cache (code, market, updated_at, fundamental, technical)
-               VALUES (?,?,?,?,?)
-               ON CONFLICT(code, market) DO UPDATE SET
-                   updated_at=excluded.updated_at,
-                   fundamental=excluded.fundamental,
-                   technical=excluded.technical""",
-            (
-                code.upper(),
-                market.upper(),
-                now_kst_iso(),
-                json.dumps(fundamental, ensure_ascii=False),
-                json.dumps(technical, ensure_ascii=False),
-            ),
-        )
+    with get_session() as db:
+        AdvisoryRepository(db).save_cache(code, market, fundamental, technical)
 
 
 def get_cache(code: str, market: str) -> Optional[dict]:
     """캐시 조회. 없으면 None."""
-    with _conn() as con:
-        row = con.execute(
-            "SELECT code, market, updated_at, fundamental, technical FROM advisory_cache WHERE code=? AND market=?",
-            (code.upper(), market.upper()),
-        ).fetchone()
-    if not row:
-        return None
-    return {
-        "code": row["code"],
-        "market": row["market"],
-        "updated_at": row["updated_at"],
-        "fundamental": json.loads(row["fundamental"] or "{}"),
-        "technical": json.loads(row["technical"] or "{}"),
-    }
+    with get_session() as db:
+        return AdvisoryRepository(db).get_cache(code, market)
 
 
 # ── 리포트 CRUD ───────────────────────────────────────────────────────────────
 
 def save_report(code: str, market: str, model: str, report: dict) -> int:
     """AI 리포트 저장. 생성된 ID 반환."""
-    with _conn() as con:
-        cur = con.execute(
-            "INSERT INTO advisory_reports (code, market, generated_at, model, report) VALUES (?,?,?,?,?)",
-            (
-                code.upper(),
-                market.upper(),
-                now_kst_iso(),
-                model,
-                json.dumps(report, ensure_ascii=False),
-            ),
-        )
-        return cur.lastrowid
+    with get_session() as db:
+        return AdvisoryRepository(db).save_report(code, market, model, report)
 
 
 def get_report_history(code: str, market: str, limit: int = 20) -> list[dict]:
     """AI 리포트 히스토리 목록 (최신순, 본문 제외)."""
-    with _conn() as con:
-        rows = con.execute(
-            """SELECT id, code, market, generated_at, model
-               FROM advisory_reports WHERE code=? AND market=?
-               ORDER BY id DESC LIMIT ?""",
-            (code.upper(), market.upper(), limit),
-        ).fetchall()
-    return [dict(r) for r in rows]
+    with get_session() as db:
+        return AdvisoryRepository(db).get_report_history(code, market, limit)
 
 
 def get_report_by_id(report_id: int) -> Optional[dict]:
     """특정 ID의 AI 리포트 조회."""
-    with _conn() as con:
-        row = con.execute(
-            "SELECT id, code, market, generated_at, model, report FROM advisory_reports WHERE id=?",
-            (report_id,),
-        ).fetchone()
-    if not row:
-        return None
-    return {
-        "id": row["id"],
-        "code": row["code"],
-        "market": row["market"],
-        "generated_at": row["generated_at"],
-        "model": row["model"],
-        "report": json.loads(row["report"] or "{}"),
-    }
+    with get_session() as db:
+        return AdvisoryRepository(db).get_report_by_id(report_id)
 
 
 def get_latest_report(code: str, market: str) -> Optional[dict]:
     """최신 AI 리포트 조회."""
-    with _conn() as con:
-        row = con.execute(
-            """SELECT id, code, market, generated_at, model, report
-               FROM advisory_reports WHERE code=? AND market=?
-               ORDER BY id DESC LIMIT 1""",
-            (code.upper(), market.upper()),
-        ).fetchone()
-    if not row:
-        return None
-    return {
-        "id": row["id"],
-        "code": row["code"],
-        "market": row["market"],
-        "generated_at": row["generated_at"],
-        "model": row["model"],
-        "report": json.loads(row["report"] or "{}"),
-    }
+    with get_session() as db:
+        return AdvisoryRepository(db).get_latest_report(code, market)
 
 
 # ── 포트폴리오 자문 리포트 CRUD ──────────────────────────────────────────────
 
 def save_portfolio_report(model: str, report: dict) -> int:
     """포트폴리오 자문 리포트 저장. 생성된 ID 반환."""
-    with _conn() as con:
-        cur = con.execute(
-            "INSERT INTO portfolio_reports (generated_at, model, report) VALUES (?,?,?)",
-            (
-                now_kst_iso(),
-                model,
-                json.dumps(report, ensure_ascii=False),
-            ),
-        )
-        return cur.lastrowid
+    with get_session() as db:
+        return AdvisoryRepository(db).save_portfolio_report(model, report)
 
 
 def get_portfolio_report_history(limit: int = 20) -> list[dict]:
     """포트폴리오 자문 이력 목록 (최신순, 본문 제외)."""
-    with _conn() as con:
-        rows = con.execute(
-            """SELECT id, generated_at, model
-               FROM portfolio_reports
-               ORDER BY id DESC LIMIT ?""",
-            (limit,),
-        ).fetchall()
-    return [dict(r) for r in rows]
+    with get_session() as db:
+        return AdvisoryRepository(db).get_portfolio_report_history(limit)
 
 
 def get_portfolio_report_by_id(report_id: int) -> Optional[dict]:
     """특정 ID의 포트폴리오 자문 리포트 조회."""
-    with _conn() as con:
-        row = con.execute(
-            "SELECT id, generated_at, model, report FROM portfolio_reports WHERE id=?",
-            (report_id,),
-        ).fetchone()
-    if not row:
-        return None
-    return {
-        "id": row["id"],
-        "generated_at": row["generated_at"],
-        "model": row["model"],
-        "report": json.loads(row["report"] or "{}"),
-    }
+    with get_session() as db:
+        return AdvisoryRepository(db).get_portfolio_report_by_id(report_id)
 
 
 def get_latest_portfolio_report() -> Optional[dict]:
     """최신 포트폴리오 자문 리포트 조회."""
-    with _conn() as con:
-        row = con.execute(
-            """SELECT id, generated_at, model, report
-               FROM portfolio_reports
-               ORDER BY id DESC LIMIT 1""",
-        ).fetchone()
-    if not row:
-        return None
-    return {
-        "id": row["id"],
-        "generated_at": row["generated_at"],
-        "model": row["model"],
-        "report": json.loads(row["report"] or "{}"),
-    }
+    with get_session() as db:
+        return AdvisoryRepository(db).get_latest_portfolio_report()

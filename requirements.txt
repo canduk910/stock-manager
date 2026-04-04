@@ -10,3 +10,5 @@ yfinance
 websockets
 openai
 feedparser
+sqlalchemy
+alembic

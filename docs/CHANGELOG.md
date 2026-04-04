@@ -1,5 +1,18 @@
 # 변경 이력
 
+## 2026-04-04 — SQLAlchemy ORM 마이그레이션
+
+### 리팩토링
+- SQLite 직접 접근 → SQLAlchemy ORM 전환 (6개 비즈니스 DB → 단일 `app.db` 통합)
+- `db/` 패키지 신규: `base.py`(DeclarativeBase) + `session.py`(Engine/Session) + `models/`(12개 모델) + `repositories/`(6개 Repository)
+- 기존 6개 store 모듈(`store.py`, `order_store.py` 등)은 Repository 위임 래퍼로 전환 (함수 시그니처 100% 유지)
+- Alembic 마이그레이션 도입 (`alembic/`): 스키마 버전 관리, `render_as_batch=True` (SQLite 호환)
+- `config.py`에 `DATABASE_URL` 환경변수 추가 (기본값: SQLite, PostgreSQL/Oracle 전환 가능)
+- `main.py` lifespan + `entrypoint.sh`에서 `alembic upgrade head` 자동 실행
+- `scripts/migrate_sqlite_data.py` 신규: 기존 6개 DB → app.db 데이터 이관 스크립트
+- cache.db, screener_cache.db는 raw SQLite 유지 (ORM 이점 없는 TTL 캐시)
+- services/, routers/, frontend/ 변경 없음
+
 ## 2026-04-04 — 계량지표 확장 + 포워드차트 + 매출추정 개선
 
 ### 기본적분석 개선

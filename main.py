@@ -14,9 +14,25 @@ load_dotenv()
 
 from config import KIS_APP_KEY, KIS_APP_SECRET, KIS_ACNT_NO, KIS_ACNT_PRDT_CD_STK, KIS_ACNT_PRDT_CD_FNO, FINNHUB_API_KEY
 
+# SQLAlchemy ORM 초기화 (모든 모델 import → Base.metadata 등록)
+import db.models  # noqa: F401, E402
+from db.base import Base  # noqa: E402
+from db.session import engine  # noqa: E402
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Alembic 마이그레이션 적용 (신규 설치 / 스키마 변경 시)
+    try:
+        from alembic.config import Config as AlembicConfig
+        from alembic import command as alembic_command
+        alembic_cfg = AlembicConfig(os.path.join(os.path.dirname(__file__), "alembic.ini"))
+        alembic_cfg.set_main_option("script_location", os.path.join(os.path.dirname(__file__), "alembic"))
+        alembic_command.upgrade(alembic_cfg, "head")
+        print("[정보] DB 마이그레이션 완료 (alembic upgrade head)")
+    except Exception as e:
+        print(f"[경고] DB 마이그레이션 실패: {e}")
+
     missing = [name for name, val in (
         ("KIS_APP_KEY", KIS_APP_KEY),
         ("KIS_APP_SECRET", KIS_APP_SECRET),

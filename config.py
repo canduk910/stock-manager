@@ -33,3 +33,10 @@ KRX_PASSWORD = os.getenv("KRX_PASSWORD", "")
 
 # ── KIS WS 체결통보 ────────────────────────────────────────────────────────
 KIS_HTS_ID = os.getenv("KIS_HTS_ID", "")
+
+# ── Database ──────────────────────────────────────────────────────────────
+from pathlib import Path  # noqa: E402
+DATABASE_URL = os.getenv(
+    "DATABASE_URL",
+    f"sqlite:///{Path.home() / 'stock-watchlist' / 'app.db'}",
+)

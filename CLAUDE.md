@@ -76,15 +76,17 @@ python test.py                      # 삼성전자 현재가 조회
 ### 레이어 구성
 
 ```
-config.py           환경변수 중앙 관리 (os.getenv 단일 진입점)
+config.py           환경변수 중앙 관리 (os.getenv 단일 진입점, DATABASE_URL 포함)
 wrapper.py          KIS API 완전 래퍼 (standalone)
-main.py             FastAPI 서버 진입점 (라우터 등록 + SPA 정적 파일 서빙)
+main.py             FastAPI 서버 진입점 (라우터 등록 + SPA 정적 파일 서빙 + Alembic 마이그레이션)
+db/                 SQLAlchemy ORM 패키지 (base, session, models/12개, repositories/6개)
+alembic/            DB 스키마 마이그레이션 관리
 routers/            API 라우터 패키지 (12개, quote/market_board는 WebSocket 포함)
 services/           서비스 레이어 (watchlist_service, detail_service, order_service, advisory_service, macro_service, portfolio_advisor_service, quote_kis/quote_overseas, order_kr/order_us/order_fno)
 services/exceptions.py  서비스 레이어 공용 예외 계층 (ServiceError / NotFoundError / ExternalAPIError / ConfigError / PaymentRequiredError / ConflictError)
 screener/           스크리너 패키지 (CLI + API 공용, pykrx + OpenDart)
-stock/              관심종목 패키지 (CLI + API 공용, pykrx + OpenDart + yfinance + advisory_store/fetcher)
-stock/db_base.py    SQLite 공용 유틸 (connect contextmanager + row_to_dict + KST 시간 헬퍼, 4개 store 공용)
+stock/              관심종목 패키지 (CLI + API 공용). store 모듈은 db/repositories/ 위임 래퍼
+stock/db_base.py    SQLite 캐시 전용 유틸 (connect contextmanager + KST 시간 헬퍼, cache.py 공용)
 frontend/           React SPA (Vite + Tailwind + Recharts)
 ```
 
@@ -121,6 +123,7 @@ frontend/           React SPA (Vite + Tailwind + Recharts)
 | `FINNHUB_API_KEY` | 선택 | 해외주식 실시간 시세 (Finnhub WS). 미설정 시 yfinance 2초 폴링(15분 지연). |
 | `KIS_HTS_ID` | 선택 | KIS HTS ID. 체결통보(H0STCNI0) WS 실시간 수신용. 미설정 시 폴링만 동작. |
 | `ADVISOR_CACHE_TTL_HOURS` | 선택 | 포트폴리오 자문 캐시 유효기간 (시간). 기본값: `0.5` (30분). |
+| `DATABASE_URL` | 선택 | SQLAlchemy DB URL. 기본값: `sqlite:///~/stock-watchlist/app.db`. PostgreSQL/Oracle 전환 시 변경. |
 | `TEST_KIS_*` | 선택 | 모의계좌용 (`test.py`에서 사용) |
 
 모의투자 BASE_URL: `https://openapivts.koreainvestment.com:29443`
@@ -140,21 +143,35 @@ frontend/           React SPA (Vite + Tailwind + Recharts)
 
 ---
 
-## 캐시 시스템
+## DB 시스템
+
+### SQLAlchemy ORM (비즈니스 데이터)
+
+6개 비즈니스 DB를 단일 `app.db`로 통합. `DATABASE_URL` 환경변수로 PostgreSQL/Oracle 전환 가능.
+
+| 테이블 | 모델 | Repository | 용도 |
+|--------|------|-----------|------|
+| watchlist, watchlist_order | Watchlist, WatchlistOrder | WatchlistRepository | 관심종목 |
+| orders, reservations | Order, Reservation | OrderRepository | 주문/예약 |
+| advisory_stocks, advisory_cache, advisory_reports, portfolio_reports | AdvisoryStock/Cache/Report, PortfolioReport | AdvisoryRepository | AI자문 |
+| market_board_stocks, market_board_order | MarketBoardStock/Order | MarketBoardRepository | 시세판 |
+| stock_info | StockInfo | StockInfoRepository | 종목 영속 캐시 |
+| macro_gpt_cache | MacroGptCache | MacroRepository | 매크로 일일 캐시 |
+
+- **Adapter 패턴**: `stock/store.py` 등 6개 파일은 Repository 위임 래퍼 (기존 함수 시그니처 100% 유지)
+- **Session**: `get_session()` = Store 래퍼 전용 contextmanager, `get_db()` = FastAPI Depends 전용
+- **Alembic**: 스키마 마이그레이션. `entrypoint.sh` + `main.py` lifespan에서 `alembic upgrade head` 실행
+- **WAL 모드**: `db/session.py`의 engine event listener에서 자동 설정 (SQLite 사용 시)
+
+### Raw SQLite (캐시)
 
 | 위치 | 용도 | TTL |
 |------|------|-----|
 | `screener_cache.db` (프로젝트 루트) | 스크리너 KRX/DART 캐시 | 만료 없음 (날짜키) |
 | `~/stock-watchlist/cache.db` | 시세/재무/종목코드/수익률 캐시 | 키별 상이 |
-| `~/stock-watchlist/stock_info.db` | 종목 정보 영속 캐시 (시세/지표/재무/수익률) | 영역별 TTL (재시작 유지) |
-| `~/stock-watchlist/watchlist.db` | 관심종목 목록 | 영구 |
-| `~/stock-watchlist/orders.db` | 주문 이력 + 예약주문 | 영구 |
-| `~/stock-watchlist/market_board.db` | 시세판 별도 등록 종목 | 영구 |
-| `~/stock-watchlist/advisory.db` | AI자문 (자문종목/캐시/리포트) | 영구 |
-| `~/stock-watchlist/macro.db` | 매크로 GPT 결과 일일 캐시 (KST 날짜 기반) | 영구 (30일 자동 정리) |
 
 - **NaN 주의**: `cache.py`의 `_sanitize()`가 get/set 양쪽에서 NaN → None 변환 보장
-- **시작 시 초기화**: `entrypoint.sh`에서 `cache.db` 삭제 (구버전 캐시 방지). 다른 DB는 영향 없음
+- **시작 시 초기화**: `entrypoint.sh`에서 `cache.db` 삭제 (구버전 캐시 방지). app.db는 영향 없음
 - **WAL 모드**: `db_base.py`와 `cache.py`에서 `PRAGMA journal_mode=WAL` + timeout 10초
 
 ---
@@ -175,7 +192,7 @@ Stage 2  python:3.11-slim → pip install + 앱 소스 + COPY --from Stage 1
 
 ## 패키지 주의사항
 
-`requirements.txt` 포함: `websockets` (KIS WS 연결용, `services/quote_kis.py`)
+`requirements.txt` 포함: `websockets` (KIS WS), `sqlalchemy` (ORM), `alembic` (마이그레이션)
 
 미포함 (별도 설치): `pycryptodome` — `KoreaInvestmentWS` 체결통보 AES 복호화용
 

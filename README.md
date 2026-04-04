@@ -72,6 +72,7 @@ cp .env.example .env
 | `OPENAI_MODEL` | 선택 | 기본값: `gpt-4o`. `gpt-4o-mini`, `o3-mini` 등 지원 |
 | `FINNHUB_API_KEY` | 선택 | 해외주식 실시간 시세. [Finnhub](https://finnhub.io) 무료 플랜. 미설정 시 yfinance 2초 폴링(15분 지연) |
 | `KIS_BASE_URL` | 선택 | 기본값: `https://openapi.koreainvestment.com:9443` |
+| `DATABASE_URL` | 선택 | DB URL. 기본값: `sqlite:///~/stock-watchlist/app.db`. PostgreSQL/Oracle 전환 시 변경 |
 
 > 스크리너·공시는 `OPENDART_API_KEY`만 있으면 됩니다. KIS 계정 없이 사용 가능합니다.
 
@@ -310,17 +311,16 @@ KIS 실전계좌 잔고 조회. KIS API 키 미설정 시 503 반환.
 │  └────────────────────────┬──────────────────────────────┘   │
 │     (비즈니스 로직 + 외부 API 호출) │                         │
 │  ┌────────────────────────▼──────────────────────────────┐   │
-│  │              Data Layer (stock/ + screener/)           │   │
-│  │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌─────────┐  │   │
-│  │  │order_    │ │advisory_ │ │market_bd_│ │watchlist│  │   │
-│  │  │store     │ │store     │ │store     │ │store    │  │   │
-│  │  │(orders.db│ │(advisory.│ │(mkt_brd. │ │(watch   │  │   │
-│  │  │ WAL모드) │ │ db)      │ │ db)      │ │ list.db)│  │   │
-│  │  └──────────┘ └──────────┘ └──────────┘ └─────────┘  │   │
+│  │        Data Layer (db/ + stock/ + screener/)           │   │
+│  │  ┌───────────────────────────────────────────────────┐ │   │
+│  │  │  SQLAlchemy ORM (db/)      → app.db (통합)       │ │   │
+│  │  │  models/ (12 테이블) + repositories/ (6개)       │ │   │
+│  │  │  store 모듈은 Repository 위임 래퍼 (시그니처 유지)│ │   │
+│  │  └───────────────────────────────────────────────────┘ │   │
 │  │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌─────────┐  │   │
 │  │  │cache.py  │ │symbol_   │ │dart_fin  │ │fno_     │  │   │
 │  │  │(cache.db │ │map.py    │ │(재무제표)│ │master   │  │   │
-│  │  │ WAL모드) │ │(종목코드)│ │          │ │(마스터) │  │   │
+│  │  │raw SQLite│ │(종목코드)│ │          │ │(마스터) │  │   │
 │  │  └──────────┘ └──────────┘ └──────────┘ └─────────┘  │   │
 │  └───────────────────────────────────────────────────────┘   │
 └───────────────────────────────────────────────────────────────┘
@@ -351,8 +351,8 @@ KIS 실전계좌 잔고 조회. KIS API 키 미설정 시 503 반환.
   │       │         (3초 폴링)                 │
   │       ▼              ▼                     │
   │  ┌─────────┐  ┌─────────────┐              │
-  │  │orders.db│  │ yfinance    │ ◄── 비개장일 │
-  │  │(SQLite) │  │ (fallback)  │   직전 종가   │
+  │  │ app.db  │  │ yfinance    │ ◄── 비개장일 │
+  │  │ (ORM)   │  │ (fallback)  │   직전 종가   │
   │  └─────────┘  └─────────────┘              │
   └────────────────────────────────────────────┘
 
@@ -492,13 +492,19 @@ stock-manager/
 │   ├── watchlist_service.py#  관심종목 대시보드
 │   ├── detail_service.py  #   재무/밸류에이션/종합리포트
 │   └── reservation_service.py # 예약주문 스케줄러 (20초 폴링)
-├── stock/                 # 데이터 레이어 (DB + 외부 데이터 수집)
-│   ├── db_base.py         #   SQLite 공용 (WAL 모드, timeout 10초)
-│   ├── order_store.py     #   orders.db CRUD
-│   ├── advisory_store.py  #   advisory.db CRUD
-│   ├── market_board_store.py # market_board.db CRUD
-│   ├── store.py           #   watchlist.db CRUD
-│   ├── cache.py           #   cache.db (TTL 캐시, WAL 모드)
+├── db/                    # SQLAlchemy ORM 패키지
+│   ├── base.py            #   DeclarativeBase
+│   ├── session.py         #   Engine, SessionLocal, get_db(), get_session()
+│   ├── models/            #   ORM 모델 12개 (Watchlist, Order, Advisory 등)
+│   └── repositories/      #   Repository 6개 (JPA Repository 패턴)
+├── alembic/               # DB 스키마 마이그레이션 (Alembic)
+├── stock/                 # 데이터 레이어 (Store 래퍼 + 외부 데이터 수집)
+│   ├── db_base.py         #   cache.py 전용 SQLite 유틸 + KST 헬퍼
+│   ├── store.py           #   WatchlistRepository 위임 래퍼
+│   ├── order_store.py     #   OrderRepository 위임 래퍼
+│   ├── advisory_store.py  #   AdvisoryRepository 위임 래퍼
+│   ├── market_board_store.py # MarketBoardRepository 위임 래퍼
+│   ├── cache.py           #   cache.db (raw SQLite TTL 캐시)
 │   ├── market.py          #   yfinance 기반 시세/펀더멘털
 │   ├── yf_client.py       #   해외주식 yfinance 클라이언트
 │   ├── dart_fin.py        #   OpenDART 재무제표
@@ -539,17 +545,29 @@ stock-manager/
 
 ---
 
-## 캐시 시스템
+## DB 시스템
+
+### 비즈니스 데이터 (SQLAlchemy ORM)
+
+`~/stock-watchlist/app.db` — 6개 비즈니스 DB를 단일 파일로 통합. 12개 테이블.
+
+`DATABASE_URL` 환경변수로 PostgreSQL/Oracle 전환 가능:
+```bash
+# SQLite (기본)
+DATABASE_URL=sqlite:///~/stock-watchlist/app.db
+
+# PostgreSQL
+DATABASE_URL=postgresql://user:pass@localhost:5432/stockmanager
+```
+
+### 캐시 (raw SQLite)
 
 | 파일 | 용도 | TTL |
 |------|------|-----|
 | `screener_cache.db` | 스크리너 KRX/DART 데이터 | 영구 (날짜키 기반) |
 | `~/stock-watchlist/cache.db` | 시세·재무·배당·수익률 캐시 | 장중 2분~1시간 / 장외 30분~12시간 |
-| `~/stock-watchlist/watchlist.db` | 관심종목 목록 | 영구 |
-| `~/stock-watchlist/orders.db` | 주문 이력 + 예약주문 | 영구 |
-| `~/stock-watchlist/advisory.db` | AI자문 데이터·리포트 | 영구 |
 
-> **캐시 초기화**: Docker 컨테이너 시작 시 `cache.db`를 자동 삭제합니다. 배포 후 구버전 캐시로 인한 문제를 방지합니다. `watchlist.db`는 영향 없음.
+> **캐시 초기화**: Docker 컨테이너 시작 시 `cache.db`를 자동 삭제합니다. `app.db`는 영향 없음.
 
 ---
 

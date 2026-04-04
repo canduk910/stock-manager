@@ -1,29 +1,29 @@
 # stock/ — 관심종목 패키지
 
-CLI와 API 라우터 양쪽에서 공용으로 사용한다. 데이터는 `~/stock-watchlist/` 디렉토리에 저장.
+CLI와 API 라우터 양쪽에서 공용으로 사용한다. 비즈니스 데이터는 SQLAlchemy ORM(`db/` 패키지)으로 `~/stock-watchlist/app.db`에 저장. 캐시(`cache.py`)만 raw SQLite(`cache.db`) 유지.
 
 ## 모듈 목록
 
 | 파일 | 역할 |
 |------|------|
-| `db_base.py` | SQLite 공용 유틸. `connect(db_name, init_fn)` contextmanager. WAL 모드 + timeout 10s. 4개 store 공용. `KST`/`now_kst()`/`now_kst_iso()` 타임존 헬퍼. |
-| `store.py` | 관심종목 CRUD + 순서 관리. `watchlist.db`. 복합 PK `(code, market)`. `watchlist_order` 테이블로 DnD 순서 영속화. |
-| `order_store.py` | 주문 이력 + 예약주문 CRUD. `orders.db`. `orders`(인덱스: status, order_no+market, symbol+market) + `reservations` 테이블. `list_active_orders()`: PENDING/PLACED/PARTIAL 대상. |
-| `advisory_store.py` | AI자문 DB. `advisory.db`. `advisory_stocks` + `advisory_cache` + `advisory_reports`(인덱스: code+market+generated_at) + `portfolio_reports` 4테이블. 포트폴리오 자문 CRUD 포함. |
+| `db_base.py` | SQLite 캐시 전용 유틸. `connect(db_name, init_fn)` contextmanager. WAL 모드 + timeout 10s. `cache.py` 공용. `KST`/`now_kst()`/`now_kst_iso()` 타임존 헬퍼 (services에서도 import). |
+| `store.py` | 관심종목 CRUD + 순서 관리. `db/repositories/watchlist_repo.py` 위임 래퍼. 기존 함수 시그니처 100% 유지. |
+| `order_store.py` | 주문 이력 + 예약주문 CRUD. `db/repositories/order_repo.py` 위임 래퍼. 기존 함수 시그니처 100% 유지. |
+| `advisory_store.py` | AI자문 CRUD. `db/repositories/advisory_repo.py` 위임 래퍼. 기존 함수 시그니처 100% 유지. |
 | `advisory_fetcher.py` | AI자문 OHLCV 수집 + 사업부문 추론. 기술지표 계산은 indicators.py 위임. KIS 1분봉 4시간대 병렬 수집(ThreadPoolExecutor). |
-| `stock_info_store.py` | 종목 정보 영속 캐시. `stock_info.db`. 시세/지표/재무/수익률 영역별 TTL 관리. Docker 재시작에도 유지. write-through 패턴. |
+| `stock_info_store.py` | 종목 정보 영속 캐시. `db/repositories/stock_info_repo.py` 위임 래퍼. 시세/지표/재무/수익률 영역별 TTL. write-through 패턴. |
 | `indicators.py` | 기술적 지표 순수 계산 (MACD/RSI/Stochastic/BB/MA/ATR). 외부 의존 없음 (math만). |
 | `utils.py` | `is_domestic(code)` — 6자리 숫자=국내. `is_fno(code)` — FNO 단축코드 판별. |
 | `symbol_map.py` | 종목코드↔종목명 매핑 (7일 캐시). `code_to_name()`. |
 | `market.py` | yfinance 기반 시세/시가총액/PER/PBR/배당수익률. |
 | `market_board.py` | 시세판: 신고가/신저가 탐지 + sparkline. |
-| `market_board_store.py` | 시세판 별도 등록 종목 CRUD + 순서 관리. `market_board.db`. `market_board_order` 테이블로 DnD 순서 영속화. |
+| `market_board_store.py` | 시세판 별도 등록 종목 CRUD + 순서 관리. `db/repositories/market_board_repo.py` 위임 래퍼. |
 | `dart_fin.py` | OpenDart 재무제표 조회 (최대 10년). |
 | `yf_client.py` | yfinance 기반 해외주식 데이터. EPS/Graham Number 지표 제공. 매출추정 3단계 fallback (revenue_estimate→analysis→totalRevenue×growth). |
 | `fno_master.py` | KIS 선물옵션 마스터파일 다운로드/파싱/검색. 인메모리 캐시(24h) → cache.db(7일) → ZIP 3단계. main.py에서 pre-warm. |
 | `sec_filings.py` | SEC EDGAR 미국 10-K/10-Q 공시 조회. |
 | `macro_fetcher.py` | 매크로 분석 데이터 수집: yfinance 지수/VIX/버핏/공포탐욕, feedparser RSS(뉴스/투자자), 캐시 키 `macro:*` |
-| `macro_store.py` | 매크로 GPT 결과 일일 캐시. `macro.db`. KST 날짜 기반 `(category, date_kst)` PK. `get_today()`/`save_today()`. 30일 자동 정리. |
+| `macro_store.py` | 매크로 GPT 결과 일일 캐시. `db/repositories/macro_repo.py` 위임 래퍼. `get_today()`/`save_today()`. 30일 자동 정리. |
 | `cache.py` | SQLite TTL 캐시. `cache.db`. NaN/Inf → None 자동 sanitize. |
 | `display.py` | Rich 테이블 출력 + CSV 내보내기. |
 | `cli.py` | Click CLI. `stock watch add/remove/list/memo/dashboard/info`. |
@@ -32,23 +32,28 @@ CLI와 API 라우터 양쪽에서 공용으로 사용한다. 데이터는 `~/sto
 
 ## DB 파일
 
-| 파일 | 위치 | 용도 |
-|------|------|------|
-| `watchlist.db` | `~/stock-watchlist/` | 관심종목 목록 |
-| `orders.db` | `~/stock-watchlist/` | 주문 이력 + 예약주문 |
-| `advisory.db` | `~/stock-watchlist/` | AI자문 (자문종목/분석캐시/리포트) |
-| `market_board.db` | `~/stock-watchlist/` | 시세판 별도 등록 종목 |
-| `cache.db` | `~/stock-watchlist/` | TTL 캐시 (시세/재무/종목코드 등) |
-| `stock_info.db` | `~/stock-watchlist/` | 종목 정보 영속 캐시 (Docker 재시작에도 유지) |
-| `macro.db` | `~/stock-watchlist/` | 매크로 GPT 결과 일일 캐시 (KST 날짜 기반) |
+| 파일 | 위치 | 용도 | 엔진 |
+|------|------|------|------|
+| `app.db` | `~/stock-watchlist/` | 비즈니스 데이터 통합 (12 테이블) | SQLAlchemy ORM |
+| `cache.db` | `~/stock-watchlist/` | TTL 캐시 (시세/재무/종목코드 등) | raw SQLite |
+
+> 기존 watchlist.db, orders.db, advisory.db, market_board.db, stock_info.db, macro.db는 app.db로 통합됨.
+> `scripts/migrate_sqlite_data.py`로 기존 데이터 이관 가능. `DATABASE_URL` 환경변수로 PostgreSQL/Oracle 전환.
 
 ---
 
 ## 핵심 규칙 및 Gotcha
 
 ### db_base.py
+- **cache.py 전용**: `connect()` contextmanager는 cache.py에서만 사용. 비즈니스 store는 `db/session.py` 사용.
+- **KST 헬퍼 공용**: `now_kst()`, `now_kst_iso()`, `KST`는 services/에서도 import.
 - **WAL 모드**: `PRAGMA journal_mode=WAL` + timeout 10초. 읽기-쓰기 동시성 보장.
 - `_initialized` set으로 DB init 중복 방지.
+
+### Store 래퍼 패턴 (Adapter)
+- 6개 store 모듈(`store.py`, `order_store.py` 등)은 `db/repositories/` Repository에 위임하는 래퍼.
+- 기존 함수 시그니처 100% 유지 — services/, routers/ 변경 없음.
+- Session 관리: `db/session.py`의 `get_session()` contextmanager 사용 (commit+rollback+close 자동).
 
 ### store.py
 - **마이그레이션**: `ALTER TABLE ... ADD COLUMN market TEXT NOT NULL DEFAULT 'KR'` 자동 실행. 기존 데이터는 모두 `KR`.

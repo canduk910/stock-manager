@@ -40,6 +40,24 @@ git log --oneline -3
 - 기능 변경 → 설명 텍스트 수정
 - 숫자 변경 → 라우터 수, 메뉴 수 등 업데이트
 
+### Step 2.5: docs/ 스펙 문서 + README.md 갱신
+
+변경된 레이어에 해당하는 docs/ 스펙 문서를 읽고 업데이트한다:
+
+| 변경 레이어 | 갱신 대상 |
+|------------|----------|
+| `stock/` | `docs/STOCK_PACKAGE.md` — 모듈 구성, DB, 함수 시그니처 |
+| `services/` | `docs/SERVICES.md` — 모듈 구성, 서비스 설명 |
+| `routers/` | `docs/API_SPEC.md` — 엔드포인트 목록, 요청/응답 스펙 |
+| `frontend/` | `docs/FRONTEND_SPEC.md` — 컴포넌트, 페이지, 훅 |
+| 전체 구조 변경 | `README.md` (루트) — 프로젝트 소개, 설치 방법, 아키텍처 |
+
+**갱신 규칙:**
+- docs/ 스펙 문서는 CLAUDE.md보다 상세한 API 레퍼런스 역할
+- 함수 시그니처 변경 → 해당 docs 문서의 시그니처 섹션 수정
+- 새 패키지/모듈 추가 → 해당 docs 문서에 섹션 추가
+- README.md는 프로젝트 전체 구조 변경, 환경변수 추가, 설치 방법 변경 시에만 갱신
+
 ### Step 3: docs/CHANGELOG.md 갱신
 
 `docs/CHANGELOG.md` 맨 위에 날짜 섹션을 추가하거나 기존 당일 섹션에 항목을 추가한다.

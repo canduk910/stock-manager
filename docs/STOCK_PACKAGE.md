@@ -2,7 +2,7 @@
 
 관심종목 관리 + 종목 데이터 수집 패키지. CLI와 웹 API 양쪽에서 사용한다.
 
-데이터 저장: `~/stock-watchlist/` (watchlist.db + cache.db)
+데이터 저장: `~/stock-watchlist/app.db` (SQLAlchemy ORM) + `cache.db` (raw SQLite)
 
 ---
 
@@ -10,10 +10,10 @@
 
 | 파일 | 역할 |
 |------|------|
-| `db_base.py` | SQLite 공용 유틸. `connect(db_name, init_fn)` contextmanager (DB 생성/init 중복 방지), `row_to_dict()`. 모든 store 모듈의 공통 기반. **WAL 모드 + timeout 10초** — 읽기-쓰기 동시성 보장. |
-| `store.py` | 관심종목 CRUD (SQLite) |
-| `order_store.py` | 주문 이력 + 예약주문 CRUD (SQLite, `orders.db`) |
-| `advisory_store.py` | AI자문 종목/캐시/리포트 CRUD (SQLite, `advisory.db`). 리포트 히스토리 조회 지원. |
+| `db_base.py` | SQLite 캐시 전용 유틸. `connect(db_name, init_fn)` contextmanager. `cache.py` 공용. KST 타임존 헬퍼(`now_kst()`, `now_kst_iso()`). |
+| `store.py` | 관심종목 CRUD. `db/repositories/watchlist_repo.py` 위임 래퍼. 기존 함수 시그니처 유지. |
+| `order_store.py` | 주문 이력 + 예약주문 CRUD. `db/repositories/order_repo.py` 위임 래퍼. |
+| `advisory_store.py` | AI자문 종목/캐시/리포트 CRUD. `db/repositories/advisory_repo.py` 위임 래퍼. |
 | `advisory_fetcher.py` | OHLCV 수집 + 사업부문 추론. 기술지표 계산은 `indicators.py` 위임. |
 | `indicators.py` | 기술적 지표 순수 계산 (MACD/RSI/Stochastic/BB/MA/ATR). 외부 의존 없음. |
 | `symbol_map.py` | 종목코드 ↔ 종목명 매핑 (pykrx 기반, fallback 포함). 서버 시작 시 background thread로 pre-warm. |
@@ -30,7 +30,7 @@
 
 ## `order_store.py` — 주문 이력 + 예약주문
 
-`~/stock-watchlist/orders.db` (SQLite). `orders`와 `reservations` 두 테이블 관리. DB 파일이 없으면 최초 접속 시 자동 생성.
+`~/stock-watchlist/app.db`의 `orders`/`reservations` 테이블 (SQLAlchemy ORM). `db/repositories/order_repo.py` 위임 래퍼. 기존 함수 시그니처 100% 유지.
 
 ### 주문 이력 함수 (`orders` 테이블)
 
