@@ -250,3 +250,13 @@ curl -s http://localhost:8000/api/{module}/... | python -m json.tool
 - [ ] 리스크 지표 (HHI, 손절 기준) — OrderAdvisor 확인
 - [ ] 매크로 체제 표시 (색상, 문구, 임계값) — MacroSentinel 확인
 - [ ] 수익률 계산 (TWR, 배당 포함) — OrderAdvisor 확인
+
+### 파이프라인 서비스 검증 (pipeline_service.py)
+- [ ] 체제 판단 매트릭스 (버핏지수×공포탐욕 교차표) 정확성 — MacroSentinel 확인
+- [ ] 체제별 스크리닝 파라미터 (PER/PBR/ROE 동적 필터) — ValueScreener 확인
+- [ ] 7점 등급 계산 로직 (7개 지표 × 4점 = 28점 만점) — MarginAnalyst 확인
+- [ ] 추천 생성 로직 (진입가/수량/손절/익절/R:R) — OrderAdvisor 확인
+- [ ] 파이프라인 게이트 조건 (defensive→중단, 후보0→중단) 정확성
+- [ ] 기존 서비스 호출 시 인터페이스 정합성 (함수 시그니처/반환 타입)
+- [ ] APScheduler 타이밍 (08:00 KR / 16:00 US KST)
+- [ ] Telegram 메시지 포맷 + 승인 콜백 흐름

@@ -157,6 +157,9 @@ frontend/           React SPA (Vite + Tailwind + Recharts)
 | market_board_stocks, market_board_order | MarketBoardStock/Order | MarketBoardRepository | 시세판 |
 | stock_info | StockInfo | StockInfoRepository | 종목 영속 캐시 |
 | macro_gpt_cache | MacroGptCache | MacroRepository | 매크로 일일 캐시 |
+| recommendation_history | RecommendationHistory | ReportRepository | 투자 추천 이력 + 성과 추적 |
+| macro_regime_history | MacroRegimeHistory | ReportRepository | 매크로 체제 일일 이력 |
+| daily_reports | DailyReport | ReportRepository | 일일 투자 보고서 |
 
 - **Adapter 패턴**: `stock/store.py` 등 6개 파일은 Repository 위임 래퍼 (기존 함수 시그니처 100% 유지)
 - **Session**: `get_session()` = Store 래퍼 전용 contextmanager, `get_db()` = FastAPI Depends 전용
@@ -192,7 +195,7 @@ Stage 2  python:3.11-slim → pip install + 앱 소스 + COPY --from Stage 1
 
 ## 패키지 주의사항
 
-`requirements.txt` 포함: `websockets` (KIS WS), `sqlalchemy` (ORM), `alembic` (마이그레이션)
+`requirements.txt` 포함: `websockets` (KIS WS), `sqlalchemy` (ORM), `alembic` (마이그레이션), `pytest` (테스트)
 
 미포함 (별도 설치): `pycryptodome` — `KoreaInvestmentWS` 체결통보 AES 복호화용
 
@@ -200,48 +203,40 @@ Stage 2  python:3.11-slim → pip install + 앱 소스 + COPY --from Stage 1
 
 ## AI 에이전트 팀 (하네스)
 
-Graham 안전마진 가치투자 에이전트 팀. 기존 API를 HTTP로 호출하여 동작하며 서비스 코드를 변경하지 않는다.
+**시스템 개발 + 도메인 자문** 전용 하네스. 투자 파이프라인은 대화형 에이전트가 아닌 FastAPI 백엔드 서비스(`pipeline_service.py` + APScheduler)로 자동 실행된다.
 
-### 에이전트 7명 (`.claude/agents/`)
+### 에이전트 8명 (`.claude/agents/`)
 
+#### 개발 에이전트 (4명)
 | 에이전트 | 파일 | 역할 |
 |---------|------|------|
-| MacroSentinel | `macro-sentinel.md` | 매크로 환경 → 시장 체제 판단 |
-| ValueScreener | `value-screener.md` | Graham 기준 종목 스크리닝 |
-| MarginAnalyst | `margin-analyst.md` | 내재가치 + 재무 건전성 심층 분석 |
-| OrderAdvisor | `order-advisor.md` | 포지션 사이징 + 주문 추천 |
-| DevArchitect | `dev-architect.md` | 통합자산관리 풀스택 개발 |
-| QA Inspector | `qa-inspector.md` | 경계면 교차 비교 검증 |
+| DevArchitect | `dev-architect.md` | 투자 자동화 시스템 풀스택 개발 |
+| TestEngineer | `test-engineer.md` | pytest 자동화 테스트 작성/실행 |
+| QA Inspector | `qa-inspector.md` | 경계면 교차 비교 검증 (수동 체크리스트) |
 | RefactorEngineer | `refactor-engineer.md` | 도메인 인지 리팩토링 |
 
-### 스킬 10개 (`.claude/skills/`)
+#### 도메인 자문 에이전트 (4명) — API 호출 안 함, 자문만 제공
+| 에이전트 | 파일 | 자문 영역 |
+|---------|------|----------|
+| MacroSentinel | `macro-sentinel.md` | 체제 판단 기준, VIX/버핏지수 임계값 |
+| ValueScreener | `value-screener.md` | 스크리닝 필터, 복합 점수, value trap |
+| MarginAnalyst | `margin-analyst.md` | Graham Number, 7점 등급, 재무건전성 |
+| OrderAdvisor | `order-advisor.md` | 포지션 사이징, 손절/익절, Write-Ahead |
 
-| 스킬 | 사용 에이전트 | 용도 |
-|------|-------------|------|
-| `macro-analysis/` | MacroSentinel | 매크로 데이터 수집 + 체제 판단 |
-| `value-screening/` | ValueScreener | Graham 멀티팩터 스크리닝 |
-| `graham-analysis/` | MarginAnalyst | 내재가치 + 기술적 분석 |
-| `portfolio-check/` | OrderAdvisor | 포트폴리오 상태 + 포지션 사이징 |
-| `order-recommend/` | OrderAdvisor | 주문 추천 + 예약주문 보조 |
-| `value-invest/` | 오케스트레이터 | 분석 파이프라인: Macro→Screener→Analyst→Advisor |
-| `asset-dev/` | 오케스트레이터 | 개발 파이프라인: 자문→설계→구현→QA→보고 |
-| `qa-verify/` | QA Inspector | 교차 비교 검증 체크리스트 |
-| `refactor-audit/` | 오케스트레이터 | 리팩토링 파이프라인: 감사→자문→실행→QA |
-| `doc-commit/` | 공용 | 문서 반영(CLAUDE.md+CHANGELOG) + 커밋 + compact |
+### 스킬 4개 (`.claude/skills/`)
 
-### 트리거
+| 스킬 | 트리거 | 용도 |
+|------|--------|------|
+| `asset-dev/` | "시스템 개발", "파이프라인", "대시보드" | 개발 파이프라인: 자문→설계→구현→QA→보고 |
+| `qa-verify/` | "QA", "정합성 검사" | 교차 비교 검증 + 파이프라인 로직 검증 |
+| `refactor-audit/` | "리팩토링", "코드 감사" | 감사→자문→실행→QA |
+| `doc-commit/` | "커밋", "문서 반영" | 문서 반영(CLAUDE.md+CHANGELOG) + 커밋 |
 
-| 요청 | 오케스트레이터 |
-|------|-------------|
-| "종목 발굴", "저평가 종목", "안전마진 분석", "가치투자" | `value-invest` |
-| "대시보드 만들어줘", "리밸런싱 기능", "자산관리 개발" | `asset-dev` |
-| "리팩토링 해줘", "코드 감사", "구조 개선" | `refactor-audit` |
+### 테스트 (`tests/`)
 
-### 에이전트 API 활용
-
-| 에이전트 | 호출 엔드포인트 |
-|---------|---------------|
-| MacroSentinel | `/api/macro/sentiment`, `/indices`, `/investor-quotes`, `/news` |
-| ValueScreener | `/api/screener/stocks`, `/api/detail/{code}/report` |
-| MarginAnalyst | `/api/advisory/{code}/refresh\|data\|analyze\|ohlcv`, `/api/detail/{code}/report\|valuation` |
-| OrderAdvisor | `/api/balance`, `/api/order/buyable\|open\|reserve` |
+```bash
+pytest tests/ -v              # 전체 (단위+통합+API)
+pytest tests/unit/ -v         # 단위 테스트만
+pytest tests/integration/ -v  # DB 통합 테스트
+pytest tests/api/ -v          # API 엔드포인트 테스트
+```

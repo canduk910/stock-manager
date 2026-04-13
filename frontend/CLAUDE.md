@@ -46,6 +46,7 @@ frontend/
       useAdvisory.js      useAdvisoryStocks / useAdvisoryData / useAdvisoryReport / useAdvisoryOhlcv
       useMacro.js         useMacroIndices / useMacroNews / useMacroSentiment / useMacroInvestorQuotes (섹션별 독립 훅)
       usePortfolioAdvisor.js  포트폴리오 AI 자문 훅. analyze/loadLatest/loadById. stale closure 해결 (loadHistory 의존성 없음).
+      useReport.js           투자 보고서 훅 5개. useReports/useReportDetail/useRecommendations/usePerformance/useRegimes.
       usePortfolio.js     포트폴리오 대시보드 훅. balance+sentiment 병렬 로드 + 자산배분/안전마진등급 계산.
     components/
       layout/Header.jsx   네비게이션 바 (5개 탑레벨: 시세판|관심종목|분석▼|포트폴리오|매매▼, 그룹 구분선, 드롭다운 hover)
@@ -79,6 +80,7 @@ frontend/
       MarketBoardPage.jsx /market-board  시세판: 신고가/신저가 Top10 + 사용자 선택 종목. 실시간 WS.
       MacroPage.jsx       /macro         매크로 분석: 지수+심리+뉴스+투자자 코멘트. 4섹션 독립 로딩.
       PortfolioPage.jsx   /portfolio     포트폴리오 통합: 체제배너+자산배분+수익률+AI자문(진단+리밸런싱+매매안+이력). balance+macro+advisor 통합.
+      ReportPage.jsx      /reports       투자 보고서: 3탭(일일보고서/추천이력/성과통계). 체제배지+등급배지+PnL 색상.
 ```
 
 ---

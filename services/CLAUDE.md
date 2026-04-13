@@ -20,6 +20,7 @@
 | `advisory_service.py` | AI자문 데이터 수집(ThreadPoolExecutor 병렬) + GPT-4o 리포트 생성 |
 | `macro_service.py` | 매크로 분석 오케스트레이션: quote+sparkline 완전 병렬 수집 + GPT 번역/추출 + 섹션별 독립 실패 허용. GPT 결과는 `macro.db`에 일일 캐싱 (KST 기준) |
 | `portfolio_advisor_service.py` | AI 포트폴리오 자문: 잔고 컨텍스트(52주 하락률 포함) + 매크로 체제 → OpenAI 호출(체제별 프롬프트 동적 구성 + 역발상 매수 규칙) → 진단/리밸런싱/매매안. `cache.db` 30분 TTL + `advisory.db` 영구 저장. `max_completion_tokens=8000`. |
+| `report_service.py` | 투자 보고서: 추천 이력 + 매크로 체제 이력 + 일일 보고서 CRUD + 통합 Markdown 생성 + 성과 통계. `db/repositories/report_repo.py` 위임. |
 
 ---
 
@@ -118,16 +119,8 @@ ServiceError (기본 400)
 
 ---
 
-## 에이전트 서비스 활용
+## 에이전트 역할
 
-AI 에이전트 팀(`.claude/agents/`)은 `routers/` 엔드포인트를 HTTP로 호출하며, 라우터가 아래 서비스에 위임한다:
+하네스의 도메인 에이전트(MacroSentinel/ValueScreener/MarginAnalyst/OrderAdvisor)는 **자문 전용** — API를 직접 호출하지 않는다. DevArchitect가 파이프라인 서비스 구현 시 투자 로직의 정확성을 자문받는다.
 
-| 서비스 | 에이전트 |
-|--------|---------|
-| `macro_service.py` | MacroSentinel (체제 판단) |
-| `advisory_service.py` | MarginAnalyst (기본적+기술적 분석) |
-| `detail_service.py` | MarginAnalyst, ValueScreener (재무/밸류에이션) |
-| `order_service.py` | OrderAdvisor (포지션 사이징+주문) |
-| `watchlist_service.py` | ValueScreener (KRX 불가 시 fallback) |
-
-에이전트 병렬 호출 시 SQLite WAL 모드 + async 패턴으로 동시성 안전. 상세 → `docs/SERVICES.md`
+투자 파이프라인은 `pipeline_service.py`(미구현)에서 위 서비스들을 직접 import하여 호출할 예정.

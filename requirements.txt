@@ -12,3 +12,5 @@ openai
 feedparser
 sqlalchemy
 alembic
+pytest
+pytest-asyncio

@@ -6,6 +6,7 @@ from .advisory import AdvisoryStock, AdvisoryCache, AdvisoryReport, PortfolioRep
 from .market_board import MarketBoardStock, MarketBoardOrder
 from .stock_info import StockInfo
 from .macro import MacroGptCache
+from .report import DailyReport, MacroRegimeHistory, RecommendationHistory
 
 __all__ = [
     "Watchlist",
@@ -20,4 +21,7 @@ __all__ = [
     "MarketBoardOrder",
     "StockInfo",
     "MacroGptCache",
+    "RecommendationHistory",
+    "MacroRegimeHistory",
+    "DailyReport",
 ]

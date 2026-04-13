@@ -17,6 +17,7 @@
 | `market_board.py` | `/api/market-board/*`, `WS /ws/market-board` | 신고가/신저가 + sparkline + 시세판 종목 CRUD + 순서 관리(`GET/PUT /api/market-board/order`) + 실시간 WS |
 | `macro.py` | `/api/macro/*` | 매크로 분석: 지수(4대)/뉴스(네이버+NYT)/심리지표(VIX+버핏+공포탐욕)/투자자 코멘트. 5개 GET 엔드포인트 |
 | `portfolio_advisor.py` | `/api/portfolio-advisor/*` | AI 포트폴리오 자문: `POST /analyze` (GPT 분석), `GET /history` (이력 목록), `GET /history/{id}` (리포트 상세) |
+| `report.py` | `/api/reports/*` | 일일 보고서 + 추천 이력 + 성과 통계 + 매크로 체제 이력. 7개 GET 엔드포인트. `/{report_id}` 패스 파라미터는 마지막에 등록 |
 
 ---
 
@@ -41,7 +42,7 @@
 ## `main.py` — FastAPI 서버 진입점
 
 - CORS 미들웨어: `localhost:5173` 허용 (Vite 개발 서버)
-- 12개 라우터 등록 (screener, earnings, balance, watchlist, detail, order, quote, advisory, search, market_board, macro, portfolio_advisor)
+- 13개 라우터 등록 (screener, earnings, balance, watchlist, detail, order, quote, advisory, search, market_board, macro, portfolio_advisor, report)
 - **lifespan**: ① `quote_manager.start()` ② 예약주문 스케줄러 시작 ③ `symbol_map` background pre-warm — 종료 시 역순 정리
 - **SPA 라우팅**: `/assets` StaticFiles 마운트 + `/{full_path:path}` 캐치올로 index.html 반환 (라우터 등록 **이후** 마지막)
 - `index.html` 응답에 `Cache-Control: no-cache, no-store, must-revalidate` 헤더
@@ -108,18 +109,9 @@ GET  /api/order/fno-price      선물옵션 현재가
 
 ---
 
-## 에이전트 호출 엔드포인트
+## 에이전트 역할
 
-AI 에이전트 팀(`.claude/agents/`)은 아래 라우터의 HTTP API를 호출한다. 서비스/DB 직접 접근 없음.
-
-| 라우터 | 에이전트 | 호출 엔드포인트 |
-|--------|---------|---------------|
-| `macro.py` | MacroSentinel | `/api/macro/sentiment\|indices\|investor-quotes\|news` |
-| `screener.py` | ValueScreener | `/api/screener/stocks` |
-| `detail.py` | MarginAnalyst, ValueScreener | `/api/detail/{code}/report\|valuation` |
-| `advisory.py` | MarginAnalyst | `/api/advisory/{code}/refresh\|data\|analyze\|ohlcv` |
-| `balance.py` | OrderAdvisor | `/api/balance` |
-| `order.py` | OrderAdvisor | `/api/order/buyable\|open\|reserve` |
+도메인 에이전트(MacroSentinel/ValueScreener/MarginAnalyst/OrderAdvisor)는 **자문 전용** — HTTP API를 직접 호출하지 않는다. 투자 파이프라인은 `pipeline_service.py`(미구현)에서 서비스 함수를 직접 호출할 예정.
 
 ---
 

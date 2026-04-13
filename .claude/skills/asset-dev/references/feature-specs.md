@@ -1,6 +1,81 @@
-# 통합자산관리 시스템 — 상세 기능 명세
+# 투자 자동화 시스템 — 상세 기능 명세
 
 각 모듈의 상세 API/DB/UI 설계. dev-architect가 구현 시 참조한다.
+
+---
+
+## Module 0: 투자 파이프라인 서비스 (핵심)
+
+### 백엔드
+
+#### 파이프라인 서비스 (`services/pipeline_service.py`)
+
+기존 서비스 함수를 직접 호출하여 분석 파이프라인을 실행한다:
+
+```python
+async def run_pipeline(market: str = "KR") -> dict:
+    # Step 1: _analyze_macro() → macro_service.get_sentiment()
+    # Step 2: _screen_stocks(market, regime) → screener.krx.get_all_stocks() + apply_filters()
+    # Step 3: _analyze_candidates(candidates[:10]) → advisory_service.refresh_stock_data()
+    # Step 4: _generate_recommendations(analyses) → report_service.save_recommendations_batch()
+    # Step 5: _generate_and_save_report() → report_service.save_daily_report()
+    # Step 6: _send_telegram_notification() → telegram_service.send_report_notification()
+```
+
+#### 체제 판단 (`_determine_regime`)
+
+버핏지수 × 공포탐욕 교차표:
+- buffett: low(<0.8) / normal(0.8-1.2) / high(1.2-1.6) / extreme(>1.6)
+- fear_greed: extreme_fear(<20) / fear(20-40) / neutral(40-60) / greed(60-80) / extreme_greed(>80)
+- VIX > 35 오버라이드: extreme_fear로 강제
+
+체제별 파라미터 (`REGIME_PARAMS`):
+- accumulation: PER<20, PBR<2.0, ROE>5%, margin=20%, position=5%, invest=75%
+- selective: PER<15, PBR<1.5, ROE>8%, margin=30%, position=4%, invest=65%
+- cautious: PER<12, PBR<1.2, ROE>10%, margin=40%, position=3%, invest=50%
+- defensive: 스크리닝 중단, 현금 100%
+
+#### 7점 등급 (`_calc_safety_grade`)
+
+7개 지표 × 4점 = 28점 만점:
+1. Graham 할인율 (>40%=4, 20-40%=3, 0-20%=2, <0%=1)
+2. PER vs 5년 평균 (<-30%=4, -30~-10%=3, -10~+10%=2, >+10%=1)
+3. PBR 절대 (<0.7=4, 0.7-1.0=3, 1.0-1.5=2, >1.5=1)
+4. 부채비율 (<50%=4, 50-100%=3, 100-200%=2, >200%=1)
+5. 유동비율 (>2.0=4, 1.5-2.0=3, 1.0-1.5=2, <1.0=1)
+6. FCF 추세 (3년양수=4, 2년=3, 1년=2, 음수=1)
+7. 매출 CAGR (>10%=4, 5-10%=3, 0-5%=2, <0%=1)
+
+등급: A(24-28), B+(20-23), B(16-19), C(12-15), D(<12)
+
+#### 스케줄러 (`services/scheduler_service.py`)
+
+APScheduler AsyncIOScheduler(timezone='Asia/Seoul'):
+- 08:00 → run_pipeline('KR')
+- 16:00 → run_pipeline('US')
+- main.py lifespan에서 시작/종료
+
+#### Telegram (`services/telegram_service.py`)
+
+- `send_report_notification(report_id, recommendations)` → 요약 + 인라인 승인 버튼
+- `handle_approval_callback(rec_id, action)` → 승인 시 예약주문 등록
+- 환경변수: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`
+
+#### API 엔드포인트
+
+```
+POST /api/pipeline/run?market=KR     수동 파이프라인 실행
+GET  /api/pipeline/status            스케줄러 상태 + 다음 실행 시각
+GET  /api/pipeline/history           실행 이력
+POST /api/telegram/webhook           Telegram 봇 콜백
+GET  /api/telegram/status            봇 상태
+```
+
+#### DB 모델 (이미 생성됨)
+
+- `recommendation_history` — 추천 이력 + 실행 추적 + 성과
+- `macro_regime_history` — 체제 판단 일일 이력
+- `daily_reports` — 통합 보고서 Markdown + JSON
 
 ---
 

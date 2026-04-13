@@ -1,5 +1,28 @@
 # 변경 이력
 
+## 2026-04-13 — 하네스 재구성 + 보고서 시스템 + 테스트 인프라
+
+### 하네스 재구성
+- 대화형 투자 스킬 6개 삭제 (macro-analysis, value-screening, graham-analysis, portfolio-check, order-recommend, value-invest)
+- 도메인 에이전트 4명(MacroSentinel/ValueScreener/MarginAnalyst/OrderAdvisor) → **자문 전용**으로 전환 (API 호출 제거)
+- DevArchitect 역할 확대: 투자 자동화 시스템 전체 개발 (파이프라인/스케줄러/Telegram)
+- TestEngineer 에이전트 신규 추가 (pytest 기반 자동화 테스트 전담)
+- asset-dev 스킬 범위 확장 (파이프라인/스케줄러/Telegram 개발 포함)
+- qa-verify 스킬에 파이프라인 로직 검증 항목 추가
+
+### 보고서 시스템 신규
+- DB 모델 3개: RecommendationHistory, MacroRegimeHistory, DailyReport + ReportRepository
+- Alembic 마이그레이션 (테이블 3개 + 인덱스 5개)
+- `services/report_service.py`: 추천 이력/체제 이력/보고서 CRUD + 통합 Markdown 생성 + 성과 통계
+- `routers/report.py`: 7개 GET 엔드포인트 (`/api/reports/*`)
+- `frontend/src/pages/ReportPage.jsx`: 3탭 UI (일일 보고서/추천 이력/성과 통계)
+- Header 분석 드롭다운에 "보고서" 메뉴 추가
+
+### 테스트 인프라 신규
+- `tests/` 디렉토리: conftest.py(인메모리 DB + TestClient) + unit/integration/api 3계층
+- 27개 테스트: 단위 7개(Markdown 생성, is_domestic) + 통합 11개(Repository CRUD) + API 9개(엔드포인트)
+- pytest + pytest-asyncio 의존성 추가
+
 ## 2026-04-04 — 역발상 매수 전략 + 밸류에이션 차트 확장 + UI 개선
 
 ### 프롬프트 개선
