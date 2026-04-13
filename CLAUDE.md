@@ -81,7 +81,7 @@ wrapper.py          KIS API 완전 래퍼 (standalone)
 main.py             FastAPI 서버 진입점 (라우터 등록 + SPA 정적 파일 서빙 + Alembic 마이그레이션)
 db/                 SQLAlchemy ORM 패키지 (base, session, models/12개, repositories/6개)
 alembic/            DB 스키마 마이그레이션 관리
-routers/            API 라우터 패키지 (12개, quote/market_board는 WebSocket 포함)
+routers/            API 라우터 패키지 (14개, quote/market_board는 WebSocket 포함)
 services/           서비스 레이어 (watchlist_service, detail_service, order_service, advisory_service, macro_service, portfolio_advisor_service, quote_kis/quote_overseas, order_kr/order_us/order_fno)
 services/exceptions.py  서비스 레이어 공용 예외 계층 (ServiceError / NotFoundError / ExternalAPIError / ConfigError / PaymentRequiredError / ConflictError)
 screener/           스크리너 패키지 (CLI + API 공용, pykrx + OpenDart)

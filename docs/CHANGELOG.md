@@ -1,5 +1,17 @@
 # 변경 이력
 
+## 2026-04-13 — 투자 파이프라인 서비스 + 스케줄러
+
+### 투자 파이프라인 신규
+- `services/pipeline_service.py`: 매크로 체제 판단(REGIME_MATRIX) → 체제별 스크리닝 → 심층 분석(7점 등급) → 추천 생성 → 보고서 저장
+- 체제 판단: 버핏지수×공포탐욕 교차표, VIX>35 오버라이드, 버핏지수 백분율→소수 자동 변환
+- 7점 등급: Graham 할인율/PER평균비교/PBR절대/부채비율/유동비율/FCF추세/매출CAGR (28점 만점 A~D)
+- 추천 생성: B+ 이상 + 안전마진 임계값 초과 + R:R≥2.0 필터
+- `services/scheduler_service.py`: APScheduler BackgroundScheduler (08:00 KR / 16:00 US KST)
+- `routers/pipeline.py`: POST /run (비동기), POST /run-sync (동기), GET /status
+- ReportPage에 KR/US 분석 실행 버튼 + 스케줄러 상태 + 실행 결과 표시 추가
+- `apscheduler` 의존성 추가
+
 ## 2026-04-13 — 하네스 재구성 + 보고서 시스템 + 테스트 인프라
 
 ### 하네스 재구성

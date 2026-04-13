@@ -18,6 +18,7 @@
 | `macro.py` | `/api/macro/*` | 매크로 분석: 지수(4대)/뉴스(네이버+NYT)/심리지표(VIX+버핏+공포탐욕)/투자자 코멘트. 5개 GET 엔드포인트 |
 | `portfolio_advisor.py` | `/api/portfolio-advisor/*` | AI 포트폴리오 자문: `POST /analyze` (GPT 분석), `GET /history` (이력 목록), `GET /history/{id}` (리포트 상세) |
 | `report.py` | `/api/reports/*` | 일일 보고서 + 추천 이력 + 성과 통계 + 매크로 체제 이력. 7개 GET 엔드포인트. `/{report_id}` 패스 파라미터는 마지막에 등록 |
+| `pipeline.py` | `/api/pipeline/*` | 투자 파이프라인: `POST /run` (비동기), `POST /run-sync` (동기), `GET /status` (스케줄러+실행 상태) |
 
 ---
 
@@ -42,7 +43,7 @@
 ## `main.py` — FastAPI 서버 진입점
 
 - CORS 미들웨어: `localhost:5173` 허용 (Vite 개발 서버)
-- 13개 라우터 등록 (screener, earnings, balance, watchlist, detail, order, quote, advisory, search, market_board, macro, portfolio_advisor, report)
+- 14개 라우터 등록 (screener, earnings, balance, watchlist, detail, order, quote, advisory, search, market_board, macro, portfolio_advisor, report, pipeline)
 - **lifespan**: ① `quote_manager.start()` ② 예약주문 스케줄러 시작 ③ `symbol_map` background pre-warm — 종료 시 역순 정리
 - **SPA 라우팅**: `/assets` StaticFiles 마운트 + `/{full_path:path}` 캐치올로 index.html 반환 (라우터 등록 **이후** 마지막)
 - `index.html` 응답에 `Cache-Control: no-cache, no-store, must-revalidate` 헤더

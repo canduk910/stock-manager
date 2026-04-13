@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { useReports, useReportDetail, useRecommendations, usePerformance, useRegimes } from '../hooks/useReport'
+import { runPipelineSync, fetchPipelineStatus } from '../api/pipeline'
 import LoadingSpinner from '../components/common/LoadingSpinner'
 import ErrorAlert from '../components/common/ErrorAlert'
 import EmptyState from '../components/common/EmptyState'
@@ -342,12 +343,108 @@ function StatCard({ label, value, color = 'text-gray-900' }) {
 
 // ── 메인 페이지 ─────────────────────────────────────────────
 
+// ── 분석 실행 패널 ──────────────────────────────────────────
+
+function PipelinePanel() {
+  const [running, setRunning] = useState(null)  // 'KR' | 'US' | null
+  const [result, setResult] = useState(null)
+  const [error, setError] = useState(null)
+  const [schedulerStatus, setSchedulerStatus] = useState(null)
+
+  useEffect(() => {
+    fetchPipelineStatus().then(setSchedulerStatus).catch(() => {})
+  }, [])
+
+  const handleRun = useCallback(async (market) => {
+    setRunning(market)
+    setResult(null)
+    setError(null)
+    try {
+      const res = await runPipelineSync(market)
+      setResult(res)
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setRunning(null)
+    }
+  }, [])
+
+  const jobs = schedulerStatus?.scheduler?.jobs || []
+
+  return (
+    <div className="bg-white rounded-lg shadow p-4 space-y-3">
+      <div className="flex items-center justify-between">
+        <h3 className="font-bold text-gray-900">분석 파이프라인</h3>
+        <div className="flex gap-2">
+          <button
+            onClick={() => handleRun('KR')}
+            disabled={running != null}
+            className={`px-4 py-2 rounded text-sm font-medium transition-colors ${
+              running === 'KR' ? 'bg-gray-400 text-white cursor-wait' :
+              running ? 'bg-gray-200 text-gray-400 cursor-not-allowed' :
+              'bg-blue-600 text-white hover:bg-blue-700'
+            }`}
+          >
+            {running === 'KR' ? 'KR 분석 중...' : 'KR 분석 실행'}
+          </button>
+          <button
+            onClick={() => handleRun('US')}
+            disabled={running != null}
+            className={`px-4 py-2 rounded text-sm font-medium transition-colors ${
+              running === 'US' ? 'bg-gray-400 text-white cursor-wait' :
+              running ? 'bg-gray-200 text-gray-400 cursor-not-allowed' :
+              'bg-green-600 text-white hover:bg-green-700'
+            }`}
+          >
+            {running === 'US' ? 'US 분석 중...' : 'US 분석 실행'}
+          </button>
+        </div>
+      </div>
+
+      {/* 스케줄러 상태 */}
+      {jobs.length > 0 && (
+        <div className="text-xs text-gray-500">
+          {jobs.map((j) => (
+            <span key={j.id} className="mr-4">
+              {j.name}: 다음 실행 {j.next_run ? new Date(j.next_run).toLocaleString('ko-KR') : '-'}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* 실행 결과 */}
+      {error && <ErrorAlert message={error} />}
+      {result && (
+        <div className="bg-gray-50 rounded p-3 text-sm space-y-1">
+          <div className="font-medium text-gray-900">
+            분석 완료 — 보고서 #{result.report_id}
+          </div>
+          <div className="text-gray-600">
+            체제: <span className="font-medium">{result.regime}</span>
+            {' / '}후보: {result.candidates_count}개
+            {' / '}분석: {result.analyses_count}개
+            {' / '}추천: <span className="font-bold text-blue-600">{result.recommended_count}개</span>
+          </div>
+          {result.errors?.length > 0 && (
+            <div className="text-orange-600 text-xs">{result.errors.join(', ')}</div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── 메인 페이지 ─────────────────────────────────────────────
+
 export default function ReportPage() {
   const [tab, setTab] = useState('reports')
 
   return (
     <div className="space-y-6">
       <h1 className="text-2xl font-bold text-gray-900">투자 보고서</h1>
+
+      {/* 분석 실행 패널 */}
+      <PipelinePanel />
 
       {/* 탭 네비게이션 */}
       <div className="flex gap-1 border-b border-gray-200">

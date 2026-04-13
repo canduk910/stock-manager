@@ -76,8 +76,13 @@ async def lifespan(app: FastAPI):
     from services.reservation_service import start_scheduler, stop_scheduler
     scheduler_task = asyncio.create_task(start_scheduler())
 
+    # 투자 파이프라인 스케줄러 시작 (08:00 KR / 16:00 US)
+    from services.scheduler_service import setup_scheduler as setup_pipeline_scheduler, shutdown_scheduler as shutdown_pipeline_scheduler
+    setup_pipeline_scheduler()
+
     yield
 
+    shutdown_pipeline_scheduler()
     stop_scheduler()
     scheduler_task.cancel()
     try:
@@ -108,7 +113,7 @@ app.add_middleware(
 )
 
 # 라우터 등록
-from routers import screener, earnings, balance, watchlist, detail, order, quote, advisory, search, market_board, macro, portfolio_advisor, report  # noqa: E402
+from routers import screener, earnings, balance, watchlist, detail, order, quote, advisory, search, market_board, macro, portfolio_advisor, report, pipeline  # noqa: E402
 
 app.include_router(screener.router)
 app.include_router(earnings.router)
@@ -123,6 +128,7 @@ app.include_router(market_board.router)
 app.include_router(macro.router)
 app.include_router(portfolio_advisor.router)
 app.include_router(report.router)
+app.include_router(pipeline.router)
 
 
 # 프론트엔드 빌드 결과 정적 파일 서빙 (API 라우터 등록 이후에 마운트)

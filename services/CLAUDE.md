@@ -21,6 +21,8 @@
 | `macro_service.py` | 매크로 분석 오케스트레이션: quote+sparkline 완전 병렬 수집 + GPT 번역/추출 + 섹션별 독립 실패 허용. GPT 결과는 `macro.db`에 일일 캐싱 (KST 기준) |
 | `portfolio_advisor_service.py` | AI 포트폴리오 자문: 잔고 컨텍스트(52주 하락률 포함) + 매크로 체제 → OpenAI 호출(체제별 프롬프트 동적 구성 + 역발상 매수 규칙) → 진단/리밸런싱/매매안. `cache.db` 30분 TTL + `advisory.db` 영구 저장. `max_completion_tokens=8000`. |
 | `report_service.py` | 투자 보고서: 추천 이력 + 매크로 체제 이력 + 일일 보고서 CRUD + 통합 Markdown 생성 + 성과 통계. `db/repositories/report_repo.py` 위임. |
+| `pipeline_service.py` | 투자 파이프라인: 매크로 체제 판단(REGIME_MATRIX) → 체제별 스크리닝 → 심층 분석(7점 등급) → 추천 생성 → 보고서 저장. 기존 서비스 직접 호출 (HTTP 미경유). `run_pipeline(market)` 단일 진입점. |
+| `scheduler_service.py` | APScheduler: 08:00 KR / 16:00 US BackgroundScheduler. `setup_scheduler()` / `shutdown_scheduler()` / `get_scheduler_status()`. main.py lifespan 통합. |
 
 ---
 
