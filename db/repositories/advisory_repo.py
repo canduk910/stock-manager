@@ -10,7 +10,7 @@ from db.models.advisory import (
     AdvisoryStock,
     PortfolioReport,
 )
-from stock.db_base import now_kst_iso
+from db.utils import now_kst_iso
 
 
 class AdvisoryRepository:

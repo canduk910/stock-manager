@@ -5,21 +5,10 @@
 
 import sqlite3
 from contextlib import contextmanager
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-# ── KST 타임존 (한국 표준시 UTC+9) ──────────────────────────────────────────
-KST = timezone(timedelta(hours=9))
-
-
-def now_kst() -> datetime:
-    """현재 KST 시각 (timezone-aware datetime)."""
-    return datetime.now(KST)
-
-
-def now_kst_iso(timespec: str = "seconds") -> str:
-    """현재 KST 시각 ISO 문자열."""
-    return datetime.now(KST).isoformat(timespec=timespec)
+# KST 유틸은 db/utils.py가 정의 원본. 여기서는 re-export (기존 caller 호환).
+from db.utils import KST, now_kst, now_kst_iso  # noqa: F401
 
 DB_DIR = Path.home() / "stock-watchlist"
 

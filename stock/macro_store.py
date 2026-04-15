@@ -24,3 +24,9 @@ def save_today(category: str, result) -> None:
     """당일(KST) GPT 결과 저장 (upsert)."""
     with get_session() as db:
         MacroRepository(db).save_today(category, result)
+
+
+def cleanup_old(days: int = 30) -> int:
+    """N일 이전 캐시 삭제. 삭제 건수 반환."""
+    with get_session() as db:
+        return MacroRepository(db).cleanup_old(days)

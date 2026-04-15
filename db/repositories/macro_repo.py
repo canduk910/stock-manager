@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import random
 from datetime import timedelta
 from typing import Optional
 
 from sqlalchemy.orm import Session
 
 from db.models.macro import MacroGptCache
-from stock.db_base import now_kst
+from db.utils import now_kst
 
 
 def _today_kst() -> str:
@@ -20,17 +19,15 @@ class MacroRepository:
     def __init__(self, db: Session):
         self.db = db
 
-    def _maybe_cleanup(self) -> None:
-        """~5% probability: delete entries older than 30 days."""
-        if random.random() < 0.05:
-            cutoff = (now_kst() - timedelta(days=30)).strftime("%Y-%m-%d")
-            self.db.query(MacroGptCache).filter(
-                MacroGptCache.date_kst < cutoff
-            ).delete()
+    def cleanup_old(self, days: int = 30) -> int:
+        """30일 이전 캐시 삭제. 삭제 건수 반환."""
+        cutoff = (now_kst() - timedelta(days=days)).strftime("%Y-%m-%d")
+        return self.db.query(MacroGptCache).filter(
+            MacroGptCache.date_kst < cutoff
+        ).delete()
 
     def get_today(self, category: str) -> Optional[any]:
         today = _today_kst()
-        self._maybe_cleanup()
         row = (
             self.db.query(MacroGptCache)
             .filter_by(category=category, date_kst=today)

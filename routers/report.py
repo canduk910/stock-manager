@@ -2,10 +2,8 @@
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends
-from sqlalchemy.orm import Session
+from fastapi import APIRouter
 
-from db.session import get_db
 from services import report_service
 
 router = APIRouter(prefix="/api/reports", tags=["reports"])
@@ -18,10 +16,9 @@ def list_reports(
     market: Optional[str] = None,
     limit: int = 30,
     offset: int = 0,
-    db: Session = Depends(get_db),
 ):
     """일일 보고서 목록 (최신순)."""
-    return report_service.list_daily_reports(db, market=market, limit=limit, offset=offset)
+    return report_service.list_daily_reports(market=market, limit=limit, offset=offset)
 
 
 # ── 추천 이력 (/{report_id}보다 먼저 등록) ────────────────────
@@ -32,46 +29,45 @@ def list_recommendations(
     status: Optional[str] = None,
     limit: int = 50,
     offset: int = 0,
-    db: Session = Depends(get_db),
 ):
     """추천 이력 목록."""
     return report_service.list_recommendations(
-        db, market=market, status=status, limit=limit, offset=offset
+        market=market, status=status, limit=limit, offset=offset
     )
 
 
 @router.get("/recommendations/{rec_id}")
-def get_recommendation(rec_id: int, db: Session = Depends(get_db)):
+def get_recommendation(rec_id: int):
     """추천 이력 상세."""
-    return report_service.get_recommendation(db, rec_id)
+    return report_service.get_recommendation(rec_id)
 
 
 # ── 성과 통계 ─────────────────────────────────────────────────
 
 @router.get("/performance")
-def get_performance(market: Optional[str] = None, db: Session = Depends(get_db)):
+def get_performance(market: Optional[str] = None):
     """추천 적중률 + 수익률 통계."""
-    return report_service.get_performance_stats(db, market=market)
+    return report_service.get_performance_stats(market=market)
 
 
 # ── 매크로 체제 이력 ──────────────────────────────────────────
 
 @router.get("/regimes")
-def list_regimes(limit: int = 90, db: Session = Depends(get_db)):
+def list_regimes(limit: int = 90):
     """매크로 체제 이력 (최근 90일)."""
-    return report_service.list_regimes(db, limit=limit)
+    return report_service.list_regimes(limit=limit)
 
 
 @router.get("/regimes/latest")
-def get_latest_regime(db: Session = Depends(get_db)):
+def get_latest_regime():
     """최신 매크로 체제."""
-    regime = report_service.get_latest_regime(db)
+    regime = report_service.get_latest_regime()
     return regime or {"regime": "unknown", "date": None}
 
 
 # ── 보고서 상세 (path param — 마지막에 등록) ──────────────────
 
 @router.get("/{report_id}")
-def get_report(report_id: int, db: Session = Depends(get_db)):
+def get_report(report_id: int):
     """일일 보고서 상세."""
-    return report_service.get_daily_report(db, report_id)
+    return report_service.get_daily_report(report_id)

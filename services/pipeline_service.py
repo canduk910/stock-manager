@@ -11,11 +11,10 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
-from db.session import get_session
 from services import macro_service, report_service
 from services.advisory_service import refresh_stock_data, _calc_graham_number
 from services.exceptions import ExternalAPIError
-from stock.db_base import now_kst_iso
+from db.utils import now_kst_iso
 
 logger = logging.getLogger(__name__)
 
@@ -444,13 +443,12 @@ def run_pipeline(market: str = "KR") -> dict:
         regime_data = _determine_regime({})
 
     # 체제 이력 저장
-    with get_session() as db:
-        report_service.save_regime(
-            db, today, regime_data["regime"],
-            buffett_ratio=regime_data.get("buffett_ratio"),
-            vix=regime_data.get("vix"),
-            fear_greed_score=regime_data.get("fear_greed_score"),
-        )
+    report_service.save_regime(
+        today, regime_data["regime"],
+        buffett_ratio=regime_data.get("buffett_ratio"),
+        vix=regime_data.get("vix"),
+        fear_greed_score=regime_data.get("fear_greed_score"),
+    )
 
     # Step 2: 종목 스크리닝
     if regime_data["regime"] == "defensive":
@@ -473,33 +471,30 @@ def run_pipeline(market: str = "KR") -> dict:
     logger.info(f"매수 추천: {len(recommendations)}개")
 
     # Step 5: DB 저장
-    with get_session() as db:
-        # 추천 이력 저장
-        if recommendations:
-            report_service.save_recommendations_batch(db, recommendations)
+    if recommendations:
+        report_service.save_recommendations_batch(recommendations)
 
-        # 보고서 생성 + 저장
-        md = report_service.generate_daily_report_markdown(
-            regime_data=regime_data,
-            recommendations=recommendations,
-            market=market,
-            date=today,
-        )
-        report_id = report_service.save_daily_report(
-            db,
-            date=today,
-            market=market,
-            report_markdown=md,
-            report_json={
-                "regime_data": {k: v for k, v in regime_data.items() if k != "params"},
-                "candidates_count": len(candidates),
-                "analyses_count": len(analyses),
-                "recommendations": recommendations,
-            },
-            regime=regime_data["regime"],
-            candidates_count=len(candidates),
-            recommended_count=len(recommendations),
-        )
+    # 보고서 생성 + 저장
+    md = report_service.generate_daily_report_markdown(
+        regime_data=regime_data,
+        recommendations=recommendations,
+        market=market,
+        date=today,
+    )
+    report_id = report_service.save_daily_report(
+        date=today,
+        market=market,
+        report_markdown=md,
+        report_json={
+            "regime_data": {k: v for k, v in regime_data.items() if k != "params"},
+            "candidates_count": len(candidates),
+            "analyses_count": len(analyses),
+            "recommendations": recommendations,
+        },
+        regime=regime_data["regime"],
+        candidates_count=len(candidates),
+        recommended_count=len(recommendations),
+    )
 
     logger.info(f"=== 파이프라인 완료: 보고서 #{report_id} ===")
     return {

@@ -6,7 +6,7 @@ CLI와 API 라우터 양쪽에서 공용으로 사용한다. 비즈니스 데이
 
 | 파일 | 역할 |
 |------|------|
-| `db_base.py` | SQLite 캐시 전용 유틸. `connect(db_name, init_fn)` contextmanager. WAL 모드 + timeout 10s. `cache.py` 공용. `KST`/`now_kst()`/`now_kst_iso()` 타임존 헬퍼 (services에서도 import). |
+| `db_base.py` | SQLite 캐시 전용 유틸. `connect(db_name, init_fn)` contextmanager. WAL 모드 + timeout 10s. `cache.py` 공용. KST 헬퍼는 `db/utils.py`에서 re-export (기존 caller 호환). |
 | `store.py` | 관심종목 CRUD + 순서 관리. `db/repositories/watchlist_repo.py` 위임 래퍼. 기존 함수 시그니처 100% 유지. |
 | `order_store.py` | 주문 이력 + 예약주문 CRUD. `db/repositories/order_repo.py` 위임 래퍼. 기존 함수 시그니처 100% 유지. |
 | `advisory_store.py` | AI자문 CRUD. `db/repositories/advisory_repo.py` 위임 래퍼. 기존 함수 시그니처 100% 유지. |
@@ -23,7 +23,8 @@ CLI와 API 라우터 양쪽에서 공용으로 사용한다. 비즈니스 데이
 | `fno_master.py` | KIS 선물옵션 마스터파일 다운로드/파싱/검색. 인메모리 캐시(24h) → cache.db(7일) → ZIP 3단계. main.py에서 pre-warm. |
 | `sec_filings.py` | SEC EDGAR 미국 10-K/10-Q 공시 조회. |
 | `macro_fetcher.py` | 매크로 분석 데이터 수집: yfinance 지수/VIX/버핏/공포탐욕, feedparser RSS(뉴스/투자자), 캐시 키 `macro:*` |
-| `macro_store.py` | 매크로 GPT 결과 일일 캐시. `db/repositories/macro_repo.py` 위임 래퍼. `get_today()`/`save_today()`. 30일 자동 정리. |
+| `report_store.py` | 보고서 CRUD (추천 이력/체제 이력/일일 보고서). `db/repositories/report_repo.py` 위임 래퍼. 다른 6개 store와 동일 패턴. |
+| `macro_store.py` | 매크로 GPT 결과 일일 캐시. `db/repositories/macro_repo.py` 위임 래퍼. `get_today()`/`save_today()`/`cleanup_old()`. |
 | `cache.py` | SQLite TTL 캐시. `cache.db`. NaN/Inf → None 자동 sanitize. |
 | `display.py` | Rich 테이블 출력 + CSV 내보내기. |
 | `cli.py` | Click CLI. `stock watch add/remove/list/memo/dashboard/info`. |
@@ -46,12 +47,12 @@ CLI와 API 라우터 양쪽에서 공용으로 사용한다. 비즈니스 데이
 
 ### db_base.py
 - **cache.py 전용**: `connect()` contextmanager는 cache.py에서만 사용. 비즈니스 store는 `db/session.py` 사용.
-- **KST 헬퍼 공용**: `now_kst()`, `now_kst_iso()`, `KST`는 services/에서도 import.
+- **KST 헬퍼**: `db/utils.py`에서 re-export. `from stock.db_base import now_kst_iso` 형태로 기존 caller 호환.
 - **WAL 모드**: `PRAGMA journal_mode=WAL` + timeout 10초. 읽기-쓰기 동시성 보장.
 - `_initialized` set으로 DB init 중복 방지.
 
 ### Store 래퍼 패턴 (Adapter)
-- 6개 store 모듈(`store.py`, `order_store.py` 등)은 `db/repositories/` Repository에 위임하는 래퍼.
+- 7개 store 모듈(`store.py`, `order_store.py`, `report_store.py` 등)은 `db/repositories/` Repository에 위임하는 래퍼.
 - 기존 함수 시그니처 100% 유지 — services/, routers/ 변경 없음.
 - Session 관리: `db/session.py`의 `get_session()` contextmanager 사용 (commit+rollback+close 자동).
 

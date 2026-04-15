@@ -79,14 +79,15 @@ python test.py                      # 삼성전자 현재가 조회
 config.py           환경변수 중앙 관리 (os.getenv 단일 진입점, DATABASE_URL 포함)
 wrapper.py          KIS API 완전 래퍼 (standalone)
 main.py             FastAPI 서버 진입점 (라우터 등록 + SPA 정적 파일 서빙 + Alembic 마이그레이션)
-db/                 SQLAlchemy ORM 패키지 (base, session, models/12개, repositories/6개)
+db/                 SQLAlchemy ORM 패키지 (base, session, utils, models/12개, repositories/7개)
 alembic/            DB 스키마 마이그레이션 관리
 routers/            API 라우터 패키지 (14개, quote/market_board는 WebSocket 포함)
 services/           서비스 레이어 (watchlist_service, detail_service, order_service, advisory_service, macro_service, portfolio_advisor_service, quote_kis/quote_overseas, order_kr/order_us/order_fno)
 services/exceptions.py  서비스 레이어 공용 예외 계층 (ServiceError / NotFoundError / ExternalAPIError / ConfigError / PaymentRequiredError / ConflictError)
 screener/           스크리너 패키지 (CLI + API 공용, pykrx + OpenDart)
 stock/              관심종목 패키지 (CLI + API 공용). store 모듈은 db/repositories/ 위임 래퍼
-stock/db_base.py    SQLite 캐시 전용 유틸 (connect contextmanager + KST 시간 헬퍼, cache.py 공용)
+db/utils.py         KST 타임존 헬퍼 정의 원본 (KST, now_kst, now_kst_iso). db/repositories/ 전용
+stock/db_base.py    SQLite 캐시 전용 유틸 (connect contextmanager, cache.py 공용). KST 헬퍼는 db/utils.py에서 re-export
 frontend/           React SPA (Vite + Tailwind + Recharts)
 ```
 

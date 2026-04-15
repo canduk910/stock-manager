@@ -5,7 +5,7 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 from db.models.order import Order, Reservation
-from stock.db_base import now_kst_iso
+from db.utils import now_kst_iso
 
 
 def _now() -> str:

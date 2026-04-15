@@ -1,5 +1,20 @@
 # 변경 이력
 
+## 2026-04-15 — db/ 패키지 구조 리팩토링
+
+### 리팩토링
+- `db/utils.py` 신규: KST 타임존 헬퍼(`KST`, `now_kst`, `now_kst_iso`) 정의 원본. db/repositories/에서 직접 import하여 db/→stock/ 역방향 의존 해소
+- `stock/db_base.py`: 자체 정의 제거 → `db/utils.py`에서 re-export (기존 caller 호환)
+- `stock/report_store.py` 신규: 보고서 CRUD 래퍼 (다른 6개 store와 동일 패턴 통일)
+- `services/report_service.py`: `db: Session` 파라미터 제거 → `stock/report_store.py` 경유
+- `routers/report.py`: `Depends(get_db)` 제거 → 서비스 직접 호출
+- `services/pipeline_service.py`: `get_session()` 직접 사용 제거 → 서비스 경유
+- `db/repositories/stock_info_repo.py`: `batch_get()` N+1 → `or_(and_(...))` 단일 쿼리
+- `db/repositories/stock_info_repo.py`: upsert 에러 로깅 `debug` → `warning`
+- `db/repositories/macro_repo.py`: `get_today()` 내 5% 확률 cleanup → `cleanup_old()` 별도 메서드 분리
+- Alembic 마이그레이션: orders/reservations 테이블 `server_default` 추가
+- Reservation 모델: `status`, `market`, `memo`에 `server_default` 추가
+
 ## 2026-04-13 — 투자 파이프라인 서비스 + 스케줄러
 
 ### 투자 파이프라인 신규

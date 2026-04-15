@@ -4,10 +4,11 @@ import logging
 from datetime import datetime, time, timedelta
 from typing import Optional
 
+from sqlalchemy import or_, and_
 from sqlalchemy.orm import Session
 
 from db.models.stock_info import StockInfo
-from stock.db_base import KST, now_kst, now_kst_iso
+from db.utils import KST, now_kst, now_kst_iso
 
 logger = logging.getLogger(__name__)
 
@@ -65,16 +66,12 @@ class StockInfoRepository:
     def batch_get(self, codes_markets: list[tuple]) -> dict:
         if not codes_markets:
             return {}
-        result = {}
-        for code, market in codes_markets:
-            row = (
-                self.db.query(StockInfo)
-                .filter_by(code=code, market=market)
-                .first()
-            )
-            if row:
-                result[(code, market)] = row.to_dict()
-        return result
+        conditions = [
+            and_(StockInfo.code == code, StockInfo.market == market)
+            for code, market in codes_markets
+        ]
+        rows = self.db.query(StockInfo).filter(or_(*conditions)).all()
+        return {(r.code, r.market): r.to_dict() for r in rows}
 
     def _ensure_row(self, code: str, market: str) -> StockInfo:
         """Get or create a StockInfo row (check-then-insert, F2 pattern)."""
@@ -99,7 +96,7 @@ class StockInfoRepository:
             row.shares = data.get("shares")
             row.price_updated_at = now_kst_iso()
         except Exception as e:
-            logger.debug("stock_info upsert_price error: %s", e)
+            logger.warning("stock_info upsert_price error: %s", e)
 
     def upsert_metrics(self, code: str, market: str, data: dict) -> None:
         try:
@@ -115,7 +112,7 @@ class StockInfoRepository:
             row.low_52 = data.get("low_52")
             row.metrics_updated_at = now_kst_iso()
         except Exception as e:
-            logger.debug("stock_info upsert_metrics error: %s", e)
+            logger.warning("stock_info upsert_metrics error: %s", e)
 
     def upsert_financials(self, code: str, market: str, data: dict) -> None:
         try:
@@ -126,7 +123,7 @@ class StockInfoRepository:
             row.bsns_year = data.get("bsns_year")
             row.fin_updated_at = now_kst_iso()
         except Exception as e:
-            logger.debug("stock_info upsert_financials error: %s", e)
+            logger.warning("stock_info upsert_financials error: %s", e)
 
     def upsert_returns(self, code: str, market: str, data: dict) -> None:
         try:
@@ -136,4 +133,4 @@ class StockInfoRepository:
             row.return_1y = data.get("return_1y")
             row.returns_updated_at = now_kst_iso()
         except Exception as e:
-            logger.debug("stock_info upsert_returns error: %s", e)
+            logger.warning("stock_info upsert_returns error: %s", e)

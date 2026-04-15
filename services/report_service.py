@@ -1,90 +1,76 @@
 """보고서 서비스 레이어.
 
-추천 이력, 매크로 체제 이력, 일일 보고서 CRUD + 통합 생성.
+추천 이력, 매크로 체제 이력, 일일 보고서 비즈니스 로직 + 통합 생성.
+DB 접근은 stock/report_store.py 래퍼 경유 (다른 서비스와 동일 패턴).
 """
 from __future__ import annotations
 
 import logging
 from typing import Optional
 
-from sqlalchemy.orm import Session
-
-from db.repositories.report_repo import ReportRepository
 from services.exceptions import NotFoundError
-from stock.db_base import now_kst_iso
+from stock import report_store
+from db.utils import now_kst_iso
 
 logger = logging.getLogger(__name__)
 
 
 # ── 추천 이력 ─────────────────────────────────────────────────
 
-def save_recommendation(db: Session, **kwargs) -> int:
-    repo = ReportRepository(db)
-    return repo.save_recommendation(**kwargs)
+def save_recommendation(**kwargs) -> int:
+    return report_store.save_recommendation(**kwargs)
 
 
-def save_recommendations_batch(db: Session, items: list[dict]) -> list[int]:
-    repo = ReportRepository(db)
-    return repo.save_recommendations_batch(items)
+def save_recommendations_batch(items: list[dict]) -> list[int]:
+    return report_store.save_recommendations_batch(items)
 
 
-def update_recommendation_status(
-    db: Session, rec_id: int, status: str, **kwargs
-) -> dict:
-    repo = ReportRepository(db)
-    ok = repo.update_recommendation_status(rec_id, status, **kwargs)
+def update_recommendation_status(rec_id: int, status: str, **kwargs) -> dict:
+    ok = report_store.update_recommendation_status(rec_id, status, **kwargs)
     if not ok:
         raise NotFoundError(f"추천 이력 #{rec_id}을 찾을 수 없습니다.")
-    return repo.get_recommendation(rec_id)
+    return report_store.get_recommendation(rec_id)
 
 
-def get_recommendation(db: Session, rec_id: int) -> dict:
-    repo = ReportRepository(db)
-    rec = repo.get_recommendation(rec_id)
+def get_recommendation(rec_id: int) -> dict:
+    rec = report_store.get_recommendation(rec_id)
     if not rec:
         raise NotFoundError(f"추천 이력 #{rec_id}을 찾을 수 없습니다.")
     return rec
 
 
 def list_recommendations(
-    db: Session,
     market: Optional[str] = None,
     status: Optional[str] = None,
     limit: int = 50,
     offset: int = 0,
 ) -> dict:
-    repo = ReportRepository(db)
-    items = repo.list_recommendations(market=market, status=status, limit=limit, offset=offset)
-    total = repo.count_recommendations(market=market, status=status)
+    items = report_store.list_recommendations(market=market, status=status, limit=limit, offset=offset)
+    total = report_store.count_recommendations(market=market, status=status)
     return {"items": items, "total": total, "limit": limit, "offset": offset}
 
 
-def get_performance_stats(db: Session, market: Optional[str] = None) -> dict:
-    repo = ReportRepository(db)
-    return repo.get_performance_stats(market=market)
+def get_performance_stats(market: Optional[str] = None) -> dict:
+    return report_store.get_performance_stats(market=market)
 
 
 # ── 매크로 체제 이력 ──────────────────────────────────────────
 
-def save_regime(db: Session, date: str, regime: str, **kwargs) -> int:
-    repo = ReportRepository(db)
-    return repo.save_regime(date, regime, **kwargs)
+def save_regime(date: str, regime: str, **kwargs) -> int:
+    return report_store.save_regime(date, regime, **kwargs)
 
 
-def get_latest_regime(db: Session) -> Optional[dict]:
-    repo = ReportRepository(db)
-    return repo.get_latest_regime()
+def get_latest_regime() -> Optional[dict]:
+    return report_store.get_latest_regime()
 
 
-def list_regimes(db: Session, limit: int = 90) -> list[dict]:
-    repo = ReportRepository(db)
-    return repo.list_regimes(limit=limit)
+def list_regimes(limit: int = 90) -> list[dict]:
+    return report_store.list_regimes(limit=limit)
 
 
 # ── 일일 보고서 ───────────────────────────────────────────────
 
 def save_daily_report(
-    db: Session,
     date: str,
     market: str,
     report_markdown: str,
@@ -93,8 +79,7 @@ def save_daily_report(
     candidates_count: int = 0,
     recommended_count: int = 0,
 ) -> int:
-    repo = ReportRepository(db)
-    return repo.save_daily_report(
+    return report_store.save_daily_report(
         date=date,
         market=market,
         report_markdown=report_markdown,
@@ -105,34 +90,29 @@ def save_daily_report(
     )
 
 
-def get_daily_report(db: Session, report_id: int) -> dict:
-    repo = ReportRepository(db)
-    report = repo.get_daily_report(report_id)
+def get_daily_report(report_id: int) -> dict:
+    report = report_store.get_daily_report(report_id)
     if not report:
         raise NotFoundError(f"보고서 #{report_id}을 찾을 수 없습니다.")
     return report
 
 
-def get_daily_report_by_date(db: Session, date: str, market: str) -> Optional[dict]:
-    repo = ReportRepository(db)
-    return repo.get_daily_report_by_date(date, market)
+def get_daily_report_by_date(date: str, market: str) -> Optional[dict]:
+    return report_store.get_daily_report_by_date(date, market)
 
 
 def list_daily_reports(
-    db: Session,
     market: Optional[str] = None,
     limit: int = 30,
     offset: int = 0,
 ) -> dict:
-    repo = ReportRepository(db)
-    items = repo.list_daily_reports(market=market, limit=limit, offset=offset)
-    total = repo.count_daily_reports(market=market)
+    items = report_store.list_daily_reports(market=market, limit=limit, offset=offset)
+    total = report_store.count_daily_reports(market=market)
     return {"items": items, "total": total, "limit": limit, "offset": offset}
 
 
-def mark_telegram_sent(db: Session, report_id: int) -> bool:
-    repo = ReportRepository(db)
-    ok = repo.mark_telegram_sent(report_id)
+def mark_telegram_sent(report_id: int) -> bool:
+    ok = report_store.mark_telegram_sent(report_id)
     if not ok:
         raise NotFoundError(f"보고서 #{report_id}을 찾을 수 없습니다.")
     return True
