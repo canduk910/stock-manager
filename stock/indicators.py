@@ -2,6 +2,12 @@
 
 pandas 없이 순수 Python으로 구현.
 MACD / RSI(Wilder) / Stochastic / Bollinger Band / MA / ATR / 변동성돌파 목표가.
+
+순수 계산 함수 8개 (_ema, _sma, _rsi, _stoch, _bollinger, _atr, _safe_val,
+calc_technical_indicators). 외부 의존성 없음 — math, typing만 사용.
+
+advisory_fetcher.py의 fetch_ohlcv_by_interval()에서 OHLCV 수집 후 자동 호출된다.
+프론트엔드 TechnicalPanel에서 시각화에 사용하는 모든 지표가 이 모듈에서 계산된다.
 """
 from __future__ import annotations
 

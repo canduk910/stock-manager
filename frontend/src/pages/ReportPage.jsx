@@ -1,3 +1,18 @@
+/**
+ * 투자 보고서 페이지 (/reports).
+ *
+ * 3탭 구조:
+ *   1) 일일 보고서 — pipeline_service가 매일 생성하는 시장 분석 보고서 (Markdown)
+ *      - 체제 배지: accumulation(초록) / selective(노랑) / cautious(주황) / defensive(빨강)
+ *      - 좌측 목록 + 우측 상세 2패널 레이아웃
+ *   2) 추천 이력 — 파이프라인이 추천한 종목의 이력 추적
+ *      - 시장/상태 필터, 등급 배지(A~D 색상), PnL 색상(한국 관례: 상승=빨강, 하락=파랑)
+ *   3) 성과 통계 — 추천 종목의 등급별/시장별 통계
+ *      - 체제 이력 타임라인 (최근 30일)
+ *
+ * 데이터 소스: /api/reports/* (7개 GET 엔드포인트)
+ * 훅: useReports, useReportDetail, useRecommendations, usePerformance, useRegimes
+ */
 import { useEffect, useState, useCallback } from 'react'
 import { useReports, useReportDetail, useRecommendations, usePerformance, useRegimes } from '../hooks/useReport'
 import { runPipelineSync, fetchPipelineStatus } from '../api/pipeline'

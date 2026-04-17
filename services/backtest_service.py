@@ -1,4 +1,27 @@
-"""백테스트 서비스 — MCP 서버 연동 오케스트레이션."""
+"""백테스트 서비스 — MCP 서버 연동 오케스트레이션.
+
+KIS AI Extensions MCP 서버의 백테스트 도구를 호출하여 전략 실행 결과를 반환한다.
+결과는 strategy_store(DB)에 저장하여 이력 관리 및 AI 자문 연동에 활용한다.
+
+MCP 도구 매핑 테이블:
+| 함수                    | MCP 도구                      | 용도                     |
+|-------------------------|-------------------------------|--------------------------|
+| list_presets()          | list_presets_tool              | 프리셋 전략 목록 조회     |
+| list_indicators()      | list_indicators_tool           | 사용 가능 지표 목록 조회  |
+| run_preset_backtest()  | run_preset_backtest_tool       | 프리셋 전략 백테스트 실행 |
+| run_custom_backtest()  | validate_yaml_tool             | YAML 전략 검증 (1단계)   |
+|                         | run_custom_backtest_tool       | 커스텀 전략 백테스트 (2단계) |
+| get_strategy_signals() | run_preset_backtest_tool ×3    | AI 자문용 전략 신호 생성  |
+
+의존 관계:
+- services/mcp_client.py → MCPClient (JSON-RPC 통신)
+- stock/strategy_store.py → 백테스트 job/결과 DB CRUD
+- advisory_service.py에서 get_strategy_signals() 호출
+
+MCP 비활성화(KIS_MCP_ENABLED=false) 시:
+- list_presets/run_* 함수 → ConfigError (MCPClient._check_enabled에서 raise)
+- get_strategy_signals() → None 반환 (graceful degrade)
+"""
 
 import logging
 import uuid
@@ -35,11 +58,19 @@ def run_preset_backtest(
     end_date: Optional[str] = None,
     initial_cash: int = 10_000_000,
 ) -> dict:
-    """프리셋 전략 백테스트 실행."""
+    """프리셋 전략 백테스트 실행.
+
+    실행 흐름:
+    1) UUID job_id 생성 → DB에 작업 메타데이터 선행 기록
+    2) MCP run_preset_backtest_tool 호출 (최대 5분 소요 가능)
+    3) 완료 시 _save_if_completed()로 메트릭 8개 추출 → DB 결과 저장
+    4) 예외 발생 시 ExternalAPIError로 래핑하여 상위 전파
+    """
     client = get_mcp_client()
+    # UUID로 고유한 작업 ID 생성 — 결과 조회/이력 추적에 사용
     job_id = str(uuid.uuid4())
 
-    # DB에 작업 기록
+    # DB에 작업 기록 (Write-Ahead: MCP 호출 전 선행 저장)
     strategy_store.save_backtest_job(
         job_id=job_id,
         strategy_name=preset,
@@ -79,10 +110,15 @@ def run_custom_backtest(
     end_date: Optional[str] = None,
     initial_cash: int = 10_000_000,
 ) -> dict:
-    """커스텀 YAML 전략 백테스트 실행."""
+    """커스텀 YAML 전략 백테스트 실행.
+
+    2단계 실행:
+    1) validate_yaml_tool로 YAML 구문 및 스키마 검증 (실패 시 즉시 ExternalAPIError)
+    2) run_custom_backtest_tool로 실제 백테스트 실행
+    """
     client = get_mcp_client()
 
-    # YAML 검증
+    # 1단계: YAML 검증 — 구문 오류나 지원하지 않는 지표 사용 시 조기 실패
     try:
         client.call_tool("validate_yaml_tool", {"yaml_content": yaml_content})
     except ExternalAPIError as e:
@@ -157,8 +193,14 @@ def run_batch_backtest(
 def get_strategy_signals(code: str, market: str) -> Optional[dict]:
     """종목별 전략 신호 생성 (AI 자문 연동용).
 
-    대표 3전략(sma_crossover/momentum/trend_filter_signal) 배치 실행.
-    MCP 비활성화 시 None 반환.
+    대표 3전략 배치 실행 후 합의(consensus)를 도출한다.
+    MCP 비활성화 시 None 반환 (advisory_service에서 graceful degrade).
+
+    대표 3전략 선택 근거:
+    - sma_crossover: 추세 추종 (이동평균 교차 — 가장 기본적인 추세 판별)
+    - momentum: 모멘텀 (가격 변동률 기반 — 단기 방향성)
+    - trend_filter_signal: 복합 추세 필터 (추세+필터 조합 — 노이즈 제거)
+    이 3가지로 추세/모멘텀/복합 관점을 균형 있게 커버한다.
     """
     if not KIS_MCP_ENABLED:
         return None
@@ -195,7 +237,7 @@ def get_strategy_signals(code: str, market: str) -> Optional[dict]:
             logger.warning("전략 신호 생성 실패 (%s): %s", preset, e)
             signals.append({"strategy": preset, "signal": "HOLD", "strength": 0.0, "error": str(e)})
 
-    # 합의 도출
+    # 합의 도출 — 과반수 투표 방식 (3전략 중 2개 이상 동일 신호 시 채택)
     buy_count = sum(1 for s in signals if s.get("signal") == "BUY")
     sell_count = sum(1 for s in signals if s.get("signal") == "SELL")
     total = len(signals)
@@ -219,7 +261,16 @@ def get_strategy_signals(code: str, market: str) -> Optional[dict]:
 
 
 def _extract_signal(preset: str, content) -> dict:
-    """MCP 결과에서 전략 신호 추출."""
+    """MCP 결과에서 전략 신호 추출.
+
+    수익률 → 신호 변환 로직:
+    - total_return_pct >  5% → BUY  (강도 = 수익률/20, 최대 1.0)
+    - total_return_pct < -5% → SELL (강도 = |수익률|/20, 최대 1.0)
+    - -5% ~ +5%              → HOLD (강도 = 0.5, 중립)
+
+    임계값 5%: 거래비용+슬리피지를 감안한 유의미한 수익률 기준.
+    강도 스케일: 20%를 최대(1.0)로 설정 — 전략 1회 실행으로 20% 이상이면 강한 신호.
+    """
     signal = "HOLD"
     strength = 0.0
 
@@ -240,7 +291,18 @@ def _extract_signal(preset: str, content) -> dict:
 
 
 def _save_if_completed(job_id: str, result) -> None:
-    """MCP 결과가 완료 상태면 DB에 저장."""
+    """MCP 결과가 완료 상태면 DB에 저장.
+
+    MCP 응답에서 메트릭 8개를 추출하여 strategy_store에 저장한다:
+    - total_return_pct: 총 수익률(%)
+    - cagr: 연평균 복합 성장률(%)
+    - sharpe_ratio: 샤프 비율 (위험 조정 수익률)
+    - sortino_ratio: 소르티노 비율 (하방 위험만 고려)
+    - max_drawdown: 최대 낙폭(%)
+    - win_rate: 승률(%)
+    - profit_factor: 총이익/총손실 비율
+    - total_trades: 총 거래 횟수
+    """
     if not isinstance(result, dict):
         return
     content = result.get("content", result)

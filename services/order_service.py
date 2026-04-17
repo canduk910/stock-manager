@@ -1,7 +1,23 @@
 """주문 비즈니스 로직 서비스.
 
-공개 API dispatch + Write-Ahead DB 기록 + 대사(Reconciliation).
-시장별 KIS API 구현은 order_kr.py / order_us.py / order_fno.py에 위임한다.
+routers/order.py의 유일한 의존 대상. 주문의 전체 생명주기를 관리한다.
+
+핵심 패턴 — Write-Ahead:
+1) PENDING 선행 기록 → 2) KIS API 호출 → 3) PLACED/REJECTED 상태 갱신
+이 순서를 통해 API 호출 도중 장애가 발생해도 주문 기록이 유실되지 않는다
+(split-brain 방지). PENDING 상태의 주문은 대사 시 KIS 상태와 비교하여 최종 상태를 결정.
+
+시장별 KIS API 실행은 하위 모듈에 위임:
+- order_kr.py (국내주식)
+- order_us.py (해외주식)
+- order_fno.py (선물옵션)
+
+주요 흐름:
+- place_order()  → 시장별 디스패치 (KR→order_kr, US→order_us, FNO→order_fno)
+- modify_order() → KIS 정정 성공 후 로컬 DB 가격/수량 즉시 반영
+- cancel_order() → KIS 취소 성공 후 로컬 DB 상태 즉시 갱신
+- _maybe_reconcile() → 30초 쿨다운으로 자동 대사 (F5 연타 방지)
+- sync_orders()  → 쿨다운 무시, 사용자 명시적 강제 대사
 """
 
 import json
@@ -52,13 +68,19 @@ from services.order_fno import (
 # ── 상수 / 유틸 ──────────────────────────────────────────────────────────────
 
 # 미국 거래소 코드 (주문용)
-_US_EXCHANGE_CODE = "NASD"  # 미국전체 (NASD/NYSE/AMEX 통합)
+# NASD를 사용하면 NYSE/AMEX/NASDAQ 모든 미국 거래소를 통합 커버한다
+_US_EXCHANGE_CODE = "NASD"
 
+# place_order 디스패치 및 get_buyable 등에서 진입부 시장 코드 검증에 사용
 _VALID_MARKETS = {"KR", "US", "FNO"}
 
 
 def _validate_market(market: str) -> str:
-    """시장 코드 검증. 유효하지 않으면 ServiceError."""
+    """시장 코드 검증. 유효하지 않으면 ServiceError.
+
+    디스패치 함수(get_buyable/get_open_orders/get_executions) 진입부에서 호출하여
+    잘못된 시장 코드가 하위 모듈까지 전파되는 것을 방지한다.
+    """
     m = market.upper()
     if m not in _VALID_MARKETS:
         raise ServiceError(f"지원하지 않는 시장입니다: {market} (KR/US/FNO)")
@@ -67,6 +89,10 @@ def _validate_market(market: str) -> str:
 
 def _strip_leading_zeros(order_no: str) -> str:
     """TTTC8036R의 10자리 제로패딩 주문번호를 KIS 정정/취소용 8자리로 변환.
+
+    KIS 미체결 조회(TTTC8036R)는 주문번호를 10자리 제로패딩으로 반환하지만,
+    정정/취소 API(TTTC0803U)는 8자리 주문번호를 요구한다.
+    int()로 변환하여 앞의 0을 자연스럽게 제거한다.
     예: '0020551600' → '20551600'
     """
     try:
@@ -300,6 +326,10 @@ def get_executions(market: str = "KR") -> list[dict]:
 def sync_orders() -> dict:
     """로컬 DB와 KIS 상태 대사(Reconciliation) — 쿨다운 무시, 강제 실행.
 
+    사용자가 명시적으로 "동기화" 버튼을 눌렀을 때 호출된다.
+    _maybe_reconcile()의 쿨다운 타이머를 무시하고 즉시 KIS API를 호출한다.
+    대사 완료 후 쿨다운 타이머를 리셋하여 직후 자동 대사가 중복 실행되지 않도록 한다.
+
     로컬 PLACED/PARTIAL 주문을 KIS 체결+미체결 내역과 비교하여 상태를 갱신한다.
     체결에도 미체결에도 없는 주문은 CANCELLED로 처리한다.
     """
@@ -314,11 +344,18 @@ def sync_orders() -> dict:
 # ── 대사 쿨다운 ────────────────────────────────────────────────────────────────
 
 _last_reconcile_ts: float = 0.0
-_RECONCILE_COOLDOWN = 30  # 초 — 30초 내 재대사 방지 (F5 연타 대응)
+# 30초 쿨다운 근거: KIS API 초당 호출 제한(20회/초)과 사용자 F5 연타를 감안.
+# 미체결+체결 조회를 합치면 시장당 2회 API 호출이 필요하므로,
+# 30초 미만으로 줄이면 빈번한 페이지 새로고침 시 KIS API 부하가 급증한다.
+_RECONCILE_COOLDOWN = 30  # 초
 
 
 def _maybe_reconcile():
-    """쿨다운(30초) 경과 시 활성 주문을 KIS와 자동 대사."""
+    """쿨다운(30초) 경과 시 활성 주문을 KIS와 자동 대사.
+
+    get_order_history()와 get_executions()에서 호출된다.
+    쿨다운 시간 내에는 KIS API를 호출하지 않아 F5 연타 시 API 호출 0회를 보장한다.
+    """
     global _last_reconcile_ts
     now = _time.time()
     if now - _last_reconcile_ts > _RECONCILE_COOLDOWN:
@@ -463,7 +500,10 @@ def get_order_history(
 
 
 def get_fno_price(symbol: str, mrkt_div: str = "F") -> dict:
-    """선물옵션 현재가 조회 (FHMIF10000000)."""
+    """선물옵션 현재가 조회 (TR_ID: FHMIF10000000).
+
+    mrkt_div: 'F'=선물, 'O'=옵션. 기본값 'F'.
+    """
     app_key, app_secret, _, _, _ = get_kis_credentials()
     token = get_access_token()
     headers = make_headers(token, app_key, app_secret, "FHMIF10000000")
@@ -497,8 +537,13 @@ def get_fno_price(symbol: str, mrkt_div: str = "F") -> dict:
 
 
 # ── 예약주문 서비스 ───────────────────────────────────────────────────────────
+# 예약주문은 DB에 조건(시간/가격)만 저장하고, 실제 주문 발송은
+# reservation_service.py의 asyncio 폴링 루프가 조건 충족 시 place_order()를 호출한다.
 
-
+# 지원하는 예약 조건 유형:
+# - scheduled: ISO 8601 시각이 되면 주문 발송
+# - price_below: 현재가가 목표가 이하로 하락하면 주문 발송 (매수용)
+# - price_above: 현재가가 목표가 이상으로 상승하면 주문 발송 (매도용)
 _VALID_CONDITION_TYPES = {"scheduled", "price_below", "price_above"}
 
 
@@ -556,7 +601,12 @@ def get_reservations(status: str = None) -> list[dict]:
 
 
 def delete_reservation(res_id: int) -> bool:
-    """예약주문 삭제. WAITING 상태만 허용."""
+    """예약주문 삭제. WAITING 상태만 허용.
+
+    존재 확인 + 상태 검증 2단계:
+    1) 존재하지 않으면 NotFoundError
+    2) WAITING이 아니면 ServiceError (TRIGGERED/COMPLETED 상태는 이력 보존을 위해 삭제 불가)
+    """
     from services.exceptions import NotFoundError
     existing = order_store.get_reservation(res_id)
     if not existing:

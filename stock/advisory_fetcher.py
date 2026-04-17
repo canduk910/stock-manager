@@ -1,6 +1,18 @@
 """AI자문 데이터 수집 레이어.
 
 15분봉(KR/US) + 기술적 지표(MACD/RSI/Stoch/BB/MA) + 사업별 매출비중.
+
+데이터 수집 경로:
+  1. KIS REST API (FHKST03010200) — 국내 1분봉 → 15분 resample
+     - 시간대별 4회 병렬 호출 (ThreadPoolExecutor, 15:30/14:30/13:30/12:30)
+     - 30봉 미만이면 yfinance .KS/.KQ suffix fallback
+  2. yfinance — 해외 15분봉 + interval별 OHLCV (15m/60m/1d/1wk)
+  3. OpenAI GPT — 국내 사업부문 매출비중 + 설명 + 키워드 추론 (1회 호출)
+  4. yfinance 분기 재무 — PER/PBR 5년 통계 (avg/max/min/deviation)
+
+기술지표 계산은 stock.indicators.calc_technical_indicators()에 위임한다.
+KIS 토큰은 routers/_kis_auth.get_access_token_safe()를 사용한다
+(과거 모듈 내 자체 캐시 → _kis_auth 공통 모듈로 이관됨).
 """
 
 from __future__ import annotations
@@ -20,7 +32,12 @@ from stock.indicators import calc_technical_indicators
 # ── KIS 1분봉 → 15분봉 리샘플 ────────────────────────────────────────────────
 
 def _fetch_15min_ohlcv_kr_yf(code: str) -> list[dict]:
-    """yfinance 기반 국내 15분봉 (최대 60일치). .KS/.KQ suffix 사용."""
+    """yfinance 기반 국내 15분봉 fallback (최대 60일치). .KS/.KQ suffix 사용.
+
+    KIS API 키 미설정이거나 KIS 데이터가 30봉 미만일 때 사용.
+    yfinance 15m interval은 최대 60일까지만 조회 가능 (Yahoo 제한).
+    반환: [{time, open, high, low, close, volume}] 최근 300봉.
+    """
     try:
         from stock.market import _kr_yf_ticker_str
         from stock.yf_client import _ticker
@@ -59,7 +76,14 @@ def _fetch_15min_ohlcv_kr_yf(code: str) -> list[dict]:
 def fetch_15min_ohlcv_kr(code: str) -> list[dict]:
     """KIS REST API FHKST03010200 (1분봉) 수집 후 15분봉으로 리샘플.
 
-    하루치가 부족(< 30봉)하면 yfinance .KS/.KQ fallback으로 5일치 수집.
+    수집 전략:
+      1. KIS 1분봉을 시간대별 4회 병렬 호출 (153000/143000/133000/123000)
+         - 각 시간대에서 약 30봉(30분치) 반환 → 총 ~120봉(2시간) 수집
+         - ThreadPoolExecutor(max_workers=4)로 병렬화하여 지연 최소화
+      2. 중복 제거(time 기준) + 시간순 정렬 후 pandas resample('15min')
+      3. 15분봉이 30봉 미만이면 yfinance fallback으로 60일치 수집
+
+    하루치가 부족(< 30봉)하면 yfinance .KS/.KQ fallback으로 수집.
     KIS 키 미설정 시 즉시 yfinance fallback.
     반환: [{time, open, high, low, close, volume}] 최근 300봉.
     """
@@ -79,6 +103,9 @@ def fetch_15min_ohlcv_kr(code: str) -> list[dict]:
         }
 
         # 여러 시간대 병렬 호출로 하루 전체 데이터 수집 (각 30봉씩, 총 120봉 ≈ 2시간치 1분봉)
+        # fid_input_hour_1: 기준 시각. "153000"(15:30 장 마감)부터 역순 조회해야
+        # 전 거래일 데이터가 정상 반환됨 (장중 시각 지정 시 빈 응답 위험)
+        # fid_etc_cls_code: 빈 문자열 필수. 누락 시 "ERROR INPUT FIELD NOT FOUND" 오류 발생
         def _fetch_single_hour(hour_str: str) -> list[dict]:
             params = {
                 "fid_cond_mrkt_div_code": "J",
@@ -163,7 +190,8 @@ def fetch_15min_ohlcv_kr(code: str) -> list[dict]:
                     "volume": int(row["volume"]),
                 })
 
-        # KIS 데이터 30봉 미만이면 yfinance로 5일치 수집 (기술지표 계산에 충분한 데이터 확보)
+        # KIS 데이터 30봉 미만이면 yfinance fallback (기술지표 계산에 최소 30봉 필요:
+        # RSI 14봉 + MACD 26봉 초기값 등)
         if len(result) < 30:
             yf_result = _fetch_15min_ohlcv_kr_yf(code)
             if yf_result:
@@ -176,7 +204,11 @@ def fetch_15min_ohlcv_kr(code: str) -> list[dict]:
 
 
 def fetch_15min_ohlcv_us(code: str) -> list[dict]:
-    """yfinance 15분봉 (최대 60일치). 최근 300봉 반환."""
+    """yfinance 15분봉 해외 종목 (최대 60일치). 최근 300봉 반환.
+
+    해외 종목은 KIS API가 아닌 yfinance만 사용한다.
+    yfinance 15m interval 제한: 최대 60일. 15분 지연 데이터.
+    """
     try:
         from stock.yf_client import _ticker
         t = _ticker(code.upper())
@@ -208,13 +240,20 @@ def fetch_15min_ohlcv_us(code: str) -> list[dict]:
         return []
 
 
-# ── 기술적 지표 계산: stock/indicators.py 분리 ─────────────────────────────────
-# calc_technical_indicators는 stock.indicators에서 import (상단 참조)
+# ── 기술적 지표 계산: stock/indicators.py에 위임 ──────────────────────────────
+# calc_technical_indicators는 stock.indicators에서 import (상단 참조).
+# 과거에는 이 파일에 인라인으로 존재했으나, 재사용성을 위해 indicators.py로 분리됨.
+# advisory_service, pipeline_service 등 여러 서비스에서 indicators.py를 직접 사용.
 
 # ── 타임프레임별 OHLCV 수집 ──────────────────────────────────────────────────
 
 def _yf_hist_to_ohlcv_list(hist, max_bars: int = 3000) -> list[dict]:
-    """yfinance history DataFrame → OHLCV list (최근 max_bars봉)."""
+    """yfinance history DataFrame → OHLCV dict list 변환 (최근 max_bars봉).
+
+    max_bars=3000: 10년 일봉(약 2,447행)을 커버하기 위한 값.
+    초기값 500에서 확장됨 — 장기 밸류에이션 차트에서 데이터 절삭 방지.
+    Close=0인 행은 비정상 데이터로 간주하여 건너뜀.
+    """
     if hist is None or hist.empty:
         return []
     result = []
@@ -238,7 +277,11 @@ def _yf_hist_to_ohlcv_list(hist, max_bars: int = 3000) -> list[dict]:
 
 
 def _fetch_ohlcv_kr_yf(code: str, interval: str = "15m", period: str = "60d") -> list[dict]:
-    """yfinance 기반 국내 OHLCV (interval/period 지정). .KS/.KQ suffix 사용."""
+    """yfinance 기반 국내 OHLCV (interval/period 지정). .KS/.KQ suffix 사용.
+
+    국내 종목은 6자리 숫자 코드를 stock.market._kr_yf_ticker_str()로
+    .KS(KOSPI) 또는 .KQ(KOSDAQ) suffix 붙은 yfinance 티커로 변환해야 한다.
+    """
     try:
         from stock.market import _kr_yf_ticker_str
         from stock.yf_client import _ticker
@@ -265,7 +308,7 @@ def _fetch_ohlcv_us_yf(code: str, interval: str = "15m", period: str = "60d") ->
         return []
 
 
-# yfinance interval별 최대 period 매핑
+# yfinance interval별 허용 interval 매핑 (입력값 → yfinance 파라미터)
 _YF_INTERVAL_MAP = {
     "15m":  "15m",
     "60m":  "60m",
@@ -273,20 +316,31 @@ _YF_INTERVAL_MAP = {
     "1wk":  "1wk",
 }
 
+# yfinance interval별 최대 조회 기간 제한 (Yahoo Finance 서버 제약)
+# 이 제한을 초과하면 yfinance가 빈 DataFrame을 반환하거나 에러 발생
 _MAX_PERIOD = {
-    "15m":  "60d",
-    "60m":  "2y",
-    "1d":   "10y",
-    "1wk":  "10y",
+    "15m":  "60d",    # 15분봉: 최대 60일 (약 2개월)
+    "60m":  "2y",     # 60분봉: 최대 2년
+    "1d":   "10y",    # 일봉: 최대 10년
+    "1wk":  "10y",    # 주봉: 최대 10년
 }
 
 
 def fetch_ohlcv_by_interval(code: str, market: str, interval: str = "15m", period: str = "60d") -> dict:
-    """interval/period 지정 OHLCV 수집 + 기술지표 계산.
+    """interval/period 지정 OHLCV 수집 + 기술지표 자동 계산.
 
-    interval: '15m' | '60m' | '1d' | '1wk'
-    period: yfinance period string ('5d', '1mo', '60d', '6mo', '1y', '3y', '5y', '10y' 등)
-    반환: {"ohlcv": [...], "indicators": {...}}
+    Args:
+        code: 종목코드 (국내 6자리 / 해외 티커)
+        market: 'KR' | 'US'
+        interval: '15m' | '60m' | '1d' | '1wk' (미지원 값은 '15m' fallback)
+        period: yfinance period 문자열 ('5d', '1mo', '60d', '6mo', '1y', '3y', '5y', '10y' 등)
+
+    Returns:
+        {"ohlcv": [{time, open, high, low, close, volume}, ...],
+         "indicators": {macd, rsi, stoch, bb, ma, current_signals, ...}}
+
+    OHLCV 수집 후 stock.indicators.calc_technical_indicators()를 자동 호출하여
+    기술지표를 함께 반환한다. 프론트엔드 TechnicalPanel에서 사용.
     """
     if interval not in _YF_INTERVAL_MAP:
         interval = "15m"
@@ -305,10 +359,19 @@ def fetch_ohlcv_by_interval(code: str, market: str, interval: str = "15m", perio
 # ── 사업별 매출비중 + 사업 설명 + 테마 키워드 (KR — OpenAI 추론) ──────────────
 
 def fetch_segments_kr(code: str, name: str) -> dict:
-    """KR: OpenAI GPT에게 사업부문 매출비중 + 사업 설명 + 투자 테마 키워드 추론 요청.
+    """KR: OpenAI GPT에게 사업부문 매출비중 + 사업 설명 + 투자 테마 키워드를 1회 호출로 통합 추론.
 
-    OPENAI_API_KEY 미설정 시 빈 dict 반환.
-    반환: {"segments": [{segment, revenue_pct, note}], "description": str, "keywords": [str]}
+    GPT 1회 호출로 3가지(segments/description/keywords)를 JSON response_format으로 요청.
+    과거에는 항목별 별도 호출이었으나 API 비용 절감 + 응답 일관성을 위해 통합.
+    max_completion_tokens=600: 4개 사업부문 + 2~3문장 설명 + 8개 키워드에 충분한 토큰.
+
+    Args:
+        code: 종목코드 (6자리)
+        name: 종목명 (GPT 프롬프트에 사용)
+
+    Returns:
+        {"segments": [{segment, revenue_pct, note}], "description": str, "keywords": [str]}
+        OPENAI_API_KEY 미설정 시 빈 구조 반환.
     """
     empty = {"segments": [], "description": "", "keywords": []}
     if not OPENAI_API_KEY:
@@ -336,7 +399,7 @@ def fetch_segments_kr(code: str, name: str) -> dict:
         content = resp.choices[0].message.content or "{}"
         data = json.loads(content)
 
-        # segments 파싱
+        # segments 파싱: GPT 응답이 루트 배열인 경우와 object인 경우 모두 대응
         segs = data if isinstance(data, list) else data.get("segments", data.get("items", []))
         if isinstance(segs, list):
             pass
@@ -368,14 +431,23 @@ def fetch_segments_kr(code: str, name: str) -> dict:
 def fetch_valuation_stats(code: str, market: str) -> dict:
     """PER/PBR 5년 통계 (평균/최대/최소/현재/편차%).
 
-    내부에서 `fetch_valuation_history_yf(code, years=5)` 호출 후 집계.
-    반환:
-      {
-        "per_avg_5y", "per_max_5y", "per_min_5y", "per_current", "per_deviation_pct",
-        "pbr_avg_5y", "pbr_max_5y", "pbr_min_5y", "pbr_current", "pbr_deviation_pct",
-        "data_points": int,  # 집계에 사용된 월봉 수
-      }
-    데이터 부족 시 각 필드 None. 캐시 24시간.
+    내부에서 yf_client.fetch_valuation_history_yf(code, years=5)를 호출한 뒤
+    월별 PER/PBR 시계열을 집계하여 통계를 산출한다.
+
+    편차%: (현재값 - 5년 평균) / 5년 평균 × 100
+      양수면 역사적 평균 대비 고평가, 음수면 저평가를 의미.
+
+    Args:
+        code: 종목코드 (국내 6자리 / 해외 티커)
+        market: 'KR' | 'US'. KR인 경우 _kr_yf_ticker_str()로 .KS/.KQ 변환 필요.
+
+    Returns:
+        {per_avg_5y, per_max_5y, per_min_5y, per_current, per_deviation_pct,
+         pbr_avg_5y, pbr_max_5y, pbr_min_5y, pbr_current, pbr_deviation_pct,
+         data_points: int}
+        데이터 부족 시 각 필드 None.
+
+    캐시: 'valuation_stats:{market}:{code}' 키, TTL 24시간.
     """
     from stock.cache import get_cached, set_cached
     from stock.yf_client import fetch_valuation_history_yf
@@ -394,9 +466,9 @@ def fetch_valuation_stats(code: str, market: str) -> dict:
     }
 
     try:
-        # yfinance는 국내 종목에 대해 .KS/.KQ suffix 처리가 필요 — fetch_valuation_history_yf는 code를 그대로 사용
-        # 국내는 stock.market.fetch_valuation_history()가 빈 배열 반환하므로 (pykrx 스크래핑 불가)
-        # yfinance ticker string으로 변환해서 직접 호출
+        # 국내 종목: stock.market.fetch_valuation_history()는 pykrx 스크래핑 불가로 빈 배열 반환.
+        # 따라서 _kr_yf_ticker_str()로 .KS/.KQ suffix 변환 후
+        # yfinance fetch_valuation_history_yf()를 직접 호출한다.
         if market == "KR":
             from stock.market import _kr_yf_ticker_str
             ticker_str = _kr_yf_ticker_str(code)

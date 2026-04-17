@@ -1,6 +1,25 @@
 """OpenDart API 기반 재무데이터 조회 (fnlttSinglAcntAll).
 
 최근 사업보고서(연간) 기준 연결재무제표 우선, 없으면 개별재무제표.
+
+OpenDart 연동 구조:
+  1. corpCode.xml ZIP → stock_code → corp_code 매핑 (30일 캐시)
+  2. fnlttSinglAcntAll.json API → 재무제표 원시 데이터
+  3. 계정명 매핑 (_ACCOUNT_KEYS 등) → 표준 필드 추출
+  4. 3년 단위 배치 호출로 최대 10년치 효율적 수집
+
+캐시 전략:
+  - corp_code/corp_name 매핑: 30일 (corpCode.xml 변경 빈도 낮음)
+  - 재무 데이터: 7일(168시간) — 사업보고서 공시 주기 고려
+  - 빈 결과: 6시간 — 신규상장 등 일시적 미공시 대응
+
+계정명 매핑 체계:
+  - _ACCOUNT_KEYS: IS/CIS 매출/영업이익/순이익 (적자기업 변형 포함)
+  - _BS_KEYS: BS/CBS 대차대조표 항목
+  - _CF_KEYS: CF/CCF 현금흐름표 항목
+  - _IS_DETAIL_KEYS: IS/CIS 세부 손익계산서 항목
+
+OPENDART_API_KEY 환경변수 필수. https://opendart.fss.or.kr 에서 발급.
 """
 
 import os
@@ -13,10 +32,14 @@ import requests
 from .cache import delete_prefix, get_cached, set_cached
 
 _BASE_URL = "https://opendart.fss.or.kr/api"
-_REPRT_CODE = "11011"  # 사업보고서
+# 사업보고서 reprt_code. 연간 확정 재무제표 기준.
+# 분기별 코드: 11013(Q1), 11012(반기), 11014(Q3), 11011(사업보고서=연간)
+_REPRT_CODE = "11011"
 
 
-_DART_HEADERS = {"Connection": "close"}  # keep-alive 재사용 방지 → RemoteDisconnected 방지
+# keep-alive 재사용 방지 헤더. DART 서버가 keep-alive 연결을 예고 없이 끊어
+# requests.exceptions.ConnectionError(RemoteDisconnected) 발생하는 문제 대응.
+_DART_HEADERS = {"Connection": "close"}
 
 
 def _dart_get(url: str, params: dict, timeout: int = 20) -> requests.Response:
@@ -172,6 +195,10 @@ def _parse_amount(s) -> Optional[int]:
         return None
 
 
+# IS/CIS 핵심 계정명 매핑.
+# 적자 기업은 계정명이 변형되므로 (영업이익 → 영업손실, 당기순이익 → 당기순손실) 모두 포함.
+# "연결당기순이익": 골프존(215000) 등 CIS(포괄손익계산서) 방식 기업이 사용하는 계정명.
+# 첫 번째로 매칭되는 계정명을 사용하므로, 순서가 중요할 수 있다 (일반적 이름 우선).
 _ACCOUNT_KEYS = {
     "revenue": ("매출액", "수익(매출액)", "영업수익", "매출"),
     "operating_income": ("영업이익", "영업이익(손실)", "영업손실"),
@@ -213,7 +240,10 @@ _CF_KEYS = {
 }
 
 # ── 손익계산서 세부 계정 매핑 ─────────────────────────────────────────────────
-
+# IS detail은 _ACCOUNT_KEYS보다 세분화된 항목 (매출원가, 매출총이익, SGA 등 포함).
+# fetch_income_detail_annual()에서 사용. _ACCOUNT_KEYS와 중복 계정명이 있지만
+# 용도가 다르므로(detail vs summary) 별도 관리.
+# "기본주당이익": DART에서 EPS 계정명이 기업마다 상이 (기본주당이익(손실)/기본주당순이익/기본주당이익)
 _IS_DETAIL_KEYS = {
     "revenue":          ("매출액", "수익(매출액)", "영업수익", "매출"),
     "cogs":             ("매출원가",),
@@ -283,7 +313,10 @@ def _extract_period_accounts(is_items: list[dict], period_key: str) -> dict:
 def _bsns_year_candidates() -> list[int]:
     """시도할 사업연도 목록 (최근 연도 우선).
 
-    3~4월에도 전년도 사업보고서가 공시되므로 항상 y-1 우선 시도.
+    항상 today.year - 1부터 시작하는 이유:
+      - 한국 사업보고서는 3~4월에 공시되므로, 1~4월에는 전년도 보고서가 최신
+      - 5월 이후에도 year-1이 확정 보고서이므로 동일하게 적용 (월 경계 조건 불필요)
+      - 신규상장 등으로 year-1이 없는 경우 year-2, year-3까지 fallback
     """
     y = date.today().year
     return [y - 1, y - 2, y - 3]
@@ -377,11 +410,13 @@ def fetch_financials_multi_year(
         set_cached(cache_key, [], ttl_hours=6)
         return []
 
-    # 최근 확정 사업연도 결정 (3~4월에도 전년도 사업보고서 공시됨)
+    # 최근 확정 사업연도 결정: 항상 year-1 사용 (월 경계 제거).
+    # 3월에도 전년도 사업보고서가 공시되므로 year-1이 안전한 시작점.
     today = date.today()
     latest_year = today.year - 1
 
-    # 3년 단위 앵커 연도 목록 (최대 ceil(years/3)개 배치)
+    # 3년 단위 배치 호출: DART API 1회 호출로 당기/전기/전전기(3년치) 추출 가능.
+    # 10년치 조회 시 ceil(10/3)=4회만 API 호출하면 된다.
     num_batches = (years + 2) // 3
     anchor_years = [latest_year - i * 3 for i in range(num_batches)]
 
@@ -426,7 +461,8 @@ def fetch_financials_multi_year(
             else ""
         )
 
-        # thstrm(당기), frmtrm(전기), bfefrmtrm(전전기) 각각 추출
+        # DART 사업보고서는 당기/전기/전전기 3개년을 한 번에 제공한다.
+        # thstrm=당기(anchor년), frmtrm=전기(anchor-1), bfefrmtrm=전전기(anchor-2)
         for period_key, year_offset in [
             ("thstrm", 0),
             ("frmtrm", -1),
@@ -688,7 +724,12 @@ def fetch_income_detail_annual(stock_code: str, years: int = 5) -> list[dict]:
 # ── Phase 2-3: 분기 실적 ─────────────────────────────────────────────────────
 
 # reprt_code 매핑 (OpenDart):
-# 11013 = Q1(1분기보고서), 11012 = 반기(2분기 누계), 11014 = Q3(3분기 누계), 11011 = 사업보고서(연간)
+# DART 분기보고서는 개별 분기가 아닌 누계 방식으로 공시된다.
+# 따라서 개별 분기 값을 얻으려면 누계값 간 차이를 계산해야 한다 (_calc_quarterly_delta 방식).
+#   11013 = Q1(1분기보고서) — Q1 개별값 = Q1 누계 그 자체
+#   11012 = 반기(2분기 누계) — Q2 개별값 = 반기 - Q1
+#   11014 = Q3(3분기 누계)  — Q3 개별값 = 3분기누계 - 반기
+#   11011 = 사업보고서(연간)— Q4 개별값 = 연간 - 3분기누계
 _QUARTERLY_REPRT_CODES = [
     ("11013", 1),  # Q1
     ("11012", 2),  # 반기 (2분기 누계 = Q1 + Q2)

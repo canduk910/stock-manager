@@ -1,6 +1,35 @@
 """AI자문 서비스 레이어.
 
-데이터 수집(advisory_fetcher) + 재무데이터(dart_fin/yf_client) + OpenAI 호출.
+종목별 AI 투자 리포트를 생성하는 핵심 서비스. 데이터 수집부터 GPT 호출, 결과 저장까지의
+전체 파이프라인을 관리한다.
+
+데이터 흐름:
+  refresh_stock_data()               generate_ai_report()
+  ┌──────────────────┐               ┌──────────────────────────────────┐
+  │ _collect_fundamental (7~8 task)│   │ advisory_cache → 프롬프트 조립    │
+  │ _collect_technical (15분봉)    │──→│ _build_system_prompt (4전략+7점) │
+  │ _collect_strategy_signals(MCP) │   │ _build_prompt (재무+기술+매크로)  │
+  │         ↓                      │   │         ↓                        │
+  │ advisory_cache에 JSON 저장     │   │ OpenAI GPT 호출 (재시도 3단계)   │
+  └──────────────────┘               │         ↓                        │
+                                      │ _parse_report → Pydantic v2 검증│
+                                      │         ↓                        │
+                                      │ advisory_reports DB 저장          │
+                                      └──────────────────────────────────┘
+
+재시도 전략 3단계:
+1) 토큰 잘림(finish_reason=="length"): 10000→12000 토큰으로 재시도, 2차 실패 시 저장 거부
+2) Pydantic v2 검증 실패: 추가 지침과 함께 1회 재시도
+3) 일반 에러(네트워크/rate limit 등): 2초 backoff 후 1회 재시도
+
+의존 관계:
+- stock/advisory_fetcher.py → 15분봉 OHLCV + 기술지표 + 사업 개요
+- stock/dart_fin.py → 국내 DART 재무제표
+- stock/yf_client.py → 해외 yfinance 재무데이터
+- stock/advisory_store.py → 캐시/리포트 DB CRUD
+- services/macro_regime.py → 공용 체제 판단
+- services/safety_grade.py → 7점 등급 사전 계산
+- services/backtest_service.py → MCP 전략 신호 (선택)
 """
 
 from __future__ import annotations
@@ -166,12 +195,24 @@ def _collect_fundamental(code: str, market: str, name: str) -> dict:
 
 
 def _collect_fundamental_kr(code: str, name: str) -> dict:
+    """국내 종목 기본적 분석 데이터 수집.
+
+    ThreadPoolExecutor 7개 task 매핑표:
+    | Task         | 함수                                | 데이터               | 소스      |
+    |--------------|-------------------------------------|---------------------|-----------|
+    | f_income     | dart_fin.fetch_income_detail_annual  | 손익계산서 (5년)      | DART      |
+    | f_bs_cf      | dart_fin.fetch_bs_cf_annual          | 대차대조표+현금흐름(5년)| DART     |
+    | f_metrics    | fetch_market_metrics                 | PER/PBR/ROE/시총    | yfinance  |
+    | f_segments   | advisory_fetcher.fetch_segments_kr   | 사업 개요+키워드      | DART+GPT  |
+    | f_forward    | fetch_forward_estimates_yf           | Forward PE/EPS      | yfinance  |
+    | f_val_stats  | advisory_fetcher.fetch_valuation_stats| PER/PBR 5년 통계   | yfinance  |
+    | f_quarterly  | dart_fin.fetch_quarterly_financials  | 분기 실적 (4분기)    | DART      |
+    """
     from concurrent.futures import ThreadPoolExecutor
     from stock import dart_fin
     from stock.market import fetch_market_metrics
     from stock.yf_client import fetch_forward_estimates_yf
 
-    # 7개 독립 데이터 소스 병렬 수집 (Phase 2-5: valuation_stats + quarterly 추가)
     with ThreadPoolExecutor(max_workers=7) as pool:
         f_income = pool.submit(dart_fin.fetch_income_detail_annual, code, 5)
         f_bs_cf = pool.submit(dart_fin.fetch_bs_cf_annual, code, 5)
@@ -217,6 +258,12 @@ def _collect_fundamental_kr(code: str, name: str) -> dict:
 
 
 def _collect_fundamental_us(code: str) -> dict:
+    """해외 종목 기본적 분석 데이터 수집.
+
+    ThreadPoolExecutor 8개 task — 모두 yfinance 기반 (DART 미사용).
+    국내 _collect_fundamental_kr과 동일한 반환 구조를 유지하여 하위 호출자가
+    시장 구분 없이 동일하게 처리할 수 있다.
+    """
     from concurrent.futures import ThreadPoolExecutor
     from stock.yf_client import (
         fetch_income_detail_yf,
@@ -228,7 +275,6 @@ def _collect_fundamental_us(code: str) -> dict:
         fetch_quarterly_financials_yf,
     )
 
-    # 8개 독립 데이터 소스 병렬 수집 (Phase 2-5: valuation_stats + quarterly 추가)
     with ThreadPoolExecutor(max_workers=8) as pool:
         f_income = pool.submit(fetch_income_detail_yf, code, 5)
         f_bs = pool.submit(fetch_balance_sheet_yf, code, 5)
@@ -373,7 +419,11 @@ def _collect_technical(code: str, market: str) -> dict:
 
 
 def _collect_strategy_signals(code: str, market: str) -> Optional[dict]:
-    """KIS AI Extensions 전략 신호 수집 (MCP 비활성화 시 None)."""
+    """KIS AI Extensions 전략 신호 수집 (MCP 비활성화 시 None).
+
+    MCP 서버가 비활성화(KIS_MCP_ENABLED=false)이거나 연결 실패 시 None을 반환하여
+    전략 신호 없이도 AI 리포트가 정상 생성되도록 graceful degrade를 보장한다.
+    """
     try:
         from services.backtest_service import get_strategy_signals
         return get_strategy_signals(code, market)
@@ -455,6 +505,9 @@ def _determine_regime(sentiment: dict) -> tuple[str, str]:
 
 
 # 체제별 요구 안전마진(%) — 공용 모듈 REGIME_PARAMS에서 가져옴 (하위 호환)
+# 예: accumulation=20%, selective=25%, cautious=30%, defensive=40%
+# 이 값은 프롬프트에 "요구 안전마진: N% 이상"으로 삽입되어
+# GPT가 Graham Number 할인율과 비교하여 투자 판단을 내리는 기준이 된다.
 from services.macro_regime import REGIME_PARAMS as _SHARED_REGIME_PARAMS
 _REGIME_MARGIN = {k: v["margin"] for k, v in _SHARED_REGIME_PARAMS.items()}
 
@@ -483,7 +536,13 @@ def _build_macro_section(macro_ctx: Optional[dict], regime: str, regime_desc: st
 
 
 def _build_strategy_signal_section(signals: Optional[dict]) -> str:
-    """KIS 전략 신호 프롬프트 섹션."""
+    """KIS 전략 신호 프롬프트 섹션.
+
+    MCP 전략 신호 dict를 프롬프트 텍스트로 변환한다.
+    - signals가 None이면 "MCP 서버 비활성화" 메시지 반환
+    - 각 전략의 BUY/SELL/HOLD 신호와 강도를 퍼센트로 표시
+    - 백테스트 메트릭(수익률/샤프/낙폭)이 있으면 함께 표시
+    """
     if not signals:
         return "## KIS 전략 신호\n- MCP 서버 비활성화 (전략 분석 미사용)"
 
@@ -517,6 +576,13 @@ def _build_strategy_signal_section(signals: Optional[dict]) -> str:
     return "\n".join(lines)
 
 
+# ── 체제별 투자 원칙 ───────────────────────────────────────────────────────
+# 각 체제에서 GPT가 따라야 할 투자 행동 지침.
+# 시스템 프롬프트에 삽입되어 GPT의 등급 부여와 매매 판단을 제약한다.
+# - accumulation: 시장 저평가 구간. 안전마진 20%면 적극 진입 가능
+# - selective: 중립 구간. 25% 이상 안전마진을 가진 종목만 선별 매수
+# - cautious: 과열 경계. 30% 이상 안전마진 + 하방 리스크 강조
+# - defensive: 극단 공포/과열. 매수 금지, 현금 보존 최우선
 _REGIME_RULES = {
     "accumulation": (
         "시장 체제: accumulation (탐욕 — 축적 구간)\n"
@@ -543,7 +609,20 @@ _REGIME_RULES = {
 
 
 def _build_system_prompt(regime: str, regime_desc: str) -> str:
-    """체제별 투자 원칙 + 도메인 에이전트(MarginAnalyst/MacroSentinel/OrderAdvisor/ValueScreener) 규칙을 구조화한 시스템 프롬프트."""
+    """체제별 투자 원칙 + 도메인 에이전트 규칙을 구조화한 시스템 프롬프트.
+
+    시스템 프롬프트에 포함되는 주요 섹션과 그 근거:
+    - 4전략 프레임워크: 변동성 돌파(래리 윌리엄스) + 안전마진(그레이엄) + 추세추종 + KIS 퀀트
+      → 서로 다른 투자 철학을 교차 검증하여 단일 전략의 편향을 방지
+    - 7점 등급 체계 (MarginAnalyst): 7개 지표 × 4점 = 28점 → A/B+/B/C/D 등급
+      → 정량적 기준으로 GPT의 자의적 판단을 제약
+    - MacroSentinel 매트릭스: 버핏지수 4구간 × 공포탐욕 5구간 = 20셀 체제 표
+      → VIX>35 오버라이드로 극단 상황 대응
+    - OrderAdvisor 손절/포지션: 등급별 손절폭(A=-8%, B+=-10%, B=-12%)
+      → 리스크 관리를 시스템적으로 강제
+    - ValueScreener 5규칙: Value Trap 판별 — 2개 이상 해당 시 경고
+      → 저PER 함정 방지
+    """
     regime_rule = _REGIME_RULES.get(regime, _REGIME_RULES["selective"])
     return (
         "당신은 전문 주식 애널리스트입니다. "
@@ -619,7 +698,26 @@ def _build_prompt(code: str, market: str, name: str, fundamental: dict, technica
                   regime: str = "selective",
                   regime_desc: str = "중립 (적극적)",
                   strategy_signals: Optional[dict] = None) -> str:
-    """GPT 프롬프트 구성."""
+    """GPT 유저 프롬프트 구성.
+
+    프롬프트 구조 (위→아래 순서):
+    1) 손익계산서 3년 요약
+    2) 대차대조표 3년 요약
+    3) 현금흐름표 3년 요약
+    4) 계량지표 (PER/PBR/ROE/PSR/EV-EBITDA)
+    5) 기술적 시그널 (MACD/RSI/Stochastic/MA20)
+    6) 변동성 돌파 전략 데이터 (ATR, K=0.3/0.5/0.7 목표가)
+    7) 안전마진 분석 (Graham Number + 할인율)
+    8) 추세추종 전략 데이터 (MA 정배열, MACD 크로스)
+    9) 포워드 가이던스 (Forward PE/EPS, 애널리스트 컨센서스)
+    10) PER/PBR 5년 히스토리 비교
+    11) 분기 실적 추세 (최근 4분기)
+    12) 거래량·볼린저밴드 신호
+    13) 7점 등급 사전 계산값 (safety_grade.py 결과 — GPT 참고용)
+    14) 매크로 환경 섹션 (체제 + VIX + 버핏지수 + 공포탐욕)
+    15) KIS 전략 신호 (MCP 백테스트 결과)
+    16) JSON 응답 스키마 명세
+    """
     currency = "KRW(억원)" if market == "KR" else "USD(백만달러)"
 
     # 최근 3년 손익 요약

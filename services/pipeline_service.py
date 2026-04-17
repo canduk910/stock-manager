@@ -1,7 +1,33 @@
 """투자 파이프라인 서비스.
 
-매크로 분석 → 스크리닝 → 심층 분석 → 7점 등급 → 추천 생성 → 보고서 저장.
-기존 서비스 함수를 직접 호출하며 HTTP를 경유하지 않는다.
+자동 투자 추천의 핵심 엔진. 매크로 분석부터 종목 추천까지 5단계 파이프라인을 실행한다.
+scheduler_service.py(APScheduler)에 의해 정해진 시각에 자동 실행되거나,
+routers/pipeline.py를 통해 수동 실행할 수 있다.
+
+파이프라인 5단계:
+  Step 1: 체제 판단 (macro_regime.py 공용 모듈 위임)
+    └→ VIX + 버핏지수 + 공포탐욕 → accumulation/selective/cautious/defensive
+  Step 2: 종목 스크리닝 (screener/krx.py + screener/service.py)
+    └→ 체제별 PER/PBR/ROE 필터 → 복합 점수 상위 20개
+    └→ defensive 체제 → 스크리닝 중단 (현금 보존 권고)
+  Step 3: 심층 분석 (advisory_service.refresh_stock_data + safety_grade.py)
+    └→ 상위 10개 종목 ThreadPoolExecutor 병렬 분석
+    └→ 7점 등급(28점 만점) + Graham Number 할인율
+  Step 4: 추천 생성 (_generate_recommendations)
+    └→ B+ 이상 + 할인율 ≥ 체제 임계값 + R:R ≥ 2.0 필터 → 최대 5종목
+  Step 5: 보고서 저장 (report_service)
+    └→ 추천 이력 DB + Markdown 보고서 + 일일 보고서 DB
+
+단일 진입점: run_pipeline(market="KR") — market="KR"/"US"/"ALL"
+
+의존 관계 (HTTP 아닌 직접 함수 호출):
+- services/macro_service.py → get_sentiment()
+- services/advisory_service.py → refresh_stock_data(), _calc_graham_number()
+- services/safety_grade.py → compute_grade_7point() (위임)
+- services/macro_regime.py → determine_regime(), REGIME_MATRIX, REGIME_PARAMS
+- services/report_service.py → 추천/체제/보고서 저장
+- screener/krx.py → get_all_stocks()
+- screener/service.py → apply_filters(), sort_stocks()
 """
 from __future__ import annotations
 
@@ -26,12 +52,15 @@ KST = timezone(timedelta(hours=9))
 def _determine_regime(sentiment: dict, previous_regime: Optional[str] = None) -> dict:
     """매크로 심리 데이터에서 시장 체제를 결정한다 (공용 모듈 위임).
 
-    기존 반환 키(params.margin_threshold/max_position/max_invest)를 하위 호환 유지하도록 래핑한다.
+    공용 모듈(macro_regime.py)의 반환값을 기존 pipeline 코드와 호환되도록 래핑한다.
 
     호환 키 매핑 (공용 모듈 REGIME_PARAMS → 기존 pipeline 키):
-    - margin_threshold ← margin     (스크리닝 할인율 임계값, _generate_recommendations L388에서 소비)
-    - max_position     ← single_cap (종목당 한도 소수 비율, 현재 소비처 없음. 보고서/포지션 사이징 확장 대비 하위호환)
-    - max_invest       ← stock_max  (총투자 한도 소수 비율, 현재 소비처 없음. 동일)
+    - margin_threshold ← margin     (스크리닝 할인율 임계값, _generate_recommendations에서 소비)
+    - max_position     ← single_cap (종목당 한도 소수 비율, 보고서/포지션 사이징 확장 대비 하위호환)
+    - max_invest       ← stock_max  (총투자 한도 소수 비율, 동일)
+
+    예: selective 체제 → margin=25, single_cap=4, stock_max=65
+        → margin_threshold=25, max_position=0.04, max_invest=0.65
     """
     base = _determine_regime_shared(sentiment, previous_regime=previous_regime)
     params = dict(base["params"])
@@ -53,7 +82,13 @@ def _determine_regime(sentiment: dict, previous_regime: Optional[str] = None) ->
 # ── 스크리닝 ──────────────────────────────────────────────────
 
 def _screen_stocks(market: str, regime_data: dict) -> list[dict]:
-    """체제별 필터로 종목 스크리닝."""
+    """체제별 필터로 종목 스크리닝.
+
+    defensive 체제에서 스크리닝을 중단하는 근거:
+    defensive는 VIX>35 또는 극단 과열/공포 상태로, 신규 매수 자체를 금지한다.
+    스크리닝 결과가 있더라도 _generate_recommendations에서 걸러지지만,
+    KRX API 호출 자체를 절약하기 위해 조기 중단한다.
+    """
     regime = regime_data["regime"]
     if regime == "defensive":
         logger.info("Defensive 체제 — 스크리닝 중단, 현금 보존 권고")

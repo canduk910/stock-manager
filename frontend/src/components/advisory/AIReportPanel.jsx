@@ -1,5 +1,22 @@
 /**
- * AI자문 탭 — OpenAI GPT-4o 리포트 표시
+ * AI자문 탭 — OpenAI GPT-4o 리포트 표시.
+ *
+ * DetailPage > 종합리포트 > AI자문 서브탭에서 렌더링된다.
+ *
+ * 구조 (위→아래):
+ *   1) v2 등급 카드 (hasV2=true일 때만 표시):
+ *      - SafetyGradeBadge: A(진녹)/B+(연녹)/B(황)/C(주)/D(적) 대형 배지
+ *      - ScoreBar 3개: 등급점수(28점)/복합점수(100점)/체제정합성(100점)
+ *      - Value Trap 경고 배너 (value_trap_warning=true 시 적색)
+ *      - recommendation 배지: ENTER(빨강)/HOLD(황)/SKIP(회)
+ *   2) 종합투자의견: 등급 배지(매수/중립/매도) + 요약 + 근거
+ *   3) 전략별 평가: 변동성돌파/안전마진/추세추종 3컬럼 카드
+ *      - 안전마진: Graham Number + 할인율 표시
+ *   4) 기술적 시그널: MACD/RSI/Stoch 해석 + 거래량/BB
+ *   5) 포지션 가이드: 진입가/손절가/익절가/리스크보상비율/분할매수
+ *   6) 리스크 요인 + 투자 포인트
+ *
+ * v1 하위호환: schema_version !== 'v2' 또는 grade 부재 시 v2 카드 전체 숨김
  */
 
 function GradeBadge({ grade }) {

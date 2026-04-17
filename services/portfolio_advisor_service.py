@@ -1,7 +1,29 @@
 """AI 포트폴리오 자문 서비스.
 
-잔고 데이터를 분석하여 포트폴리오 진단, 리밸런싱 제안, 매매 실행안을 생성한다.
-OpenAI GPT를 사용하며, 결과는 stock/cache.py에 30분 TTL로 캐싱.
+사용자의 실제 보유 잔고를 분석하여 포트폴리오 진단, 리밸런싱 제안, 매매 실행안을 생성한다.
+개별 종목 AI 리포트(advisory_service)와 연계하여 포트폴리오 레벨의 종합 판단을 내린다.
+
+자문 흐름:
+1) 잔고 API 응답 → _build_context() 컨텍스트 구조체 변환
+   - 종목별 52주 하락률, 개별 AI 리포트 요약, 백테스트 메트릭 수집
+   - 가중 등급 집계: Σ(weight_pct × grade_score) / Σ(weight_pct)
+   - 집중도(HHI), 국내/해외 비중, 등급 분포 계산
+2) 매크로 체제 판단 (macro_regime.py 공용 모듈 위임)
+3) 체제별 시스템 프롬프트 생성 (현금비중 규칙 + 역발상 매수 + 손실 종목 처리)
+4) OpenAI GPT 호출 → JSON 응답 (진단/리밸런싱/매매안/시장코멘트)
+5) cache.db에 30분 TTL 캐싱 + advisory.db에 영구 저장
+
+캐시 정책:
+- cache.db: ADVISOR_CACHE_TTL_HOURS (기본 0.5=30분) TTL
+- 캐시 키: 보유종목 구성(code+quantity)의 SHA256 해시
+- force_refresh=True이면 캐시 무시, GPT 재호출
+
+의존 관계:
+- services/macro_regime.py → 공용 체제 판단
+- services/safety_grade.py → 체제 정합성 점수
+- stock/advisory_store.py → 개별 리포트 조회 + 포트폴리오 리포트 저장
+- stock/cache.py → 30분 TTL 캐시
+- stock/strategy_store.py → 백테스트 메트릭 조회
 """
 
 from __future__ import annotations
@@ -23,7 +45,12 @@ logger = logging.getLogger(__name__)
 # ── 캐시 키 ──────────────────────────────────────────────────────────────────
 
 def _compute_cache_key(balance_data: dict) -> str:
-    """보유종목 구성(code+quantity)으로 SHA256 캐시 키 생성."""
+    """보유종목 구성(code+quantity)으로 SHA256 캐시 키 생성.
+
+    종목 코드와 수량 조합만으로 키를 생성하므로, 동일 보유 구성이면
+    가격 변동과 무관하게 캐시를 재사용한다 (30분 TTL 내).
+    sort()로 순서 독립적 일관성을 보장한다.
+    """
     pairs: list[tuple[str, str]] = []
     for s in balance_data.get("stock_list") or []:
         pairs.append((s.get("code", ""), str(s.get("quantity", ""))))
@@ -47,7 +74,12 @@ def _safe_float(val, default=0.0) -> float:
 
 
 def _fetch_52w_high(code: str, market: str) -> int | float | None:
-    """종목의 52주 고가를 가져온다. 6시간 TTL 캐싱."""
+    """종목의 52주 고가를 가져온다. 6시간 TTL 캐싱.
+
+    6시간 TTL 근거: 52주 고가는 장중에도 변할 수 있지만(신고가 갱신 시),
+    포트폴리오 자문 빈도(30분 캐시)를 감안하면 6시간이면 충분히 최신이다.
+    더 짧은 TTL은 API 부하를 증가시키고, 더 긴 TTL은 신고가 반영이 늦어진다.
+    """
     cache_key = f"advisor:52w:{market}:{code}"
     cached = get_cached(cache_key)
     if cached is not None:
@@ -74,7 +106,11 @@ def _fetch_52w_high(code: str, market: str) -> int | float | None:
 
 
 def _fetch_backtest_metrics(code: str, market: str) -> dict | None:
-    """종목의 최신 백테스트 메트릭 조회 (없으면 None)."""
+    """종목의 최신 백테스트 메트릭 조회 (없으면 None).
+
+    MCP 백테스트 결과를 포트폴리오 컨텍스트에 연계하여
+    GPT가 전략 성과를 참고할 수 있도록 한다.
+    """
     try:
         from stock.strategy_store import get_latest_backtest_metrics
         return get_latest_backtest_metrics(code, market)
@@ -85,8 +121,14 @@ def _fetch_backtest_metrics(code: str, market: str) -> dict | None:
 def _extract_report_summary(report_data: dict) -> dict:
     """개별 리포트 JSON에서 포트폴리오 프롬프트용 핵심 필드 추출.
 
-    v1 리포트 구조: {종합투자의견: {등급, 요약, 근거}, 전략별평가: {안전마진: {할인율}}, 리스크요인: [{요인}]}
-    v2(Phase 3): schema_version='v2' + 종목등급/등급점수 필드 추가 예정. v1 리포트는 grade=None.
+    JSON 경로 매핑 (v1 기준):
+    - grade: report.종목등급 (v2에서 추가, v1은 None)
+    - summary_2lines: report.종합투자의견.요약 (180자 제한)
+    - discount_rate: report.전략별평가.안전마진.할인율
+    - risks: report.리스크요인[].요인 (상위 2개, 각 50자 제한)
+
+    v2(Phase 3): schema_version='v2' + 종목등급(A~D)/등급점수(0-28) 필드 추가.
+    v1 리포트는 grade=None으로 반환된다.
     """
     if not isinstance(report_data, dict):
         return {"grade": None, "summary_2lines": None, "discount_rate": None, "risks": []}
@@ -135,7 +177,11 @@ def _extract_report_summary(report_data: dict) -> dict:
 
 
 def _fetch_latest_report_summary(code: str, market: str) -> dict:
-    """종목의 최신 AI 리포트 요약 반환. 리포트 없으면 빈 dict."""
+    """종목의 최신 AI 리포트 요약 반환. 리포트 없으면 빈 dict.
+
+    개별 종목 리포트(advisory_service) → 포트폴리오 컨텍스트 연계.
+    GPT가 포트폴리오 판단 시 개별 종목의 기존 분석 결과를 참고하도록 한다.
+    """
     try:
         latest = advisory_store.get_latest_report(code, market)
     except Exception as e:
@@ -237,7 +283,13 @@ def _build_context(balance_data: dict) -> dict:
 
     # Phase 2-8: 가중 평균 등급 + 등급 분포 + 체제 정합성
     # latest_report_grade는 v1에서는 None (Phase 3 DB 스키마 확장 후 v2 리포트가 생기면 값 채워짐)
-    GRADE_SCORE_MAP = {"A": 26, "B+": 21.5, "B": 17.5, "C": 13.5, "D": 8.0}  # 등급 구간 중심값
+    # 등급 구간 중심값 근거:
+    # A=26: 24~28점 범위의 중심 → (24+28)/2 = 26
+    # B+=21.5: 20~23점 → (20+23)/2 = 21.5
+    # B=17.5: 16~19점 → (16+19)/2 = 17.5
+    # C=13.5: 12~15점 → (12+15)/2 = 13.5
+    # D=8.0: 7~11점 → (7+11)/2 = 9이지만 하향 보수적 적용
+    GRADE_SCORE_MAP = {"A": 26, "B+": 21.5, "B": 17.5, "C": 13.5, "D": 8.0}
     grade_distribution = {"A": 0, "B+": 0, "B": 0, "C": 0, "D": 0, "unknown": 0}
     weighted_score_sum = 0.0
     graded_weight_sum = 0.0

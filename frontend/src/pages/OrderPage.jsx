@@ -1,8 +1,22 @@
 /**
- * 주문 페이지.
- * 탭: 주문 발송 / 미체결 / 체결 내역 / 주문 이력 / 예약주문
+ * 주문 페이지 (/order).
  *
- * URL 파라미터: ?symbol=&market=&side= (잔고 페이지에서 연계)
+ * 5탭 UI: 주문발송 / 미체결 / 체결내역 / 주문이력 / 예약주문
+ *
+ * 핵심 설계:
+ *   - **공유 상태**: symbol/symbolName/market 3개를 최상단에서 관리하여 모든 탭이 공유
+ *   - **URL 파라미터**: ?symbol=&market=&side= — 잔고 페이지 HoldingsTable의 매수/매도 버튼에서 연계
+ *   - **isMounted ref**: StrictMode 중복 렌더링 시 초기 API 호출 방지
+ *   - **자동 폴링**: 미체결/체결 탭 10초 간격 (setInterval)
+ *   - **체결통보 WS**: useExecutionNotice 훅이 H0STCNI0 체결통보 수신 시 토스트 + 자동 갱신
+ *   - **주문 후 딜레이**: 주문 발송 → 3초 대기 후 미체결/체결 자동 갱신 (KIS API 반영 지연)
+ *
+ * 레이아웃 (주문발송 탭):
+ *   - xl 이상: 좌측=호가창(OrderbookPanel) + 우측=주문폼(OrderForm) 2컬럼
+ *   - xl 미만: 주문폼만 단일 컬럼
+ *   - 호가 클릭 → externalPrice/externalSide → OrderForm에 자동 입력
+ *
+ * MARKET_TABS (미체결/체결/주문이력): KR / US / FNO 3개 시장 탭
  */
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useSearchParams } from 'react-router-dom'

@@ -1,9 +1,18 @@
 /**
- * 백테스트 React 훅.
+ * 백테스트 React 훅 3종.
  *
- * useMcpStatus — MCP 서버 연결 상태
- * usePresets — 프리셋 전략 목록
- * useBacktest — 백테스트 실행 + 3초 폴링 + 결과
+ * useMcpStatus  — KIS MCP 서버 연결 상태 (GET /api/backtest/status → {available: bool})
+ * usePresets    — 프리셋 전략 목록 (GET /api/backtest/presets → 10개 전략)
+ * useBacktest   — 백테스트 실행 + 비동기 폴링 + 결과
+ *
+ * 폴링 패턴 (useBacktest):
+ *   1. POST /run/preset 또는 /run/custom → {job_id} 반환
+ *   2. setInterval(3초) → GET /result/{job_id} 반복 호출
+ *   3. status==="completed" 또는 "failed" → clearInterval
+ *   4. 최대 60회(3분) 후 타임아웃 → status="timeout"
+ *   5. 컴포넌트 unmount 시 자동 cleanup (useEffect return)
+ *
+ * 상태 전이: idle → submitting → running → completed/failed/timeout
  */
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useAsyncState } from './useAsyncState'
@@ -37,7 +46,9 @@ export function useBacktest() {
   const intervalRef = useRef(null)
   const pollCountRef = useRef(0)
 
-  const MAX_POLLS = 60 // 3초 × 60 = 3분
+  // 3초 간격 × 60회 = 최대 3분 대기
+  // QuantConnect Lean 백테스트는 종목/기간에 따라 수초~수분 소요
+  const MAX_POLLS = 60
 
   const stopPolling = useCallback(() => {
     if (intervalRef.current) {

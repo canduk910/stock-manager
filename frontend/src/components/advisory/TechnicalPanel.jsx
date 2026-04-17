@@ -1,7 +1,19 @@
 /**
- * 기술적 분석 탭
- * 캔들스틱 + MA + BB + 거래량 + MACD + RSI + Stochastic + PER/PBR 밸류에이션
- * 타임프레임 (15분/60분/1일/1주) + 기간 선택 지원
+ * 기술적 분석 탭 (DetailPage > 종합리포트 > 기술적 분석).
+ *
+ * 차트 구성 (위→아래):
+ *   1) 타임프레임 선택: 15m / 60m / 1d / 1wk (interval별 기간 자동 조정)
+ *   2) 시그널 배지: MACD 크로스(golden/dead) + RSI(과매수/과매도) + Stoch 상태
+ *   3) 캔들스틱 + MA5/20/60 + BB(20,2σ) — CandlestickChart 공용 컴포넌트
+ *   4) 거래량 바 차트
+ *   5) MACD(12,26,9) 라인 차트 + 시그널 라인 + 히스토그램
+ *   6) RSI(14) 라인 차트 + 70/30 기준선
+ *   7) Stochastic(14,3) %K/%D 라인 + 80/20 기준선
+ *   8) PER/PBR 밸류에이션 — 1d/1wk 인터벌에서만 표시 (ValuationChart compact)
+ *   9) KIS 전략 신호 카드 — MCP 활성화 시만 표시 (StrategySignalCard)
+ *
+ * 데이터 소스: GET /api/advisory/{code}/ohlcv?interval=&period=
+ * yfinance 제한: 15m=max60d, 60m=max2y, 1d/1wk=max10y
  */
 import { useState, useEffect, useMemo } from 'react'
 import {

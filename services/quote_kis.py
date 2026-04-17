@@ -53,6 +53,7 @@ def _resolve_fno_type(symbol: str) -> str:
             if info and "옵션" in info.get("product_type", ""):
                 return "ZO"
         except Exception:
+            # FNO 마스터 미로드 시 기본 선물(ZF)로 fallback
             pass
         return "ZF"
     return "IF"

@@ -1,7 +1,24 @@
 """yfinance 기반 해외주식 데이터 수집.
 
-stock/market.py (국내 pykrx) 와 stock/dart_fin.py (국내 DART) 의 해외주식 버전.
+stock/market.py (국내) 와 stock/dart_fin.py (국내 DART) 의 해외주식 대응 모듈.
 시세는 15분 지연이며, 재무는 최대 4년을 제공한다.
+
+제공 데이터 전체 목록:
+  - 시세: 현재가/등락/시가총액 (fetch_price_yf)
+  - 상세: 52주 고저/PER/PBR/ROE/배당수익률 (fetch_detail_yf)
+  - 수익률: 당일/3M/6M/1Y (fetch_period_returns_yf)
+  - 재무: 단일연도/다년도 손익 (fetch_financials_yf, fetch_financials_multi_year_yf)
+  - 대차대조표: 연간 BS (fetch_balance_sheet_yf)
+  - 현금흐름표: 연간 CF (fetch_cashflow_yf)
+  - 손익 세부: IS detail (fetch_income_detail_yf)
+  - 계량지표: PER/PBR/PSR/EV/Graham Number 등 (fetch_metrics_yf)
+  - 밸류에이션: 월별 PER/PBR 히스토리 (fetch_valuation_history_yf)
+  - 사업부문: 섹터/산업/사업설명 (fetch_segments_yf)
+  - 포워드 추정: 애널리스트 컨센서스 (fetch_forward_estimates_yf)
+  - 분기 실적: 분기별 손익 (fetch_quarterly_financials_yf)
+
+캐시: stock/cache.py (SQLite TTL 캐시) 사용. 장중/장외 TTL 분리 적용.
+영속 캐시: fetch 결과를 stock_info_store에 write-through하여 Docker 재시작에도 유지.
 """
 
 from __future__ import annotations
@@ -14,19 +31,31 @@ from stock.market import _is_us_trading_hours
 
 
 def _ticker(code: str):
-    """yfinance Ticker 객체 반환 (LRU 캐시로 중복 생성 방지)."""
+    """yfinance Ticker 객체 반환 (LRU 캐시로 중복 생성 방지).
+
+    yfinance Ticker 생성 비용은 낮지만, info/history 호출 시 내부적으로
+    HTTP 요청을 캐싱하므로 동일 Ticker 객체를 재사용하면 성능이 향상된다.
+    maxsize=256으로 제한하여 메모리 사용을 억제한다.
+    """
     import yfinance as yf
     return yf.Ticker(code.upper())
 
 
 # lru_cache를 _ticker 자체에 적용하면 Ticker 내부 상태가 stale될 수 있으므로
-# 별도 캐시 dict + TTL 없이 maxsize 제한만 적용
+# 별도 캐시 dict + TTL 없이 maxsize 제한만 적용.
+# Ticker 내부 state가 stale되더라도 history/info 호출 시 새로 fetch하므로
+# 실사용에서는 문제 없음. 256개 초과 시 LRU 정책으로 오래된 것부터 제거.
 from functools import lru_cache as _lru_cache
 _ticker = _lru_cache(maxsize=256)(_ticker)
 
 
 def _safe(v) -> Optional[float]:
-    """NaN/Inf를 None으로 변환. JSON 직렬화 안전."""
+    """NaN/Inf를 None으로 변환. JSON 직렬화 안전.
+
+    yfinance는 결측값을 NaN(float)으로 반환하는 경우가 많다.
+    NaN/Inf는 JSON 표준에서 허용되지 않으므로 API 응답 전 반드시 None으로 변환해야 한다.
+    cache.py의 _sanitize()와 동일한 역할이지만, 이 함수는 단일 값 변환에 특화.
+    """
     if v is None:
         return None
     try:
@@ -144,9 +173,13 @@ def fetch_detail_yf(code: str) -> Optional[dict]:
         roe_raw = info.get("returnOnEquity")
         roe = _safe(round(roe_raw * 100, 2)) if roe_raw is not None else None
 
-        # dividendYield: 이미 % 형태 (0.4, 1.3) → 우선 사용
-        # trailingAnnualDividendYield: 소수점 형태 → ×100 변환 (ADR 오계산 가능)
-        # dividendRate(연간 주당배당금) ÷ 현재가 → 마지막 fallback
+        # 배당수익률 3단계 fallback (중요: 순서 변경 금지)
+        # 1단계: dividendYield — 이미 % 형태(0.4, 1.3). 가장 정확.
+        # 2단계: trailingAnnualDividendYield × 100 — 소수점(0.004=0.4%). ADR 종목에서
+        #        환율 오류 가능 (NVO 덴마크 ADR 사례: 0.303 → 30.3% 잘못 계산됨,
+        #        실제 dividendYield=4.67%가 정확).
+        # 3단계: dividendRate(연간 주당배당금) ÷ 현재가 × 100 — 서울리츠(365550) 등
+        #        1~2단계 모두 None인 종목 대응. 0 < result < 50% sanity check 적용.
         div_yield_pct  = info.get("dividendYield")
         trailing_yield = info.get("trailingAnnualDividendYield")
         div_rate       = info.get("dividendRate")
@@ -265,6 +298,10 @@ def fetch_financials_multi_year_yf(code: str, years: int = 4) -> list[dict]:
 
     반환: [{year, revenue, operating_income, net_income}, ...]  과거 → 최신 순.
     국내 dart_fin.py 와 동일한 인터페이스. dart_url 없음.
+
+    캐시 전략: 캐시에는 전체 연도를 저장하고, 반환 시 years만큼 슬라이싱한다.
+    이렇게 하는 이유: years=2로 요청 후 years=4로 재요청 시 캐시에서 4년치를
+    제공할 수 있어 API 호출을 줄인다. 부분 캐시 시 슬라이싱 경계 버그도 방지.
     """
     key = f"yf:fin_multi:{code.upper()}"
     cached = get_cached(key)
@@ -273,7 +310,9 @@ def fetch_financials_multi_year_yf(code: str, years: int = 4) -> list[dict]:
 
     try:
         t = _ticker(code)
-        fin = t.financials  # 연간 손익계산서 (columns = 날짜, index = 항목)
+        # yfinance financials: columns = 날짜(Timestamp), index = 계정명(문자열)
+        # 열 순서는 최신→과거이므로 sorted(reverse=False)로 과거→최신 정렬
+        fin = t.financials
         if fin is None or fin.empty:
             set_cached(key, [], ttl_hours=24)
             return []
@@ -300,7 +339,7 @@ def fetch_financials_multi_year_yf(code: str, years: int = 4) -> list[dict]:
                 "dart_url": "",
             })
 
-        # 전체 rows를 캐시에 저장 (슬라이싱 전)
+        # 전체 rows를 캐시에 저장 (슬라이싱 전) — 부분 캐시 버그 방지
         set_cached(key, rows, ttl_hours=24)
         return rows[-years:] if len(rows) > years else rows
     except Exception:
@@ -541,10 +580,18 @@ def fetch_metrics_yf(code: str) -> dict:
 def fetch_valuation_history_yf(code: str, years: int = 5) -> list[dict]:
     """분기 재무 + 일별 주가를 조합해 월별 PER/PBR 히스토리 반환.
 
-    - PER: 월말 종가 ÷ TTM EPS (해당 날짜 이전 최근 4분기 EPS 합산)
-    - PBR: 월말 종가 ÷ BPS (해당 날짜 이전 최근 분기 equity ÷ shares)
+    계산 로직:
+      PER = 월말 종가 ÷ TTM EPS
+        - TTM EPS: 해당 월 이전 최근 4분기 EPS 합산 (Trailing Twelve Months)
+        - 4분기 미만이면 최근 1분기 × 4로 연환산 (데이터 부족 시 근사)
+      PBR = 월말 종가 ÷ BPS
+        - BPS: 해당 월 이전 최근 분기 stockholders_equity ÷ 발행주식수
+        - 발행주식수: 분기 BS의 Ordinary Shares Number, 없으면 현재값(fast_info.shares) fallback
 
-    반환: [{date: "YYYY-MM", per: float|None, pbr: float|None}, ...]  오래된순
+    이상치 필터: PER ≤ 0 또는 > 500은 None 처리 (적자기업/일시적 이상값 제거)
+
+    반환: [{date: "YYYY-MM", per, pbr, mktcap, shares}, ...]  오래된순
+    캐시: 'yf:valuation_hist:{code}:{years}' TTL 24시간.
     """
     key = f"yf:valuation_hist:{code.upper()}:{years}"
     cached = get_cached(key)
@@ -556,7 +603,7 @@ def fetch_valuation_history_yf(code: str, years: int = 5) -> list[dict]:
 
         t = _ticker(code)
 
-        # 1. 분기 손익계산서 → EPS 시계열
+        # 1. 분기 손익계산서 → EPS 시계열 (Basic EPS 우선, Diluted EPS fallback)
         qfin = t.quarterly_financials
         eps_series = None
         if qfin is not None and not qfin.empty:
@@ -565,7 +612,7 @@ def fetch_valuation_history_yf(code: str, years: int = 5) -> list[dict]:
                     eps_series = qfin.loc[name].sort_index()  # 오래된→최신
                     break
 
-        # 2. 분기 대차대조표 → equity 시계열
+        # 2. 분기 대차대조표 → stockholders equity 시계열 (BPS 계산용)
         qbs = t.quarterly_balance_sheet
         eq_series = None
         if qbs is not None and not qbs.empty:
@@ -575,6 +622,8 @@ def fetch_valuation_history_yf(code: str, years: int = 5) -> list[dict]:
                     break
 
         # 3. 발행주식수 시계열 (분기별) + 현재값 fallback
+        #    Ordinary Shares Number > Share Issued 순으로 탐색
+        #    분기 BS에 없으면 fast_info.shares → info.sharesOutstanding 순
         shares_series = None
         if qbs is not None and not qbs.empty:
             for name in ("Ordinary Shares Number", "Share Issued"):
@@ -590,7 +639,7 @@ def fetch_valuation_history_yf(code: str, years: int = 5) -> list[dict]:
         if not shares_current:
             shares_current = _safe((t.info or {}).get("sharesOutstanding"))
 
-        # 4. 일별 주가 → 월별 마지막 종가
+        # 4. 일별 주가 → 월말(ME=Month End) 종가 resample
         hist = t.history(period=f"{years}y")
         if hist.empty:
             set_cached(key, [], ttl_hours=24)
@@ -640,7 +689,8 @@ def fetch_valuation_history_yf(code: str, years: int = 5) -> list[dict]:
                         if bps > 0:
                             pbr = _safe(round(price_val / bps, 2))
 
-            # PER 이상치 제거 (0 이하 또는 500 초과)
+            # PER 이상치 제거: 0 이하(적자 기업)와 500 초과(일시적 실적 급감)는
+            # 차트에서 스케일 왜곡을 일으키므로 None 처리
             if per is not None and (per <= 0 or per > 500):
                 per = None
 
@@ -663,8 +713,13 @@ def fetch_valuation_history_yf(code: str, years: int = 5) -> list[dict]:
 def fetch_segments_yf(code: str) -> dict:
     """사업별 매출비중 + 사업 설명 + 키워드 (best effort).
 
-    yfinance .info 에서 추출 가능한 세그먼트/사업설명/섹터·산업 반환.
-    반환: {"segments": [...], "description": str, "keywords": [str]}
+    yfinance에는 공식 세그먼트(사업부문) API가 없으므로 sector 수준만 제공.
+    description은 longBusinessSummary에서 300자로 절삭 (UI 카드 레이아웃 제한).
+    keywords는 sector + industry를 배열로 제공.
+    국내 종목용 fetch_segments_kr()와 동일한 반환 구조를 유지.
+
+    반환: {"segments": [{segment, revenue_pct, note}], "description": str, "keywords": [str]}
+    캐시: 'yf:segments_v2:{code}' TTL 24시간.
     """
     key = f"yf:segments_v2:{code.upper()}"
     cached = get_cached(key)
@@ -722,6 +777,11 @@ def fetch_forward_estimates_yf(code: str, is_kr: bool = False) -> dict:
     US: yfinance info에서 비교적 풍부하게 제공.
     KR: .KS/.KQ suffix로 시도, 없으면 None 반환.
 
+    매출 추정치 3단계 fallback:
+      1. t.revenue_estimate (yfinance 0.2.30+, DataFrame 형태, 가장 안정적)
+      2. t.analysis (레거시 방식, Revenue Estimate 컬럼)
+      3. totalRevenue × (1 + revenueGrowth) (info 기반 근사)
+
     반환:
     {
         "eps_current_year":        float | None,  # 현재 회계연도 EPS 추정
@@ -755,13 +815,17 @@ def fetch_forward_estimates_yf(code: str, is_kr: bool = False) -> dict:
         t = yf.Ticker(ticker_str)
         info = t.info or {}
 
-        # 매출 추정치: 3단계 fallback (revenue_estimate → analysis → totalRevenue×growth)
+        # 매출 추정치: 3단계 fallback
+        # 이 순서대로 시도하는 이유: revenue_estimate가 가장 신뢰도 높고,
+        # analysis는 yfinance 버전에 따라 사용 불가할 수 있으며,
+        # totalRevenue×growth는 추정치가 아닌 과거 실적 기반 근사이므로 최후 수단.
         rev_estimate: Optional[float] = None
         rev_forward: Optional[float] = None
         try:
             import pandas as pd
 
-            # 1단계: t.revenue_estimate (yfinance 0.2.30+, 더 안정적)
+            # 1단계: t.revenue_estimate (yfinance 0.2.30+)
+            # index: '0y'(현 회계연도), '+1y'(다음 회계연도). 컬럼: avg/low/high/...
             try:
                 rev_df = getattr(t, 'revenue_estimate', None)
                 if rev_df is not None and not rev_df.empty:
@@ -818,7 +882,7 @@ def fetch_forward_estimates_yf(code: str, is_kr: bool = False) -> dict:
         except Exception:
             pass
 
-        # 순이익 추정: EPS × 발행주식수
+        # 순이익 추정: EPS × 발행주식수 (yfinance에 직접 순이익 추정치가 없으므로 역산)
         eps_cy = _safe(info.get("epsCurrentYear"))
         eps_fw = _safe(info.get("epsForward"))
         shares = _safe_int(info.get("sharesOutstanding"))
@@ -862,9 +926,17 @@ def fetch_forward_estimates_yf(code: str, is_kr: bool = False) -> dict:
 def fetch_quarterly_financials_yf(code: str, quarters: int = 4) -> list[dict]:
     """해외 종목 최근 N분기 손익 핵심 지표.
 
+    yfinance quarterly_financials 파싱 구조:
+      - DataFrame: columns = Timestamp(분기 말일), index = 계정명 문자열
+      - 열 순서: 최신→과거 (reindex로 오래된→최신 재정렬)
+      - 분기 판별: ts.month로 Q1~Q4 계산 ((month-1)//3 + 1)
+
+    국내 dart_fin.py의 fetch_quarterly_financials()는 누계→개별 환산이 필요하지만,
+    yfinance는 이미 개별 분기값을 제공하므로 환산 없이 직접 사용.
+
     반환: [{year, quarter, revenue, operating_income, net_income, oi_margin, net_margin}]
     오래된순. 데이터 부족 시 가용 분기만 반환. 미공시 필드는 None.
-    캐시: yf:quarterly:{code}:{quarters} 7일 TTL.
+    캐시: 'yf:quarterly:{code}:{quarters}' TTL 7일.
     """
     key = f"yf:quarterly:{code.upper()}:{quarters}"
     cached = get_cached(key)
@@ -878,7 +950,8 @@ def fetch_quarterly_financials_yf(code: str, quarters: int = 4) -> list[dict]:
             set_cached(key, [], ttl_hours=24)
             return []
 
-        # yfinance quarterly_financials는 열=날짜, 행=계정. 날짜 오래된→최신 정렬
+        # yfinance quarterly_financials: 열=날짜(Timestamp), 행=계정명(문자열)
+        # 기본 열 순서가 최신→과거이므로 sorted로 오래된→최신 정렬
         qfin_sorted = qfin.reindex(sorted(qfin.columns), axis=1)
 
         def _row(name: str):
