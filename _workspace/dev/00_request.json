@@ -1,0 +1,15 @@
+{
+  "request": "현재 포트폴리오와 관심종목에 대한 AI자문 기능을 점검하고 더욱 좋은 자문자료를 얻기 위해 프롬프트와 입력데이터, 출력결과를 개선",
+  "scope": "Phase 1+2+3 전체 (백엔드 + DB 마이그레이션 + 프론트엔드 UI)",
+  "targets": [
+    "개별 종목 AI자문 (services/advisory_service.py)",
+    "포트폴리오 AI자문 (services/portfolio_advisor_service.py)"
+  ],
+  "improvements": {
+    "input": ["Forward estimates 프롬프트 투입", "PER 5년 통계", "분기 실적(DART/yfinance)", "거래량+BB 신호", "개별 리포트 → 포트폴리오 연계"],
+    "prompt": ["MarginAnalyst 7점 등급 표 삽입", "MacroSentinel 체제 매트릭스 + VIX 오버라이드", "OrderAdvisor 등급별 손절폭", "ValueScreener Value Trap 규칙", "공용 체제 판단 모듈 분리"],
+    "output": ["정량 필드 추가(등급/점수/복합점수/체제정합성)", "Pydantic 스키마 검증", "토큰 잘림 시 재시도", "schema_version v1/v2", "Alembic 마이그레이션", "프론트 등급 UI"]
+  },
+  "advisory_mode": "구현 직전 실시간 자문 (각 Phase 착수 시점에 SendMessage)",
+  "plan_file": "/Users/koscom/.claude/plans/buzzing-swinging-fern.md"
+}
