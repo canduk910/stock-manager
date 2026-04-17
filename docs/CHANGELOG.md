@@ -1,5 +1,13 @@
 # 변경 이력
 
+## 2026-04-17 — KIS AI Extensions 백테스트 연동 + 267260 가격 버그 수정
+
+### 버그 수정
+- `_kr_yf_ticker_str()` score 기준 강화: `best_score = -1` → `0` (score ≥ 1 필수, mktcap 또는 shares 존재해야 유효 suffix)
+- 267260(HD현대일렉트릭) `.KQ` 잘못 캐시되어 307,000원 표시 → `.KS` 정상 선택으로 1,087,000원 복구
+- `market_cap > 0`, `shares > 0` 양수 검증 추가
+- `best_score >= 2` 시 조기 중단 (불필요한 suffix 추가 시도 방지)
+
 ## 2026-04-17 — KIS AI Extensions 백테스트 연동
 
 ### 백테스트 기능 신규

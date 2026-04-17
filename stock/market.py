@@ -64,7 +64,11 @@ def _kr_yf_ticker_str(code: str) -> Optional[str]:
     from .yf_client import _ticker
 
     best: Optional[str] = None
-    best_score = -1  # 0=가격만, 1=가격+시총, 2=가격+시총+shares
+    # 최소 score ≥ 1 요구 (mktcap 또는 shares 중 하나 이상 필수).
+    # score=0(price만 있고 mktcap/shares 없음)이면 잘못된 suffix일 가능성 높음.
+    # 예: 267260(HD현대일렉트릭)은 .KS(KOSPI)가 정상이나, .KQ 조회 시
+    #     price만 반환되고 mktcap=None → 잘못된 데이터가 7일 캐시되는 버그 방지.
+    best_score = 0
 
     for suffix in [".KS", ".KQ"]:
         try:
@@ -73,13 +77,16 @@ def _kr_yf_ticker_str(code: str) -> Optional[str]:
             if not price or price <= 0:
                 continue
             score = 0
-            if fi.market_cap:
+            if fi.market_cap and fi.market_cap > 0:
                 score += 1
-            if fi.shares:
+            if fi.shares and fi.shares > 0:
                 score += 1
             if score > best_score:
                 best = f"{code}{suffix}"
                 best_score = score
+            # score=2이면 완전한 데이터 → 추가 suffix 시도 불필요
+            if best_score >= 2:
+                break
         except Exception:
             pass
 
