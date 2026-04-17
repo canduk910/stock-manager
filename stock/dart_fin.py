@@ -110,8 +110,9 @@ def _load_corp_map() -> dict[str, str]:
 def _load_corp_name_map() -> dict[str, str]:
     """전체 기업명 맵 (stock_code → corp_name) 반환.
 
-    DART corpCode.xml에서 corp_name도 포함해 파싱. 30일 캐싱.
-    pykrx KRX 서버 이슈 시 종목명 대체 소스로 활용.
+    DART corpCode.xml ZIP에서 stock_code → corp_name 매핑을 추출. 30일 캐싱.
+    stock/symbol_map.py의 code_to_name()에서 pykrx 실패 시 fallback 소스로 활용.
+    2026-02 KRX 서버 변경 이후 pykrx로 종목명 조회 실패 시 이 맵이 대체한다.
     """
     cache_key = "dart:corp_name_map:v1"
     cached = get_cached(cache_key)
@@ -427,7 +428,7 @@ def fetch_financials_multi_year(
         if len(collected) >= years:
             break
 
-        # 첫 번째 배치(latest_year)가 미공시면 anchor-1로 fallback
+        # 첫 배치만 anchor-1 fallback: 최신연도 미공시 기업 대응 (IS 다년도)
         effective_anchor = anchor
         items: list = []
         found_fs: Optional[str] = None
@@ -567,7 +568,7 @@ def fetch_bs_cf_annual(stock_code: str, years: int = 5) -> dict:
         if len(bs_collected) >= years and len(cf_collected) >= years:
             break
 
-        # 첫 번째 배치(latest_year)가 미공시면 anchor-1로 fallback
+        # 첫 배치만 anchor-1 fallback: 최신연도 미공시 기업 대응 (BS/CF)
         effective_anchor = anchor
         items: list = []
         found_fs: Optional[str] = None
@@ -784,14 +785,20 @@ def _extract_quarterly_accumulated(items: list[dict]) -> dict:
 def fetch_quarterly_financials(stock_code: str, quarters: int = 4) -> list[dict]:
     """국내 종목 최근 N분기 손익 (DART 분기보고서 누계 → 개별 분기 환산).
 
-    변환 공식:
-      Q1 값 = 11013 thstrm (Q1)
-      Q2 값 = 11012 thstrm (반기) − Q1
-      Q3 값 = 11014 thstrm (3분기누계) − 반기
-      Q4 값 = 11011 thstrm (연간) − 3분기누계
+    DART 분기보고서는 누계 방식이므로 개별 분기 환산이 필요하다:
+      Q1 값 = 11013 thstrm (Q1 누계 = Q1 그 자체)
+      Q2 값 = 11012 thstrm (반기 누계) − Q1
+      Q3 값 = 11014 thstrm (3분기 누계) − 반기 누계
+      Q4 값 = 11011 thstrm (연간) − 3분기 누계
+
+    직전 누계가 없는 경우(미공시): 해당 분기 값을 그대로 사용 (graceful degradation).
+    예: Q2 조회 시 Q1이 미공시면 반기 누계를 Q2 값으로 간주.
+
+    연결재무제표(CFS) 우선, 없으면 개별재무제표(OFS) fallback.
+    첫 번째 유효한 fs_div가 결정되면 이후 배치에서도 동일 fs_div 유지.
 
     반환: [{year, quarter, revenue, operating_income, net_income, oi_margin, net_margin}] 오래된순
-    미공시 분기 건너뜀 (graceful). 캐시: `dart:quarterly:{code}:{quarters}` 7일.
+    미공시 분기 건너뜀. 캐시: 'dart:quarterly:{code}:{quarters}' TTL 7일.
     """
     cache_key = f"dart:quarterly:{stock_code}:{quarters}"
     cached = get_cached(cache_key)
@@ -832,7 +839,7 @@ def fetch_quarterly_financials(stock_code: str, quarters: int = 4) -> list[dict]
         if not accum:
             continue
 
-        # 누계 → 개별 분기 환산
+        # 누계 → 개별 분기 환산: 현재 분기 누계 - 직전 분기 누계 = 해당 분기 개별값
         for q in range(1, 5):
             if q not in accum:
                 continue

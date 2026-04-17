@@ -1,7 +1,21 @@
 """7점 등급/복합점수/체제정합성/포지션 사이징 공유 로직.
 
-margin-analyst.md + value-screener.md + order-advisor.md 에이전트 스펙 기반.
-pipeline_service._calc_safety_grade() 로직을 이전/일반화하여 KR/US 공통 사용.
+3중 일관성 원칙:
+  System Prompt 문자열(advisory_service._build_system_prompt)
+  = safety_grade.py 코드 (이 파일의 임계값)
+  = Pydantic 타입(schemas/advisory_report_v2.py의 필드 범위)
+이 3곳의 임계값이 불일치하면 GPT 등급과 사전 계산 등급이 괴리되므로,
+변경 시 반드시 3곳을 동시에 수정해야 한다.
+
+도메인 에이전트 스펙 출처:
+- margin-analyst.md → 7점 등급 체계 (7지표 × 4점 = 28점)
+- value-screener.md → 복합 점수 공식 (PER/PBR/ROE/배당 가중합)
+- order-advisor.md  → 등급별 포지션 사이징 + 손절폭
+
+사용처:
+- advisory_service.py → _build_prompt에서 사전 계산값 삽입
+- pipeline_service.py → _calc_safety_grade에서 위임 호출
+- portfolio_advisor_service.py → 체제 정합성 점수 계산
 
 주요 함수:
 - compute_grade_7point(metrics, bs, cf, income, valuation_stats) → {score, grade, details, valid_entry}
@@ -16,9 +30,19 @@ from typing import Optional
 
 
 # ── 등급별 팩터/손절폭 (order-advisor.md) ────────────────────────────────
-
+# GRADE_FACTOR: 등급에 따른 포지션 수량 조절 배수
+# 예: selective 체제 종목당 한도 4%일 때 B+ 등급 → 4% × 0.75 = 3.0%
+# A=1.0(100%): 강력매수 등급이므로 한도를 최대로 활용
+# B+=0.75(75%): 매수 등급이지만 소폭 감액 (리스크 관리)
+# B=0.50(50%): 조건부 등급이므로 반으로 축소
+# C/D=0: 진입 금지 (매수 불가 등급)
 GRADE_FACTOR = {"A": 1.0, "B+": 0.75, "B": 0.5, "C": 0.0, "D": 0.0}
 
+# 등급별 손절폭 — 등급이 높을수록 좁은 손절 (확신이 높으므로 빠르게 손절)
+# A=-8%: 강력매수 종목이 8% 하락하면 전제가 틀린 것 → 빠른 손절
+# B+=-10%: 매수 종목에 약간 더 여유
+# B=-12%: 조건부 종목에 최대 여유
+# C/D=None: 진입 자체를 금지
 GRADE_STOP_LOSS_PCT = {
     "A": 0.08,    # -8%
     "B+": 0.10,   # -10%
@@ -29,9 +53,29 @@ GRADE_STOP_LOSS_PCT = {
 
 
 # ── 7점 등급 (margin-analyst.md 스펙) ───────────────────────────────────
+# 7개 지표를 각 4점 만점으로 평가하여 합산 (최대 28점)
+#
+# 임계값 표 (ASCII):
+# ┌────┬──────────────────┬───────┬──────────┬──────────┬───────┐
+# │ #  │ 지표             │ 4점   │ 3점      │ 2점      │ 1점   │
+# ├────┼──────────────────┼───────┼──────────┼──────────┼───────┤
+# │ 1  │ Graham 할인율    │ >40%  │ 20-40%   │ 0-20%    │ ≤0%   │
+# │ 2  │ PER vs 5년평균   │ <-30% │ -30~-10% │ -10~+10% │ >+10% │
+# │ 3  │ PBR 절대값       │ <0.7  │ 0.7-1.0  │ 1.0-1.5  │ >1.5  │
+# │ 4  │ 부채비율         │ <50%  │ 50-100%  │ 100-200% │ >200% │
+# │ 5  │ 유동비율         │ >2.0  │ 1.5-2.0  │ 1.0-1.5  │ <1.0  │
+# │ 6  │ FCF 양수 연수    │ 3년   │ 2년      │ 1년      │ 0년   │
+# │ 7  │ 매출 CAGR(3년)   │ >10%  │ 5-10%    │ 0-5%     │ <0%   │
+# └────┴──────────────────┴───────┴──────────┴──────────┴───────┘
+#
+# 등급 컷오프: A=24-28 / B+=20-23 / B=16-19 / C=12-15 / D=<12
 
 def _score_discount(discount: Optional[float]) -> int:
-    """Graham 할인율 점수. >40=4 / 20-40=3 / 0-20=2 / ≤0=1."""
+    """Graham 할인율 점수. >40=4 / 20-40=3 / 0-20=2 / ≤0=1.
+
+    Graham Number = sqrt(22.5 × EPS × BPS) 대비 현재가의 할인 정도.
+    할인율이 높을수록 내재가치 대비 저평가 → 높은 점수.
+    """
     if discount is None:
         return 1
     if discount > 40:
@@ -44,7 +88,11 @@ def _score_discount(discount: Optional[float]) -> int:
 
 
 def _score_per_vs_avg(per: Optional[float], per_avg: Optional[float]) -> int:
-    """PER vs 5년 평균 편차%. <-30=4 / -30~-10=3 / -10~+10=2 / >+10=1."""
+    """PER vs 5년 평균 편차%. <-30=4 / -30~-10=3 / -10~+10=2 / >+10=1.
+
+    현재 PER이 5년 평균 대비 크게 낮으면 역사적 저평가 구간 → 높은 점수.
+    데이터 없으면 중립 2점으로 처리하여 등급에 큰 영향을 주지 않도록 한다.
+    """
     if per is None or per_avg is None or per_avg <= 0:
         return 2  # 데이터 없으면 중립
     diff_pct = (per - per_avg) / per_avg * 100
@@ -58,7 +106,12 @@ def _score_per_vs_avg(per: Optional[float], per_avg: Optional[float]) -> int:
 
 
 def _score_pbr(pbr: Optional[float]) -> int:
-    """PBR 절대값. <0.7=4 / 0.7-1.0=3 / 1.0-1.5=2 / >1.5=1."""
+    """PBR 절대값. <0.7=4 / 0.7-1.0=3 / 1.0-1.5=2 / >1.5=1.
+
+    PBR < 1.0은 시가총액이 순자산 가치보다 낮다는 의미 → 자산 대비 저평가.
+    0.7 미만은 극단적 저평가 또는 구조적 문제(value trap 가능) → 최고점 부여하되
+    다른 지표(FCF, 부채비율)와 교차 검증 필요.
+    """
     if pbr is None:
         return 2
     if pbr < 0.7:
@@ -71,7 +124,11 @@ def _score_pbr(pbr: Optional[float]) -> int:
 
 
 def _score_debt_ratio(debt_ratio: Optional[float]) -> int:
-    """부채비율. <50=4 / 50-100=3 / 100-200=2 / >200=1."""
+    """부채비율. <50=4 / 50-100=3 / 100-200=2 / >200=1.
+
+    부채비율 = 총부채 / 자기자본 × 100.
+    50% 미만은 재무적으로 매우 안정적, 200% 초과는 과도한 레버리지 → 위험.
+    """
     if debt_ratio is None:
         return 2
     if debt_ratio < 50:
@@ -102,7 +159,12 @@ def _score_current_ratio(current_ratio: Optional[float]) -> int:
 
 
 def _score_fcf_trend(fcf_years_positive: int) -> int:
-    """FCF 양수 연수. 3년=4 / 2년=3 / 1년=2 / 0년=1."""
+    """FCF 양수 연수. 3년=4 / 2년=3 / 1년=2 / 0년=1.
+
+    FCF(Free Cash Flow) = 영업현금흐름 - 자본적 지출(CAPEX).
+    최근 3년 연속 FCF 양수이면 자체 현금 창출 능력이 검증된 것으로 판단.
+    연속이 아닌 경우에도 양수 연수만 카운트한다 (_count_fcf_years_positive에서 break).
+    """
     if fcf_years_positive >= 3:
         return 4
     if fcf_years_positive >= 2:
@@ -113,7 +175,11 @@ def _score_fcf_trend(fcf_years_positive: int) -> int:
 
 
 def _score_revenue_cagr(revenue_cagr: Optional[float]) -> int:
-    """매출 CAGR. >10=4 / 5-10=3 / 0-5=2 / <0=1."""
+    """매출 CAGR. >10=4 / 5-10=3 / 0-5=2 / <0=1.
+
+    CAGR(Compound Annual Growth Rate) = 연평균 복합 성장률.
+    10% 초과는 고성장, 0% 미만은 매출 감소(구조적 쇠퇴 또는 경기 민감) → 위험.
+    """
     if revenue_cagr is None:
         return 2
     if revenue_cagr > 10:
@@ -133,7 +199,11 @@ def _calc_discount(graham_number: Optional[float], current_price: Optional[float
 
 
 def _count_fcf_years_positive(cashflow: list[dict]) -> int:
-    """cashflow 리스트 최신 3년 FCF 양수 연수."""
+    """cashflow 리스트 최신 3년 FCF 양수 연속 연수.
+
+    최신 연도부터 역순으로 탐색하며, 첫 음수 FCF 발견 시 중단(break).
+    따라서 "연속" 양수 연수를 반환한다 (중간에 음수가 있으면 그 이후만 카운트).
+    """
     if not cashflow:
         return 0
     years_positive = 0
@@ -295,6 +365,12 @@ def compute_composite_score(metrics: dict) -> Optional[float]:
 
     공식: (1/PER × 0.3 + 1/PBR × 0.3 + ROE/100 × 0.25 + dividend_yield/100 × 0.15) × 100
 
+    가중치 근거 (ValueScreener 에이전트 스펙):
+    - PER 역수(0.3) + PBR 역수(0.3) = 밸류에이션 60% — 저평가 종목 선호
+    - ROE(0.25) = 수익성 25% — 자기자본 수익률이 높은 기업 선호
+    - 배당수익률(0.15) = 주주환원 15% — 배당 지급 기업 가산
+
+    정상적인 저평가+고ROE 종목의 raw값이 0.5~1.0 범위이므로 ×100하면 50~100 스케일.
     PER/PBR ≤ 0 또는 None → 해당 항목 0점 처리 (전체 점수는 여전히 계산).
     배당수익률은 %(3.5) 또는 소수점(0.035) 모두 지원 (> 1이면 %, else 소수점으로 간주).
     """
@@ -332,8 +408,12 @@ def compute_composite_score(metrics: dict) -> Optional[float]:
 
 
 # ── 체제 정합성 ─────────────────────────────────────────────────────────
+# 체제가 엄격할수록 높은 등급을 요구하여 부적격 종목 편입을 방지한다.
 
 # 체제별 기대 등급 점수 (score 중심값)
+# accumulation/selective: B+(20점) 이상이면 체제에 적합
+# cautious: A(24점) 이상을 요구 — 신중한 체제에서는 우량주만 편입
+# defensive: A 최대(28점)를 요구 — 사실상 어떤 종목도 진입 불가 (현금 보존)
 _REGIME_EXPECTED_GRADE = {
     "accumulation": 20,  # B+ 기대
     "selective": 20,     # B+ 기대
@@ -358,12 +438,19 @@ def compute_regime_alignment(
 ) -> float:
     """체제 정합성 점수 0~100.
 
-    구성:
-    - 등급 정합: 체제별 기대 점수 대비 실제 점수 (40%)
-    - FCF 정합: fcf_years_positive >= 2 면 높음 (30%)
-    - 주식비중 정합: stock_pct가 체제 권고치 이내면 높음 (30%). None이면 등급+FCF 2항목만 사용.
+    종목(또는 포트폴리오)이 현재 시장 체제에 얼마나 적합한지를 정량화한다.
 
-    defensive + A등급 + FCF양수 = 높음(안정). accumulation + D등급 = 낮음.
+    구성 (3항목 가중합):
+    - 등급 정합 (40%): 체제별 기대 점수 대비 실제 점수.
+      기대치 초과 → 100, 최저(D=8점)까지 선형 감소 → 0
+    - FCF 정합 (30%): 현금 창출 안정성.
+      3년 연속 양수=100, 2년=75, 1년=50, 0년=25
+    - 주식비중 정합 (30%): 체제 권고 주식 비중과의 오차.
+      ±5%p 이내=100, ±20%p 초과=0, 그 사이 선형 감소
+      stock_pct가 None이면 등급+FCF 2항목만 사용 (50/50 가중)
+
+    활용: advisory_service 프롬프트에 참고값으로 삽입,
+    portfolio_advisor_service에서 포트폴리오 차원 정합성 판단에 사용.
     """
     # 1. 등급 정합
     expected_score = _REGIME_EXPECTED_GRADE.get(regime, 20)
@@ -409,6 +496,11 @@ def compute_regime_alignment(
 
 
 # ── 포지션 사이징 (order-advisor.md) ────────────────────────────────────
+# GRADE_FACTOR × 체제 한도로 최종 투자 비중을 결정한다.
+# 예시:
+#   selective 체제(single_cap=4%) + B+ 등급(factor=0.75) = 3.0%
+#   accumulation 체제(single_cap=5%) + A 등급(factor=1.0) = 5.0%
+#   어떤 체제든 C/D 등급(factor=0) = 0% (진입 금지)
 
 def compute_position_size(
     grade: str,
@@ -419,12 +511,14 @@ def compute_position_size(
 ) -> dict:
     """등급 × 체제 한도 기반 수량 계산.
 
-    최종 포지션% = 체제 종목당 한도% × grade_factor
+    계산 공식:
+    target_pct = regime_single_cap_pct × grade_factor / 100
     max_amount = total_portfolio × target_pct
-    available = min(max_amount, cash_available)
-    raw_qty = floor(available / entry_price)
+    available = min(max_amount, cash_available)  # 예수금 제한
+    qty = floor(available / entry_price)
 
     C/D 등급 또는 진입가 ≤ 0 → qty=0, recommendation="SKIP".
+    qty > 0이면 "ENTER", qty = 0이면 "HOLD" (자금 부족).
     """
     factor = GRADE_FACTOR.get(grade, 0.0)
     if factor == 0 or entry_price <= 0:

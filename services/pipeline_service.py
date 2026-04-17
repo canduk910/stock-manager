@@ -114,7 +114,9 @@ def _screen_stocks(market: str, regime_data: dict) -> list[dict]:
         )
         logger.info(f"필터 통과: {len(filtered)}개 (PER<{params['per_max']}, PBR<{params['pbr_max']}, ROE>{params['roe_min']})")
 
-        # 복합 점수로 정렬
+        # 복합 점수로 정렬 — ValueScreener 공식과 동일
+        # (1/PER × 0.3 + 1/PBR × 0.3 + ROE/100 × 0.25 + 배당수익률/100 × 0.15)
+        # 가중치 근거: PER+PBR 밸류에이션 60% + 수익성(ROE) 25% + 배당 15%
         for s in filtered:
             per = s.get("per") or 999
             pbr = s.get("pbr") or 999
@@ -248,7 +250,13 @@ def _extract_financial_metrics(fundamental: dict) -> dict:
 
 
 def _analyze_single(code: str, name: str, market: str) -> Optional[dict]:
-    """단일 종목 심층 분석."""
+    """단일 종목 심층 분석.
+
+    advisory_service.refresh_stock_data()로 전체 재무/기술 데이터를 수집한 후,
+    safety_grade.py에 위임하여 7점 등급을 계산한다.
+    ThreadPoolExecutor에서 병렬 실행되므로, 개별 종목 실패가 다른 종목에 영향을 주지 않도록
+    예외를 로깅하고 None을 반환한다.
+    """
     try:
         cache = refresh_stock_data(code, market, name)
         fundamental = cache.get("fundamental") or {}
@@ -294,7 +302,11 @@ def _analyze_single(code: str, name: str, market: str) -> Optional[dict]:
 
 
 def _analyze_candidates(candidates: list[dict], market: str) -> list[dict]:
-    """상위 후보 종목 병렬 심층 분석."""
+    """상위 후보 종목 병렬 심층 분석.
+
+    max_workers=3: KIS/DART/yfinance API rate limit을 감안한 동시 요청 수 제한.
+    결과는 등급순 정렬 (A > B+ > B > C > D), 동일 등급은 할인율 내림차순.
+    """
     analyses = []
     with ThreadPoolExecutor(max_workers=3) as pool:
         futures = {
@@ -315,7 +327,17 @@ def _analyze_candidates(candidates: list[dict], market: str) -> list[dict]:
 # ── 추천 생성 ─────────────────────────────────────────────────
 
 def _generate_recommendations(analyses: list[dict], regime_data: dict) -> list[dict]:
-    """분석 결과에서 매수 추천을 생성한다."""
+    """분석 결과에서 매수 추천을 생성한다.
+
+    margin_threshold: 체제별 요구 안전마진% (accumulation=20, selective=25, cautious=30, defensive=40)
+    이 임계값을 Graham Number 할인율과 비교하여 필터링한다.
+
+    필터링 조건 (모두 충족해야 추천):
+    1) 등급 B+ 이상 (A 또는 B+)
+    2) 할인율 ≥ margin_threshold
+    3) R:R ≥ 2.0 (리스크보상비율)
+    최대 5종목까지 추천.
+    """
     regime = regime_data["regime"]
     params = regime_data["params"]
     margin_threshold = params["margin_threshold"]
@@ -336,7 +358,8 @@ def _generate_recommendations(analyses: list[dict], regime_data: dict) -> list[d
         entry_price = a.get("current_price") or 0
         graham_number = a.get("graham_number") or 0
 
-        # 손절/익절
+        # 손절/익절 — OrderAdvisor 등급별 손절폭 규칙
+        # A등급=-8%, B+등급=-10% (B는 _generate_recommendations 진입 전 필터링됨)
         stop_pct = 0.08 if grade == "A" else 0.10
         stop_loss = round(entry_price * (1 - stop_pct)) if entry_price else None
         take_profit = graham_number if graham_number else None
@@ -346,7 +369,7 @@ def _generate_recommendations(analyses: list[dict], regime_data: dict) -> list[d
         if stop_loss and take_profit and entry_price and entry_price > stop_loss:
             risk_reward = round((take_profit - entry_price) / (entry_price - stop_loss), 1)
 
-        # R:R < 2.0 이면 스킵
+        # R:R < 2.0 이면 스킵 — OrderAdvisor 규칙: risk_reward >= 2.0 아니면 매수 보류
         if risk_reward is not None and risk_reward < 2.0:
             continue
 
@@ -372,10 +395,14 @@ def _generate_recommendations(analyses: list[dict], regime_data: dict) -> list[d
 # ── 메인 파이프라인 ───────────────────────────────────────────
 
 def run_pipeline(market: str = "KR") -> dict:
-    """전체 투자 파이프라인 실행.
+    """전체 투자 파이프라인 실행 — 단일 진입점.
+
+    Args:
+        market: "KR" (국내), "US" (해외), "ALL" (전체)
 
     Returns:
-        dict: report_id, regime, candidates_count, recommended_count, errors
+        dict: report_id, date, market, regime, candidates_count,
+              analyses_count, recommended_count, errors
     """
     errors = []
     today = datetime.now(KST).strftime("%Y-%m-%d")
