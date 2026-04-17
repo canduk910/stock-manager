@@ -1,5 +1,35 @@
 # 변경 이력
 
+## 2026-04-17 — KIS AI Extensions 백테스트 연동
+
+### 백테스트 기능 신규
+- KIS AI Extensions MCP 서버 연동 (`services/mcp_client.py` — httpx JSON-RPC 클라이언트)
+- 백테스트 서비스 (`services/backtest_service.py` — 프리셋/커스텀/배치 실행, 전략 신호 생성)
+- 백테스트 API (`routers/backtest.py` — 7개 엔드포인트: status/presets/indicators/run/result/history)
+- DB 모델 (`db/models/backtest.py` — BacktestJob, Strategy) + Alembic 마이그레이션
+- Store 래퍼 (`stock/strategy_store.py` — db/repositories/backtest_repo.py 위임)
+- 환경변수 `KIS_MCP_URL`, `KIS_MCP_ENABLED` 추가 (기본 비활성화)
+- httpx 의존성 추가
+
+### AI 자문 전략 신호 통합
+- `advisory_service.py`: `_collect_strategy_signals()` — MCP 대표 3전략 신호 병렬 수집
+- `_build_strategy_signal_section()` — GPT 프롬프트에 전략 신호/백테스트 메트릭 섹션 추가
+- System Prompt에 "전략 4: KIS 퀀트 전략 신호 (보조 지표)" 규칙 추가
+- `advisory_store.save_cache()` + `advisory_cache` 테이블에 `strategy_signals` JSON 컬럼
+- MCP 비활성화 시 기존 자문 시스템 100% 동작 (zero degradation)
+
+### 포트폴리오 자문 연동
+- `portfolio_advisor_service.py`: 각 holding에 `backtest_metrics` 필드 추가
+
+### 프론트엔드 신규
+- BacktestPage (`/backtest`) — 종목 선택 + 전략 선택(프리셋/YAML) + 기간/금액 + 실행 + 결과 차트
+- components/backtest/ (StrategySelector, MetricsCard, BacktestResultPanel, BatchCompareTable)
+- api/backtest.js + hooks/useBacktest.js (3초 폴링, 타임아웃 3분)
+- Header 분석 드롭다운에 "백테스트" 메뉴 추가
+- TechnicalPanel에 KIS 전략 신호 카드 (MCP 활성화 시만 표시)
+
+---
+
 ## 2026-04-17 — AI자문 개선 (입력/프롬프트/출력 3축 개편)
 
 ### Phase 1: 프롬프트 보강 + 개별↔포트폴리오 연계

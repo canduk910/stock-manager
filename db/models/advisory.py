@@ -33,6 +33,7 @@ class AdvisoryCache(Base):
     updated_at = Column(String, nullable=False)
     fundamental = Column(JSON)
     technical = Column(JSON)
+    strategy_signals = Column(JSON, nullable=True)
 
     def to_dict(self) -> dict:
         return {
@@ -41,6 +42,7 @@ class AdvisoryCache(Base):
             "updated_at": self.updated_at,
             "fundamental": self.fundamental or {},
             "technical": self.technical or {},
+            "strategy_signals": self.strategy_signals,
         }
 
 

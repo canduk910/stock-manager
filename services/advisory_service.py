@@ -29,11 +29,14 @@ def refresh_stock_data(code: str, market: str, name: str) -> dict:
 
     국내(KR): dart_fin + market.fetch_market_metrics + 15분봉KIS
     해외(US): yf_client + 15분봉 yfinance
+    + KIS MCP 전략 신호 (활성화 시)
     """
     fundamental = _collect_fundamental(code, market, name)
     technical = _collect_technical(code, market)
+    strategy_signals = _collect_strategy_signals(code, market)
 
-    advisory_store.save_cache(code, market, fundamental, technical)
+    advisory_store.save_cache(code, market, fundamental, technical,
+                              strategy_signals=strategy_signals)
     return advisory_store.get_cache(code, market) or {}
 
 
@@ -53,6 +56,7 @@ def generate_ai_report(code: str, market: str, name: str) -> dict:
 
     fundamental = cache.get("fundamental") or {}
     technical = cache.get("technical") or {}
+    strategy_signals = cache.get("strategy_signals")  # MCP 전략 신호 (없으면 None)
 
     model = OPENAI_MODEL
     graham_data = _calc_graham_number(fundamental, market)
@@ -61,7 +65,7 @@ def generate_ai_report(code: str, market: str, name: str) -> dict:
     macro_ctx = _get_macro_context()
     regime, regime_desc = _determine_regime(macro_ctx)
 
-    prompt = _build_prompt(code, market, name, fundamental, technical, graham_data, macro_ctx, regime, regime_desc)
+    prompt = _build_prompt(code, market, name, fundamental, technical, graham_data, macro_ctx, regime, regime_desc, strategy_signals)
     system_prompt = _build_system_prompt(regime, regime_desc)
 
     def _call_openai(max_tokens: int, extra_user_msg: str = "") -> tuple[str, str]:
@@ -368,6 +372,16 @@ def _collect_technical(code: str, market: str) -> dict:
     }
 
 
+def _collect_strategy_signals(code: str, market: str) -> Optional[dict]:
+    """KIS AI Extensions 전략 신호 수집 (MCP 비활성화 시 None)."""
+    try:
+        from services.backtest_service import get_strategy_signals
+        return get_strategy_signals(code, market)
+    except Exception as e:
+        logger.debug("전략 신호 수집 실패 [%s]: %s", code, e)
+        return None
+
+
 def _calc_graham_number(fundamental: dict, market: str) -> dict:
     """Graham Number = sqrt(22.5 × EPS × BPS) 계산.
     BPS 직접 데이터 없으면 price/PBR 역산 (KR/US 공통).
@@ -468,6 +482,41 @@ def _build_macro_section(macro_ctx: Optional[dict], regime: str, regime_desc: st
     return "\n".join(lines)
 
 
+def _build_strategy_signal_section(signals: Optional[dict]) -> str:
+    """KIS 전략 신호 프롬프트 섹션."""
+    if not signals:
+        return "## KIS 전략 신호\n- MCP 서버 비활성화 (전략 분석 미사용)"
+
+    lines = ["## KIS 전략 신호 (퀀트 백테스팅 기반)"]
+    for s in signals.get("signals", []):
+        strength_pct = f"{s.get('strength', 0) * 100:.0f}%"
+        lines.append(f"- {s.get('strategy', 'unknown')}: {s.get('signal', 'HOLD')} (강도 {strength_pct})")
+
+    consensus = signals.get("consensus", "HOLD")
+    avg = signals.get("avg_strength", 0)
+    lines.append(f"- 전략 합의: {consensus} (평균 강도 {avg * 100:.0f}%)")
+
+    bt_list = signals.get("backtest_metrics") or []
+    if bt_list:
+        for bt in bt_list if isinstance(bt_list, list) else [bt_list]:
+            if isinstance(bt, dict):
+                ret = bt.get("total_return_pct")
+                sharpe = bt.get("sharpe_ratio")
+                dd = bt.get("max_drawdown")
+                parts = []
+                if ret is not None:
+                    parts.append(f"수익률 {ret:+.1f}%")
+                if sharpe is not None:
+                    parts.append(f"샤프 {sharpe:.2f}")
+                if dd is not None:
+                    parts.append(f"낙폭 {dd:.1f}%")
+                if parts:
+                    name = bt.get("strategy", "")
+                    lines.append(f"- 백테스트({name}): {', '.join(parts)}")
+
+    return "\n".join(lines)
+
+
 _REGIME_RULES = {
     "accumulation": (
         "시장 체제: accumulation (탐욕 — 축적 구간)\n"
@@ -550,6 +599,11 @@ def _build_system_prompt(regime: str, regime_desc: str) -> str:
         "3. FCF 3년 연속 음수\n"
         "4. 부채비율 전년 대비 30%p 이상 급증\n"
         "5. 배당 중단 (과거 지급 이력 있으나 최근 중단)\n\n"
+        "【전략 4: KIS 퀀트 전략 신호 (보조 지표)】\n"
+        "SMA Crossover / Momentum / Trend Filter 3개 전략의 BUY/SELL/HOLD 신호와 강도(0~1).\n"
+        "전략 합의(consensus)가 BUY이면서 강도>0.6이면 추세추종 전략의 보조 확인 신호로 활용.\n"
+        "백테스트 메트릭이 있으면 샤프>1.0이고 승률>50%인 전략만 신뢰.\n"
+        "단, 전략 신호는 보조 지표이며, 기존 3전략(변동성돌파/안전마진/추세추종)의 판단을 뒤집지 않는다.\n\n"
         "【업종 상대평가】\n"
         "종목의 섹터/업종을 감안하여 동종 업종 평균 PER/PBR 대비 상대적 위치를 평가하세요 (참고용).\n\n"
         f"【현재 매크로 환경】\n{regime_rule}\n\n"
@@ -563,7 +617,8 @@ def _build_prompt(code: str, market: str, name: str, fundamental: dict, technica
                   graham_data: Optional[dict] = None,
                   macro_ctx: Optional[dict] = None,
                   regime: str = "selective",
-                  regime_desc: str = "중립 (적극적)") -> str:
+                  regime_desc: str = "중립 (적극적)",
+                  strategy_signals: Optional[dict] = None) -> str:
     """GPT 프롬프트 구성."""
     currency = "KRW(억원)" if market == "KR" else "USD(백만달러)"
 
@@ -793,6 +848,8 @@ def _build_prompt(code: str, market: str, name: str, fundamental: dict, technica
    사전 계산을 단순 복사하지 말고, 독립적 판단을 내리되 불일치 시 reasoning에 근거 명시.
 
 {_build_macro_section(macro_ctx, regime, regime_desc)}
+
+{_build_strategy_signal_section(strategy_signals)}
 
 위 데이터를 세 가지 전략 프레임워크(변동성 돌파/안전마진/추세추종)로 종합 분석하여 다음 JSON 형식으로 투자 의견을 작성해주세요:
 {{

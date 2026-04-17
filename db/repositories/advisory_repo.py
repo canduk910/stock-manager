@@ -63,7 +63,8 @@ class AdvisoryRepository:
 
     # ── Cache CRUD ──────────────────────────────────────────────
 
-    def save_cache(self, code: str, market: str, fundamental: dict, technical: dict) -> None:
+    def save_cache(self, code: str, market: str, fundamental: dict, technical: dict,
+                   strategy_signals: dict = None) -> None:
         code_u, market_u = code.upper(), market.upper()
         row = (
             self.db.query(AdvisoryCache)
@@ -76,6 +77,8 @@ class AdvisoryRepository:
         row.updated_at = now_kst_iso()
         row.fundamental = fundamental
         row.technical = technical
+        if hasattr(row, 'strategy_signals'):
+            row.strategy_signals = strategy_signals
 
     def get_cache(self, code: str, market: str) -> Optional[dict]:
         row = (

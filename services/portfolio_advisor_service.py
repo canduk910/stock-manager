@@ -73,6 +73,15 @@ def _fetch_52w_high(code: str, market: str) -> int | float | None:
     return value
 
 
+def _fetch_backtest_metrics(code: str, market: str) -> dict | None:
+    """종목의 최신 백테스트 메트릭 조회 (없으면 None)."""
+    try:
+        from stock.strategy_store import get_latest_backtest_metrics
+        return get_latest_backtest_metrics(code, market)
+    except Exception:
+        return None
+
+
 def _extract_report_summary(report_data: dict) -> dict:
     """개별 리포트 JSON에서 포트폴리오 프롬프트용 핵심 필드 추출.
 
@@ -157,6 +166,7 @@ def _build_context(balance_data: dict) -> dict:
         h52 = _fetch_52w_high(code, "KR")
         drop = round((cur - h52) / h52 * 100, 1) if cur and h52 and h52 > 0 else None
         report_summary = _fetch_latest_report_summary(code, "KR")
+        bt_metrics = _fetch_backtest_metrics(code, "KR")
         holdings.append({
             "name": s.get("name", ""),
             "code": code,
@@ -178,6 +188,7 @@ def _build_context(balance_data: dict) -> dict:
             "latest_report_summary": report_summary.get("summary_2lines"),
             "latest_report_discount_rate": report_summary.get("discount_rate"),
             "latest_report_risks": report_summary.get("risks") or [],
+            "backtest_metrics": bt_metrics,
         })
 
     # 해외주식
@@ -189,6 +200,7 @@ def _build_context(balance_data: dict) -> dict:
         h52_us = _fetch_52w_high(code_us, "US")
         drop_us = round((cur_us - h52_us) / h52_us * 100, 1) if cur_us and h52_us and h52_us > 0 else None
         report_summary_us = _fetch_latest_report_summary(code_us, "US")
+        bt_metrics_us = _fetch_backtest_metrics(code_us, "US")
         holdings.append({
             "name": s.get("name", ""),
             "code": code_us,
@@ -212,6 +224,7 @@ def _build_context(balance_data: dict) -> dict:
             "latest_report_summary": report_summary_us.get("summary_2lines"),
             "latest_report_discount_rate": report_summary_us.get("discount_rate"),
             "latest_report_risks": report_summary_us.get("risks") or [],
+            "backtest_metrics": bt_metrics_us,
         })
 
     # 집중도 계산

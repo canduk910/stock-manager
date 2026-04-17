@@ -40,3 +40,7 @@ DATABASE_URL = os.getenv(
     "DATABASE_URL",
     f"sqlite:///{Path.home() / 'stock-watchlist' / 'app.db'}",
 )
+
+# ── KIS AI Extensions (MCP 서버) ──────────────────────────────────────
+KIS_MCP_URL = os.getenv("KIS_MCP_URL", "http://127.0.0.1:3846/mcp")
+KIS_MCP_ENABLED = os.getenv("KIS_MCP_ENABLED", "false").lower() == "true"

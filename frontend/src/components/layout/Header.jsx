@@ -14,6 +14,7 @@ const NAV_GROUPS = [
         { to: '/screener', label: '스크리너' },
         { to: '/earnings', label: '공시' },
         { to: '/reports', label: '보고서' },
+        { to: '/backtest', label: '백테스트' },
       ],
     },
   ],

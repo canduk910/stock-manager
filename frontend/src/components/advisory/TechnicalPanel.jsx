@@ -354,6 +354,109 @@ export default function TechnicalPanel({ data, symbol, market, valuationData }) 
         </div>
       )}
 
+      {/* ── KIS 전략 신호 (MCP 연동) ────────────────────────────────── */}
+      <StrategySignalCard strategySignals={data?.strategy_signals} symbol={symbol} />
+
+    </div>
+  )
+}
+
+// ── KIS 전략 신호 카드 ─────────────────────────────────────────
+function StrategySignalCard({ strategySignals, symbol }) {
+  if (!strategySignals) return null
+
+  const signals = strategySignals.signals || []
+  const consensus = strategySignals.consensus || 'HOLD'
+  const avgStrength = strategySignals.avg_strength
+  const bt = strategySignals.backtest_metrics
+
+  const signalColor = (s) => {
+    if (s === 'BUY') return 'bg-red-50 text-red-700 border-red-200'
+    if (s === 'SELL') return 'bg-blue-50 text-blue-700 border-blue-200'
+    return 'bg-gray-50 text-gray-600 border-gray-200'
+  }
+
+  const STRATEGY_LABELS = {
+    sma_crossover: 'SMA 크로스',
+    momentum: '모멘텀',
+    trend_filter_signal: '추세 필터',
+  }
+
+  return (
+    <div className="mt-4 bg-gradient-to-r from-indigo-50 to-purple-50 rounded-lg border border-indigo-200 p-4">
+      <div className="flex items-center justify-between mb-3">
+        <p className="text-xs font-semibold text-indigo-800">KIS 전략 신호 (퀀트 백테스팅)</p>
+        {symbol && (
+          <a
+            href={`/backtest`}
+            className="text-xs text-indigo-600 hover:text-indigo-800 underline"
+          >
+            상세 백테스트 &rarr;
+          </a>
+        )}
+      </div>
+
+      {/* 개별 전략 신호 */}
+      <div className="space-y-1.5 mb-3">
+        {signals.map((s) => (
+          <div key={s.strategy} className="flex items-center justify-between">
+            <span className="text-xs text-gray-700">{STRATEGY_LABELS[s.strategy] || s.strategy}</span>
+            <div className="flex items-center gap-2">
+              <span className={`px-2 py-0.5 rounded text-xs font-medium border ${signalColor(s.signal)}`}>
+                {s.signal}
+              </span>
+              <span className="text-xs text-gray-500 w-10 text-right">
+                {(s.strength * 100).toFixed(0)}%
+              </span>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* 합의 */}
+      <div className="flex items-center justify-between pt-2 border-t border-indigo-200">
+        <span className="text-xs font-medium text-gray-700">전략 합의</span>
+        <div className="flex items-center gap-2">
+          <span className={`px-2.5 py-0.5 rounded text-xs font-bold border ${signalColor(consensus)}`}>
+            {consensus}
+          </span>
+          {avgStrength != null && (
+            <span className="text-xs text-gray-500">평균 {(avgStrength * 100).toFixed(0)}%</span>
+          )}
+        </div>
+      </div>
+
+      {/* 백테스트 메트릭 */}
+      {bt && (
+        <div className="mt-2 pt-2 border-t border-indigo-200 grid grid-cols-4 gap-2 text-center">
+          {bt.total_return_pct != null && (
+            <div>
+              <div className="text-[10px] text-gray-500">수익률</div>
+              <div className={`text-xs font-semibold ${bt.total_return_pct >= 0 ? 'text-red-600' : 'text-blue-600'}`}>
+                {bt.total_return_pct >= 0 ? '+' : ''}{bt.total_return_pct.toFixed(1)}%
+              </div>
+            </div>
+          )}
+          {bt.sharpe_ratio != null && (
+            <div>
+              <div className="text-[10px] text-gray-500">샤프</div>
+              <div className="text-xs font-semibold">{bt.sharpe_ratio.toFixed(2)}</div>
+            </div>
+          )}
+          {bt.max_drawdown != null && (
+            <div>
+              <div className="text-[10px] text-gray-500">낙폭</div>
+              <div className="text-xs font-semibold text-blue-600">{bt.max_drawdown.toFixed(1)}%</div>
+            </div>
+          )}
+          {bt.win_rate != null && (
+            <div>
+              <div className="text-[10px] text-gray-500">승률</div>
+              <div className="text-xs font-semibold">{bt.win_rate.toFixed(1)}%</div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }

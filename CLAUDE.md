@@ -81,8 +81,8 @@ wrapper.py          KIS API 완전 래퍼 (standalone)
 main.py             FastAPI 서버 진입점 (라우터 등록 + SPA 정적 파일 서빙 + Alembic 마이그레이션)
 db/                 SQLAlchemy ORM 패키지 (base, session, utils, models/12개, repositories/7개)
 alembic/            DB 스키마 마이그레이션 관리
-routers/            API 라우터 패키지 (14개, quote/market_board는 WebSocket 포함)
-services/           서비스 레이어 (watchlist_service, detail_service, order_service, advisory_service, macro_service, portfolio_advisor_service, quote_kis/quote_overseas, order_kr/order_us/order_fno, macro_regime, safety_grade, schemas/)
+routers/            API 라우터 패키지 (15개, quote/market_board는 WebSocket 포함)
+services/           서비스 레이어 (watchlist_service, detail_service, order_service, advisory_service, macro_service, portfolio_advisor_service, quote_kis/quote_overseas, order_kr/order_us/order_fno, macro_regime, safety_grade, schemas/, mcp_client, backtest_service)
 services/exceptions.py  서비스 레이어 공용 예외 계층 (ServiceError / NotFoundError / ExternalAPIError / ConfigError / PaymentRequiredError / ConflictError)
 services/macro_regime.py  공용 체제 판단 (REGIME_MATRIX 20셀 + VIX 오버라이드 + 하이스테리시스). 3개 서비스 공유.
 services/safety_grade.py  7점 등급/복합점수/체제정합성/포지션사이징 공유 모듈. advisory_service + pipeline_service 공유.
@@ -128,6 +128,8 @@ frontend/           React SPA (Vite + Tailwind + Recharts)
 | `KIS_HTS_ID` | 선택 | KIS HTS ID. 체결통보(H0STCNI0) WS 실시간 수신용. 미설정 시 폴링만 동작. |
 | `ADVISOR_CACHE_TTL_HOURS` | 선택 | 포트폴리오 자문 캐시 유효기간 (시간). 기본값: `0.5` (30분). |
 | `DATABASE_URL` | 선택 | SQLAlchemy DB URL. 기본값: `sqlite:///~/stock-watchlist/app.db`. PostgreSQL/Oracle 전환 시 변경. |
+| `KIS_MCP_URL` | 선택 | KIS AI Extensions MCP 서버 URL. 기본값: `http://127.0.0.1:3846/mcp`. |
+| `KIS_MCP_ENABLED` | 선택 | MCP 백테스트 연동 활성화. 기본값: `false`. `true` 설정 시 백테스트 기능 활성화. |
 | `TEST_KIS_*` | 선택 | 모의계좌용 (`test.py`에서 사용) |
 
 모의투자 BASE_URL: `https://openapivts.koreainvestment.com:29443`
@@ -144,6 +146,7 @@ frontend/           React SPA (Vite + Tailwind + Recharts)
 | **SEC EDGAR** | 미국 10-K/10-Q 공시. 키 불필요 | `stock/sec_filings.py` |
 | **KIS OpenAPI** | 잔고, 현재가, 주문 등. `KIS_APP_KEY`/`KIS_APP_SECRET` 필요 | `wrapper.py`, `routers/balance.py` |
 | **OpenAI API** | 종합 투자 의견 (3전략 프레임워크). `OPENAI_API_KEY` 필요 | `services/advisory_service.py` |
+| **KIS AI Extensions** | 전략 백테스팅 (10 프리셋 + 80 기술지표, QuantConnect Lean). `KIS_MCP_ENABLED=true` 필요 | `services/mcp_client.py`, `services/backtest_service.py` |
 
 ---
 

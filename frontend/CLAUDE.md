@@ -30,6 +30,7 @@ frontend/
       search.js           searchStocks(q, market) → GET /api/search
       macro.js            fetchMacroIndices / fetchMacroNews / fetchMacroSentiment / fetchMacroInvestorQuotes / fetchMacroSummary
       advisor.js          analyzePortfolio / fetchAdvisorHistory / fetchAdvisorReport → /api/portfolio-advisor/*
+      backtest.js         fetchMcpStatus / fetchPresets / runPresetBacktest / runCustomBacktest / runBatchBacktest / fetchBacktestResult → /api/backtest/*
     hooks/
       useAsyncState.js    useAsyncState(initialData) — 비동기 data/loading/error 상태 관리 공통 훅. run(asyncFn)으로 자동 관리.
       useScreener.js      { data, loading, error, search }
@@ -48,6 +49,7 @@ frontend/
       usePortfolioAdvisor.js  포트폴리오 AI 자문 훅. analyze/loadLatest/loadById. stale closure 해결 (loadHistory 의존성 없음).
       useReport.js           투자 보고서 훅 5개. useReports/useReportDetail/useRecommendations/usePerformance/useRegimes.
       usePortfolio.js     포트폴리오 대시보드 훅. balance+sentiment 병렬 로드 + 자산배분/안전마진등급 계산.
+      useBacktest.js      백테스트 훅. useMcpStatus(MCP연결상태) / usePresets(전략목록) / useBacktest(실행+3초폴링+결과).
     components/
       layout/Header.jsx   네비게이션 바 (5개 탑레벨: 시세판|관심종목|분석▼|포트폴리오|매매▼, 그룹 구분선, 드롭다운 hover)
       common/             LoadingSpinner, ErrorAlert, EmptyState, DataTable, ToastNotification
@@ -67,6 +69,8 @@ frontend/
       advisor/            AdvisorPanel (포트폴리오 자문 컨테이너 + **개별 종목 리포트 연계 요약 카드**(가중등급+분포바+B미만 경고; weighted_grade_avg 부재 시 숨김)),
                           RebalanceCard (리밸런싱 제안), TradeTable (매매안+주문실행),
                           TradeConfirmModal (AI 추천 주문 확인 모달)
+      backtest/           StrategySelector (프리셋/커스텀 YAML 선택), MetricsCard (수익률/샤프/낙폭/승률),
+                          BacktestResultPanel (수익률곡선+거래내역), BatchCompareTable (전략 비교)
       macro/              IndexSection (4지수+1년스파크라인+툴팁), SentimentSection (VIX+버핏+공포탐욕),
                           NewsSection (한국+NYT 2컬럼), InvestorSection (4명 투자자 코멘트 카드)
     pages/
@@ -81,6 +85,7 @@ frontend/
       MacroPage.jsx       /macro         매크로 분석: 지수+심리+뉴스+투자자 코멘트. 4섹션 독립 로딩.
       PortfolioPage.jsx   /portfolio     포트폴리오 통합: 체제배너+자산배분+수익률+AI자문(진단+리밸런싱+매매안+이력). balance+macro+advisor 통합.
       ReportPage.jsx      /reports       투자 보고서: 3탭(일일보고서/추천이력/성과통계). 체제배지+등급배지+PnL 색상.
+      BacktestPage.jsx    /backtest      KIS AI Extensions 백테스트: 프리셋/커스텀 전략, 결과 차트/메트릭, 전략 비교. MCP 비활성화 시 안내 표시.
 ```
 
 ---
