@@ -87,13 +87,31 @@ class AdvisoryRepository:
 
     # ── Report CRUD ─────────────────────────────────────────────
 
-    def save_report(self, code: str, market: str, model: str, report: dict) -> int:
+    def save_report(
+        self,
+        code: str,
+        market: str,
+        model: str,
+        report: dict,
+        grade: str | None = None,
+        grade_score: int | None = None,
+        composite_score: float | None = None,
+        regime_alignment: float | None = None,
+        schema_version: str = "v1",
+        value_trap_warning: bool = False,
+    ) -> int:
         r = AdvisoryReport(
             code=code.upper(),
             market=market.upper(),
             generated_at=now_kst_iso(),
             model=model,
             report=report,
+            grade=grade,
+            grade_score=grade_score,
+            composite_score=composite_score,
+            regime_alignment=regime_alignment,
+            schema_version=schema_version,
+            value_trap_warning=value_trap_warning,
         )
         self.db.add(r)
         self.db.flush()
@@ -124,11 +142,21 @@ class AdvisoryRepository:
 
     # ── Portfolio Report CRUD ───────────────────────────────────
 
-    def save_portfolio_report(self, model: str, report: dict) -> int:
+    def save_portfolio_report(
+        self,
+        model: str,
+        report: dict,
+        weighted_grade_avg: float | None = None,
+        regime: str | None = None,
+        schema_version: str = "v1",
+    ) -> int:
         r = PortfolioReport(
             generated_at=now_kst_iso(),
             model=model,
             report=report,
+            weighted_grade_avg=weighted_grade_avg,
+            regime=regime,
+            schema_version=schema_version,
         )
         self.db.add(r)
         self.db.flush()

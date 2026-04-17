@@ -12,6 +12,7 @@ import logging
 
 from config import ADVISOR_CACHE_TTL_HOURS, OPENAI_API_KEY, OPENAI_MODEL
 from services.exceptions import ConfigError, ExternalAPIError, NotFoundError, PaymentRequiredError
+from services.macro_regime import determine_regime as _shared_determine_regime
 from stock import advisory_store
 from stock.cache import get_cached, set_cached
 from stock.db_base import now_kst, now_kst_iso
@@ -46,18 +47,94 @@ def _safe_float(val, default=0.0) -> float:
 
 
 def _fetch_52w_high(code: str, market: str) -> int | float | None:
-    """종목의 52주 고가를 가져온다."""
+    """종목의 52주 고가를 가져온다. 6시간 TTL 캐싱."""
+    cache_key = f"advisor:52w:{market}:{code}"
+    cached = get_cached(cache_key)
+    if cached is not None:
+        # 캐시 값은 {"value": num} 형태로 감싸서 저장 (None도 캐싱 가능하도록)
+        if isinstance(cached, dict):
+            return cached.get("value")
+        return cached
     try:
         if market == "KR":
             from stock.market import fetch_market_metrics
             m = fetch_market_metrics(code)
-            return m.get("high_52")
+            value = m.get("high_52")
         else:
             from stock.yf_client import _ticker, _safe
             t = _ticker(code)
-            return _safe(t.fast_info.year_high)
+            value = _safe(t.fast_info.year_high)
     except Exception:
-        return None
+        value = None
+    try:
+        set_cached(cache_key, {"value": value}, ttl_hours=6)
+    except Exception:
+        pass
+    return value
+
+
+def _extract_report_summary(report_data: dict) -> dict:
+    """개별 리포트 JSON에서 포트폴리오 프롬프트용 핵심 필드 추출.
+
+    v1 리포트 구조: {종합투자의견: {등급, 요약, 근거}, 전략별평가: {안전마진: {할인율}}, 리스크요인: [{요인}]}
+    v2(Phase 3): schema_version='v2' + 종목등급/등급점수 필드 추가 예정. v1 리포트는 grade=None.
+    """
+    if not isinstance(report_data, dict):
+        return {"grade": None, "summary_2lines": None, "discount_rate": None, "risks": []}
+
+    # 실제 저장 구조: advisory_store.get_latest_report() → {report_id, model, report: {...원본JSON...}, created_at}
+    report_body = report_data.get("report") or report_data
+    if not isinstance(report_body, dict):
+        return {"grade": None, "summary_2lines": None, "discount_rate": None, "risks": []}
+
+    opinion = report_body.get("종합투자의견") or {}
+    # v1: 등급 = "매수/중립/매도", v2에서는 "종목등급"(A/B+/B/C/D) 필드 별도
+    grade = report_body.get("종목등급") or None  # v1은 None
+
+    # 요약 180자 제한
+    summary = opinion.get("요약") if isinstance(opinion, dict) else None
+    if isinstance(summary, str) and len(summary) > 180:
+        summary = summary[:177] + "..."
+
+    # 안전마진 할인율
+    discount = None
+    strat = report_body.get("전략별평가") or {}
+    margin = strat.get("안전마진") if isinstance(strat, dict) else None
+    if isinstance(margin, dict):
+        discount = margin.get("할인율")
+
+    # 리스크 상위 2개, 각 50자 제한
+    risks_raw = report_body.get("리스크요인") or []
+    risks: list[str] = []
+    if isinstance(risks_raw, list):
+        for r in risks_raw[:2]:
+            if isinstance(r, dict):
+                txt = r.get("요인") or r.get("name") or ""
+            else:
+                txt = str(r)
+            if txt:
+                if len(txt) > 50:
+                    txt = txt[:47] + "..."
+                risks.append(txt)
+
+    return {
+        "grade": grade,
+        "summary_2lines": summary,
+        "discount_rate": discount,
+        "risks": risks,
+    }
+
+
+def _fetch_latest_report_summary(code: str, market: str) -> dict:
+    """종목의 최신 AI 리포트 요약 반환. 리포트 없으면 빈 dict."""
+    try:
+        latest = advisory_store.get_latest_report(code, market)
+    except Exception as e:
+        logger.debug("개별 리포트 조회 실패 [%s %s]: %s", code, market, e)
+        return {"grade": None, "summary_2lines": None, "discount_rate": None, "risks": []}
+    if not latest:
+        return {"grade": None, "summary_2lines": None, "discount_rate": None, "risks": []}
+    return _extract_report_summary(latest)
 
 
 def _build_context(balance_data: dict) -> dict:
@@ -79,6 +156,7 @@ def _build_context(balance_data: dict) -> dict:
         cur = _safe_float(s.get("current_price"))
         h52 = _fetch_52w_high(code, "KR")
         drop = round((cur - h52) / h52 * 100, 1) if cur and h52 and h52 > 0 else None
+        report_summary = _fetch_latest_report_summary(code, "KR")
         holdings.append({
             "name": s.get("name", ""),
             "code": code,
@@ -96,6 +174,10 @@ def _build_context(balance_data: dict) -> dict:
             "dividend_yield": s.get("dividend_yield"),
             "high_52": h52,
             "drop_from_high": drop,
+            "latest_report_grade": report_summary.get("grade"),
+            "latest_report_summary": report_summary.get("summary_2lines"),
+            "latest_report_discount_rate": report_summary.get("discount_rate"),
+            "latest_report_risks": report_summary.get("risks") or [],
         })
 
     # 해외주식
@@ -106,6 +188,7 @@ def _build_context(balance_data: dict) -> dict:
         cur_us = _safe_float(s.get("current_price"))
         h52_us = _fetch_52w_high(code_us, "US")
         drop_us = round((cur_us - h52_us) / h52_us * 100, 1) if cur_us and h52_us and h52_us > 0 else None
+        report_summary_us = _fetch_latest_report_summary(code_us, "US")
         holdings.append({
             "name": s.get("name", ""),
             "code": code_us,
@@ -125,6 +208,10 @@ def _build_context(balance_data: dict) -> dict:
             "dividend_yield": s.get("dividend_yield"),
             "high_52": h52_us,
             "drop_from_high": drop_us,
+            "latest_report_grade": report_summary_us.get("grade"),
+            "latest_report_summary": report_summary_us.get("summary_2lines"),
+            "latest_report_discount_rate": report_summary_us.get("discount_rate"),
+            "latest_report_risks": report_summary_us.get("risks") or [],
         })
 
     # 집중도 계산
@@ -135,6 +222,28 @@ def _build_context(balance_data: dict) -> dict:
     domestic_ratio = (stock_eval_domestic / total_eval * 100) if total_eval > 0 else 0
     overseas_ratio = (stock_eval_overseas / total_eval * 100) if total_eval > 0 else 0
 
+    # Phase 2-8: 가중 평균 등급 + 등급 분포 + 체제 정합성
+    # latest_report_grade는 v1에서는 None (Phase 3 DB 스키마 확장 후 v2 리포트가 생기면 값 채워짐)
+    GRADE_SCORE_MAP = {"A": 26, "B+": 21.5, "B": 17.5, "C": 13.5, "D": 8.0}  # 등급 구간 중심값
+    grade_distribution = {"A": 0, "B+": 0, "B": 0, "C": 0, "D": 0, "unknown": 0}
+    weighted_score_sum = 0.0
+    graded_weight_sum = 0.0
+    for h in holdings:
+        g = h.get("latest_report_grade")
+        if g in GRADE_SCORE_MAP:
+            grade_distribution[g] += 1
+            weighted_score_sum += h.get("weight_pct", 0) * GRADE_SCORE_MAP[g]
+            graded_weight_sum += h.get("weight_pct", 0)
+        else:
+            grade_distribution["unknown"] += 1
+    portfolio_grade_weighted_avg = (
+        round(weighted_score_sum / graded_weight_sum, 1) if graded_weight_sum > 0 else None
+    )
+
+    # 체제 정합성 점수 — 가중 평균 등급 + 주식 비중 정합
+    stock_pct = domestic_ratio + overseas_ratio
+    regime_alignment_score = None  # _build_prompt에서 체제 결정 후 계산
+
     return {
         "total_evaluation_krw": total_eval,
         "deposit_total_krw": deposit,
@@ -142,11 +251,16 @@ def _build_context(balance_data: dict) -> dict:
         "deposit_overseas_krw": deposit_overseas_krw,
         "domestic_ratio_pct": round(domestic_ratio, 1),
         "overseas_ratio_pct": round(overseas_ratio, 1),
+        "stock_total_pct": round(stock_pct, 1),
         "num_holdings": len(holdings),
         "top3_concentration_pct": round(top3_weight, 1),
         "hhi": round(hhi, 1),
         "holdings": holdings,
         "has_fno": bool(balance_data.get("futures_list")),
+        # Phase 2-8 신규 필드
+        "portfolio_grade_weighted_avg": portfolio_grade_weighted_avg,
+        "grade_distribution": grade_distribution,
+        "regime_alignment_score": regime_alignment_score,  # analyze_portfolio에서 주입
         "analysis_date": now_kst_iso(),
     }
 
@@ -162,19 +276,9 @@ _REGIME_CASH_RULES = {
 
 
 def _determine_regime(sentiment: dict) -> tuple[str, str]:
-    """sentiment → (regime, regime_desc) 반환."""
-    fg = sentiment.get("fear_greed") or {}
-    fg_val = fg.get("value") if fg.get("value") is not None else fg.get("score")
-    if fg_val is None:
-        return "selective", "중립 (적극적)"
-    fg_val = float(fg_val)
-    if fg_val <= 25:
-        return "defensive", "공포 (방어적)"
-    if fg_val <= 45:
-        return "cautious", "신중 (선별적)"
-    if fg_val <= 60:
-        return "selective", "중립 (적극적)"
-    return "accumulation", "탐욕 (축적)"
+    """sentiment → (regime, regime_desc) 반환 — 공용 모듈 위임."""
+    result = _shared_determine_regime(sentiment)
+    return result["regime"], result["regime_desc"]
 
 
 def _get_macro_context() -> dict:
@@ -280,6 +384,20 @@ def _build_system_prompt(regime: str, cash_pct: float) -> str:
 7. 한국어로 작성할 것
 8. 업종(섹터)은 종목명/코드에서 추론하여 분석할 것
 
+개별 종목 AI 리포트 연계 (holdings[].latest_report_*):
+A. 각 종목의 `latest_report_summary` 와 `latest_report_risks` 는 개별 종목 AI 애널리스트의 심층 판단이다. 포트폴리오 관점에서 재평가하되, 상충 시 reasoning에 개별 리포트의 어느 근거에 동의/반대하는지 명시하라.
+B. `latest_report_discount_rate < 0` (음수) 종목은 Graham Number 대비 고평가 상태 → 비중 축소(reduce) 또는 매도(exit) 우선 검토.
+C. `latest_report_discount_rate > 30` 종목은 안전마진 충분 → 체제 허용 시 비중 확대(increase) 후보.
+D. `latest_report_risks`에 명시된 리스크 2개 이상이면 해당 종목 priority=1(최우선) 재검토.
+E. 우선순위 원칙 — 기본적으로 포트폴리오 최적화(집중도/체제 현금비중/가중평균 등급/섹터 편중) 4대 제약이 개별 리포트 판단보다 우선. 단, 상충 시 reasoning에 다음 두 가지를 모두 명시:
+   1) 동의하는 개별 리포트 근거(종목명+근거)
+   2) 반대하는 근거 + 포트폴리오 관점의 반대 이유 (4대 제약 중 어느 것)
+F. 개별 신호를 뒤집지 않는 예외 3건 (필수 승계):
+   1) `latest_report_risks`에 "Value Trap" 또는 "가치 함정" 단어 포함 + 개별 AI가 "매도" 권고 → 매도(exit) 필수 승계 (포트폴리오 최적화로 상쇄 불가)
+   2) 기술 시그널 극단 과매수(RSI>80) + 개별 AI 매도 시그널 → "신규 매수" 권고 금지 (기존 보유 유지는 허용)
+   3) `latest_report_risks`에 "분식회계", "횡령", "상장폐지", "감사의견 거절", "감사의견 한정", "자본잠식", "회계이상" 중 하나라도 포함 → 즉시 청산(immediate + exit). 포트폴리오 집중도·체제·가중등급과 무관.
+G. 포트폴리오 가중 평균 등급이 B 미만(weighted_avg score<16) 또는 C/D 등급 종목이 과반이면 신규 편입 전면 보류 + 기존 C/D 등급 종목 우선 정리 권고 (체제와 무관).
+
 포지션 사이징:
 9.  단일 종목 투자금액은 총 평가금액의 5% 초과 금지
 10. 1회 매수 주문 금액은 예수금의 30% 초과 금지
@@ -368,12 +486,25 @@ def analyze_portfolio(balance_data: dict, force_refresh: bool = False) -> dict:
     macro_ctx = _get_macro_context()
     regime, regime_desc = _determine_regime(macro_ctx)
 
+    # Phase 2-8: 체제 정합성 점수 주입 (가중 평균 등급 → grade_score 변환)
+    try:
+        from services.safety_grade import compute_regime_alignment
+        weighted_avg = context.get("portfolio_grade_weighted_avg")
+        context["regime_alignment_score"] = compute_regime_alignment(
+            regime=regime,
+            grade_score=int(weighted_avg) if weighted_avg is not None else None,
+            fcf_years_positive=None,  # 포트폴리오 차원은 FCF 데이터 없음 (None → 중립 50점)
+            stock_pct=context.get("stock_total_pct"),
+        )
+    except Exception as e:
+        logger.debug("체제 정합성 계산 실패: %s", e)
+        context["regime_alignment_score"] = None
+
     system_prompt, user_prompt = _build_prompt(context, macro_ctx, regime, regime_desc)
 
-    # OpenAI 호출
-    try:
+    # OpenAI 호출 (Phase 3: 재시도 로직)
+    def _call_portfolio_openai(max_tokens: int) -> tuple[str, str]:
         from openai import OpenAI
-
         client = OpenAI(api_key=OPENAI_API_KEY)
         resp = client.chat.completions.create(
             model=OPENAI_MODEL,
@@ -381,14 +512,23 @@ def analyze_portfolio(balance_data: dict, force_refresh: bool = False) -> dict:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            max_completion_tokens=8000,
+            max_completion_tokens=max_tokens,
             response_format={"type": "json_object"},
         )
-        content = resp.choices[0].message.content or "{}"
+        return resp.choices[0].message.content or "{}", resp.choices[0].finish_reason or "stop"
 
-        # 토큰 제한으로 응답 잘림 감지
-        if resp.choices[0].finish_reason == "length":
-            logger.warning("포트폴리오 자문 응답이 토큰 제한으로 잘렸습니다")
+    try:
+        import time as _time
+
+        content, finish_reason = _call_portfolio_openai(10000)
+
+        # 토큰 잘림 1차 재시도 (12000)
+        if finish_reason == "length":
+            logger.warning("포트폴리오 자문 토큰 잘림 1차 — 12000으로 재시도")
+            _time.sleep(1)
+            content, finish_reason = _call_portfolio_openai(12000)
+            if finish_reason == "length":
+                raise ExternalAPIError("포트폴리오 자문 응답이 토큰 제한으로 잘렸습니다.")
 
         analysis = _parse_response(content)
 
@@ -404,12 +544,28 @@ def analyze_portfolio(balance_data: dict, force_refresh: bool = False) -> dict:
             raise PaymentRequiredError(
                 "OpenAI API 크레딧이 부족합니다. platform.openai.com에서 결제 정보를 확인해주세요.",
             )
-        raise ExternalAPIError(f"OpenAI 호출 실패: {err_str}")
+        # 일반 에러 1회 재시도 (backoff 2초)
+        import time as _time
+        logger.warning("포트폴리오 OpenAI 1차 실패: %s — 2초 후 재시도", err_str[:200])
+        _time.sleep(2)
+        try:
+            content, _ = _call_portfolio_openai(10000)
+            analysis = _parse_response(content)
+            if "raw" in analysis and "diagnosis" not in analysis:
+                raise ExternalAPIError("AI 응답을 파싱할 수 없습니다.")
+        except Exception as e2:
+            raise ExternalAPIError(f"OpenAI 호출 실패: {str(e2)}")
 
     analyzed_at = now_kst_iso()
 
-    # DB 영구 저장
-    report_id = advisory_store.save_portfolio_report(OPENAI_MODEL, analysis)
+    # DB 영구 저장 (Phase 3 확장 필드)
+    weighted_avg = context.get("portfolio_grade_weighted_avg")
+    report_id = advisory_store.save_portfolio_report(
+        OPENAI_MODEL, analysis,
+        weighted_grade_avg=weighted_avg,
+        regime=regime,
+        schema_version="v2" if weighted_avg is not None else "v1",
+    )
 
     # 캐시 저장
     cache_value = {"data": analysis, "analyzed_at": analyzed_at, "report_id": report_id}

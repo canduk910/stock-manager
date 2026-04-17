@@ -683,3 +683,140 @@ def fetch_income_detail_annual(stock_code: str, years: int = 5) -> list[dict]:
     result = sorted(collected.values(), key=lambda x: x["year"])[-years:]
     set_cached(cache_key, result, ttl_hours=168)
     return result
+
+
+# ── Phase 2-3: 분기 실적 ─────────────────────────────────────────────────────
+
+# reprt_code 매핑 (OpenDart):
+# 11013 = Q1(1분기보고서), 11012 = 반기(2분기 누계), 11014 = Q3(3분기 누계), 11011 = 사업보고서(연간)
+_QUARTERLY_REPRT_CODES = [
+    ("11013", 1),  # Q1
+    ("11012", 2),  # 반기 (2분기 누계 = Q1 + Q2)
+    ("11014", 3),  # 3분기 누계 (Q1 + Q2 + Q3)
+    ("11011", 4),  # 연간
+]
+
+
+def _call_fin_api_reprt(corp_code: str, bsns_year: int, reprt_code: str, fs_div: str) -> list[dict]:
+    """분기 보고서 원시 응답 반환 (reprt_code 지정). 실패/비어있으면 []."""
+    try:
+        resp = _dart_get(
+            f"{_BASE_URL}/fnlttSinglAcntAll.json",
+            params={
+                "crtfc_key": _api_key(),
+                "corp_code": corp_code,
+                "bsns_year": str(bsns_year),
+                "reprt_code": reprt_code,
+                "fs_div": fs_div,
+            },
+            timeout=20,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        if data.get("status") != "000":
+            return []
+        return data.get("list", []) or []
+    except Exception:
+        return []
+
+
+def _extract_quarterly_accumulated(items: list[dict]) -> dict:
+    """분기/반기/3분기누계/연간 보고서의 IS(or CIS) 당기 누계값 추출.
+
+    반환: {revenue, operating_income, net_income} (누계 기준)
+    """
+    data = {"revenue": None, "operating_income": None, "net_income": None}
+    for it in items:
+        if it.get("sj_div") not in ("IS", "CIS"):
+            continue
+        nm = (it.get("account_nm") or "").strip()
+        for key, aliases in _ACCOUNT_KEYS.items():
+            if nm in aliases:
+                # thstrm_amount = 당기(해당 분기/반기/누계)
+                amt = _parse_amount(it.get("thstrm_amount"))
+                if amt is not None and data[key] is None:
+                    data[key] = amt
+                break
+    return data
+
+
+def fetch_quarterly_financials(stock_code: str, quarters: int = 4) -> list[dict]:
+    """국내 종목 최근 N분기 손익 (DART 분기보고서 누계 → 개별 분기 환산).
+
+    변환 공식:
+      Q1 값 = 11013 thstrm (Q1)
+      Q2 값 = 11012 thstrm (반기) − Q1
+      Q3 값 = 11014 thstrm (3분기누계) − 반기
+      Q4 값 = 11011 thstrm (연간) − 3분기누계
+
+    반환: [{year, quarter, revenue, operating_income, net_income, oi_margin, net_margin}] 오래된순
+    미공시 분기 건너뜀 (graceful). 캐시: `dart:quarterly:{code}:{quarters}` 7일.
+    """
+    cache_key = f"dart:quarterly:{stock_code}:{quarters}"
+    cached = get_cached(cache_key)
+    if cached is not None:
+        return cached
+
+    corp_code = _fetch_corp_code(stock_code)
+    if not corp_code:
+        set_cached(cache_key, [], ttl_hours=24)
+        return []
+
+    today = date.today()
+    latest_year = today.year
+    # 최대 2년치(=최근 8분기) 조회하여 이후 quarters 만큼 슬라이스
+    years_to_fetch = max(2, (quarters + 3) // 4 + 1)
+
+    quarterly_rows: list[dict] = []
+
+    for year_offset in range(years_to_fetch):
+        target_year = latest_year - year_offset
+
+        # 4개 reprt_code 조회 → 누계값 수집
+        accum: dict[int, dict] = {}  # quarter(1-4) → {revenue, operating_income, net_income}
+        fs_div_used: Optional[str] = None
+        for reprt_code, qnum in _QUARTERLY_REPRT_CODES:
+            fs_divs = [fs_div_used] if fs_div_used else ["CFS", "OFS"]
+            items: list = []
+            for fs_div in fs_divs:
+                candidate = _call_fin_api_reprt(corp_code, target_year, reprt_code, fs_div)
+                if candidate:
+                    items = candidate
+                    if fs_div_used is None:
+                        fs_div_used = fs_div
+                    break
+            if items:
+                accum[qnum] = _extract_quarterly_accumulated(items)
+
+        if not accum:
+            continue
+
+        # 누계 → 개별 분기 환산
+        for q in range(1, 5):
+            if q not in accum:
+                continue
+            cur = accum[q]
+            prev = accum.get(q - 1) if q > 1 else None
+            row = {"year": target_year, "quarter": q}
+            for key in ("revenue", "operating_income", "net_income"):
+                cur_val = cur.get(key)
+                if cur_val is None:
+                    row[key] = None
+                    continue
+                if prev and prev.get(key) is not None:
+                    row[key] = cur_val - prev[key]
+                else:
+                    row[key] = cur_val  # 직전 누계 없으면 당기 값 그대로 (Q1 또는 graceful)
+            # 마진 계산
+            rev = row.get("revenue") or 0
+            oi = row.get("operating_income") or 0
+            ni = row.get("net_income") or 0
+            row["oi_margin"] = round(oi / rev * 100, 1) if rev > 0 and oi is not None else None
+            row["net_margin"] = round(ni / rev * 100, 1) if rev > 0 and ni is not None else None
+            quarterly_rows.append(row)
+
+    # 연도-분기 오래된→최신 정렬 후 최근 quarters만
+    quarterly_rows.sort(key=lambda r: (r["year"], r["quarter"]))
+    result = quarterly_rows[-quarters:] if len(quarterly_rows) > quarters else quarterly_rows
+    set_cached(cache_key, result, ttl_hours=24 * 7)
+    return result

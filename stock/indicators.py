@@ -151,6 +151,7 @@ def calc_technical_indicators(ohlcv: list[dict]) -> dict:
     highs = [b["high"] for b in ohlcv]
     lows = [b["low"] for b in ohlcv]
     closes = [b["close"] for b in ohlcv]
+    volumes = [b.get("volume") or 0 for b in ohlcv]
 
     # MACD
     ema12 = _ema(closes, 12)
@@ -254,6 +255,39 @@ def calc_technical_indicators(ohlcv: list[dict]) -> dict:
         elif ma5_cur < ma20_cur < ma60_cur:
             ma_alignment = "역배열"
 
+    # 거래량 신호 (Phase 2-1)
+    volume_5d_avg: Optional[float] = None
+    volume_20d_avg: Optional[float] = None
+    volume_signal: Optional[float] = None
+    cur_volume = volumes[-1] if volumes else 0
+    if len(volumes) >= 5:
+        recent5 = volumes[-5:]
+        avg5 = sum(recent5) / 5 if recent5 else 0
+        volume_5d_avg = _safe_val(avg5)
+        # volume_signal: 최신 거래량 / 5일 평균 (직전 5봉 평균 대비 배수)
+        # 최신 포함 평균 대신 직전 5봉 평균을 쓰는 게 신호 의미 명확
+        if len(volumes) >= 6:
+            prev5 = volumes[-6:-1]
+            avg_prev5 = sum(prev5) / 5 if prev5 else 0
+            if avg_prev5 > 0:
+                volume_signal = _safe_val(round(cur_volume / avg_prev5, 2))
+    if len(volumes) >= 20:
+        recent20 = volumes[-20:]
+        avg20 = sum(recent20) / 20 if recent20 else 0
+        volume_20d_avg = _safe_val(avg20)
+
+    # BB 위치 (Phase 2-1): (close - lower) / (upper - lower) × 100
+    bb_position: Optional[float] = None
+    bb_upper_cur = next((v for v in reversed(bb_upper) if v is not None), None)
+    bb_lower_cur = next((v for v in reversed(bb_lower) if v is not None), None)
+    if (
+        bb_upper_cur is not None
+        and bb_lower_cur is not None
+        and bb_upper_cur > bb_lower_cur
+        and cur_close is not None
+    ):
+        bb_position = _safe_val(round((cur_close - bb_lower_cur) / (bb_upper_cur - bb_lower_cur) * 100, 1))
+
     return {
         "macd": {
             "macd": macd_line,
@@ -302,5 +336,10 @@ def calc_technical_indicators(ohlcv: list[dict]) -> dict:
             "volatility_target_k03": volatility_target_k03,
             "volatility_target_k05": volatility_target_k05,
             "volatility_target_k07": volatility_target_k07,
+            # Phase 2-1 신규
+            "volume_signal": volume_signal,
+            "volume_5d_avg": volume_5d_avg,
+            "volume_20d_avg": volume_20d_avg,
+            "bb_position": bb_position,
         },
     }

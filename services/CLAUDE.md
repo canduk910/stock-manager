@@ -17,11 +17,14 @@
 | `quote_service.py` | 실시간 시세 공개 API 진입점 (get_manager/get_overseas_manager 싱글턴) |
 | `quote_kis.py` | KIS WebSocket 단일 연결 + 심볼별 pub/sub (국내+FNO). KISQuoteManager 클래스. |
 | `quote_overseas.py` | 해외주식 시세 (Finnhub WS 또는 yfinance 2초 폴링). OverseasQuoteManager 클래스. |
-| `advisory_service.py` | AI자문 데이터 수집(ThreadPoolExecutor 병렬) + GPT-4o 리포트 생성 |
+| `advisory_service.py` | AI자문 데이터 수집(ThreadPoolExecutor 7~8 workers 병렬) + GPT 리포트 생성. v2 스키마: 7점등급/복합점수/체제정합성/Value Trap 정량 필드. Pydantic 검증 + 토큰 잘림 재시도. |
+| `macro_regime.py` | **공용 체제 판단 모듈** (신규). REGIME_MATRIX 20셀(버핏×공포탐욕) + REGIME_PARAMS(margin/stock_max/cash_min/single_cap) + VIX>35 오버라이드 + 하이스테리시스 ±5. 3개 서비스(advisory/portfolio_advisor/pipeline) 공유. |
+| `safety_grade.py` | **7점 등급/복합점수 공유 모듈** (신규). `compute_grade_7point()`(7지표×4점=28점→A/B+/B/C/D), `compute_composite_score()`(ValueScreener 공식), `compute_regime_alignment()`, `compute_position_sizing()`. advisory_service + pipeline_service 공유. |
+| `schemas/advisory_report_v2.py` | **Pydantic v2 응답 스키마** (신규). `AdvisoryReportV2Schema` 11개 모델 계층. `validate_v2_report()`/`extract_v2_fields()`. 등급=Literal, 점수=ge/le 범위 검증. |
 | `macro_service.py` | 매크로 분석 오케스트레이션: quote+sparkline 완전 병렬 수집 + GPT 번역/추출 + 섹션별 독립 실패 허용. GPT 결과는 `macro.db`에 일일 캐싱 (KST 기준) |
-| `portfolio_advisor_service.py` | AI 포트폴리오 자문: 잔고 컨텍스트(52주 하락률 포함) + 매크로 체제 → OpenAI 호출(체제별 프롬프트 동적 구성 + 역발상 매수 규칙) → 진단/리밸런싱/매매안. `cache.db` 30분 TTL + `advisory.db` 영구 저장. `max_completion_tokens=8000`. |
+| `portfolio_advisor_service.py` | AI 포트폴리오 자문: 잔고 컨텍스트(52주 하락률+**개별 AI 리포트 연계**) + 매크로 체제 → OpenAI 호출(체제별 프롬프트 + 역발상 + **가중 등급 집계 + 체제 정합성**) → 진단/리밸런싱/매매안. `cache.db` 30분 TTL + `advisory.db` 영구 저장. 52주 고가 6h 캐시. |
 | `report_service.py` | 투자 보고서: 추천 이력 + 매크로 체제 이력 + 일일 보고서 비즈니스 로직 + 통합 Markdown 생성 + 성과 통계. `stock/report_store.py` 래퍼 경유 (다른 서비스와 동일 패턴). |
-| `pipeline_service.py` | 투자 파이프라인: 매크로 체제 판단(REGIME_MATRIX) → 체제별 스크리닝 → 심층 분석(7점 등급) → 추천 생성 → 보고서 저장. 기존 서비스 직접 호출 (HTTP 미경유). `run_pipeline(market)` 단일 진입점. |
+| `pipeline_service.py` | 투자 파이프라인: 체제 판단(`macro_regime.py` 위임) → 체제별 스크리닝 → 심층 분석(`safety_grade.py` 위임) → 추천 생성 → 보고서 저장. `run_pipeline(market)` 단일 진입점. |
 | `scheduler_service.py` | APScheduler: 08:00 KR / 16:00 US BackgroundScheduler. `setup_scheduler()` / `shutdown_scheduler()` / `get_scheduler_status()`. main.py lifespan 통합. |
 
 ---
@@ -98,14 +101,14 @@ ServiceError (기본 400)
 - `_fetch_current_price(symbol, market)`: 국내=`stock.market.fetch_price()`, 해외=`stock.yf_client.fetch_price_yf()` (yfinance 통일)
 
 ### advisory_service.py
-- **3전략 프레임워크**:
-  - 변동성 돌파 (Larry Williams, K=0.3/0.5/0.7)
-  - 안전마진 (Graham Number = √(22.5×EPS×BPS))
-  - 추세추종 (MA정배열 + MACD + RSI)
-- `max_completion_tokens=2500`
+- **3전략 프레임워크**: 변동성 돌파(K=0.3/0.5/0.7) + 안전마진(Graham Number) + 추세추종(MA+MACD+RSI)
+- **System Prompt 도메인 규칙 삽입** (Phase 1): MarginAnalyst 7점 등급표 + MacroSentinel 체제 매트릭스 + OrderAdvisor 등급별 손절폭(A=-8%/B+=-10%/B=-12%) + ValueScreener Value Trap 5규칙
+- **User Prompt 추가 섹션** (Phase 2): Forward 추정치 + PER/PBR 5년 통계 + 분기 실적 + 거래량·BB 신호 + 7점 등급 사전 계산값
+- **v2 JSON 정량 필드**: `schema_version`/`종목등급`(A~D)/`등급점수`(0-28)/`복합점수`(0-100)/`체제정합성점수`(0-100)/`Value_Trap_경고`/`등급팩터`/`recommendation`(ENTER/HOLD/SKIP)
+- **재시도 로직**: `max_completion_tokens=10000`(기본)→12000(재시도). 토큰 잘림/Pydantic 실패/일반 에러 각 1회 재시도. 토큰 2차 실패 시 저장 거부(ExternalAPIError)
 - `response_format={"type":"json_object"}`
-- 출력 JSON에 `전략별평가` 섹션 포함
-- fundamental 응답에 `business_description`, `business_keywords` 필드 포함 (fetch_segments 반환 dict에서 추출, 구 캐시 list 형태 하위호환)
+- Pydantic v2 스키마 검증 (`schemas/advisory_report_v2.py`) + v1 폴백
+- fundamental 응답에 `business_description`, `business_keywords`, `forward_estimates`, `valuation_stats`, `quarterly` 필드
 - ServiceError 계층 사용 (HTTPException 직접 raise 없음)
 
 ### watchlist_service.py
@@ -123,6 +126,6 @@ ServiceError (기본 400)
 
 ## 에이전트 역할
 
-하네스의 도메인 에이전트(MacroSentinel/ValueScreener/MarginAnalyst/OrderAdvisor)는 **자문 전용** — API를 직접 호출하지 않는다. DevArchitect가 파이프라인 서비스 구현 시 투자 로직의 정확성을 자문받는다.
+하네스의 도메인 에이전트(MacroSentinel/ValueScreener/MarginAnalyst/OrderAdvisor)는 **자문 전용** — API를 직접 호출하지 않는다. 도메인 규칙은 `advisory_service.py`의 System Prompt + `safety_grade.py`/`macro_regime.py` 공용 모듈에 코드화되어 있다.
 
-투자 파이프라인은 `pipeline_service.py`(미구현)에서 위 서비스들을 직접 import하여 호출할 예정.
+**3중 일관성 필수**: System Prompt(문자) = safety_grade.py(코드) = Pydantic(타입) 동일 임계값 유지.

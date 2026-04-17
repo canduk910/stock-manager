@@ -855,3 +855,89 @@ def fetch_forward_estimates_yf(code: str, is_kr: bool = False) -> dict:
     except Exception:
         set_cached(cache_key, empty, ttl_hours=1)
         return empty
+
+
+# ── Phase 2-3: 분기 실적 (yfinance) ──────────────────────────────────────────
+
+def fetch_quarterly_financials_yf(code: str, quarters: int = 4) -> list[dict]:
+    """해외 종목 최근 N분기 손익 핵심 지표.
+
+    반환: [{year, quarter, revenue, operating_income, net_income, oi_margin, net_margin}]
+    오래된순. 데이터 부족 시 가용 분기만 반환. 미공시 필드는 None.
+    캐시: yf:quarterly:{code}:{quarters} 7일 TTL.
+    """
+    key = f"yf:quarterly:{code.upper()}:{quarters}"
+    cached = get_cached(key)
+    if cached is not None:
+        return cached
+
+    try:
+        t = _ticker(code)
+        qfin = t.quarterly_financials
+        if qfin is None or qfin.empty:
+            set_cached(key, [], ttl_hours=24)
+            return []
+
+        # yfinance quarterly_financials는 열=날짜, 행=계정. 날짜 오래된→최신 정렬
+        qfin_sorted = qfin.reindex(sorted(qfin.columns), axis=1)
+
+        def _row(name: str):
+            if name in qfin_sorted.index:
+                return qfin_sorted.loc[name]
+            return None
+
+        revenue_row = _row("Total Revenue") if _row("Total Revenue") is not None else _row("Revenue")
+        oi_row = _row("Operating Income")
+        ni_row = _row("Net Income") or _row("Net Income Common Stockholders")
+
+        result: list[dict] = []
+        for ts in qfin_sorted.columns:
+            try:
+                year = ts.year
+                quarter = (ts.month - 1) // 3 + 1
+            except Exception:
+                continue
+
+            def _pick(row, ts):
+                if row is None:
+                    return None
+                try:
+                    v = row.get(ts)
+                    if v is None:
+                        return None
+                    vf = float(v)
+                    if vf != vf or vf in (float("inf"), float("-inf")):
+                        return None
+                    return vf
+                except Exception:
+                    return None
+
+            revenue = _pick(revenue_row, ts)
+            oi = _pick(oi_row, ts)
+            ni = _pick(ni_row, ts)
+
+            oi_margin = None
+            net_margin = None
+            if revenue and revenue > 0:
+                if oi is not None:
+                    oi_margin = round(oi / revenue * 100, 2)
+                if ni is not None:
+                    net_margin = round(ni / revenue * 100, 2)
+
+            result.append({
+                "year": year,
+                "quarter": quarter,
+                "revenue": revenue,
+                "operating_income": oi,
+                "net_income": ni,
+                "oi_margin": oi_margin,
+                "net_margin": net_margin,
+            })
+
+        # 최근 N분기만
+        result = result[-quarters:] if len(result) > quarters else result
+        set_cached(key, result, ttl_hours=24 * 7)
+        return result
+    except Exception:
+        set_cached(key, [], ttl_hours=1)
+        return []

@@ -14,102 +14,39 @@ from typing import Optional
 from services import macro_service, report_service
 from services.advisory_service import refresh_stock_data, _calc_graham_number
 from services.exceptions import ExternalAPIError
+from services.macro_regime import determine_regime as _determine_regime_shared, REGIME_MATRIX, REGIME_PARAMS
 from db.utils import now_kst_iso
 
 logger = logging.getLogger(__name__)
 
 KST = timezone(timedelta(hours=9))
 
-# ── 체제 판단 ─────────────────────────────────────────────────
+# ── 체제 판단 (공용 모듈 위임) ────────────────────────────────
 
-REGIME_MATRIX = {
-    ("low", "extreme_fear"): "accumulation",
-    ("low", "fear"): "accumulation",
-    ("low", "neutral"): "selective",
-    ("low", "greed"): "cautious",
-    ("low", "extreme_greed"): "cautious",
-    ("normal", "extreme_fear"): "selective",
-    ("normal", "fear"): "selective",
-    ("normal", "neutral"): "cautious",
-    ("normal", "greed"): "cautious",
-    ("normal", "extreme_greed"): "defensive",
-    ("high", "extreme_fear"): "selective",
-    ("high", "fear"): "cautious",
-    ("high", "neutral"): "cautious",
-    ("high", "greed"): "defensive",
-    ("high", "extreme_greed"): "defensive",
-    ("extreme", "extreme_fear"): "cautious",
-    ("extreme", "fear"): "defensive",
-    ("extreme", "neutral"): "defensive",
-    ("extreme", "greed"): "defensive",
-    ("extreme", "extreme_greed"): "defensive",
-}
+def _determine_regime(sentiment: dict, previous_regime: Optional[str] = None) -> dict:
+    """매크로 심리 데이터에서 시장 체제를 결정한다 (공용 모듈 위임).
 
-REGIME_PARAMS = {
-    "accumulation": {"per_max": 20, "pbr_max": 2.0, "roe_min": 5, "margin_threshold": 20, "max_position": 0.05, "max_invest": 0.75},
-    "selective":    {"per_max": 15, "pbr_max": 1.5, "roe_min": 8, "margin_threshold": 30, "max_position": 0.04, "max_invest": 0.65},
-    "cautious":     {"per_max": 12, "pbr_max": 1.2, "roe_min": 10, "margin_threshold": 40, "max_position": 0.03, "max_invest": 0.50},
-    "defensive":    {"per_max": 0,  "pbr_max": 0,   "roe_min": 0,  "margin_threshold": 999, "max_position": 0, "max_invest": 0},
-}
+    기존 반환 키(params.margin_threshold/max_position/max_invest)를 하위 호환 유지하도록 래핑한다.
 
-
-def _classify_buffett(ratio: Optional[float]) -> str:
-    if ratio is None:
-        return "normal"
-    if ratio < 0.8:
-        return "low"
-    if ratio < 1.2:
-        return "normal"
-    if ratio < 1.6:
-        return "high"
-    return "extreme"
-
-
-def _classify_fear_greed(score: Optional[float], vix: Optional[float] = None) -> str:
-    # VIX > 35 오버라이드
-    if vix is not None and vix > 35:
-        return "extreme_fear"
-    if score is None:
-        return "neutral"
-    if score < 20:
-        return "extreme_fear"
-    if score < 40:
-        return "fear"
-    if score < 60:
-        return "neutral"
-    if score < 80:
-        return "greed"
-    return "extreme_greed"
-
-
-def _determine_regime(sentiment: dict) -> dict:
-    """매크로 심리 데이터에서 시장 체제를 결정한다."""
-    raw_vix = sentiment.get("vix")
-    vix = raw_vix.get("value") if isinstance(raw_vix, dict) else raw_vix
-
-    buffett_data = sentiment.get("buffett_indicator") or {}
-    buffett_ratio = buffett_data.get("ratio") if isinstance(buffett_data, dict) else buffett_data
-    # ratio가 백분율(235.2)이면 소수(2.352)로 변환
-    if buffett_ratio is not None and buffett_ratio > 10:
-        buffett_ratio = round(buffett_ratio / 100, 3)
-
-    fear_greed = sentiment.get("fear_greed") or {}
-    fg_score = fear_greed.get("score") if isinstance(fear_greed, dict) else fear_greed
-
-    buffett_level = _classify_buffett(buffett_ratio)
-    fg_level = _classify_fear_greed(fg_score, vix)
-
-    regime = REGIME_MATRIX.get((buffett_level, fg_level), "cautious")
-    params = REGIME_PARAMS[regime]
-
+    호환 키 매핑 (공용 모듈 REGIME_PARAMS → 기존 pipeline 키):
+    - margin_threshold ← margin     (스크리닝 할인율 임계값, _generate_recommendations L388에서 소비)
+    - max_position     ← single_cap (종목당 한도 소수 비율, 현재 소비처 없음. 보고서/포지션 사이징 확장 대비 하위호환)
+    - max_invest       ← stock_max  (총투자 한도 소수 비율, 현재 소비처 없음. 동일)
+    """
+    base = _determine_regime_shared(sentiment, previous_regime=previous_regime)
+    params = dict(base["params"])
+    # 기존 pipeline 코드와 호환되는 키 매핑 (소수점 비율로 변환)
+    params["margin_threshold"] = params.get("margin", 999)
+    params["max_position"] = (params.get("single_cap", 0) or 0) / 100.0
+    params["max_invest"] = (params.get("stock_max", 0) or 0) / 100.0
     return {
-        "regime": regime,
+        "regime": base["regime"],
         "params": params,
-        "vix": vix,
-        "buffett_ratio": buffett_ratio,
-        "fear_greed_score": fg_score,
-        "buffett_level": buffett_level,
-        "fear_greed_level": fg_level,
+        "vix": base.get("vix"),
+        "buffett_ratio": base.get("buffett_ratio"),
+        "fear_greed_score": base.get("fear_greed_score"),
+        "buffett_level": base.get("buffett_level"),
+        "fear_greed_level": base.get("fg_level"),
     }
 
 
@@ -176,68 +113,45 @@ def _calc_safety_grade(
     fcf_years_positive: int = 0,
     revenue_cagr: Optional[float] = None,
 ) -> dict:
-    """7개 지표 기반 종합 등급 (28점 만점)."""
-    details = {}
-    score = 0
+    """7개 지표 기반 종합 등급 (28점 만점).
 
-    # 1. Graham 할인율
-    if graham_number and current_price and current_price > 0:
-        discount = (graham_number - current_price) / current_price * 100
-        pts = 4 if discount > 40 else 3 if discount > 20 else 2 if discount > 0 else 1
-    else:
-        discount = None
-        pts = 1
-    details["discount"] = {"value": discount, "points": pts}
-    score += pts
+    Phase 2-4: services.safety_grade 공용 모듈로 이전. 기존 시그니처 유지하여 하위호환.
+    내부적으로 safety_grade.compute_grade_7point()에 전달.
+    """
+    from services.safety_grade import compute_grade_7point
 
-    # 2. PER vs 5년 평균
-    if per and per_5yr_avg and per_5yr_avg > 0:
-        per_diff = (per - per_5yr_avg) / per_5yr_avg * 100
-        pts = 4 if per_diff < -30 else 3 if per_diff < -10 else 2 if per_diff < 10 else 1
-    else:
-        pts = 2  # 데이터 없으면 중립
-    details["per_vs_avg"] = {"value": per, "avg": per_5yr_avg, "points": pts}
-    score += pts
-
-    # 3. PBR 절대
-    if pbr is not None:
-        pts = 4 if pbr < 0.7 else 3 if pbr < 1.0 else 2 if pbr < 1.5 else 1
-    else:
-        pts = 2
-    details["pbr"] = {"value": pbr, "points": pts}
-    score += pts
-
-    # 4. 부채비율
-    if debt_ratio is not None:
-        pts = 4 if debt_ratio < 50 else 3 if debt_ratio < 100 else 2 if debt_ratio < 200 else 1
-    else:
-        pts = 2
-    details["debt_ratio"] = {"value": debt_ratio, "points": pts}
-    score += pts
-
-    # 5. 유동비율
-    if current_ratio is not None:
-        pts = 4 if current_ratio > 2.0 else 3 if current_ratio > 1.5 else 2 if current_ratio > 1.0 else 1
-    else:
-        pts = 2
-    details["current_ratio"] = {"value": current_ratio, "points": pts}
-    score += pts
-
-    # 6. FCF 추세
-    pts = 4 if fcf_years_positive >= 3 else 3 if fcf_years_positive >= 2 else 2 if fcf_years_positive >= 1 else 1
-    details["fcf_trend"] = {"years_positive": fcf_years_positive, "points": pts}
-    score += pts
-
-    # 7. 매출 CAGR
+    metrics = {"per": per, "pbr": pbr}
+    bs = [{"debt_ratio": debt_ratio, "current_ratio": current_ratio}] if (debt_ratio or current_ratio) else []
+    # fcf_years_positive는 income_stmt에서 재계산되므로 우회: 빈 cashflow + income 만들되, 실제 점수는 아래 override
+    # cashflow 대신 간단히 fcf_years_positive를 income 인자로 전달 위해 자체 income 구성
+    income = []
     if revenue_cagr is not None:
-        pts = 4 if revenue_cagr > 10 else 3 if revenue_cagr > 5 else 2 if revenue_cagr > 0 else 1
-    else:
-        pts = 2
-    details["revenue_cagr"] = {"value": revenue_cagr, "points": pts}
-    score += pts
+        # 과거→현재 매출이 revenue_cagr에 맞도록 가상 구성
+        last = 100.0
+        first = last / ((1 + revenue_cagr / 100) ** 3)
+        income = [{"year": 1, "revenue": first}, {"year": 4, "revenue": last}]
+    val_stats = {"per_avg_5y": per_5yr_avg} if per_5yr_avg else None
 
-    grade = "A" if score >= 24 else "B+" if score >= 20 else "B" if score >= 16 else "C" if score >= 12 else "D"
-    return {"score": score, "grade": grade, "details": details}
+    # FCF 연수를 직접 주입하기 위한 가상 cashflow
+    cf: list[dict] = []
+    for _ in range(fcf_years_positive):
+        cf.append({"operating_cf": 1, "free_cf": 1})
+    # fcf_years_positive=0이면 cf=[] → _count_fcf_years_positive=0 → 1점
+
+    result = compute_grade_7point(
+        metrics=metrics,
+        balance_sheet=bs,
+        cashflow=cf,
+        income_stmt=income,
+        valuation_stats=val_stats,
+        graham_number=graham_number,
+        current_price=current_price,
+    )
+    return {
+        "score": result["score"],
+        "grade": result["grade"],
+        "details": result["details"],
+    }
 
 
 def _extract_financial_metrics(fundamental: dict) -> dict:

@@ -109,6 +109,49 @@ export default function AdvisorPanel({ balanceData, notify, advisor: externalAdv
               </div>
             )}
 
+            {/* Phase 3: 개별 종목 리포트 연계 요약 카드 (portfolio_grade_weighted_avg 부재 시 숨김) */}
+            {result?.data && (result?.weighted_grade_avg != null || result?.data?.portfolio_grade_weighted_avg != null) && (() => {
+              const wga = result?.weighted_grade_avg ?? result?.data?.portfolio_grade_weighted_avg
+              const regime = result?.regime ?? result?.data?.regime
+              const gdist = result?.data?.grade_distribution || {}
+              const belowB = (gdist['C'] || 0) + (gdist['D'] || 0)
+              const gradeColor = wga >= 24 ? 'text-emerald-600' : wga >= 20 ? 'text-green-600' : wga >= 16 ? 'text-yellow-600' : wga >= 12 ? 'text-orange-600' : 'text-red-600'
+              return (
+                <div className="border border-indigo-200 rounded-lg p-3 bg-indigo-50/30 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-sm font-semibold text-indigo-700">개별 종목 리포트 연계</h4>
+                    {regime && <span className="text-xs px-2 py-0.5 bg-indigo-100 text-indigo-600 rounded">{regime}</span>}
+                  </div>
+                  <div className="flex items-center gap-4">
+                    <div className="text-center">
+                      <p className="text-xs text-gray-500">가중 평균 등급</p>
+                      <p className={`text-2xl font-black ${gradeColor}`}>{wga?.toFixed(1)}</p>
+                      <p className="text-xs text-gray-400">/28</p>
+                    </div>
+                    <div className="flex-1 flex gap-1 items-end h-8">
+                      {['A','B+','B','C','D','unknown'].map(g => {
+                        const cnt = gdist[g] || 0
+                        const colors = { A: 'bg-emerald-400', 'B+': 'bg-green-400', B: 'bg-yellow-400', C: 'bg-orange-400', D: 'bg-red-400', unknown: 'bg-gray-300' }
+                        return cnt > 0 ? (
+                          <div key={g} className="flex flex-col items-center flex-1">
+                            <span className="text-[10px] text-gray-500">{cnt}</span>
+                            <div className={`w-full rounded-t ${colors[g]}`} style={{ height: `${Math.min(cnt * 8, 24)}px` }}></div>
+                            <span className="text-[10px] text-gray-400">{g}</span>
+                          </div>
+                        ) : null
+                      })}
+                    </div>
+                  </div>
+                  {belowB > 0 && (
+                    <p className="text-xs text-orange-600">C/D 등급 {belowB}개 종목 — 우선 정리 권고</p>
+                  )}
+                  {wga != null && wga < 16 && (
+                    <p className="text-xs text-red-600 font-semibold">가중 평균 B 미만 — 신규 편입 전면 보류</p>
+                  )}
+                </div>
+              )
+            })()}
+
             <DiagnosisCard diagnosis={analysis.diagnosis} />
             <RebalanceCard suggestions={analysis.rebalancing} />
             <TradeTable trades={analysis.trades} notify={notify} />

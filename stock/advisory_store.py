@@ -52,10 +52,26 @@ def get_cache(code: str, market: str) -> Optional[dict]:
 
 # ── 리포트 CRUD ───────────────────────────────────────────────────────────────
 
-def save_report(code: str, market: str, model: str, report: dict) -> int:
+def save_report(
+    code: str,
+    market: str,
+    model: str,
+    report: dict,
+    grade: str | None = None,
+    grade_score: int | None = None,
+    composite_score: float | None = None,
+    regime_alignment: float | None = None,
+    schema_version: str = "v1",
+    value_trap_warning: bool = False,
+) -> int:
     """AI 리포트 저장. 생성된 ID 반환."""
     with get_session() as db:
-        return AdvisoryRepository(db).save_report(code, market, model, report)
+        return AdvisoryRepository(db).save_report(
+            code, market, model, report,
+            grade=grade, grade_score=grade_score,
+            composite_score=composite_score, regime_alignment=regime_alignment,
+            schema_version=schema_version, value_trap_warning=value_trap_warning,
+        )
 
 
 def get_report_history(code: str, market: str, limit: int = 20) -> list[dict]:
@@ -78,10 +94,20 @@ def get_latest_report(code: str, market: str) -> Optional[dict]:
 
 # ── 포트폴리오 자문 리포트 CRUD ──────────────────────────────────────────────
 
-def save_portfolio_report(model: str, report: dict) -> int:
+def save_portfolio_report(
+    model: str,
+    report: dict,
+    weighted_grade_avg: float | None = None,
+    regime: str | None = None,
+    schema_version: str = "v1",
+) -> int:
     """포트폴리오 자문 리포트 저장. 생성된 ID 반환."""
     with get_session() as db:
-        return AdvisoryRepository(db).save_portfolio_report(model, report)
+        return AdvisoryRepository(db).save_portfolio_report(
+            model, report,
+            weighted_grade_avg=weighted_grade_avg, regime=regime,
+            schema_version=schema_version,
+        )
 
 
 def get_portfolio_report_history(limit: int = 20) -> list[dict]:

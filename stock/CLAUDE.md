@@ -10,16 +10,16 @@ CLI와 API 라우터 양쪽에서 공용으로 사용한다. 비즈니스 데이
 | `store.py` | 관심종목 CRUD + 순서 관리. `db/repositories/watchlist_repo.py` 위임 래퍼. 기존 함수 시그니처 100% 유지. |
 | `order_store.py` | 주문 이력 + 예약주문 CRUD. `db/repositories/order_repo.py` 위임 래퍼. 기존 함수 시그니처 100% 유지. |
 | `advisory_store.py` | AI자문 CRUD. `db/repositories/advisory_repo.py` 위임 래퍼. 기존 함수 시그니처 100% 유지. |
-| `advisory_fetcher.py` | AI자문 OHLCV 수집 + 사업부문 추론. 기술지표 계산은 indicators.py 위임. KIS 1분봉 4시간대 병렬 수집(ThreadPoolExecutor). |
+| `advisory_fetcher.py` | AI자문 OHLCV 수집 + 사업부문 추론 + **`fetch_valuation_stats()`**(PER/PBR 5년 통계). 기술지표 계산은 indicators.py 위임. KIS 1분봉 4시간대 병렬 수집(ThreadPoolExecutor). |
 | `stock_info_store.py` | 종목 정보 영속 캐시. `db/repositories/stock_info_repo.py` 위임 래퍼. 시세/지표/재무/수익률 영역별 TTL. write-through 패턴. |
-| `indicators.py` | 기술적 지표 순수 계산 (MACD/RSI/Stochastic/BB/MA/ATR). 외부 의존 없음 (math만). |
+| `indicators.py` | 기술적 지표 순수 계산 (MACD/RSI/Stochastic/BB/MA/ATR/**volume_signal**/**bb_position**). 외부 의존 없음. |
 | `utils.py` | `is_domestic(code)` — 6자리 숫자=국내. `is_fno(code)` — FNO 단축코드 판별. |
 | `symbol_map.py` | 종목코드↔종목명 매핑 (7일 캐시). `code_to_name()`. |
 | `market.py` | yfinance 기반 시세/시가총액/PER/PBR/배당수익률. |
 | `market_board.py` | 시세판: 신고가/신저가 탐지 + sparkline. |
 | `market_board_store.py` | 시세판 별도 등록 종목 CRUD + 순서 관리. `db/repositories/market_board_repo.py` 위임 래퍼. |
-| `dart_fin.py` | OpenDart 재무제표 조회 (최대 10년). |
-| `yf_client.py` | yfinance 기반 해외주식 데이터. EPS/Graham Number 지표 제공. 매출추정 3단계 fallback (revenue_estimate→analysis→totalRevenue×growth). |
+| `dart_fin.py` | OpenDart 재무제표 조회 (최대 10년) + **`fetch_quarterly_financials()`**(DART 누계→분기 환산, 최근 4분기). |
+| `yf_client.py` | yfinance 기반 해외주식 데이터. EPS/Graham Number 지표 제공. 매출추정 3단계 fallback. **`fetch_quarterly_financials_yf()`**(분기 실적). |
 | `fno_master.py` | KIS 선물옵션 마스터파일 다운로드/파싱/검색. 인메모리 캐시(24h) → cache.db(7일) → ZIP 3단계. main.py에서 pre-warm. |
 | `sec_filings.py` | SEC EDGAR 미국 10-K/10-Q 공시 조회. |
 | `macro_fetcher.py` | 매크로 분석 데이터 수집: yfinance 지수/VIX/버핏/공포탐욕, feedparser RSS(뉴스/투자자), 캐시 키 `macro:*` |
@@ -85,7 +85,7 @@ CLI와 API 라우터 양쪽에서 공용으로 사용한다. 비즈니스 데이
 ### indicators.py
 - 순수 계산 함수 8개: `_ema`, `_sma`, `_rsi`, `_stoch`, `_bollinger`, `_atr`, `_safe_val`, `calc_technical_indicators`
 - 외부 의존성 없음 (`math`, `typing.Optional`만 사용)
-- `calc_technical_indicators(ohlcv)`: MACD/RSI(Wilder)/Stochastic/BB/MA/ATR/MA배열/변동성돌파 목표가. 최대 300봉.
+- `calc_technical_indicators(ohlcv)`: MACD/RSI(Wilder)/Stochastic/BB/MA/ATR/MA배열/변동성돌파 목표가 + **`volume_signal`**(최신/5일평균 비율) + **`bb_position`**(BB밴드 내 위치 0~100). 최대 300봉.
 - `advisory_fetcher.py`의 `fetch_ohlcv_by_interval()`에서 자동 호출
 
 ### dart_fin.py
@@ -115,6 +115,9 @@ CLI와 API 라우터 양쪽에서 공용으로 사용한다. 비즈니스 데이
 | `corpCode.xml` | 30일 |
 | `symbol_map` | 7일 |
 | `dart:fin*` / `dart:income*` / `dart:bs*` / `dart:cf*` | **7일 (168시간)** |
+| `valuation_stats:{market}:{code}` | 24시간 |
+| `dart:quarterly:{code}` | 7일 |
+| `advisor:52w:{market}:{code}` | 6시간 |
 | `market:metrics:` | 장중 1시간 / 장외 12시간 |
 | `market:period_returns:` | 장중 15분 / 장외 6시간 |
 | `market:price:` | 장중 6분 / 장외 6시간 |

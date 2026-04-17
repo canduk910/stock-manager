@@ -361,3 +361,85 @@ def fetch_segments_kr(code: str, name: str) -> dict:
         return {"segments": result, "description": description, "keywords": keywords[:8]}
     except Exception:
         return empty
+
+
+# ── PER/PBR 5년 통계 (Phase 2-2) ─────────────────────────────────────────────
+
+def fetch_valuation_stats(code: str, market: str) -> dict:
+    """PER/PBR 5년 통계 (평균/최대/최소/현재/편차%).
+
+    내부에서 `fetch_valuation_history_yf(code, years=5)` 호출 후 집계.
+    반환:
+      {
+        "per_avg_5y", "per_max_5y", "per_min_5y", "per_current", "per_deviation_pct",
+        "pbr_avg_5y", "pbr_max_5y", "pbr_min_5y", "pbr_current", "pbr_deviation_pct",
+        "data_points": int,  # 집계에 사용된 월봉 수
+      }
+    데이터 부족 시 각 필드 None. 캐시 24시간.
+    """
+    from stock.cache import get_cached, set_cached
+    from stock.yf_client import fetch_valuation_history_yf
+
+    cache_key = f"valuation_stats:{market}:{code}"
+    cached = get_cached(cache_key)
+    if cached is not None:
+        return cached
+
+    empty = {
+        "per_avg_5y": None, "per_max_5y": None, "per_min_5y": None,
+        "per_current": None, "per_deviation_pct": None,
+        "pbr_avg_5y": None, "pbr_max_5y": None, "pbr_min_5y": None,
+        "pbr_current": None, "pbr_deviation_pct": None,
+        "data_points": 0,
+    }
+
+    try:
+        # yfinance는 국내 종목에 대해 .KS/.KQ suffix 처리가 필요 — fetch_valuation_history_yf는 code를 그대로 사용
+        # 국내는 stock.market.fetch_valuation_history()가 빈 배열 반환하므로 (pykrx 스크래핑 불가)
+        # yfinance ticker string으로 변환해서 직접 호출
+        if market == "KR":
+            from stock.market import _kr_yf_ticker_str
+            ticker_str = _kr_yf_ticker_str(code)
+            if not ticker_str:
+                set_cached(cache_key, empty, ttl_hours=24)
+                return empty
+            history = fetch_valuation_history_yf(ticker_str, years=5)
+        else:
+            history = fetch_valuation_history_yf(code, years=5)
+
+        if not history or not isinstance(history, list):
+            set_cached(cache_key, empty, ttl_hours=24)
+            return empty
+
+        per_vals = [h["per"] for h in history if h.get("per") is not None and h["per"] > 0]
+        pbr_vals = [h["pbr"] for h in history if h.get("pbr") is not None and h["pbr"] > 0]
+
+        result = dict(empty)
+        result["data_points"] = len(history)
+
+        if per_vals:
+            per_avg = sum(per_vals) / len(per_vals)
+            per_cur = per_vals[-1]
+            result["per_avg_5y"] = round(per_avg, 2)
+            result["per_max_5y"] = round(max(per_vals), 2)
+            result["per_min_5y"] = round(min(per_vals), 2)
+            result["per_current"] = round(per_cur, 2)
+            if per_avg > 0:
+                result["per_deviation_pct"] = round((per_cur - per_avg) / per_avg * 100, 1)
+
+        if pbr_vals:
+            pbr_avg = sum(pbr_vals) / len(pbr_vals)
+            pbr_cur = pbr_vals[-1]
+            result["pbr_avg_5y"] = round(pbr_avg, 2)
+            result["pbr_max_5y"] = round(max(pbr_vals), 2)
+            result["pbr_min_5y"] = round(min(pbr_vals), 2)
+            result["pbr_current"] = round(pbr_cur, 2)
+            if pbr_avg > 0:
+                result["pbr_deviation_pct"] = round((pbr_cur - pbr_avg) / pbr_avg * 100, 1)
+
+        set_cached(cache_key, result, ttl_hours=24)
+        return result
+    except Exception as e:
+        logger.debug("fetch_valuation_stats 실패 [%s %s]: %s", code, market, e)
+        set_cached(cache_key, empty, ttl_hours=24)
+        return empty

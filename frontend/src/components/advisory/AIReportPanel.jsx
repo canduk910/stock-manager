@@ -51,6 +51,40 @@ function Section({ title, icon, children }) {
   )
 }
 
+// Phase 3: v2 등급 배지 컴포넌트
+function SafetyGradeBadge({ grade }) {
+  const gradeMap = {
+    'A': 'bg-emerald-100 text-emerald-800 border-emerald-400',
+    'B+': 'bg-green-100 text-green-700 border-green-400',
+    'B': 'bg-yellow-100 text-yellow-700 border-yellow-400',
+    'C': 'bg-orange-100 text-orange-700 border-orange-400',
+    'D': 'bg-red-100 text-red-700 border-red-400',
+  }
+  const cls = gradeMap[grade] || 'bg-gray-100 text-gray-600 border-gray-300'
+  return (
+    <span className={`inline-flex items-center justify-center w-12 h-12 rounded-full text-xl font-black border-2 ${cls}`}>
+      {grade}
+    </span>
+  )
+}
+
+// Phase 3: 점수 게이지 바
+function ScoreBar({ label, value, max, colorClass = 'bg-blue-500' }) {
+  if (value == null) return null
+  const pct = Math.min(100, Math.max(0, (value / max) * 100))
+  return (
+    <div className="space-y-1">
+      <div className="flex justify-between text-xs text-gray-600">
+        <span>{label}</span>
+        <span className="font-semibold">{value}/{max}</span>
+      </div>
+      <div className="w-full bg-gray-200 rounded-full h-2.5">
+        <div className={`h-2.5 rounded-full ${colorClass}`} style={{ width: `${pct}%` }}></div>
+      </div>
+    </div>
+  )
+}
+
 export default function AIReportPanel({ report, history = [], loading, error, onGenerate, onSelectHistory }) {
   const reportData = report?.report || {}
   const generatedAt = report?.generated_at
@@ -62,6 +96,16 @@ export default function AIReportPanel({ report, history = [], loading, error, on
   const risks = reportData['리스크요인'] || reportData.risk_factors || []
   const points = reportData['투자포인트'] || reportData.investment_points || []
   const posGuide = reportData['포지션가이드'] || {}
+
+  // Phase 3 v2 필드 (부재 시 null → 카드 숨김)
+  const safetyGrade = report?.grade || reportData['종목등급']
+  const gradeScore = report?.grade_score ?? reportData['등급점수']
+  const compositeScore = report?.composite_score ?? reportData['복합점수']
+  const regimeAlignment = report?.regime_alignment ?? reportData['체제정합성점수']
+  const valueTrapWarning = report?.value_trap_warning ?? reportData['Value_Trap_경고']
+  const valueTrapReasons = reportData['Value_Trap_근거'] || []
+  const schemaVersion = report?.schema_version || reportData['schema_version']
+  const hasV2 = !!safetyGrade && schemaVersion === 'v2'
 
   // 원문 fallback
   const rawText = reportData.raw
@@ -106,6 +150,48 @@ export default function AIReportPanel({ report, history = [], loading, error, on
       {error && (
         <div className="p-3 bg-red-50 border border-red-200 rounded text-sm text-red-700">
           {error}
+        </div>
+      )}
+
+      {/* Phase 3: v2 종목 등급 카드 (grade 필드 부재 시 숨김) */}
+      {hasV2 && (
+        <div className="border border-gray-200 rounded-lg p-4 space-y-3">
+          {/* Value Trap 경고 배너 */}
+          {valueTrapWarning && (
+            <div className="p-3 bg-red-50 border border-red-300 rounded-lg">
+              <p className="text-sm font-bold text-red-700 mb-1">Value Trap 경고</p>
+              {valueTrapReasons.length > 0 && (
+                <ul className="text-xs text-red-600 list-disc list-inside space-y-0.5">
+                  {valueTrapReasons.map((r, i) => <li key={i}>{r}</li>)}
+                </ul>
+              )}
+            </div>
+          )}
+
+          <div className="flex items-center gap-4">
+            <SafetyGradeBadge grade={safetyGrade} />
+            <div className="flex-1 space-y-2">
+              <ScoreBar label="등급 점수" value={gradeScore} max={28} colorClass={
+                gradeScore >= 24 ? 'bg-emerald-500' : gradeScore >= 20 ? 'bg-green-500' : gradeScore >= 16 ? 'bg-yellow-500' : gradeScore >= 12 ? 'bg-orange-500' : 'bg-red-500'
+              } />
+              <ScoreBar label="복합 점수" value={compositeScore != null ? Math.round(compositeScore) : null} max={100} colorClass="bg-blue-500" />
+              <ScoreBar label="체제 정합성" value={regimeAlignment != null ? Math.round(regimeAlignment) : null} max={100} colorClass="bg-purple-500" />
+            </div>
+          </div>
+
+          {/* 등급팩터 + recommendation */}
+          {posGuide['등급팩터'] != null && (
+            <div className="flex gap-2 text-xs">
+              <span className="px-2 py-0.5 bg-gray-100 rounded">등급팩터: {posGuide['등급팩터']}</span>
+              {posGuide.recommendation && (
+                <span className={`px-2 py-0.5 rounded font-semibold ${
+                  posGuide.recommendation === 'ENTER' ? 'bg-green-100 text-green-700' :
+                  posGuide.recommendation === 'SKIP' ? 'bg-red-100 text-red-700' :
+                  'bg-yellow-100 text-yellow-700'
+                }`}>{posGuide.recommendation}</span>
+              )}
+            </div>
+          )}
         </div>
       )}
 

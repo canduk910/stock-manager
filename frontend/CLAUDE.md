@@ -64,7 +64,7 @@ frontend/
       advisory/           FundamentalPanel, TechnicalPanel, AIReportPanel
       portfolio/          RegimeBanner (매크로 체제 배너), AllocationChart (자산 배분 파이),
                           ProfitChart (종목별 수익률 바), HoldingsOverview (보유종목+안전마진 등급)
-      advisor/            AdvisorPanel (포트폴리오 자문 컨테이너), DiagnosisCard (진단 게이지+섹터),
+      advisor/            AdvisorPanel (포트폴리오 자문 컨테이너 + **개별 종목 리포트 연계 요약 카드**(가중등급+분포바+B미만 경고; weighted_grade_avg 부재 시 숨김)),
                           RebalanceCard (리밸런싱 제안), TradeTable (매매안+주문실행),
                           TradeConfirmModal (AI 추천 주문 확인 모달)
       macro/              IndexSection (4지수+1년스파크라인+툴팁), SentimentSection (VIX+버핏+공포탐욕),
@@ -128,6 +128,6 @@ frontend/
 
 - **FundamentalPanel**: **사업 개요**(BusinessOverview: #키워드 + 사업설명 + 매출비중 파이차트) → 애널리스트 추정치(매출/순이익/EPS 현재E+차기E) → 계량지표(10개: +EPS+안전마진가격) → 손익계산서(+추정치 바 반투명) → 대차대조표 → 현금흐름표
 - **TechnicalPanel**: 타임프레임(15m/60m/1d/1wk) + 기간 선택. 시그널 카드 + 캔들스틱+MA+BB → 거래량 → MACD → RSI → Stochastic → PER/PBR 밸류에이션(1d/1wk만, `valuationData` prop + `fetchDetailValuation` API)
-- **AIReportPanel**: 종합투자의견 배지 → 전략별평가 3컬럼 카드(안전마진가격 표시) → 기술적시그널 → 리스크/투자포인트
+- **AIReportPanel**: **v2 등급 카드**(SafetyGradeBadge A/B+/B/C/D + ScoreBar 3개(등급28/복합100/정합성100) + Value Trap 배너 + recommendation 배지; v1 리포트 시 카드 숨김) → 종합투자의견 배지 → 전략별평가 3컬럼 카드(안전마진가격 표시) → 기술적시그널 → 리스크/투자포인트
 
 > 컴포넌트 상세 → `docs/FRONTEND_SPEC.md`

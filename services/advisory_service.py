@@ -17,6 +17,7 @@ from stock.utils import is_domestic
 from services.exceptions import (
     ConfigError, ExternalAPIError, NotFoundError, PaymentRequiredError,
 )
+from services.macro_regime import determine_regime as _shared_determine_regime, REGIME_DESC
 
 logger = logging.getLogger(__name__)
 
@@ -39,8 +40,9 @@ def refresh_stock_data(code: str, market: str, name: str) -> dict:
 def generate_ai_report(code: str, market: str, name: str) -> dict:
     """저장된 캐시 데이터를 기반으로 OpenAI GPT-4o 리포트 생성.
 
-    OPENAI_API_KEY 미설정 시 HTTPException(503).
-    캐시 없을 시 HTTPException(404).
+    Phase 3: max_completion_tokens 10000 기본, 재시도 시 12000.
+    finish_reason=="length" 1차 재시도, 2차 실패 시 ExternalAPIError → 저장 거부.
+    Pydantic v2 검증 실패 시 1회 재시도.
     """
     if not OPENAI_API_KEY:
         raise ConfigError("OPENAI_API_KEY가 설정되지 않았습니다.")
@@ -62,25 +64,52 @@ def generate_ai_report(code: str, market: str, name: str) -> dict:
     prompt = _build_prompt(code, market, name, fundamental, technical, graham_data, macro_ctx, regime, regime_desc)
     system_prompt = _build_system_prompt(regime, regime_desc)
 
-    try:
+    def _call_openai(max_tokens: int, extra_user_msg: str = "") -> tuple[str, str]:
+        """OpenAI 호출. (content, finish_reason) 반환."""
         from openai import OpenAI
         client = OpenAI(api_key=OPENAI_API_KEY)
+        user_content = prompt + extra_user_msg
         resp = client.chat.completions.create(
             model=model,
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": prompt},
+                {"role": "user", "content": user_content},
             ],
-            max_completion_tokens=8000,
+            max_completion_tokens=max_tokens,
             response_format={"type": "json_object"},
         )
         content = resp.choices[0].message.content or "{}"
+        finish = resp.choices[0].finish_reason or "stop"
+        return content, finish
 
-        # 토큰 제한으로 응답 잘림 감지
-        if resp.choices[0].finish_reason == "length":
-            logger.warning("종목 자문 응답이 토큰 제한으로 잘렸습니다 (%s)", code)
+    try:
+        import time as _time
+
+        # 1차 호출 (max_completion_tokens=10000)
+        content, finish_reason = _call_openai(10000)
+
+        # 토큰 잘림 1차 재시도 (12000)
+        if finish_reason == "length":
+            logger.warning("종목 자문 응답 토큰 잘림 1차 (%s), 12000으로 재시도", code)
+            _time.sleep(1)
+            content, finish_reason = _call_openai(12000)
+            if finish_reason == "length":
+                logger.error("종목 자문 응답 토큰 잘림 2차 (%s), 저장 거부", code)
+                raise ExternalAPIError("응답이 토큰 제한으로 잘렸습니다. 다시 시도해주세요.")
 
         report = _parse_report(content)
+
+        # Pydantic v2 검증 (Phase 3-3)
+        from services.schemas.advisory_report_v2 import validate_v2_report
+        v2_ok, _, v2_err = validate_v2_report(report)
+        if not v2_ok:
+            logger.warning("v2 검증 실패 (%s): %s — 1회 재시도", code, v2_err[:200])
+            _time.sleep(1)
+            content2, finish2 = _call_openai(10000, "\n\n응답을 반드시 유효한 JSON으로 작성하세요. schema_version='v2' 필수 필드를 누락하지 마세요.")
+            if finish2 == "length":
+                logger.warning("v2 재시도도 토큰 잘림 (%s)", code)
+            report = _parse_report(content2)
+
     except (ConfigError, NotFoundError, PaymentRequiredError, ExternalAPIError):
         raise
     except Exception as e:
@@ -89,9 +118,37 @@ def generate_ai_report(code: str, market: str, name: str) -> dict:
             raise PaymentRequiredError(
                 "OpenAI API 크레딧이 부족합니다. platform.openai.com에서 결제 정보를 확인해주세요.",
             )
-        raise ExternalAPIError(f"OpenAI 호출 실패: {err_str}")
+        # 일반 에러 1회 재시도 (backoff 2초)
+        import time as _time
+        logger.warning("OpenAI 1차 호출 실패 (%s): %s — 2초 후 재시도", code, err_str[:200])
+        _time.sleep(2)
+        try:
+            content, finish_reason = _call_openai(10000)
+            report = _parse_report(content)
+        except Exception as e2:
+            raise ExternalAPIError(f"OpenAI 호출 실패: {str(e2)}")
 
-    report_id = advisory_store.save_report(code, market, model, report)
+    # v2 정량 필드 추출 → DB 저장
+    from services.schemas.advisory_report_v2 import extract_v2_fields
+    v2_fields = extract_v2_fields(report)
+
+    report_id = advisory_store.save_report(
+        code, market, model, report,
+        grade=v2_fields.get("grade"),
+        grade_score=v2_fields.get("grade_score"),
+        composite_score=v2_fields.get("composite_score"),
+        regime_alignment=v2_fields.get("regime_alignment"),
+        schema_version=v2_fields.get("schema_version", "v1"),
+        value_trap_warning=v2_fields.get("value_trap_warning", False),
+    )
+
+    # 사전 계산 vs GPT 등급 gap 로깅
+    gpt_grade = v2_fields.get("grade")
+    if gpt_grade:
+        logger.info("리포트 저장 [%s %s]: GPT등급=%s, schema=%s, VT=%s",
+                     code, gpt_grade, v2_fields.get("schema_version"),
+                     v2_fields.get("value_trap_warning"))
+
     return advisory_store.get_latest_report(code, market) or {}
 
 
@@ -110,13 +167,15 @@ def _collect_fundamental_kr(code: str, name: str) -> dict:
     from stock.market import fetch_market_metrics
     from stock.yf_client import fetch_forward_estimates_yf
 
-    # 5개 독립 데이터 소스 병렬 수집
-    with ThreadPoolExecutor(max_workers=5) as pool:
+    # 7개 독립 데이터 소스 병렬 수집 (Phase 2-5: valuation_stats + quarterly 추가)
+    with ThreadPoolExecutor(max_workers=7) as pool:
         f_income = pool.submit(dart_fin.fetch_income_detail_annual, code, 5)
         f_bs_cf = pool.submit(dart_fin.fetch_bs_cf_annual, code, 5)
         f_metrics = pool.submit(fetch_market_metrics, code)
         f_segments = pool.submit(advisory_fetcher.fetch_segments_kr, code, name)
         f_forward = pool.submit(fetch_forward_estimates_yf, code, True)
+        f_val_stats = pool.submit(advisory_fetcher.fetch_valuation_stats, code, "KR")
+        f_quarterly = pool.submit(dart_fin.fetch_quarterly_financials, code, 4)
 
         income_stmt = f_income.result()
         bs_cf = f_bs_cf.result()
@@ -126,6 +185,8 @@ def _collect_fundamental_kr(code: str, name: str) -> dict:
         metrics = _build_metrics_kr(metrics_raw, balance_sheet, income_stmt)
         segments_data = f_segments.result()
         forward_estimates = f_forward.result()
+        valuation_stats = f_val_stats.result()
+        quarterly = f_quarterly.result()
 
     # 하위호환: 구 캐시가 list일 수 있음
     if isinstance(segments_data, dict):
@@ -146,6 +207,8 @@ def _collect_fundamental_kr(code: str, name: str) -> dict:
         "business_description": biz_desc,
         "business_keywords": biz_keywords,
         "forward_estimates": forward_estimates,
+        "valuation_stats": valuation_stats,  # Phase 2-2
+        "quarterly": quarterly,              # Phase 2-3
     }
 
 
@@ -158,16 +221,19 @@ def _collect_fundamental_us(code: str) -> dict:
         fetch_metrics_yf,
         fetch_segments_yf,
         fetch_forward_estimates_yf,
+        fetch_quarterly_financials_yf,
     )
 
-    # 6개 독립 데이터 소스 병렬 수집
-    with ThreadPoolExecutor(max_workers=6) as pool:
+    # 8개 독립 데이터 소스 병렬 수집 (Phase 2-5: valuation_stats + quarterly 추가)
+    with ThreadPoolExecutor(max_workers=8) as pool:
         f_income = pool.submit(fetch_income_detail_yf, code, 5)
         f_bs = pool.submit(fetch_balance_sheet_yf, code, 5)
         f_cf = pool.submit(fetch_cashflow_yf, code, 5)
         f_metrics = pool.submit(fetch_metrics_yf, code)
         f_segments = pool.submit(fetch_segments_yf, code)
         f_forward = pool.submit(fetch_forward_estimates_yf, code, False)
+        f_val_stats = pool.submit(advisory_fetcher.fetch_valuation_stats, code, "US")
+        f_quarterly = pool.submit(fetch_quarterly_financials_yf, code, 4)
 
         income_stmt = f_income.result()
         balance_sheet = f_bs.result()
@@ -175,6 +241,8 @@ def _collect_fundamental_us(code: str) -> dict:
         metrics = f_metrics.result()
         segments_data = f_segments.result()
         forward_estimates = f_forward.result()
+        valuation_stats = f_val_stats.result()
+        quarterly = f_quarterly.result()
 
     # 하위호환: 구 캐시가 list일 수 있음
     if isinstance(segments_data, dict):
@@ -195,6 +263,8 @@ def _collect_fundamental_us(code: str) -> dict:
         "business_description": biz_desc,
         "business_keywords": biz_keywords,
         "forward_estimates": forward_estimates,
+        "valuation_stats": valuation_stats,  # Phase 2-2
+        "quarterly": quarterly,              # Phase 2-3
     }
 
 
@@ -362,24 +432,17 @@ def _get_macro_context() -> dict:
 
 
 def _determine_regime(sentiment: dict) -> tuple[str, str]:
-    """sentiment → (regime, regime_desc) 반환."""
-    fg = sentiment.get("fear_greed") or {}
-    fg_val = fg.get("value") if fg.get("value") is not None else fg.get("score")
-    if fg_val is None:
-        return "selective", "중립 (적극적)"
-    fg_val = float(fg_val)
-    if fg_val <= 25:
-        return "defensive", "공포 (방어적)"
-    if fg_val <= 45:
-        return "cautious", "신중 (선별적)"
-    if fg_val <= 60:
-        return "selective", "중립 (적극적)"
-    return "accumulation", "탐욕 (축적)"
+    """sentiment → (regime, regime_desc) 반환 — 공용 모듈 위임.
+
+    2차원 버핏×공포탐욕 매트릭스 + VIX>35 오버라이드 적용.
+    """
+    result = _shared_determine_regime(sentiment)
+    return result["regime"], result["regime_desc"]
 
 
-_REGIME_MARGIN = {
-    "accumulation": 20, "selective": 25, "cautious": 30, "defensive": 40,
-}
+# 체제별 요구 안전마진(%) — 공용 모듈 REGIME_PARAMS에서 가져옴 (하위 호환)
+from services.macro_regime import REGIME_PARAMS as _SHARED_REGIME_PARAMS
+_REGIME_MARGIN = {k: v["margin"] for k, v in _SHARED_REGIME_PARAMS.items()}
 
 
 def _build_macro_section(macro_ctx: Optional[dict], regime: str, regime_desc: str) -> str:
@@ -431,7 +494,7 @@ _REGIME_RULES = {
 
 
 def _build_system_prompt(regime: str, regime_desc: str) -> str:
-    """체제별 투자 원칙이 포함된 시스템 프롬프트."""
+    """체제별 투자 원칙 + 도메인 에이전트(MarginAnalyst/MacroSentinel/OrderAdvisor/ValueScreener) 규칙을 구조화한 시스템 프롬프트."""
     regime_rule = _REGIME_RULES.get(regime, _REGIME_RULES["selective"])
     return (
         "당신은 전문 주식 애널리스트입니다. "
@@ -447,14 +510,52 @@ def _build_system_prompt(regime: str, regime_desc: str) -> str:
         "【전략 3: 추세추종 전략】\n"
         "MA5>MA20>MA60 정배열 + MACD 방향 + RSI 모멘텀. "
         "정배열+골든크로스+RSI 55↑: 강한 추세. 역배열: 하락추세.\n\n"
+        "【7점 등급 체계 (MarginAnalyst, 28점 만점)】\n"
+        "아래 7개 지표를 각 4점 만점으로 평가하고 합산 점수 → 등급 부여:\n"
+        "| # | 지표             | 4점     | 3점        | 2점        | 1점    |\n"
+        "| 1 | Graham 할인율    | >40%    | 20-40%     | 0-20%      | <0%    |\n"
+        "| 2 | PER vs 5년평균   | <-30%   | -30~-10%   | -10~+10%   | >+10%  |\n"
+        "| 3 | PBR 절대값       | <0.7    | 0.7-1.0    | 1.0-1.5    | >1.5   |\n"
+        "| 4 | 부채비율         | <50%    | 50-100%    | 100-200%   | >200%  |\n"
+        "| 5 | 유동비율         | >2.0    | 1.5-2.0    | 1.0-1.5    | <1.0   |\n"
+        "| 6 | FCF 양수 연수    | 3년     | 2년        | 1년        | 0년    |\n"
+        "| 7 | 매출 CAGR(3년)   | >10%    | 5-10%      | 0-5%       | <0%    |\n"
+        "등급 컷오프: A=24-28점(강력매수), B+=20-23점(매수), B=16-19점(조건부), C=12-15점(비추천), D=<12점(부적격).\n"
+        "PER/PBR/매출 CAGR 등 데이터 없는 지표는 2점(중립)으로 처리.\n\n"
+        "【MacroSentinel 체제 매트릭스 요약】\n"
+        "버핏지수(low<0.8 / normal<1.2 / high<1.6 / extreme>=1.6) × 공포탐욕(extreme_fear<20 / fear<40 / neutral<60 / greed<80 / extreme_greed>=80):\n"
+        "- low+공포 → accumulation(적극매수), low+탐욕 → cautious(신중)\n"
+        "- normal+공포 → selective(선별), normal+극단탐욕 → defensive(방어)\n"
+        "- high+공포 → selective, high+탐욕 → defensive\n"
+        "- extreme(모든구간) → cautious/defensive 위주\n"
+        "VIX > 35: 공포탐욕 수치 무시하고 extreme_fear로 강제 오버라이드.\n\n"
+        "【OrderAdvisor 등급별 손절폭 및 포지션】\n"
+        "- 손절폭: A=-8%, B+=-10%, B=-12%, C/D=진입 금지.\n"
+        "- grade_factor (수량 조절): A=1.0, B+=0.75, B=0.50, C/D=0.\n"
+        "- 최종 포지션% = 체제 종목당 한도% × grade_factor (예: selective+B+ = 4% × 0.75 = 3.0%).\n"
+        "- 분할매수: 1차 50%(진입) → 2차 30%(지지선-3%) → 3차 20%(전저점).\n"
+        "- 익절가: Graham Number. risk_reward = (익절-진입)/(진입-손절) >= 2.0 아니면 매수 보류.\n"
+        "- 모든 주문은 지정가(시장가 금지).\n"
+        "- 매수 불가 조건 (하나라도 해당 시 '관망' 이하):\n"
+        "  a) 7점 등급 B 미만(score<16) / b) 할인율 < 체제 안전마진 임계값\n"
+        "  c) RSI > 80 극단적 과매수 / d) 동일 종목 미체결 매수 주문 존재\n"
+        "  e) 포지션 한도 초과 / f) Value Trap 경고 발동 (근거 2개 이상)\n\n"
         "【재무 건전성 체크리스트】\n"
         "부채비율 >200% 위험, 유동비율 <100% 위험, FCF 3년 연속 음수 위험. "
         "2개 이상 '위험'이면 안전마진 전략 매수 판정 금지 + '가치 함정 주의' 경고.\n\n"
+        "【ValueScreener Value Trap 5규칙】\n"
+        "아래 5개 중 2개 이상 해당하면 응답 근거에 '⚠ Value Trap 경고' 명시:\n"
+        "1. 매출 CAGR < 0% 이면서 PER < 5\n"
+        "2. 영업이익률 3년 연속 하락\n"
+        "3. FCF 3년 연속 음수\n"
+        "4. 부채비율 전년 대비 30%p 이상 급증\n"
+        "5. 배당 중단 (과거 지급 이력 있으나 최근 중단)\n\n"
         "【업종 상대평가】\n"
         "종목의 섹터/업종을 감안하여 동종 업종 평균 PER/PBR 대비 상대적 위치를 평가하세요 (참고용).\n\n"
         f"【현재 매크로 환경】\n{regime_rule}\n\n"
         "각 전략 신호를 독립적으로 평가하고, 전략 간 일치/불일치도 종합 의견에 반영하세요.\n"
-        "매크로 체제가 defensive이면 어떤 경우에도 '매수' 등급을 부여하지 마세요."
+        "매크로 체제가 defensive이면 어떤 경우에도 '매수' 등급을 부여하지 마세요.\n"
+        "7점 등급 계산 시 C/D 등급은 매수 추천 금지(최대 '관망'). 손절가는 등급별 기준에 정확히 맞추세요."
     )
 
 
@@ -557,6 +658,69 @@ def _build_prompt(code: str, market: str, name: str, fundamental: dict, technica
 
     macd_label = {'golden': '골든크로스(매수신호)', 'dead': '데드크로스(매도신호)', 'none': '크로스 없음'}.get(macd_cross, macd_cross)
 
+    # Forward Estimates (yfinance) — 국내는 전 필드 None인 경우 많음
+    fwd = fundamental.get("forward_estimates") or {}
+
+    def _fmt_na(v, suffix=""):
+        if v is None or (isinstance(v, float) and (v != v)):  # NaN 체크
+            return "N/A"
+        if isinstance(v, (int, float)):
+            return f"{v}{suffix}"
+        return f"{v}{suffix}"
+
+    forward_pe = _fmt_na(fwd.get("forward_pe"))
+    forward_eps = _fmt_na(fwd.get("forward_eps"))
+    target_mean = _fmt_na(fwd.get("target_mean_price"))
+    recommendation = _fmt_na(fwd.get("recommendation"))
+    num_analysts = _fmt_na(fwd.get("num_analysts"))
+
+    # Phase 2-2: PER/PBR 5년 통계
+    val_stats = fundamental.get("valuation_stats") or {}
+    per_avg_5y = _fmt_na(val_stats.get("per_avg_5y"))
+    per_max_5y = _fmt_na(val_stats.get("per_max_5y"))
+    per_min_5y = _fmt_na(val_stats.get("per_min_5y"))
+    per_cur_5y = _fmt_na(val_stats.get("per_current"))
+    per_dev_pct = _fmt_na(val_stats.get("per_deviation_pct"))
+    pbr_avg_5y = _fmt_na(val_stats.get("pbr_avg_5y"))
+    pbr_max_5y = _fmt_na(val_stats.get("pbr_max_5y"))
+    pbr_min_5y = _fmt_na(val_stats.get("pbr_min_5y"))
+    pbr_cur_5y = _fmt_na(val_stats.get("pbr_current"))
+    pbr_dev_pct = _fmt_na(val_stats.get("pbr_deviation_pct"))
+
+    # Phase 2-3: 분기 실적 (최근 4분기)
+    quarterly = fundamental.get("quarterly") or []
+    quarterly_summary = []
+    for q in quarterly[-4:]:
+        quarterly_summary.append(
+            f"  {q.get('year')}Q{q.get('quarter')}: 매출={_fmt(q.get('revenue'), market)}, "
+            f"영업이익={_fmt(q.get('operating_income'), market)}({q.get('oi_margin')}%), "
+            f"순이익={_fmt(q.get('net_income'), market)}({q.get('net_margin')}%)"
+        )
+
+    # Phase 2-1: 거래량·변동성 신호
+    volume_signal = _fmt_na(signals.get("volume_signal"))
+    volume_5d = _fmt_na(signals.get("volume_5d_avg"))
+    volume_20d = _fmt_na(signals.get("volume_20d_avg"))
+    bb_position = _fmt_na(signals.get("bb_position"))
+
+    # Phase 2-4: 7점 등급 사전 계산 (참고용)
+    from services.safety_grade import compute_grade_7point, compute_composite_score, compute_regime_alignment
+    grade_pre = compute_grade_7point(
+        metrics=metrics,
+        balance_sheet=fundamental.get("balance_sheet") or [],
+        cashflow=fundamental.get("cashflow") or [],
+        income_stmt=fundamental.get("income_stmt") or [],
+        valuation_stats=val_stats if val_stats else None,
+        graham_number=gn.get("graham_number") if gn else None,
+        current_price=gn.get("current_price") if gn else None,
+    )
+    composite_score = compute_composite_score(metrics)
+    regime_alignment_score = compute_regime_alignment(
+        regime=regime,
+        grade_score=grade_pre["score"],
+        fcf_years_positive=grade_pre["details"]["fcf_trend"]["years_positive"],
+    )
+
     prompt = f"""다음은 {name}({code}, {market}) 종목의 분석 데이터입니다. 통화단위: {currency}
 
 ## 손익계산서 (최근 3년)
@@ -594,10 +758,49 @@ def _build_prompt(code: str, market: str, name: str, fundamental: dict, technica
 - MACD 크로스: {macd_cross}
 - RSI: {rsi_val} ({rsi_signal})
 
+## 포워드 가이던스 (국내종목은 대부분 N/A)
+- Forward PE: {forward_pe}
+- Forward EPS: {forward_eps}
+- 애널리스트 목표가(평균): {target_mean}
+- 투자의견 점수(1=Strong Buy ~ 5=Strong Sell): {recommendation}
+- 애널리스트 수: {num_analysts}
+
+## PER/PBR 5년 히스토리 비교
+- PER: 현재 {per_cur_5y}배 / 5년 평균 {per_avg_5y}배 (범위 {per_min_5y}~{per_max_5y}, 편차 {per_dev_pct}%)
+- PBR: 현재 {pbr_cur_5y}배 / 5년 평균 {pbr_avg_5y}배 (범위 {pbr_min_5y}~{pbr_max_5y}, 편차 {pbr_dev_pct}%)
+- 편차 <-20%: 5년 평균 대비 저평가 / >+20%: 고평가로 해석
+
+## 분기 실적 추세 (최근 {len(quarterly)}분기)
+{chr(10).join(quarterly_summary) or '  데이터 없음 (소형주 또는 미공시)'}
+
+## 거래량·변동성 신호
+- 거래량 신호 (최신/직전5일평균): {volume_signal}배 (>1.5 급증 / <0.7 급감)
+- 5일 평균 거래량: {volume_5d}, 20일 평균: {volume_20d}
+- 볼린저밴드 위치: {bb_position} (0=하단 터치, 100=상단 터치, 50=중간)
+
+## 7점 등급 사전 계산값 (참고용)
+사전 계산 등급: {grade_pre['grade']} ({grade_pre['score']}/28점)
+- Graham 할인율: {grade_pre['details']['discount']['points']}/4
+- PER vs 5년평균: {grade_pre['details']['per_vs_avg']['points']}/4
+- PBR 절대: {grade_pre['details']['pbr']['points']}/4
+- 부채비율: {grade_pre['details']['debt_ratio']['points']}/4
+- 유동비율: {grade_pre['details']['current_ratio']['points']}/4
+- FCF 추세: {grade_pre['details']['fcf_trend']['points']}/4
+- 매출 CAGR: {grade_pre['details']['revenue_cagr']['points']}/4
+복합 점수: {composite_score}/100 (ValueScreener 공식)
+체제 정합성: {regime_alignment_score}/100
+※ 위는 데이터 기반 사전 계산이며, GPT는 추세·매크로·기술시그널을 종합해 최종 등급을 부여할 것.
+   사전 계산을 단순 복사하지 말고, 독립적 판단을 내리되 불일치 시 reasoning에 근거 명시.
+
 {_build_macro_section(macro_ctx, regime, regime_desc)}
 
 위 데이터를 세 가지 전략 프레임워크(변동성 돌파/안전마진/추세추종)로 종합 분석하여 다음 JSON 형식으로 투자 의견을 작성해주세요:
 {{
+  "schema_version": "v2",
+  "종목등급": "A 또는 B+ 또는 B 또는 C 또는 D (MarginAnalyst 7점 등급, 사전 계산값 참고)",
+  "등급점수": 0-28 범위 정수 (7점 지표 합산),
+  "복합점수": 0-100 범위 실수 (ValueScreener 공식, 사전계산 참고),
+  "체제정합성점수": 0-100 범위 실수 (현재 시장 체제 대비 종목 적합도),
   "종합투자의견": {{
     "등급": "매수 또는 중립 또는 매도",
     "요약": "2-3문장 요약",
@@ -623,22 +826,26 @@ def _build_prompt(code: str, market: str, name: str, fundamental: dict, technica
   }},
   "기술적시그널": {{
     "신호": "매수 또는 관망 또는 매도",
-    "해석": "기술적 분석 해석 2-3문장",
+    "해석": "기술적 분석 해석 2-3문장 (거래량 신호와 BB 위치 포함)",
     "지표별": {{
       "macd": "해석",
       "rsi": "해석",
-      "stoch": "해석"
+      "stoch": "해석",
+      "volume": "거래량 신호 해석 (volume_signal 기준 급증/정상/감소)",
+      "bb": "BB 위치 해석 (0~30 하단지지 / 70~100 상단저항)"
     }}
   }},
   "포지션가이드": {{
+    "등급팩터": 종목등급에 따른 소수 (A=1.0 / B+=0.75 / B=0.50 / C·D=0),
     "추천진입가": 현재가 또는 기술적 지지선 기반 정수,
     "진입가근거": "진입가 산정 근거",
-    "손절가": 진입가 대비 -10~-15% 정수,
-    "손절근거": "손절가 산정 근거 (등급별 차등: 강한매수 -15%, 매수 -12%, 조건부 -10%)",
+    "손절가": System Prompt 7점등급 손절폭 규칙(A=-8%/B+=-10%/B=-12%)에 따른 정수,
+    "손절근거": "손절가 산정 근거",
     "1차익절가": Graham Number 또는 목표가 정수,
     "익절근거": "익절가 산정 근거",
-    "리스크보상비율": (익절가-진입가)/(진입가-손절가) 소수점1자리,
-    "분할매수제안": "1차 50%(현재) - 2차 30%(지지선-3%) - 3차 20%(전저점)"
+    "리스크보상비율": (익절가-진입가)/(진입가-손절가) 소수점1자리 (<2.0이면 매수 보류),
+    "분할매수제안": "1차 50%(진입가) - 2차 30%(1차-3%) - 3차 20%(1차-6%)",
+    "recommendation": "ENTER 또는 HOLD 또는 SKIP (C·D등급 또는 Value_Trap_경고=true 또는 risk_reward<2.0 시 SKIP)"
   }},
   "리스크요인": [
     {{"요인": "리스크명", "설명": "설명"}},
@@ -647,7 +854,9 @@ def _build_prompt(code: str, market: str, name: str, fundamental: dict, technica
   "투자포인트": [
     {{"포인트": "포인트명", "설명": "설명"}},
     ...
-  ]
+  ],
+  "Value_Trap_경고": true 또는 false (ValueScreener 5규칙 중 2개 이상 해당 시 true),
+  "Value_Trap_근거": ["근거1", "근거2"] (경고=true일 때 해당 규칙 번호와 근거 명시, 경고=false면 빈 배열)
 }}"""
     return prompt
 
