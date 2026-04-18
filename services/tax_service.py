@@ -14,7 +14,7 @@ from typing import Optional
 import requests
 
 from config import KIS_APP_KEY, KIS_APP_SECRET, KIS_ACNT_NO, KIS_ACNT_PRDT_CD_STK, KIS_BASE_URL
-from services.exceptions import ConfigError, ExternalAPIError, NotFoundError
+from services.exceptions import ExternalAPIError, NotFoundError
 from stock import cache, tax_store
 from stock.order_store import list_orders
 
@@ -107,69 +107,187 @@ def _fetch_exchange_rate_yf(date: str, currency: str) -> Optional[float]:
         return None
 
 
-# ── KIS API 기간별 체결 조회 ──────────────────────────────────────────────────
+# ── KIS API 체결 조회 + 동기화 ────────────────────────────────────────────────
 
 def sync_transactions(year: int) -> dict:
-    """KIS API 기간별 조회를 시도하고, 실패 시 로컬 DB에서 동기화.
+    """KIS API에서 해외 체결내역을 동기화.
+
+    1순위: CTOS4001R (일별거래내역 — 환율+수수료 포함)
+    2순위: TTTS3035R (주문체결내역 — 기간별, 환율 없음 → yfinance 보충)
+    3순위: 로컬 DB orders 테이블
 
     Returns:
-        {"source": "KIS"|"LOCAL", "synced": int, "skipped": int}
+        {"source": str, "synced": int, "skipped": int, "message": str}
     """
-    # KIS API 기간별 조회 시도
+    # 1순위: CTOS4001R (일별거래내역 — 환율/수수료 내장)
     try:
-        result = _fetch_executions_from_kis(year)
-        if result["synced"] > 0 or result["source"] == "KIS":
+        result = _fetch_from_ctos4001r(year)
+        if result["synced"] > 0 or result["source"] == "KIS_DAILY":
             return result
     except Exception as e:
-        logger.info("KIS API 기간별 조회 실패, 로컬 DB fallback: %s", e)
+        logger.info("CTOS4001R 조회 실패: %s", e)
 
-    # 로컬 DB fallback
-    return _sync_from_orders(year)
+    # 2순위: TTTS3035R (주문체결내역 — 기간별)
+    try:
+        result = _fetch_from_ttts3035r(year)
+        if result["synced"] > 0 or result["source"] == "KIS_CCNL":
+            return result
+    except Exception as e:
+        logger.info("TTTS3035R 조회 실패: %s", e)
+
+    # 3순위: 로컬 DB
+    result = _sync_from_orders(year)
+    if result["synced"] == 0 and result["skipped"] == 0:
+        result["message"] = "KIS API 및 로컬 주문 이력에 해당 연도 체결 내역이 없습니다. '매매내역' 탭에서 수동으로 추가해주세요."
+    return result
 
 
-def _fetch_executions_from_kis(year: int) -> dict:
-    """KIS API JTTT3001R로 기간별 해외 체결내역 조회."""
+def _kis_credentials():
+    """KIS API 인증 정보 확인. 미설정 시 None 반환."""
     if not all([KIS_APP_KEY, KIS_APP_SECRET, KIS_ACNT_NO, KIS_ACNT_PRDT_CD_STK]):
-        raise ConfigError("KIS API 키 미설정")
+        return None
+    return KIS_APP_KEY, KIS_APP_SECRET, KIS_ACNT_NO, KIS_ACNT_PRDT_CD_STK
+
+
+def _fetch_from_ctos4001r(year: int) -> dict:
+    """CTOS4001R 해외주식 일별거래내역 — 환율+수수료 포함."""
+    creds = _kis_credentials()
+    if not creds:
+        raise ValueError("KIS API 키 미설정")
 
     from routers._kis_auth import get_access_token, make_headers
 
     token = get_access_token()
-    headers = make_headers(token, KIS_APP_KEY, KIS_APP_SECRET, "JTTT3001R")
+    headers = make_headers(token, creds[0], creds[1], "CTOS4001R")
+    headers["custtype"] = "P"
 
-    start_date = f"{year}0101"
-    end_date = f"{year}1231"
+    synced, skipped = 0, 0
+    fk100, nk100 = "", ""
 
-    synced = 0
-    skipped = 0
+    while True:
+        params = {
+            "CANO": creds[2],
+            "ACNT_PRDT_CD": creds[3],
+            "ERLM_STRT_DT": f"{year}0101",
+            "ERLM_END_DT": f"{year}1231",
+            "OVRS_EXCG_CD": "",
+            "PDNO": "",
+            "SLL_BUY_DVSN_CD": "00",
+            "LOAN_DVSN_CD": "",
+            "CTX_AREA_FK100": fk100,
+            "CTX_AREA_NK100": nk100,
+        }
+
+        url = f"{KIS_BASE_URL}/uapi/overseas-stock/v1/trading/inquire-period-trans"
+        res = requests.get(url, headers=headers, params=params, timeout=10)
+        data = res.json()
+
+        if data.get("rt_cd") != "0":
+            if synced == 0:
+                raise ExternalAPIError(f"CTOS4001R 오류: {data.get('msg1', '')}")
+            break
+
+        items = data.get("output1", [])
+        if not items:
+            break
+
+        for item in items:
+            qty = int(item.get("ccld_qty", "0") or "0")
+            if qty <= 0:
+                continue
+
+            symbol = item.get("pdno", "")
+            side_code = item.get("sll_buy_dvsn_cd", "")
+            side = "sell" if side_code == "01" else "buy"
+            price_str = item.get("ft_ccld_unpr2") or item.get("ovrs_stck_ccld_unpr", "0")
+            price = float(price_str or "0")
+            trade_date_raw = item.get("trad_dt", "")
+            trade_date = f"{trade_date_raw[:4]}-{trade_date_raw[4:6]}-{trade_date_raw[6:8]}" if len(trade_date_raw) == 8 else trade_date_raw
+
+            # 환율 (API에서 제공!)
+            exrt = float(item.get("erlm_exrt", "0") or "0")
+            exchange_rate = exrt if exrt > 0 else get_exchange_rate(trade_date, item.get("crcy_cd", "USD"))
+
+            # 수수료 (API에서 제공!)
+            commission = float(item.get("frcr_fee1", "0") or "0")
+            commission_krw = float(item.get("dmst_wcrc_fee", "0") or "0")
+
+            price_krw = price * exchange_rate if exchange_rate else None
+
+            if tax_store.exists_by_key(symbol, side, trade_date, price, qty):
+                skipped += 1
+                continue
+
+            tax_store.insert_transaction(
+                source="KIS",
+                symbol=symbol,
+                symbol_name=item.get("ovrs_item_name", ""),
+                side=side,
+                quantity=qty,
+                price_foreign=price,
+                currency=item.get("crcy_cd", "USD"),
+                exchange_rate=exchange_rate,
+                price_krw=price_krw,
+                commission=commission,
+                commission_krw=commission_krw,
+                trade_date=trade_date,
+            )
+            synced += 1
+
+        # 연속 조회
+        tr_cont = data.get("tr_cont", "")
+        if tr_cont in ("D", "E", ""):
+            break
+        fk100 = data.get("ctx_area_fk100", "")
+        nk100 = data.get("ctx_area_nk100", "")
+        if not fk100:
+            break
+
+    msg = f"KIS 일별거래내역(CTOS4001R): {synced}건 동기화" + (f", {skipped}건 스킵" if skipped else "")
+    if synced == 0 and skipped == 0:
+        msg = f"KIS API 조회 완료: {year}년 체결 내역 없음"
+    return {"source": "KIS_DAILY", "synced": synced, "skipped": skipped, "message": msg}
+
+
+def _fetch_from_ttts3035r(year: int) -> dict:
+    """TTTS3035R 해외주식 주문체결내역 — 기간별 조회 (환율 없음 → yfinance 보충)."""
+    creds = _kis_credentials()
+    if not creds:
+        raise ValueError("KIS API 키 미설정")
+
+    from routers._kis_auth import get_access_token, make_headers
+
+    token = get_access_token()
+    headers = make_headers(token, creds[0], creds[1], "TTTS3035R")
+
+    synced, skipped = 0, 0
     fk200, nk200 = "", ""
 
     while True:
         params = {
-            "CANO": KIS_ACNT_NO,
-            "ACNT_PRDT_CD": KIS_ACNT_PRDT_CD_STK,
-            "PDNO": "",
-            "ORD_STRT_DT": start_date,
-            "ORD_END_DT": end_date,
-            "SLL_BUY_DVSN_CD": "00",
-            "CCLD_NCCS_DVSN": "01",  # 체결만
-            "OVRS_EXCG_CD": "NASD",
+            "CANO": creds[2],
+            "ACNT_PRDT_CD": creds[3],
+            "PDNO": "%",
+            "ORD_STRT_DT": f"{year}0101",
+            "ORD_END_DT": f"{year}1231",
+            "SLL_BUY_DVSN": "00",
+            "CCLD_NCCS_DVSN": "01",
+            "OVRS_EXCG_CD": "%",
             "SORT_SQN": "DS",
+            "ORD_DT": "",
+            "ORD_GNO_BRNO": "",
+            "ODNO": "",
             "CTX_AREA_FK200": fk200,
             "CTX_AREA_NK200": nk200,
         }
 
         url = f"{KIS_BASE_URL}/uapi/overseas-stock/v1/trading/inquire-ccnl"
-        try:
-            res = requests.get(url, headers=headers, params=params, timeout=10)
-            data = res.json()
-        except Exception as e:
-            raise ExternalAPIError(f"KIS 해외 체결 조회 실패: {e}")
+        res = requests.get(url, headers=headers, params=params, timeout=10)
+        data = res.json()
 
         if data.get("rt_cd") != "0":
-            msg = data.get("msg1", "알 수 없는 오류")
             if synced == 0:
-                raise ExternalAPIError(f"KIS API 응답 오류: {msg}")
+                raise ExternalAPIError(f"TTTS3035R 오류: {data.get('msg1', '')}")
             break
 
         items = data.get("output", [])
@@ -179,43 +297,36 @@ def _fetch_executions_from_kis(year: int) -> dict:
         for item in items:
             if not item.get("odno"):
                 continue
-
-            filled_qty = int(item.get("ft_ccld_qty", "0") or "0")
-            if filled_qty <= 0:
+            qty = int(item.get("ft_ccld_qty", "0") or "0")
+            if qty <= 0:
                 continue
 
             symbol = item.get("pdno", "")
             side = "buy" if item.get("sll_buy_dvsn_cd") == "02" else "sell"
             price = float(item.get("ft_ccld_unpr3", "0") or "0")
             trade_date_raw = item.get("ord_dt", "")
+            trade_date = f"{trade_date_raw[:4]}-{trade_date_raw[4:6]}-{trade_date_raw[6:8]}" if len(trade_date_raw) == 8 else trade_date_raw
 
-            if len(trade_date_raw) == 8:
-                trade_date = f"{trade_date_raw[:4]}-{trade_date_raw[4:6]}-{trade_date_raw[6:8]}"
-            else:
-                trade_date = trade_date_raw
-
-            # 중복 체크
-            if tax_store.exists_by_key(symbol, side, trade_date, price, filled_qty):
-                skipped += 1
-                continue
-
-            # 환율 조회
-            exchange_rate = get_exchange_rate(trade_date, "USD")
+            currency = item.get("tr_crcy_cd", "USD") or "USD"
+            exchange_rate = get_exchange_rate(trade_date, currency)
             price_krw = price * exchange_rate if exchange_rate else None
 
-            # 수수료
-            amount = price * filled_qty
+            amount = price * qty
             commission = amount * _DEFAULT_COMMISSION_RATE
             commission_krw = commission * exchange_rate if exchange_rate else 0
+
+            if tax_store.exists_by_key(symbol, side, trade_date, price, qty):
+                skipped += 1
+                continue
 
             tax_store.insert_transaction(
                 source="KIS",
                 symbol=symbol,
                 symbol_name=item.get("prdt_name", ""),
                 side=side,
-                quantity=filled_qty,
+                quantity=qty,
                 price_foreign=price,
-                currency="USD",
+                currency=currency,
                 exchange_rate=exchange_rate,
                 price_krw=price_krw,
                 commission=commission,
@@ -233,7 +344,10 @@ def _fetch_executions_from_kis(year: int) -> dict:
         if not fk200:
             break
 
-    return {"source": "KIS", "synced": synced, "skipped": skipped}
+    msg = f"KIS 주문체결내역(TTTS3035R): {synced}건 동기화" + (f", {skipped}건 스킵" if skipped else "")
+    if synced == 0 and skipped == 0:
+        msg = f"KIS API 조회 완료: {year}년 체결 내역 없음"
+    return {"source": "KIS_CCNL", "synced": synced, "skipped": skipped, "message": msg}
 
 
 def _sync_from_orders(year: int) -> dict:
@@ -293,7 +407,8 @@ def _sync_from_orders(year: int) -> dict:
         )
         synced += 1
 
-    return {"source": "LOCAL", "synced": synced, "skipped": skipped}
+    msg = f"로컬 DB: {synced}건 동기화" + (f", {skipped}건 스킵" if skipped else "")
+    return {"source": "LOCAL", "synced": synced, "skipped": skipped, "message": msg}
 
 
 # ── 수동 입력 ─────────────────────────────────────────────────────────────────

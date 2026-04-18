@@ -1,14 +1,17 @@
 # 변경 이력
 
-## 2026-04-18 — 해외주식 양도소득세 계산 서비스 신규
+## 2026-04-18 — 해외주식 양도소득세 계산 서비스 신규 + KIS API 문서
 
 ### 해외주식 양도소득세 신규
 - 백엔드: `db/models/tax.py` (TaxTransaction/TaxCalculation 2 테이블) + `db/repositories/tax_repo.py` + `stock/tax_store.py` + `services/tax_service.py` + `routers/tax.py` (7개 엔드포인트)
 - 환율 조회: yfinance `USDKRW=X` 연간 일괄 fetch → cache.db 영구 캐시. 주말/공휴일 직전 영업일 자동 fallback
-- 데이터 수집: KIS API `JTTT3001R` 기간별 조회 우선 → 로컬 DB orders 테이블 fallback → 수동 입력
+- 데이터 수집: 3단계 KIS API 동기화 — `CTOS4001R`(일별거래내역, 환율+수수료 내장) → `TTTS3035R`(주문체결내역, 기간별) → 로컬 DB orders fallback → 수동 입력
 - 양도세 계산: 선입선출법(FIFO) 기본 + 이동평균법 토글. 기본공제 250만원, 세율 22%
 - 프론트엔드: `/tax` 페이지 (3탭: 요약/매매내역/계산상세), 4카드(양도차익/공제/과세표준/세액), 종목별 BarChart, 수동 추가 폼
 - Header "매매" 드롭다운에 "양도세" 메뉴 추가
+
+### KIS OpenAPI 전체 문서 기록
+- `docs/KIS_API_REFERENCE.md` 전면 재작성: xlsx 338개 API → 22개 카테고리별 Markdown 테이블 (REST 278개 + WebSocket 60개)
 
 ## 2026-04-18 — 포트폴리오 자문 섹터 추천 + 뉴스 수집 품질 개선
 

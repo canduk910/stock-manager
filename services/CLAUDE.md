@@ -28,7 +28,7 @@
 | `scheduler_service.py` | APScheduler: 08:00 KR / 16:00 US BackgroundScheduler. `setup_scheduler()` / `shutdown_scheduler()` / `get_scheduler_status()`. main.py lifespan 통합. |
 | `mcp_client.py` | KIS AI Extensions MCP 서버 HTTP 클라이언트. `MCPClient` 클래스(httpx, JSON-RPC `tools/call`). `health_check()`/`call_tool()`. `KIS_MCP_ENABLED=false`이면 ConfigError. 싱글턴 `get_mcp_client()`. |
 | `backtest_service.py` | 백테스트 오케스트레이션: MCP 연동(프리셋/커스텀/배치 백테스트 실행), `get_strategy_signals()` — 대표 3전략 신호 + 합의 + 백테스트 메트릭. advisory_service에서 호출. MCP 비활성화 시 None 반환. |
-| `tax_service.py` | 해외주식 양도소득세: 환율 조회(yfinance+cache.db) + KIS API/로컬 DB 동기화 + FIFO/이동평균 계산 + 연간 요약(기본공제250만/세율22%). `stock/tax_store.py` 래퍼 경유. |
+| `tax_service.py` | 해외주식 양도소득세: 3단계 동기화(CTOS4001R 환율+수수료 내장 → TTTS3035R 기간별 체결 → 로컬 DB) + 환율 조회(yfinance+cache.db) + FIFO/이동평균 계산 + 연간 요약(기본공제250만/세율22%). `stock/tax_store.py` 래퍼 경유. |
 
 ---
 

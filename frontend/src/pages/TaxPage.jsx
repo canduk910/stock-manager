@@ -47,8 +47,7 @@ export default function TaxPage() {
     setSyncLoading(true)
     try {
       const result = await transactions.sync(year)
-      const msg = `동기화 완료 (${result.source}): ${result.synced}건 추가, ${result.skipped}건 스킵`
-      alert(msg)
+      alert(result.message || `동기화 완료: ${result.synced}건 추가`)
       transactions.load(year)
       // 요약도 갱신
       summary.load(year, method)
