@@ -79,10 +79,10 @@ python test.py                      # 삼성전자 현재가 조회
 config.py           환경변수 중앙 관리 (os.getenv 단일 진입점, DATABASE_URL 포함)
 wrapper.py          KIS API 완전 래퍼 (standalone)
 main.py             FastAPI 서버 진입점 (라우터 등록 + SPA 정적 파일 서빙 + Alembic 마이그레이션)
-db/                 SQLAlchemy ORM 패키지 (base, session, utils, models/12개, repositories/7개)
+db/                 SQLAlchemy ORM 패키지 (base, session, utils, models/13개, repositories/8개)
 alembic/            DB 스키마 마이그레이션 관리
-routers/            API 라우터 패키지 (15개, quote/market_board는 WebSocket 포함)
-services/           서비스 레이어 (watchlist_service, detail_service, order_service, advisory_service, macro_service, portfolio_advisor_service, quote_kis/quote_overseas, order_kr/order_us/order_fno, macro_regime, safety_grade, schemas/, mcp_client, backtest_service)
+routers/            API 라우터 패키지 (16개, quote/market_board는 WebSocket 포함)
+services/           서비스 레이어 (watchlist_service, detail_service, order_service, advisory_service, macro_service, portfolio_advisor_service, quote_kis/quote_overseas, order_kr/order_us/order_fno, macro_regime, safety_grade, schemas/, mcp_client, backtest_service, tax_service)
 services/exceptions.py  서비스 레이어 공용 예외 계층 (ServiceError / NotFoundError / ExternalAPIError / ConfigError / PaymentRequiredError / ConflictError)
 services/macro_regime.py  공용 체제 판단 (REGIME_MATRIX 20셀 + VIX 오버라이드 + 하이스테리시스). 3개 서비스 공유.
 services/safety_grade.py  7점 등급/복합점수/체제정합성/포지션사이징 공유 모듈. advisory_service + pipeline_service 공유.
@@ -167,8 +167,9 @@ frontend/           React SPA (Vite + Tailwind + Recharts)
 | recommendation_history | RecommendationHistory | ReportRepository | 투자 추천 이력 + 성과 추적 |
 | macro_regime_history | MacroRegimeHistory | ReportRepository | 매크로 체제 일일 이력 |
 | daily_reports | DailyReport | ReportRepository | 일일 투자 보고서 |
+| tax_transactions, tax_calculations | TaxTransaction, TaxCalculation | TaxRepository | 해외주식 양도세 |
 
-- **Adapter 패턴**: `stock/store.py` 등 6개 파일은 Repository 위임 래퍼 (기존 함수 시그니처 100% 유지)
+- **Adapter 패턴**: `stock/store.py` 등 7개 파일은 Repository 위임 래퍼 (기존 함수 시그니처 100% 유지)
 - **Session**: `get_session()` = Store 래퍼 전용 contextmanager, `get_db()` = FastAPI Depends 전용
 - **Alembic**: 스키마 마이그레이션. `entrypoint.sh` + `main.py` lifespan에서 `alembic upgrade head` 실행
 - **WAL 모드**: `db/session.py`의 engine event listener에서 자동 설정 (SQLite 사용 시)

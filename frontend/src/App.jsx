@@ -13,6 +13,7 @@ import MacroPage from './pages/MacroPage'
 import PortfolioPage from './pages/PortfolioPage'
 import ReportPage from './pages/ReportPage'
 import BacktestPage from './pages/BacktestPage'
+import TaxPage from './pages/TaxPage'
 import ToastNotification from './components/common/ToastNotification'
 import { useNotification } from './hooks/useNotification'
 
@@ -52,6 +53,7 @@ export default function App() {
           <Route path="/portfolio" element={<PortfolioPage notify={notify} />} />
           <Route path="/reports" element={<ReportPage />} />
           <Route path="/backtest" element={<BacktestPage />} />
+          <Route path="/tax" element={<TaxPage />} />
         </Routes>
       </main>
       <ToastNotification toasts={toasts} removeToast={removeToast} />

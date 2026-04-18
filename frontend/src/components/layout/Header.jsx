@@ -26,6 +26,7 @@ const NAV_GROUPS = [
       children: [
         { to: '/order', label: '주문' },
         { to: '/balance', label: '잔고' },
+        { to: '/tax', label: '양도세' },
       ],
     },
   ],

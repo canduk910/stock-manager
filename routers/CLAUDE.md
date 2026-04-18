@@ -20,6 +20,7 @@
 | `report.py` | `/api/reports/*` | 일일 보고서 + 추천 이력 + 성과 통계 + 매크로 체제 이력. 7개 GET 엔드포인트. `/{report_id}` 패스 파라미터는 마지막에 등록 |
 | `pipeline.py` | `/api/pipeline/*` | 투자 파이프라인: `POST /run` (비동기), `POST /run-sync` (동기), `GET /status` (스케줄러+실행 상태) |
 | `backtest.py` | `/api/backtest/*` | KIS AI Extensions MCP 연동 백테스트: 프리셋/커스텀/배치 실행, 결과 조회, 이력. `KIS_MCP_ENABLED=true` 필요. 7개 엔드포인트 |
+| `tax.py` | `/api/tax/*` | 해외주식 양도소득세: 연간 요약/매매내역 CRUD/KIS 동기화/FIFO·AVG 재계산/계산 상세. 7개 엔드포인트 |
 
 ---
 
