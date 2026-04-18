@@ -1,5 +1,18 @@
 # 변경 이력
 
+## 2026-04-18 — MCP 백테스트 연동 + 백테스트 UX 개선
+
+### MCP 연동
+- `mcp_client.py` Streamable HTTP 세션 프로토콜 전환 (initialize → session ID → tools/call + SSE 파싱)
+- Docker 내부에서 호스트 MCP 접근: `host.docker.internal` + `Host: 127.0.0.1` 헤더 고정
+- `docker-compose.yml` `extra_hosts: host.docker.internal:host-gateway` 추가
+- `backtest_service.py` `_extract_mcp_content()` — MCP content 구조에서 실제 데이터 추출
+
+### 백테스트 UI 개선
+- `StrategySelector`: 프리셋 선택 시 상세 설명 카드 표시 (description, category 배지, tags, params 기본값/범위)
+- `BacktestPage`: 진행 현황 강화 — 단계별 메시지(전략 제출/시뮬레이션 중) + 경과 시간 카운터 + 프로그레스 바(배치)
+- "다른 페이지로 이동해도 괜찮습니다" 백그라운드 실행 안내 배너 추가
+
 ## 2026-04-18 — 양도세 FIFO 엔진 전면 재설계 + 시뮬레이션
 
 ### 버그 수정 (근본)

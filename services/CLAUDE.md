@@ -26,8 +26,8 @@
 | `report_service.py` | 투자 보고서: 추천 이력 + 매크로 체제 이력 + 일일 보고서 비즈니스 로직 + 통합 Markdown 생성 + 성과 통계. `stock/report_store.py` 래퍼 경유 (다른 서비스와 동일 패턴). |
 | `pipeline_service.py` | 투자 파이프라인: 체제 판단(`macro_regime.py` 위임) → 체제별 스크리닝 → 심층 분석(`safety_grade.py` 위임) → 추천 생성 → 보고서 저장. `run_pipeline(market)` 단일 진입점. |
 | `scheduler_service.py` | APScheduler: 08:00 KR / 16:00 US BackgroundScheduler. `setup_scheduler()` / `shutdown_scheduler()` / `get_scheduler_status()`. main.py lifespan 통합. |
-| `mcp_client.py` | KIS AI Extensions MCP 서버 HTTP 클라이언트. `MCPClient` 클래스(httpx, JSON-RPC `tools/call`). `health_check()`/`call_tool()`. `KIS_MCP_ENABLED=false`이면 ConfigError. 싱글턴 `get_mcp_client()`. |
-| `backtest_service.py` | 백테스트 오케스트레이션: MCP 연동(프리셋/커스텀/배치 백테스트 실행), `get_strategy_signals()` — 대표 3전략 신호 + 합의 + 백테스트 메트릭. advisory_service에서 호출. MCP 비활성화 시 None 반환. |
+| `mcp_client.py` | KIS AI Extensions MCP Streamable HTTP 클라이언트. 세션 기반 프로토콜(initialize → session ID → tools/call). SSE 응답 파싱. Host 헤더 고정(Docker 내부 접근). `health_check()`/`call_tool()`. 싱글턴 `get_mcp_client()`. |
+| `backtest_service.py` | 백테스트 오케스트레이션: MCP 연동(프리셋/커스텀/배치 백테스트 실행), `_extract_mcp_content()` SSE content 파싱. `get_strategy_signals()` — 대표 3전략 신호 + 합의 + 백테스트 메트릭. advisory_service에서 호출. MCP 비활성화 시 None 반환. |
 | `tax_service.py` | 해외주식 양도소득세: CTOS4001R+TTTS3035R 병합 동기화(연속조회 `tr_cont:N` 헤더) + 잔고 기반 적응적 소급(2015년까지) + 시간순 FIFO 재생(매도 시점 이전 매수만 소진) + `tax_fifo_lots` 매도→매수 매핑 + 잔고 `avg_price` fallback + 가상 매도 시뮬레이션 + 동기화 후 자동 재계산. `stock/tax_store.py` 래퍼 경유. 도메인 규칙: `docs/TAX_DOMAIN.md`. |
 
 ---

@@ -23,6 +23,7 @@ MCP 비활성화(KIS_MCP_ENABLED=false) 시:
 - get_strategy_signals() → None 반환 (graceful degrade)
 """
 
+import json
 import logging
 import uuid
 from typing import Optional
@@ -36,18 +37,41 @@ from stock import strategy_store
 logger = logging.getLogger(__name__)
 
 
+def _extract_mcp_content(result: dict | list) -> any:
+    """MCP Streamable HTTP 응답에서 실제 데이터 추출.
+
+    MCP content 구조: {"content": [{"type":"text","text":"...JSON..."}]}
+    text 안의 JSON에 {"success": true, "data": [...]} 형태가 있으면 data만 반환.
+    """
+    if isinstance(result, dict):
+        content = result.get("content", [])
+        if isinstance(content, list) and content:
+            text = content[0].get("text", "")
+            if text:
+                try:
+                    parsed = json.loads(text)
+                    # {"success": true, "data": [...]} 구조면 data만 반환
+                    if isinstance(parsed, dict) and "data" in parsed:
+                        return parsed["data"]
+                    return parsed
+                except (json.JSONDecodeError, TypeError):
+                    return text
+        return content if content else result
+    return result
+
+
 def list_presets() -> list:
     """MCP list_presets_tool 호출."""
     client = get_mcp_client()
     result = client.call_tool("list_presets_tool", {})
-    return result.get("content", result) if isinstance(result, dict) else result
+    return _extract_mcp_content(result)
 
 
 def list_indicators() -> list:
     """MCP list_indicators_tool 호출."""
     client = get_mcp_client()
     result = client.call_tool("list_indicators_tool", {})
-    return result.get("content", result) if isinstance(result, dict) else result
+    return _extract_mcp_content(result)
 
 
 def run_preset_backtest(

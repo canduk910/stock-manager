@@ -73,7 +73,7 @@ frontend/
                           **SectorRecommendationCard** (신규 섹터 진입 추천: 섹터명+목표비중+타이밍+대표종목→DetailPage 링크),
                           RebalanceCard (리밸런싱 제안), TradeTable (매매안+주문실행),
                           TradeConfirmModal (AI 추천 주문 확인 모달)
-      backtest/           StrategySelector (프리셋/커스텀 YAML 선택), MetricsCard (수익률/샤프/낙폭/승률),
+      backtest/           StrategySelector (프리셋 드롭다운+상세 설명 카드(description/category/tags/params) / 커스텀 YAML), MetricsCard (수익률/샤프/낙폭/승률),
                           BacktestResultPanel (수익률곡선+거래내역), BatchCompareTable (전략 비교)
       macro/              IndexSection (4지수+1년스파크라인+툴팁), SentimentSection (VIX+버핏+공포탐욕),
                           NewsSection (한국+NYT 2컬럼), InvestorSection (4명 투자자 코멘트 카드)
@@ -92,7 +92,7 @@ frontend/
       MacroPage.jsx       /macro         매크로 분석: 지수+심리+뉴스+투자자 코멘트. 4섹션 독립 로딩.
       PortfolioPage.jsx   /portfolio     포트폴리오 통합: 체제배너+자산배분+수익률+AI자문(진단+리밸런싱+매매안+이력). balance+macro+advisor 통합.
       ReportPage.jsx      /reports       투자 보고서: 3탭(일일보고서/추천이력/성과통계). 체제배지+등급배지+PnL 색상.
-      BacktestPage.jsx    /backtest      KIS AI Extensions 백테스트: 프리셋/커스텀 전략, 결과 차트/메트릭, 전략 비교. MCP 비활성화 시 안내 표시.
+      BacktestPage.jsx    /backtest      KIS AI Extensions 백테스트: 프리셋/커스텀 전략, 결과 차트/메트릭, 전략 비교. 진행 현황(단계별 메시지+경과시간+프로그레스바+백그라운드 안내). MCP 비활성화 시 안내 표시.
       TaxPage.jsx         /tax           해외주식 양도소득세: 4탭(요약/매매내역/계산상세/시뮬레이션). FIFO 전용, 연도 선택, KIS 적응적 동기화+자동 재계산.
 ```
 

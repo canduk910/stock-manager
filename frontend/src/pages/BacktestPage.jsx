@@ -1,20 +1,9 @@
 /**
  * 백테스트 페이지 (/backtest).
  *
- * KIS AI Extensions MCP 서버(port 3846) 연동으로 전략 백테스트를 실행한다.
- *
- * 구조:
- *   1) MCP 상태 확인 — KIS_MCP_ENABLED=false이면 안내 화면 표시
- *   2) 종목 선택 — SymbolSearchBar 재사용 (주문 페이지와 동일 컴포넌트)
- *   3) 전략 선택 — 프리셋(10개 드롭다운) 또는 커스텀(.kis.yaml 직접 입력)
- *   4) 백테스트 실행 — POST /api/backtest/run/preset 또는 /run/custom
- *   5) 결과 폴링 — GET /api/backtest/result/{job_id} (3초 간격, 최대 3분)
- *   6) 결과 표시 — MetricsCard(4칸) + 수익률 곡선 + 거래 내역
- *   7) 배치 비교 — 4개 프리셋 동시 실행 → 비교 테이블
- *
- * 핵심 훅: useMcpStatus (연결 상태), usePresets (전략 목록), useBacktest (실행+폴링)
+ * KIS AI Extensions MCP 서버 연동으로 전략 백테스트를 실행한다.
  */
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import SymbolSearchBar from '../components/order/SymbolSearchBar'
 import StrategySelector from '../components/backtest/StrategySelector'
 import BacktestResultPanel from '../components/backtest/BacktestResultPanel'
@@ -23,11 +12,6 @@ import LoadingSpinner from '../components/common/LoadingSpinner'
 import ErrorAlert from '../components/common/ErrorAlert'
 import { useMcpStatus, usePresets, useBacktest } from '../hooks/useBacktest'
 
-// 배치 비교 시 사용할 대표 전략 4개:
-// - sma_crossover: 추세추종 대표 (골든/데드 크로스)
-// - momentum: 모멘텀 대표 (최근 N일 수익률)
-// - trend_filter_signal: 복합 전략 (추세 + 시그널)
-// - volatility_breakout: 변동성 대표 (축소 후 확장)
 const DEFAULT_PRESETS_FOR_BATCH = ['sma_crossover', 'momentum', 'trend_filter_signal', 'volatility_breakout']
 
 export default function BacktestPage() {
@@ -38,27 +22,42 @@ export default function BacktestPage() {
     runPreset, runCustom, runBatch, reset,
   } = useBacktest()
 
-  // 종목 선택
   const [market, setMarket] = useState('KR')
   const [symbol, setSymbol] = useState('')
   const [symbolName, setSymbolName] = useState('')
-
-  // 전략 선택
-  const [strategyMode, setStrategyMode] = useState('preset') // preset | custom
+  const [strategyMode, setStrategyMode] = useState('preset')
   const [selectedPreset, setSelectedPreset] = useState('')
   const [yamlContent, setYamlContent] = useState('')
 
-  // 기간/금액
   const today = new Date().toISOString().slice(0, 10)
   const oneYearAgo = new Date(Date.now() - 365 * 86400000).toISOString().slice(0, 10)
   const [startDate, setStartDate] = useState(oneYearAgo)
   const [endDate, setEndDate] = useState(today)
   const [initialCash, setInitialCash] = useState(10000000)
-
-  // 결과 모드 (single | batch)
   const [resultMode, setResultMode] = useState(null)
 
-  // MCP 연결 시 프리셋 목록 로드
+  // 경과 시간 카운터
+  const [elapsed, setElapsed] = useState(0)
+  const elapsedRef = useRef(null)
+
+  const isRunning = status === 'submitting' || status === 'running'
+
+  // 실행 시작/종료 시 경과 시간 타이머 관리
+  useEffect(() => {
+    if (isRunning) {
+      setElapsed(0)
+      elapsedRef.current = setInterval(() => setElapsed((v) => v + 1), 1000)
+    } else {
+      if (elapsedRef.current) {
+        clearInterval(elapsedRef.current)
+        elapsedRef.current = null
+      }
+    }
+    return () => {
+      if (elapsedRef.current) clearInterval(elapsedRef.current)
+    }
+  }, [isRunning])
+
   useEffect(() => {
     if (mcpAvailable) loadPresets()
   }, [mcpAvailable, loadPresets])
@@ -87,7 +86,6 @@ export default function BacktestPage() {
     runBatch(DEFAULT_PRESETS_FOR_BATCH, symbol, market, startDate, endDate)
   }, [symbol, market, startDate, endDate, runBatch, reset])
 
-  const isRunning = status === 'submitting' || status === 'running'
   const canRun = symbol && (
     (strategyMode === 'preset' && selectedPreset) ||
     (strategyMode === 'custom' && yamlContent.trim())
@@ -127,7 +125,6 @@ export default function BacktestPage() {
 
       {/* 설정 패널 */}
       <div className="bg-white rounded-lg border p-4 space-y-4">
-        {/* 종목 선택 */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">종목</label>
           <SymbolSearchBar
@@ -139,7 +136,6 @@ export default function BacktestPage() {
           />
         </div>
 
-        {/* 전략 선택 */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">전략</label>
           <StrategySelector
@@ -153,76 +149,86 @@ export default function BacktestPage() {
           />
         </div>
 
-        {/* 기간 + 금액 */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <div>
             <label className="block text-xs text-gray-500 mb-1">시작일</label>
-            <input
-              type="date"
-              value={startDate}
-              onChange={(e) => setStartDate(e.target.value)}
-              className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm"
-            />
+            <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)}
+              className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm" />
           </div>
           <div>
             <label className="block text-xs text-gray-500 mb-1">종료일</label>
-            <input
-              type="date"
-              value={endDate}
-              onChange={(e) => setEndDate(e.target.value)}
-              className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm"
-            />
+            <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)}
+              className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm" />
           </div>
           <div>
             <label className="block text-xs text-gray-500 mb-1">초기자금</label>
-            <input
-              type="number"
-              value={initialCash}
-              onChange={(e) => setInitialCash(Number(e.target.value))}
-              className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm"
-              step={1000000}
-            />
+            <input type="number" value={initialCash} onChange={(e) => setInitialCash(Number(e.target.value))}
+              className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm" step={1000000} />
           </div>
         </div>
 
-        {/* 실행 버튼 */}
         <div className="flex gap-3">
-          <button
-            onClick={handleRun}
-            disabled={!canRun}
-            className="px-5 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          >
+          <button onClick={handleRun} disabled={!canRun}
+            className="px-5 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
             {isRunning ? '실행 중...' : '백테스트 실행'}
           </button>
-          <button
-            onClick={handleBatch}
-            disabled={!symbol || isRunning}
-            className="px-5 py-2 bg-gray-600 text-white text-sm font-medium rounded-lg hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          >
+          <button onClick={handleBatch} disabled={!symbol || isRunning}
+            className="px-5 py-2 bg-gray-600 text-white text-sm font-medium rounded-lg hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
             전략 비교 (4개)
           </button>
         </div>
       </div>
 
-      {/* 진행 상태 */}
+      {/* 진행 상태 — 상세 현황 */}
       {isRunning && (
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 flex items-center gap-3">
-          <LoadingSpinner />
-          <div>
-            <p className="text-sm font-medium text-blue-800">백테스트 진행 중...</p>
-            {progress && (
-              <p className="text-xs text-blue-600 mt-1">
-                {progress.done}/{progress.total} 완료
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 space-y-3">
+          <div className="flex items-center gap-3">
+            <LoadingSpinner />
+            <div className="flex-1">
+              <p className="text-sm font-medium text-blue-800">
+                {status === 'submitting' ? '전략 제출 중...' : '백테스트 실행 중'}
               </p>
-            )}
+              <p className="text-xs text-blue-600 mt-0.5">
+                {status === 'submitting' && 'MCP 서버에 전략을 전송하고 있습니다'}
+                {status === 'running' && 'KIS 시세 데이터 수집 + QuantConnect Lean 엔진 시뮬레이션'}
+              </p>
+            </div>
+            <div className="text-right">
+              <p className="text-sm font-mono text-blue-700">{elapsed}초</p>
+              <p className="text-xs text-blue-400">최대 5분</p>
+            </div>
+          </div>
+
+          {/* 프로그레스 바 (배치 시) */}
+          {progress && (
+            <div>
+              <div className="flex justify-between text-xs text-blue-600 mb-1">
+                <span>진행률</span>
+                <span>{progress.done}/{progress.total} 전략 완료</span>
+              </div>
+              <div className="w-full bg-blue-200 rounded-full h-2">
+                <div className="bg-blue-600 h-2 rounded-full transition-all duration-500"
+                  style={{ width: `${Math.round((progress.done / progress.total) * 100)}%` }} />
+              </div>
+            </div>
+          )}
+
+          {/* 백그라운드 안내 */}
+          <div className="bg-green-50 border border-green-200 rounded px-3 py-2 text-xs text-green-700 flex items-start gap-2">
+            <span className="mt-0.5">&#x1f4a1;</span>
+            <div>
+              <p className="font-medium">다른 페이지로 이동해도 괜찮습니다</p>
+              <p className="mt-0.5 text-green-600">
+                백테스트는 서버에서 실행되며, 이 페이지를 떠나도 작업이 중단되지 않습니다.
+                돌아오면 자동으로 결과를 확인합니다.
+              </p>
+            </div>
           </div>
         </div>
       )}
 
-      {/* 에러 */}
       {error && <ErrorAlert message={error} />}
 
-      {/* 결과 */}
       {status === 'completed' && resultMode === 'single' && (
         <BacktestResultPanel result={result} />
       )}

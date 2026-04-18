@@ -27,45 +27,94 @@ logger = logging.getLogger(__name__)
 
 
 class MCPClient:
-    """MCP 서버 동기 HTTP 클라이언트.
+    """MCP Streamable HTTP 클라이언트.
 
-    httpx.Client 기반이며, JSON-RPC 2.0 페이로드를 구성하여 MCP 서버에 전송한다.
+    MCP 2025-03-26 프로토콜 — 세션 기반 Streamable HTTP:
+    1. POST /mcp + initialize → 세션 ID 획득 (응답 헤더 mcp-session-id)
+    2. POST /mcp + tools/call (헤더에 Mcp-Session-Id) → SSE 응답에서 result 추출
     """
 
     def __init__(self):
-        # connect=5s: 로컬/사내 서버 연결이므로 5초면 충분
-        # read=300s: 백테스트 실행이 최대 5분까지 소요될 수 있음
-        # write=10s, pool=10s: 일반적인 HTTP 클라이언트 기본값
+        mcp_url = KIS_MCP_URL.rstrip("/")
+        if mcp_url.endswith("/mcp"):
+            self._base_url = mcp_url[:-4]
+            self._mcp_path = "/mcp"
+        else:
+            self._base_url = mcp_url
+            self._mcp_path = ""
+        # MCP 서버가 Host 헤더를 검증하므로, 127.0.0.1로 고정
+        # (Docker 내부에서 host.docker.internal로 접근 시 Host 불일치 방지)
+        from urllib.parse import urlparse
+        parsed = urlparse(mcp_url)
+        self._host_header = f"127.0.0.1:{parsed.port or 3846}"
         self._http = httpx.Client(
-            base_url=KIS_MCP_URL,
+            base_url=self._base_url,
             timeout=httpx.Timeout(connect=5.0, read=300.0, write=10.0, pool=10.0),
         )
-        # JSON-RPC 요청 ID — 호출마다 1씩 증가하여 요청/응답 매칭에 사용
         self._req_id = 0
+        self._session_id: str | None = None
 
     def _check_enabled(self):
-        """MCP 비활성화 시 ConfigError raise."""
         if not KIS_MCP_ENABLED:
             raise ConfigError("KIS MCP 서버가 비활성화되어 있습니다. KIS_MCP_ENABLED=true로 설정하세요.")
 
-    def call_tool(self, tool_name: str, params: dict) -> dict:
-        """MCP JSON-RPC tools/call 호출.
-
-        JSON-RPC 2.0 페이로드 구조:
-        {
+    def _ensure_session(self):
+        """MCP 세션 초기화. 세션 ID가 없거나 만료 시 재초기화."""
+        if self._session_id:
+            return
+        self._req_id += 1
+        payload = {
             "jsonrpc": "2.0",
-            "id": <순차 증가 정수>,
-            "method": "tools/call",
-            "params": {"name": <도구명>, "arguments": <파라미터 dict>}
+            "id": self._req_id,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-03-26",
+                "capabilities": {},
+                "clientInfo": {"name": "stock-manager", "version": "1.0"},
+            },
         }
+        try:
+            resp = self._http.post(
+                self._mcp_path,
+                json=payload,
+                headers={
+                    "Accept": "application/json, text/event-stream",
+                    "Content-Type": "application/json",
+                    "Host": self._host_header,
+                },
+            )
+            resp.raise_for_status()
+            self._session_id = resp.headers.get("mcp-session-id", "")
+            logger.info("MCP 세션 초기화 완료: %s", self._session_id[:8] if self._session_id else "N/A")
+        except Exception as e:
+            logger.warning("MCP 세션 초기화 실패: %s", e)
+            self._session_id = None
 
-        에러 변환 규칙:
-        - httpx.ConnectError → ExternalAPIError("연결 불가")
-        - httpx.TimeoutException → ExternalAPIError("응답 시간 초과")
-        - httpx.HTTPStatusError → ExternalAPIError("HTTP 오류: {status_code}")
-        - body에 "error" 키 존재 → ExternalAPIError("도구 호출 실패")
-        """
+    def _parse_sse_result(self, text: str) -> dict:
+        """SSE 텍스트에서 JSON-RPC result 추출."""
+        import json as _json
+        for line in text.split("\n"):
+            if line.startswith("data: "):
+                try:
+                    body = _json.loads(line[6:])
+                    if "error" in body:
+                        raise ExternalAPIError(f"MCP 도구 호출 실패: {body['error']}")
+                    return body.get("result", {})
+                except _json.JSONDecodeError:
+                    continue
+        # SSE가 아닌 일반 JSON 응답일 수도 있음
+        try:
+            body = _json.loads(text)
+            if "error" in body:
+                raise ExternalAPIError(f"MCP 도구 호출 실패: {body['error']}")
+            return body.get("result", {})
+        except _json.JSONDecodeError:
+            raise ExternalAPIError(f"MCP 응답 파싱 실패: {text[:200]}")
+
+    def call_tool(self, tool_name: str, params: dict) -> dict:
+        """MCP tools/call 호출 (Streamable HTTP 세션 프로토콜)."""
         self._check_enabled()
+        self._ensure_session()
         self._req_id += 1
         payload = {
             "jsonrpc": "2.0",
@@ -73,13 +122,24 @@ class MCPClient:
             "method": "tools/call",
             "params": {"name": tool_name, "arguments": params},
         }
+        headers = {
+            "Accept": "application/json, text/event-stream",
+            "Content-Type": "application/json",
+            "Host": self._host_header,
+        }
+        if self._session_id:
+            headers["Mcp-Session-Id"] = self._session_id
         try:
-            resp = self._http.post("", json=payload)
+            resp = self._http.post(self._mcp_path, json=payload, headers=headers)
+            # 421 = 세션 만료 → 재초기화 후 재시도
+            if resp.status_code == 421:
+                self._session_id = None
+                self._ensure_session()
+                if self._session_id:
+                    headers["Mcp-Session-Id"] = self._session_id
+                resp = self._http.post(self._mcp_path, json=payload, headers=headers)
             resp.raise_for_status()
-            body = resp.json()
-            if "error" in body:
-                raise ExternalAPIError(f"MCP 도구 호출 실패: {body['error']}")
-            return body.get("result", {})
+            return self._parse_sse_result(resp.text)
         except httpx.ConnectError:
             raise ExternalAPIError("KIS MCP 서버에 연결할 수 없습니다")
         except httpx.TimeoutException:
@@ -88,11 +148,7 @@ class MCPClient:
             raise ExternalAPIError(f"MCP 서버 HTTP 오류: {e.response.status_code}")
 
     def health_check(self) -> bool:
-        """MCP 서버 상태 확인.
-
-        MCP 비활성화 시에도 에러를 raise하지 않고 False를 반환한다 (graceful degrade).
-        이를 통해 호출자가 MCP 사용 가능 여부를 안전하게 판별할 수 있다.
-        """
+        """MCP 서버 상태 확인."""
         if not KIS_MCP_ENABLED:
             return False
         try:
