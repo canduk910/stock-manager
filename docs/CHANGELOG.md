@@ -1,5 +1,27 @@
 # 변경 이력
 
+## 2026-04-18 — 포트폴리오 자문 섹터 추천 + 뉴스 수집 품질 개선
+
+### 포트폴리오 자문 — 신규 섹터 진입 추천
+- GPT 프롬프트에 `sector_recommendations[]` JSON 스키마 + 규칙 29-32 추가
+- 체제별 신규 섹터 한도: accumulation=3-5개, selective=2-3개, cautious=1개, defensive=금지
+- `_get_macro_news_context()`: 한국 5개 + 해외 3개 뉴스 헤드라인을 GPT 컨텍스트에 주입
+- `_REGIME_VALUATION_LIMITS`: 체제별 PER/PBR 한도 매핑 (규칙 31에서 참조)
+- `SectorRecommendationCard.jsx` 신규: 섹터명+목표비중+타이밍 배지+대표종목→DetailPage 링크
+- `AdvisorPanel.jsx`: DiagnosisCard와 RebalanceCard 사이에 SectorRecommendationCard 배치
+
+### 뉴스 수집 품질 개선
+- 한국 뉴스: 단일 검색어 → Google News **비즈니스 토픽 RSS**(편집 큐레이션) + `증시+금리+환율` 2개 소스 병합
+- 해외 뉴스: NYT만 → NYT + Google News US 비즈니스 토픽 2개 소스 병합
+- `_dedup_and_sort()` 신규: 제목 앞 30자 기반 중복 제거 + `published_ts` 최신순 정렬
+- `_parse_published_ts()` 신규: RFC 2822 날짜 → Unix timestamp 파싱
+- `_parse_rss()`: `published_ts` 필드 추가 (정렬 기준)
+- `fetch_investor_news()`: 여유있게 수집 후 `_dedup_and_sort()` 적용
+- `macro_service.py`: `source` 필드 NYT 하드코딩 → 동적 반영
+
+### UI 개선
+- `DiagnosisCard.jsx`: 섹터명 잘림 수정 (`w-20` → `w-28 shrink-0` + `title` 속성)
+
 ## 2026-04-17 — KIS AI Extensions 백테스트 연동 + 267260 가격 버그 수정
 
 ### 버그 수정

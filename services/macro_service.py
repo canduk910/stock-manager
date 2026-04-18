@@ -102,7 +102,7 @@ def get_news() -> dict:
                 "title_ko": tr.get("title", article["title"]),
                 "summary_ko": tr.get("summary", ""),
                 "link": article["link"],
-                "source": "NYT",
+                "source": article.get("source") or "NYT",
                 "published": article.get("published", ""),
                 "translated": bool(tr.get("title")),
             })

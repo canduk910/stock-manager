@@ -3,6 +3,7 @@ import { usePortfolioAdvisor } from '../../hooks/usePortfolioAdvisor'
 import LoadingSpinner from '../common/LoadingSpinner'
 import ErrorAlert from '../common/ErrorAlert'
 import DiagnosisCard from './DiagnosisCard'
+import SectorRecommendationCard from './SectorRecommendationCard'
 import RebalanceCard from './RebalanceCard'
 import TradeTable from './TradeTable'
 
@@ -153,6 +154,7 @@ export default function AdvisorPanel({ balanceData, notify, advisor: externalAdv
             })()}
 
             <DiagnosisCard diagnosis={analysis.diagnosis} />
+            <SectorRecommendationCard recommendations={analysis.sector_recommendations} />
             <RebalanceCard suggestions={analysis.rebalancing} />
             <TradeTable trades={analysis.trades} notify={notify} />
 

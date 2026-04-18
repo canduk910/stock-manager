@@ -67,6 +67,8 @@ frontend/
       portfolio/          RegimeBanner (매크로 체제 배너), AllocationChart (자산 배분 파이),
                           ProfitChart (종목별 수익률 바), HoldingsOverview (보유종목+안전마진 등급)
       advisor/            AdvisorPanel (포트폴리오 자문 컨테이너 + **개별 종목 리포트 연계 요약 카드**(가중등급+분포바+B미만 경고; weighted_grade_avg 부재 시 숨김)),
+                          DiagnosisCard (진단 카드: 점수게이지+위험도+섹터분석 바),
+                          **SectorRecommendationCard** (신규 섹터 진입 추천: 섹터명+목표비중+타이밍+대표종목→DetailPage 링크),
                           RebalanceCard (리밸런싱 제안), TradeTable (매매안+주문실행),
                           TradeConfirmModal (AI 추천 주문 확인 모달)
       backtest/           StrategySelector (프리셋/커스텀 YAML 선택), MetricsCard (수익률/샤프/낙폭/승률),

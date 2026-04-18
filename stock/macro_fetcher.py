@@ -37,8 +37,16 @@ INVESTORS = [
      "query": '"Stanley Druckenmiller" market OR economy'},
 ]
 
-_NAVER_RSS_URL = "https://news.google.com/rss/search?q=한국+경제+주식&hl=ko&gl=KR&ceid=KR:ko"
-_NYT_RSS_URL = "https://rss.nytimes.com/services/xml/rss/nyt/Business.xml"
+# 한국 뉴스 — 비즈니스 토픽(화제순 큐레이션) + 시장 핵심 키워드 검색
+_KR_NEWS_FEEDS = [
+    "https://news.google.com/rss/topics/CAAqJggKIiBDQkFTRWdvSUwyMHZNRGx6TVdZU0FtdHZHZ0pMVWlnQVAB?hl=ko&gl=KR&ceid=KR:ko",
+    "https://news.google.com/rss/search?q=한국+증시+금리+환율&hl=ko&gl=KR&ceid=KR:ko",
+]
+# 해외 뉴스 — NYT Business + Google News US 비즈니스 토픽
+_INTL_NEWS_FEEDS = [
+    "https://rss.nytimes.com/services/xml/rss/nyt/Business.xml",
+    "https://news.google.com/rss/topics/CAAqJggKIiBDQkFTRWdvSUwyMHZNRGx6TVdZU0FtVnVHZ0pWVXlnQVAB?hl=en&gl=US&ceid=US:en",
+]
 _GOOGLE_NEWS_RSS = "https://news.google.com/rss/search?hl=en&gl=US&ceid=US:en&q={query}"
 
 
@@ -296,8 +304,42 @@ def calc_fear_greed() -> Optional[dict]:
 
 # ── RSS 파싱 ─────────────────────────────────────────────────────────────────
 
+def _parse_published_ts(date_str: str) -> float:
+    """RSS published 문자열 → Unix timestamp. 파싱 실패 시 0 반환."""
+    if not date_str:
+        return 0.0
+    try:
+        from email.utils import parsedate_to_datetime
+        return parsedate_to_datetime(date_str).timestamp()
+    except Exception:
+        pass
+    # feedparser의 time_struct 형태 fallback
+    try:
+        import time as _time
+        import calendar
+        tp = _time.strptime(date_str[:25], "%a, %d %b %Y %H:%M:%S")
+        return float(calendar.timegm(tp))
+    except Exception:
+        return 0.0
+
+
+def _dedup_and_sort(articles: list[dict], max_items: int) -> list[dict]:
+    """제목 기반 중복 제거 + 최신순 정렬."""
+    import re as _re
+    seen: set[str] = set()
+    unique: list[dict] = []
+    for a in articles:
+        # 공백/특수문자 제거한 앞 30자로 중복 판별
+        key = _re.sub(r"[\s\-·:|\[\]()]+", "", a.get("title", ""))[:30]
+        if key and key not in seen:
+            seen.add(key)
+            unique.append(a)
+    unique.sort(key=lambda x: x.get("published_ts", 0), reverse=True)
+    return unique[:max_items]
+
+
 def _parse_rss(url: str, max_items: int = 15) -> list[dict]:
-    """feedparser로 RSS 파싱."""
+    """feedparser로 RSS 파싱. published_ts(타임스탬프) 포함."""
     try:
         import feedparser
         feed = feedparser.parse(url)
@@ -314,6 +356,7 @@ def _parse_rss(url: str, max_items: int = 15) -> list[dict]:
                 "summary": _strip_html((entry.get("summary") or ""))[:200],
                 "source": source,
                 "published": published,
+                "published_ts": _parse_published_ts(published),
             })
         return items
     except Exception as e:
@@ -322,33 +365,41 @@ def _parse_rss(url: str, max_items: int = 15) -> list[dict]:
 
 
 def fetch_naver_news(max_items: int = 15) -> list[dict]:
-    """한국 경제 뉴스 (Google News Korea RSS 경유)."""
+    """한국 경제 뉴스 — 다중 토픽 + 중복 제거 + 최신순."""
     key = "macro:news:naver"
     cached = get_cached(key)
     if cached is not None:
         return cached
 
-    items = _parse_rss(_NAVER_RSS_URL, max_items)
+    all_items: list[dict] = []
+    for url in _KR_NEWS_FEEDS:
+        all_items.extend(_parse_rss(url, max_items=20))
+
+    items = _dedup_and_sort(all_items, max_items)
     if items:
         set_cached(key, items, ttl_hours=0.5)
     return items
 
 
 def fetch_nyt_news(max_items: int = 10) -> list[dict]:
-    """NYT Business 뉴스 RSS."""
+    """해외 경제 뉴스 — NYT + Google News US 비즈니스 + 중복 제거 + 최신순."""
     key = "macro:news:nyt_raw"
     cached = get_cached(key)
     if cached is not None:
         return cached
 
-    items = _parse_rss(_NYT_RSS_URL, max_items)
+    all_items: list[dict] = []
+    for url in _INTL_NEWS_FEEDS:
+        all_items.extend(_parse_rss(url, max_items=15))
+
+    items = _dedup_and_sort(all_items, max_items)
     if items:
         set_cached(key, items, ttl_hours=0.5)
     return items
 
 
 def fetch_investor_news(query: str, max_items: int = 5) -> list[dict]:
-    """Google News RSS로 투자자 관련 뉴스 검색."""
+    """Google News RSS로 투자자 관련 뉴스 검색 — 최신순 정렬."""
     slug = urllib.parse.quote(query)
     url = _GOOGLE_NEWS_RSS.format(query=slug)
 
@@ -357,7 +408,8 @@ def fetch_investor_news(query: str, max_items: int = 5) -> list[dict]:
     if cached is not None:
         return cached
 
-    items = _parse_rss(url, max_items)
+    raw = _parse_rss(url, max_items=max_items * 2)  # 여유있게 수집 후 정렬
+    items = _dedup_and_sort(raw, max_items)
     if items:
         set_cached(key, items, ttl_hours=6)
     return items

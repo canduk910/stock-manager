@@ -83,7 +83,7 @@ export default function DiagnosisCard({ diagnosis }) {
             <div className="space-y-1.5">
               {diagnosis.sector_analysis.map((s, i) => (
                 <div key={i} className="flex items-center gap-2 text-sm">
-                  <span className="w-20 text-gray-600 truncate">{s.sector}</span>
+                  <span className="w-28 shrink-0 text-gray-600 truncate" title={s.sector}>{s.sector}</span>
                   <div className="flex-1 bg-gray-100 rounded-full h-2 overflow-hidden">
                     <div
                       className="bg-blue-500 h-2 rounded-full"

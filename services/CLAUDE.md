@@ -22,7 +22,7 @@
 | `safety_grade.py` | **7점 등급/복합점수 공유 모듈** (신규). `compute_grade_7point()`(7지표×4점=28점→A/B+/B/C/D), `compute_composite_score()`(ValueScreener 공식), `compute_regime_alignment()`, `compute_position_sizing()`. advisory_service + pipeline_service 공유. |
 | `schemas/advisory_report_v2.py` | **Pydantic v2 응답 스키마** (신규). `AdvisoryReportV2Schema` 11개 모델 계층. `validate_v2_report()`/`extract_v2_fields()`. 등급=Literal, 점수=ge/le 범위 검증. |
 | `macro_service.py` | 매크로 분석 오케스트레이션: quote+sparkline 완전 병렬 수집 + GPT 번역/추출 + 섹션별 독립 실패 허용. GPT 결과는 `macro.db`에 일일 캐싱 (KST 기준) |
-| `portfolio_advisor_service.py` | AI 포트폴리오 자문: 잔고 컨텍스트(52주 하락률+**개별 AI 리포트 연계**) + 매크로 체제 → OpenAI 호출(체제별 프롬프트 + 역발상 + **가중 등급 집계 + 체제 정합성**) → 진단/리밸런싱/매매안. `cache.db` 30분 TTL + `advisory.db` 영구 저장. 52주 고가 6h 캐시. |
+| `portfolio_advisor_service.py` | AI 포트폴리오 자문: 잔고 컨텍스트(52주 하락률+**개별 AI 리포트 연계**) + 매크로 체제 + **매크로 뉴스 헤드라인** → OpenAI 호출(체제별 프롬프트 + 역발상 + **가중 등급 집계 + 체제 정합성 + 신규 섹터 진입 추천(규칙 29-32)**) → 진단/리밸런싱/매매안/**섹터 추천**. `cache.db` 30분 TTL + `advisory.db` 영구 저장. 52주 고가 6h 캐시. |
 | `report_service.py` | 투자 보고서: 추천 이력 + 매크로 체제 이력 + 일일 보고서 비즈니스 로직 + 통합 Markdown 생성 + 성과 통계. `stock/report_store.py` 래퍼 경유 (다른 서비스와 동일 패턴). |
 | `pipeline_service.py` | 투자 파이프라인: 체제 판단(`macro_regime.py` 위임) → 체제별 스크리닝 → 심층 분석(`safety_grade.py` 위임) → 추천 생성 → 보고서 저장. `run_pipeline(market)` 단일 진입점. |
 | `scheduler_service.py` | APScheduler: 08:00 KR / 16:00 US BackgroundScheduler. `setup_scheduler()` / `shutdown_scheduler()` / `get_scheduler_status()`. main.py lifespan 통합. |
