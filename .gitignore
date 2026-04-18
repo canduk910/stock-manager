@@ -30,3 +30,9 @@ frontend/dist/
 # SQLAlchemy / Alembic (DB files are user-specific)
 *.db.bak
 *.db.pre_migration_bak
+
+# Claude Code plans
+.claude/plans/
+
+# Excel 참고 문서
+docs/*.xlsx
