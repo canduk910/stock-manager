@@ -2,15 +2,18 @@
  * 백테스트 페이지 (/backtest).
  *
  * KIS AI Extensions MCP 서버 연동으로 전략 백테스트를 실행한다.
+ * 히스토리 테이블로 과거 실행 결과를 조회할 수 있다.
  */
 import { useState, useEffect, useCallback, useRef } from 'react'
 import SymbolSearchBar from '../components/order/SymbolSearchBar'
 import StrategySelector from '../components/backtest/StrategySelector'
 import BacktestResultPanel from '../components/backtest/BacktestResultPanel'
 import BatchCompareTable from '../components/backtest/BatchCompareTable'
+import BacktestHistoryTable from '../components/backtest/BacktestHistoryTable'
 import LoadingSpinner from '../components/common/LoadingSpinner'
 import ErrorAlert from '../components/common/ErrorAlert'
-import { useMcpStatus, usePresets, useBacktest } from '../hooks/useBacktest'
+import { useMcpStatus, usePresets, useBacktest, useBacktestHistory } from '../hooks/useBacktest'
+import { fetchBacktestResult } from '../api/backtest'
 
 const DEFAULT_PRESETS_FOR_BATCH = ['sma_crossover', 'momentum', 'trend_filter_signal', 'volatility_breakout']
 
@@ -21,6 +24,7 @@ export default function BacktestPage() {
     status, result, error, progress,
     runPreset, runCustom, runBatch, reset,
   } = useBacktest()
+  const { history, loading: historyLoading, load: loadHistory } = useBacktestHistory()
 
   const [market, setMarket] = useState('KR')
   const [symbol, setSymbol] = useState('')
@@ -35,6 +39,7 @@ export default function BacktestPage() {
   const [endDate, setEndDate] = useState(today)
   const [initialCash, setInitialCash] = useState(10000000)
   const [resultMode, setResultMode] = useState(null)
+  const [viewResult, setViewResult] = useState(null) // 히스토리에서 선택한 결과
 
   // 경과 시간 카운터
   const [elapsed, setElapsed] = useState(0)
@@ -62,6 +67,12 @@ export default function BacktestPage() {
     if (mcpAvailable) loadPresets()
   }, [mcpAvailable, loadPresets])
 
+  // 마운트 시 + 백테스트 완료 시 히스토리 로드
+  useEffect(() => { loadHistory() }, [loadHistory])
+  useEffect(() => {
+    if (status === 'completed') loadHistory()
+  }, [status, loadHistory])
+
   const handleSymbolSelect = useCallback(({ code, name, market: m }) => {
     setSymbol(code)
     setSymbolName(name)
@@ -71,6 +82,7 @@ export default function BacktestPage() {
   const handleRun = useCallback(() => {
     if (!symbol) return
     reset()
+    setViewResult(null)
     setResultMode('single')
     if (strategyMode === 'preset' && selectedPreset) {
       runPreset(selectedPreset, symbol, market, startDate, endDate, initialCash)
@@ -82,9 +94,25 @@ export default function BacktestPage() {
   const handleBatch = useCallback(() => {
     if (!symbol) return
     reset()
+    setViewResult(null)
     setResultMode('batch')
     runBatch(DEFAULT_PRESETS_FOR_BATCH, symbol, market, startDate, endDate)
   }, [symbol, market, startDate, endDate, runBatch, reset])
+
+  // 히스토리에서 결과 선택
+  const handleHistorySelect = useCallback(async (job) => {
+    try {
+      const data = await fetchBacktestResult(job.job_id)
+      setViewResult(data)
+      setResultMode('single')
+      reset()
+    } catch {
+      // 이미 job 자체에 메트릭이 있으면 그대로 표시
+      setViewResult(job)
+      setResultMode('single')
+      reset()
+    }
+  }, [reset])
 
   const canRun = symbol && (
     (strategyMode === 'preset' && selectedPreset) ||
@@ -179,7 +207,7 @@ export default function BacktestPage() {
         </div>
       </div>
 
-      {/* 진행 상태 — 상세 현황 */}
+      {/* 진행 상태 */}
       {isRunning && (
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 space-y-3">
           <div className="flex items-center gap-3">
@@ -190,7 +218,7 @@ export default function BacktestPage() {
               </p>
               <p className="text-xs text-blue-600 mt-0.5">
                 {status === 'submitting' && 'MCP 서버에 전략을 전송하고 있습니다'}
-                {status === 'running' && 'KIS 시세 데이터 수집 + QuantConnect Lean 엔진 시뮬레이션'}
+                {status === 'running' && 'KIS 시세 데이터 수집 + 시뮬레이션 엔진 실행'}
               </p>
             </div>
             <div className="text-right">
@@ -219,8 +247,7 @@ export default function BacktestPage() {
             <div>
               <p className="font-medium">다른 페이지로 이동해도 괜찮습니다</p>
               <p className="mt-0.5 text-green-600">
-                백테스트는 서버에서 실행되며, 이 페이지를 떠나도 작업이 중단되지 않습니다.
-                돌아오면 자동으로 결과를 확인합니다.
+                백테스트는 서버에서 실행됩니다. 돌아오면 아래 이력에서 결과를 확인할 수 있습니다.
               </p>
             </div>
           </div>
@@ -229,6 +256,7 @@ export default function BacktestPage() {
 
       {error && <ErrorAlert message={error} />}
 
+      {/* 현재 실행 결과 */}
       {status === 'completed' && resultMode === 'single' && (
         <BacktestResultPanel result={result} />
       )}
@@ -237,13 +265,28 @@ export default function BacktestPage() {
         <BatchCompareTable result={result} />
       )}
 
+      {/* 히스토리에서 선택한 결과 */}
+      {viewResult && status !== 'completed' && (
+        <BacktestResultPanel result={viewResult} />
+      )}
+
       {status === 'timeout' && (
         <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
           <p className="text-sm text-yellow-800">
-            백테스트 시간이 초과되었습니다. MCP 서버 상태를 확인해주세요.
+            백테스트 시간이 초과되었습니다. 아래 이력에서 나중에 결과를 확인하세요.
           </p>
         </div>
       )}
+
+      {/* 이력 */}
+      <div className="bg-white rounded-lg border p-4">
+        <h2 className="text-sm font-semibold text-gray-700 mb-3">백테스트 이력</h2>
+        <BacktestHistoryTable
+          history={history}
+          onSelect={handleHistorySelect}
+          loading={historyLoading}
+        />
+      </div>
     </div>
   )
 }

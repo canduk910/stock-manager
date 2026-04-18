@@ -3,15 +3,26 @@
 KIS AI Extensions MCP 서버의 백테스트 도구를 호출하여 전략 실행 결과를 반환한다.
 결과는 strategy_store(DB)에 저장하여 이력 관리 및 AI 자문 연동에 활용한다.
 
-MCP 도구 매핑 테이블:
-| 함수                    | MCP 도구                      | 용도                     |
-|-------------------------|-------------------------------|--------------------------|
-| list_presets()          | list_presets_tool              | 프리셋 전략 목록 조회     |
-| list_indicators()      | list_indicators_tool           | 사용 가능 지표 목록 조회  |
-| run_preset_backtest()  | run_preset_backtest_tool       | 프리셋 전략 백테스트 실행 |
-| run_custom_backtest()  | validate_yaml_tool             | YAML 전략 검증 (1단계)   |
-|                         | run_custom_backtest_tool       | 커스텀 전략 백테스트 (2단계) |
-| get_strategy_signals() | run_preset_backtest_tool ×3    | AI 자문용 전략 신호 생성  |
+MCP 도구 매핑 테이블 (비동기 2단계):
+| 함수                    | MCP 도구 (1단계)              | MCP 도구 (2단계)              |
+|-------------------------|-------------------------------|-------------------------------|
+| list_presets()          | list_presets_tool              | -                             |
+| list_indicators()      | list_indicators_tool           | -                             |
+| run_preset_backtest()  | run_preset_backtest_tool       | get_backtest_result_tool      |
+| run_custom_backtest()  | validate_yaml_tool + run_backtest_tool | get_backtest_result_tool |
+| run_batch_backtest()   | run_batch_backtest_tool        | (내장 대기)                    |
+| get_strategy_signals() | run_preset_backtest_tool ×3    | get_backtest_result_tool ×3   |
+
+MCP 파라미터 스키마:
+- run_preset_backtest_tool: strategy_id(str), symbols(list[str]), initial_capital(num), start_date, end_date
+- run_backtest_tool: yaml_content(str), symbols(list[str]), initial_capital(num), start_date, end_date
+- get_backtest_result_tool: job_id(str), wait(bool=true), timeout(num=300)
+- run_batch_backtest_tool: items(list[dict]), start_date, end_date, initial_capital(num)
+
+MCP 응답 메트릭 구조:
+  data.result.metrics.basic: total_return, annual_return, max_drawdown
+  data.result.metrics.risk: sharpe_ratio, sortino_ratio
+  data.result.metrics.trading: total_orders, win_rate, profit_loss_ratio, avg_win, avg_loss
 
 의존 관계:
 - services/mcp_client.py → MCPClient (JSON-RPC 통신)
@@ -52,12 +63,65 @@ def _extract_mcp_content(result: dict | list) -> any:
                     parsed = json.loads(text)
                     # {"success": true, "data": [...]} 구조면 data만 반환
                     if isinstance(parsed, dict) and "data" in parsed:
+                        if not parsed.get("success", True):
+                            error_msg = parsed.get("error", "알 수 없는 오류")
+                            raise ExternalAPIError(f"MCP 백테스트 실패: {error_msg}")
                         return parsed["data"]
                     return parsed
                 except (json.JSONDecodeError, TypeError):
                     return text
         return content if content else result
     return result
+
+
+def _extract_metrics(data: dict) -> dict:
+    """MCP 결과 데이터에서 메트릭 8개 추출.
+
+    MCP 응답 구조:
+      data.result.metrics.basic: total_return, annual_return, max_drawdown
+      data.result.metrics.risk: sharpe_ratio, sortino_ratio
+      data.result.metrics.trading: total_orders, win_rate, profit_loss_ratio
+    """
+    result = data.get("result", data) if isinstance(data, dict) else {}
+    m = result.get("metrics", {}) if isinstance(result, dict) else {}
+    basic = m.get("basic", {})
+    risk = m.get("risk", {})
+    trading = m.get("trading", {})
+
+    return {
+        "total_return_pct": basic.get("total_return"),
+        "cagr": basic.get("annual_return"),
+        "sharpe_ratio": risk.get("sharpe_ratio"),
+        "sortino_ratio": risk.get("sortino_ratio"),
+        "max_drawdown": basic.get("max_drawdown"),
+        "win_rate": trading.get("win_rate"),
+        "profit_factor": trading.get("profit_loss_ratio"),
+        "total_trades": trading.get("total_orders"),
+    }
+
+
+def _run_and_wait(client, tool_name: str, params: dict, timeout: int = 280) -> dict:
+    """MCP 비동기 2단계 실행: 도구 호출 → job_id 획득 → 결과 대기.
+
+    1단계: tool_name 호출 → 즉시 job_id 반환
+    2단계: get_backtest_result_tool(job_id, wait=true) → 완료 대기
+    """
+    # 1단계: 백테스트 제출 → job_id
+    result1 = client.call_tool(tool_name, params)
+    data1 = _extract_mcp_content(result1)
+    if not isinstance(data1, dict) or "job_id" not in data1:
+        raise ExternalAPIError(f"MCP 응답에서 job_id를 찾을 수 없습니다: {data1}")
+    mcp_job_id = data1["job_id"]
+    logger.info("MCP 백테스트 제출 완료: %s (MCP job: %s)", tool_name, mcp_job_id)
+
+    # 2단계: 결과 대기
+    result2 = client.call_tool("get_backtest_result_tool", {
+        "job_id": mcp_job_id,
+        "wait": True,
+        "timeout": timeout,
+    })
+    data2 = _extract_mcp_content(result2)
+    return data2
 
 
 def list_presets() -> list:
@@ -84,17 +148,14 @@ def run_preset_backtest(
 ) -> dict:
     """프리셋 전략 백테스트 실행.
 
-    실행 흐름:
-    1) UUID job_id 생성 → DB에 작업 메타데이터 선행 기록
-    2) MCP run_preset_backtest_tool 호출 (최대 5분 소요 가능)
-    3) 완료 시 _save_if_completed()로 메트릭 8개 추출 → DB 결과 저장
-    4) 예외 발생 시 ExternalAPIError로 래핑하여 상위 전파
+    비동기 2단계:
+    1) run_preset_backtest_tool → 즉시 MCP job_id 반환
+    2) get_backtest_result_tool(wait=true) → 완료 대기 후 결과
     """
     client = get_mcp_client()
-    # UUID로 고유한 작업 ID 생성 — 결과 조회/이력 추적에 사용
     job_id = str(uuid.uuid4())
 
-    # DB에 작업 기록 (Write-Ahead: MCP 호출 전 선행 저장)
+    # DB에 작업 기록 (Write-Ahead)
     strategy_store.save_backtest_job(
         job_id=job_id,
         strategy_name=preset,
@@ -105,10 +166,9 @@ def run_preset_backtest(
     )
 
     params = {
-        "preset": preset,
-        "symbol": symbol,
-        "market": market,
-        "initial_cash": initial_cash,
+        "strategy_id": preset,
+        "symbols": [symbol],
+        "initial_capital": initial_cash,
     }
     if start_date:
         params["start_date"] = start_date
@@ -116,12 +176,14 @@ def run_preset_backtest(
         params["end_date"] = end_date
 
     try:
-        result = client.call_tool("run_preset_backtest_tool", params)
-        _save_if_completed(job_id, result)
-        return {"job_id": job_id, "status": "completed", "result": result}
+        data = _run_and_wait(client, "run_preset_backtest_tool", params)
+        _save_completed(job_id, data)
+        return {"job_id": job_id, "status": "completed", "result": data}
     except ExternalAPIError:
+        strategy_store.update_job_status(job_id, "failed")
         raise
     except Exception as e:
+        strategy_store.update_job_status(job_id, "failed")
         logger.error("백테스트 실행 실패: %s", e)
         raise ExternalAPIError(f"백테스트 실행 실패: {e}")
 
@@ -136,13 +198,14 @@ def run_custom_backtest(
 ) -> dict:
     """커스텀 YAML 전략 백테스트 실행.
 
-    2단계 실행:
-    1) validate_yaml_tool로 YAML 구문 및 스키마 검증 (실패 시 즉시 ExternalAPIError)
-    2) run_custom_backtest_tool로 실제 백테스트 실행
+    3단계:
+    1) validate_yaml_tool로 YAML 검증
+    2) run_backtest_tool → 즉시 MCP job_id 반환
+    3) get_backtest_result_tool(wait=true) → 완료 대기
     """
     client = get_mcp_client()
 
-    # 1단계: YAML 검증 — 구문 오류나 지원하지 않는 지표 사용 시 조기 실패
+    # 1단계: YAML 검증
     try:
         client.call_tool("validate_yaml_tool", {"yaml_content": yaml_content})
     except ExternalAPIError as e:
@@ -160,9 +223,8 @@ def run_custom_backtest(
 
     params = {
         "yaml_content": yaml_content,
-        "symbol": symbol,
-        "market": market,
-        "initial_cash": initial_cash,
+        "symbols": [symbol],
+        "initial_capital": initial_cash,
     }
     if start_date:
         params["start_date"] = start_date
@@ -170,12 +232,14 @@ def run_custom_backtest(
         params["end_date"] = end_date
 
     try:
-        result = client.call_tool("run_custom_backtest_tool", params)
-        _save_if_completed(job_id, result)
-        return {"job_id": job_id, "status": "completed", "result": result}
+        data = _run_and_wait(client, "run_backtest_tool", params)
+        _save_completed(job_id, data)
+        return {"job_id": job_id, "status": "completed", "result": data}
     except ExternalAPIError:
+        strategy_store.update_job_status(job_id, "failed")
         raise
     except Exception as e:
+        strategy_store.update_job_status(job_id, "failed")
         logger.error("커스텀 백테스트 실행 실패: %s", e)
         raise ExternalAPIError(f"커스텀 백테스트 실행 실패: {e}")
 
@@ -196,7 +260,7 @@ def run_batch_backtest(
     end_date: Optional[str] = None,
     initial_cash: int = 10_000_000,
 ) -> dict:
-    """배치 비교 (여러 전략)."""
+    """배치 비교 (여러 전략). 내부적으로 순차 실행."""
     results = {}
     for preset in presets:
         try:
@@ -220,11 +284,10 @@ def get_strategy_signals(code: str, market: str) -> Optional[dict]:
     대표 3전략 배치 실행 후 합의(consensus)를 도출한다.
     MCP 비활성화 시 None 반환 (advisory_service에서 graceful degrade).
 
-    대표 3전략 선택 근거:
-    - sma_crossover: 추세 추종 (이동평균 교차 — 가장 기본적인 추세 판별)
-    - momentum: 모멘텀 (가격 변동률 기반 — 단기 방향성)
-    - trend_filter_signal: 복합 추세 필터 (추세+필터 조합 — 노이즈 제거)
-    이 3가지로 추세/모멘텀/복합 관점을 균형 있게 커버한다.
+    대표 3전략:
+    - sma_crossover: 추세 추종 (이동평균 교차)
+    - momentum: 모멘텀 (가격 변동률)
+    - trend_filter_signal: 복합 추세 필터
     """
     if not KIS_MCP_ENABLED:
         return None
@@ -237,31 +300,31 @@ def get_strategy_signals(code: str, market: str) -> Optional[dict]:
 
     for preset in representative_presets:
         try:
-            result = client.call_tool("run_preset_backtest_tool", {
-                "preset": preset,
-                "symbol": code,
-                "market": market,
-                "initial_cash": 10_000_000,
-            })
-            content = result.get("content", result) if isinstance(result, dict) else result
-
-            # 신호 추출
-            signal = _extract_signal(preset, content)
-            signals.append(signal)
+            data = _run_and_wait(client, "run_preset_backtest_tool", {
+                "strategy_id": preset,
+                "symbols": [code],
+                "initial_capital": 10_000_000,
+            }, timeout=120)
 
             # 메트릭 추출
-            if isinstance(content, dict):
-                metrics_list.append({
-                    "strategy": preset,
-                    "total_return_pct": content.get("total_return_pct"),
-                    "sharpe_ratio": content.get("sharpe_ratio"),
-                    "max_drawdown": content.get("max_drawdown"),
-                })
+            metrics = _extract_metrics(data)
+            total_return = metrics.get("total_return_pct", 0) or 0
+
+            # 신호 추출
+            signal = _extract_signal(preset, total_return)
+            signals.append(signal)
+
+            metrics_list.append({
+                "strategy": preset,
+                "total_return_pct": total_return,
+                "sharpe_ratio": metrics.get("sharpe_ratio"),
+                "max_drawdown": metrics.get("max_drawdown"),
+            })
         except Exception as e:
             logger.warning("전략 신호 생성 실패 (%s): %s", preset, e)
             signals.append({"strategy": preset, "signal": "HOLD", "strength": 0.0, "error": str(e)})
 
-    # 합의 도출 — 과반수 투표 방식 (3전략 중 2개 이상 동일 신호 시 채택)
+    # 합의 도출 — 과반수 투표
     buy_count = sum(1 for s in signals if s.get("signal") == "BUY")
     sell_count = sum(1 for s in signals if s.get("signal") == "SELL")
     total = len(signals)
@@ -284,68 +347,38 @@ def get_strategy_signals(code: str, market: str) -> Optional[dict]:
     }
 
 
-def _extract_signal(preset: str, content) -> dict:
-    """MCP 결과에서 전략 신호 추출.
+def _extract_signal(preset: str, total_return: float) -> dict:
+    """수익률 → 신호 변환.
 
-    수익률 → 신호 변환 로직:
-    - total_return_pct >  5% → BUY  (강도 = 수익률/20, 최대 1.0)
-    - total_return_pct < -5% → SELL (강도 = |수익률|/20, 최대 1.0)
-    - -5% ~ +5%              → HOLD (강도 = 0.5, 중립)
-
-    임계값 5%: 거래비용+슬리피지를 감안한 유의미한 수익률 기준.
-    강도 스케일: 20%를 최대(1.0)로 설정 — 전략 1회 실행으로 20% 이상이면 강한 신호.
+    - > 5% → BUY (강도 = 수익률/20, 최대 1.0)
+    - < -5% → SELL (강도 = |수익률|/20, 최대 1.0)
+    - -5% ~ +5% → HOLD (강도 = 0.5)
     """
-    signal = "HOLD"
-    strength = 0.0
+    if not isinstance(total_return, (int, float)):
+        return {"strategy": preset, "signal": "HOLD", "strength": 0.0}
 
-    if isinstance(content, dict):
-        total_return = content.get("total_return_pct", 0)
-        if isinstance(total_return, (int, float)):
-            if total_return > 5:
-                signal = "BUY"
-                strength = min(total_return / 20, 1.0)
-            elif total_return < -5:
-                signal = "SELL"
-                strength = min(abs(total_return) / 20, 1.0)
-            else:
-                signal = "HOLD"
-                strength = 0.5
+    if total_return > 5:
+        signal = "BUY"
+        strength = min(total_return / 20, 1.0)
+    elif total_return < -5:
+        signal = "SELL"
+        strength = min(abs(total_return) / 20, 1.0)
+    else:
+        signal = "HOLD"
+        strength = 0.5
 
     return {"strategy": preset, "signal": signal, "strength": round(strength, 2)}
 
 
-def _save_if_completed(job_id: str, result) -> None:
-    """MCP 결과가 완료 상태면 DB에 저장.
-
-    MCP 응답에서 메트릭 8개를 추출하여 strategy_store에 저장한다:
-    - total_return_pct: 총 수익률(%)
-    - cagr: 연평균 복합 성장률(%)
-    - sharpe_ratio: 샤프 비율 (위험 조정 수익률)
-    - sortino_ratio: 소르티노 비율 (하방 위험만 고려)
-    - max_drawdown: 최대 낙폭(%)
-    - win_rate: 승률(%)
-    - profit_factor: 총이익/총손실 비율
-    - total_trades: 총 거래 횟수
-    """
-    if not isinstance(result, dict):
-        return
-    content = result.get("content", result)
-    if not isinstance(content, dict):
+def _save_completed(job_id: str, data) -> None:
+    """MCP 결과를 DB에 저장."""
+    if not isinstance(data, dict):
         return
 
-    metrics = {
-        "total_return_pct": content.get("total_return_pct"),
-        "cagr": content.get("cagr"),
-        "sharpe_ratio": content.get("sharpe_ratio"),
-        "sortino_ratio": content.get("sortino_ratio"),
-        "max_drawdown": content.get("max_drawdown"),
-        "win_rate": content.get("win_rate"),
-        "profit_factor": content.get("profit_factor"),
-        "total_trades": content.get("total_trades"),
-    }
+    metrics = _extract_metrics(data)
     strategy_store.save_backtest_result(
         job_id=job_id,
         metrics=metrics,
-        result_json=content,
+        result_json=data,
         completed_at=now_kst_iso(),
     )

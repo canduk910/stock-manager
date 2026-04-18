@@ -62,3 +62,12 @@ export function runBatchBacktest(presets, symbol, market = 'KR', startDate, endD
 export function fetchBacktestResult(jobId) {
   return apiFetch(`/api/backtest/result/${jobId}`)
 }
+
+/** 백테스트 이력 조회 → [{job_id, strategy_name, symbol, status, ...}] */
+export function fetchBacktestHistory(symbol, market, limit = 20) {
+  const params = new URLSearchParams()
+  if (symbol) params.set('symbol', symbol)
+  if (market) params.set('market', market)
+  params.set('limit', String(limit))
+  return apiFetch(`/api/backtest/history?${params}`)
+}

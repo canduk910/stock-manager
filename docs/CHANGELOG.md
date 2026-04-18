@@ -1,5 +1,20 @@
 # 변경 이력
 
+## 2026-04-19 — 백테스트 MCP 파라미터 수정 + 비동기 2단계 + 이력 조회
+
+### 버그 수정
+- MCP 서버 `kis_devlp.yaml`에 `my_agent`/`prod`/`vps`/`ops`/`vops` 누락 → KeyError 해결
+- `backtest_service.py` 파라미터 불일치 수정: `symbol`→`symbols`(배열), `preset`→`strategy_id`, `initial_cash`→`initial_capital`
+- MCP 비동기 2단계 구조 적용: `run_preset_backtest_tool` → job_id → `get_backtest_result_tool(wait=true)`
+- 실패 시 job 상태를 `"failed"`로 갱신 (기존: `"submitted"` 영구 잔류)
+- `BacktestResultPanel` MCP 중첩 메트릭(basic/risk/trading) 자동 플래트닝 + equity_curve 오브젝트→배열 변환
+
+### 이력 조회 신규
+- `BacktestHistoryTable` 컴포넌트 신규 (일시/종목/전략/수익률/상태/보기)
+- `useBacktestHistory` 훅 + `fetchBacktestHistory` API 함수 추가
+- `BacktestPage`에 이력 섹션 통합 (마운트 시 로드, 완료 시 새로고침, 과거 결과 보기)
+- 폴링 타임아웃 3분→10분 확장
+
 ## 2026-04-18 — MCP 백테스트 연동 + 백테스트 UX 개선
 
 ### MCP 연동

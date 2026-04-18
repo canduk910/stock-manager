@@ -39,6 +39,12 @@ def save_backtest_result(
         )
 
 
+def update_job_status(job_id: str, status: str) -> bool:
+    """작업 상태 변경."""
+    with get_session() as db:
+        return BacktestRepository(db).update_job_status(job_id, status)
+
+
 def get_job(job_id: str) -> Optional[dict]:
     """작업 조회."""
     with get_session() as db:

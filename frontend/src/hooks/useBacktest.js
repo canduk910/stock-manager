@@ -19,7 +19,7 @@ import { useAsyncState } from './useAsyncState'
 import {
   fetchMcpStatus, fetchPresets as fetchPresetsApi,
   runPresetBacktest, runCustomBacktest, runBatchBacktest,
-  fetchBacktestResult,
+  fetchBacktestResult, fetchBacktestHistory,
 } from '../api/backtest'
 
 /** MCP 서버 상태 (1회 조회) */
@@ -46,9 +46,9 @@ export function useBacktest() {
   const intervalRef = useRef(null)
   const pollCountRef = useRef(0)
 
-  // 3초 간격 × 60회 = 최대 3분 대기
-  // QuantConnect Lean 백테스트는 종목/기간에 따라 수초~수분 소요
-  const MAX_POLLS = 60
+  // 3초 간격 × 200회 = 최대 10분 대기
+  // MCP 백테스트 서버는 비동기 2단계 — 실행 후 결과 대기 최대 5분
+  const MAX_POLLS = 200
 
   const stopPolling = useCallback(() => {
     if (intervalRef.current) {
@@ -68,7 +68,7 @@ export function useBacktest() {
       if (pollCountRef.current > MAX_POLLS) {
         stopPolling()
         setStatus('timeout')
-        setError('백테스트 시간이 초과되었습니다 (3분)')
+        setError('백테스트 시간이 초과되었습니다 (10분). 히스토리에서 결과를 확인하세요.')
         return
       }
       try {
@@ -151,4 +151,13 @@ export function useBacktest() {
     jobId, status, result, error, progress,
     runPreset, runCustom, runBatch, reset,
   }
+}
+
+/** 백테스트 이력 조회 */
+export function useBacktestHistory() {
+  const { data, loading, error, run } = useAsyncState([])
+  const load = useCallback((symbol, market, limit) => {
+    return run(() => fetchBacktestHistory(symbol, market, limit)).catch(() => {})
+  }, [run])
+  return { history: data || [], loading, error, load }
 }

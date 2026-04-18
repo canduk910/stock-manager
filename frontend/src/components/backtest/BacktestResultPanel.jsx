@@ -4,12 +4,47 @@
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import MetricsCard from './MetricsCard'
 
+/**
+ * MCP 중첩 메트릭 (basic/risk/trading) → 플랫 메트릭으로 변환.
+ */
+function flattenMetrics(raw) {
+  if (!raw) return null
+  // 이미 플랫 형태 (total_return_pct 키가 있으면)
+  if (raw.total_return_pct != null) return raw
+  // MCP 중첩 형태
+  const basic = raw.basic || {}
+  const risk = raw.risk || {}
+  const trading = raw.trading || {}
+  return {
+    total_return_pct: basic.total_return,
+    cagr: basic.annual_return,
+    max_drawdown: basic.max_drawdown != null ? -Math.abs(basic.max_drawdown) : null,
+    sharpe_ratio: risk.sharpe_ratio,
+    sortino_ratio: risk.sortino_ratio,
+    win_rate: trading.win_rate,
+    profit_factor: trading.profit_loss_ratio,
+    total_trades: trading.total_orders,
+  }
+}
+
+/**
+ * equity_curve 오브젝트 {date: value} → 배열 [{date, equity}] 변환.
+ */
+function normalizeEquityCurve(raw) {
+  if (!raw) return []
+  if (Array.isArray(raw)) return raw
+  // {date: value} 형태
+  return Object.entries(raw).map(([date, equity]) => ({ date, equity }))
+}
+
 export default function BacktestResultPanel({ result }) {
   if (!result) return null
 
-  const metrics = result.metrics || result.result?.metrics
-  const equityCurve = result.equity_curve || result.result?.equity_curve || []
-  const trades = result.trades || result.result?.trades || []
+  const rawMetrics = result.metrics || result.result?.metrics || result.result_json?.result?.metrics
+  const metrics = flattenMetrics(rawMetrics)
+  const rawCurve = result.equity_curve || result.result?.equity_curve || result.result_json?.result?.equity_curve
+  const equityCurve = normalizeEquityCurve(rawCurve)
+  const trades = result.trades || result.result?.trades || result.result_json?.result?.trades || []
 
   return (
     <div className="space-y-4">
