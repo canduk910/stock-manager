@@ -31,7 +31,7 @@ frontend/
       macro.js            fetchMacroIndices / fetchMacroNews / fetchMacroSentiment / fetchMacroInvestorQuotes / fetchMacroSummary
       advisor.js          analyzePortfolio / fetchAdvisorHistory / fetchAdvisorReport → /api/portfolio-advisor/*
       backtest.js         fetchMcpStatus / fetchPresets / runPresetBacktest / runCustomBacktest / runBatchBacktest / fetchBacktestResult → /api/backtest/*
-      tax.js              fetchTaxSummary(year) / fetchTaxTransactions / syncTax / recalculateTax(year) / fetchTaxCalculations(year,symbol) / addTaxTransaction / deleteTaxTransaction → /api/tax/* (FIFO 전용, method 파라미터 제거)
+      tax.js              fetchTaxSummary(year) / fetchTaxTransactions / syncTax / recalculateTax(year) / fetchTaxCalculations(year,symbol) / addTaxTransaction / deleteTaxTransaction / fetchSimulationHoldings / simulateTax → /api/tax/* (FIFO 전용, 시뮬레이션 포함)
     hooks/
       useAsyncState.js    useAsyncState(initialData) — 비동기 data/loading/error 상태 관리 공통 훅. run(asyncFn)으로 자동 관리.
       useScreener.js      { data, loading, error, search }
@@ -51,7 +51,7 @@ frontend/
       useReport.js           투자 보고서 훅 5개. useReports/useReportDetail/useRecommendations/usePerformance/useRegimes.
       usePortfolio.js     포트폴리오 대시보드 훅. balance+sentiment 병렬 로드 + 자산배분/안전마진등급 계산.
       useBacktest.js      백테스트 훅. useMcpStatus(MCP연결상태) / usePresets(전략목록) / useBacktest(실행+3초폴링+결과).
-      useTax.js           양도세 훅. useTaxSummary(load(year)) / useTaxTransactions(sync/add/remove) / useTaxCalculations(recalc). FIFO 전용.
+      useTax.js           양도세 훅. useTaxSummary / useTaxTransactions(sync/add/remove) / useTaxCalculations(recalc) / useTaxSimulation(loadHoldings/simulate). FIFO 전용.
     components/
       layout/Header.jsx   네비게이션 바 (5개 탑레벨: 시세판|관심종목|분석▼|포트폴리오|매매▼, 그룹 구분선, 드롭다운 hover)
       common/             LoadingSpinner, ErrorAlert, EmptyState, DataTable, ToastNotification
@@ -78,7 +78,8 @@ frontend/
       macro/              IndexSection (4지수+1년스파크라인+툴팁), SentimentSection (VIX+버핏+공포탐욕),
                           NewsSection (한국+NYT 2컬럼), InvestorSection (4명 투자자 코멘트 카드)
       tax/                TaxSummaryCards (4카드: 양도차익/공제/과세표준/세액), TaxBySymbolChart (종목별 BarChart),
-                          TaxTransactionsTable (매매내역+수동추가), TaxCalculationDetail (FIFO/AVG 상세), TaxDisclaimer (면책배너)
+                          TaxTransactionsTable (매매내역+수동추가), TaxCalculationDetail (FIFO lots 상세), TaxDisclaimer (면책배너),
+                          TaxSimulationPanel (가상매도 시뮬레이션: 보유종목 선택+매도가/수량 입력+예상 세액)
     pages/
       DashboardPage.jsx   /         포트폴리오 요약(체제배너+자산현황+배분차트) + 오늘 공시
       ScreenerPage.jsx    /screener
@@ -92,7 +93,7 @@ frontend/
       PortfolioPage.jsx   /portfolio     포트폴리오 통합: 체제배너+자산배분+수익률+AI자문(진단+리밸런싱+매매안+이력). balance+macro+advisor 통합.
       ReportPage.jsx      /reports       투자 보고서: 3탭(일일보고서/추천이력/성과통계). 체제배지+등급배지+PnL 색상.
       BacktestPage.jsx    /backtest      KIS AI Extensions 백테스트: 프리셋/커스텀 전략, 결과 차트/메트릭, 전략 비교. MCP 비활성화 시 안내 표시.
-      TaxPage.jsx         /tax           해외주식 양도소득세: 3탭(요약/매매내역/계산상세). FIFO 전용, 연도 선택, KIS 동기화(과거5년 자동탐색).
+      TaxPage.jsx         /tax           해외주식 양도소득세: 4탭(요약/매매내역/계산상세/시뮬레이션). FIFO 전용, 연도 선택, KIS 적응적 동기화+자동 재계산.
 ```
 
 ---

@@ -34,3 +34,14 @@ export function addTaxTransaction(body) {
 export function deleteTaxTransaction(id) {
   return apiFetch(`/api/tax/transactions/${id}`, { method: 'DELETE' })
 }
+
+export function fetchSimulationHoldings() {
+  return apiFetch('/api/tax/simulate/holdings')
+}
+
+export function simulateTax(year, simulations) {
+  return apiFetch('/api/tax/simulate', {
+    method: 'POST',
+    body: JSON.stringify({ year, simulations }),
+  })
+}

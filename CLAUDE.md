@@ -167,7 +167,7 @@ frontend/           React SPA (Vite + Tailwind + Recharts)
 | recommendation_history | RecommendationHistory | ReportRepository | 투자 추천 이력 + 성과 추적 |
 | macro_regime_history | MacroRegimeHistory | ReportRepository | 매크로 체제 일일 이력 |
 | daily_reports | DailyReport | ReportRepository | 일일 투자 보고서 |
-| tax_transactions, tax_calculations | TaxTransaction, TaxCalculation | TaxRepository | 해외주식 양도세 |
+| tax_transactions, tax_calculations, tax_fifo_lots | TaxTransaction, TaxCalculation, TaxFifoLot | TaxRepository | 해외주식 양도세 |
 
 - **Adapter 패턴**: `stock/store.py` 등 7개 파일은 Repository 위임 래퍼 (기존 함수 시그니처 100% 유지)
 - **Session**: `get_session()` = Store 래퍼 전용 contextmanager, `get_db()` = FastAPI Depends 전용

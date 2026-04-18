@@ -94,3 +94,40 @@ class TaxCalculation(Base):
             "detail_json": self.detail_json,
             "calculated_at": self.calculated_at,
         }
+
+
+class TaxFifoLot(Base):
+    """FIFO 매도→매수 매핑 (1매도 = N매수 lot)."""
+
+    __tablename__ = "tax_fifo_lots"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    calculation_id = Column(Integer, nullable=False)  # tax_calculations.id
+    sell_tx_id = Column(Integer, nullable=False)       # 매도 거래 ID
+    buy_tx_id = Column(Integer)                         # 매수 거래 ID (None=부족)
+    symbol = Column(String, nullable=False)
+    quantity = Column(Integer, nullable=False)           # 소진 수량
+    buy_price_krw = Column(Float)                       # 매수 원화 단가
+    buy_trade_date = Column(String)                     # 매수일
+    cost_krw = Column(Float)                            # 취득원가 (원화)
+    warning = Column(String)                            # "매수 내역 부족" 등
+
+    __table_args__ = (
+        Index("idx_fifo_lot_calc", "calculation_id"),
+        Index("idx_fifo_lot_sell", "sell_tx_id"),
+        Index("idx_fifo_lot_buy", "buy_tx_id"),
+    )
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "calculation_id": self.calculation_id,
+            "sell_tx_id": self.sell_tx_id,
+            "buy_tx_id": self.buy_tx_id,
+            "symbol": self.symbol,
+            "quantity": self.quantity,
+            "buy_price_krw": self.buy_price_krw,
+            "buy_trade_date": self.buy_trade_date,
+            "cost_krw": self.cost_krw,
+            "warning": self.warning,
+        }

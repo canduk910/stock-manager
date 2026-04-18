@@ -61,3 +61,20 @@ def list_calculations(year: int, method: str = "FIFO", symbol: str = None) -> li
 def delete_calculations_by_year(year: int, method: str) -> int:
     with get_session() as db:
         return TaxRepository(db).delete_calculations_by_year(year, method)
+
+
+# ── TaxFifoLot CRUD ────────────────────────────────────────────────────────
+
+def insert_fifo_lot(**kwargs) -> dict:
+    with get_session() as db:
+        return TaxRepository(db).insert_fifo_lot(**kwargs)
+
+
+def list_fifo_lots(calculation_id: int) -> list[dict]:
+    with get_session() as db:
+        return TaxRepository(db).list_fifo_lots(calculation_id)
+
+
+def delete_fifo_lots_by_year(year: int) -> int:
+    with get_session() as db:
+        return TaxRepository(db).delete_fifo_lots_by_year(year)

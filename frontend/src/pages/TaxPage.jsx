@@ -4,7 +4,8 @@ import TaxSummaryCards from '../components/tax/TaxSummaryCards'
 import TaxBySymbolChart from '../components/tax/TaxBySymbolChart'
 import TaxTransactionsTable from '../components/tax/TaxTransactionsTable'
 import TaxCalculationDetail from '../components/tax/TaxCalculationDetail'
-import { useTaxSummary, useTaxTransactions, useTaxCalculations } from '../hooks/useTax'
+import TaxSimulationPanel from '../components/tax/TaxSimulationPanel'
+import { useTaxSummary, useTaxTransactions, useTaxCalculations, useTaxSimulation } from '../hooks/useTax'
 import LoadingSpinner from '../components/common/LoadingSpinner'
 import ErrorAlert from '../components/common/ErrorAlert'
 
@@ -12,6 +13,7 @@ const TABS = [
   { key: 'summary', label: '요약' },
   { key: 'transactions', label: '매매내역' },
   { key: 'detail', label: '계산 상세' },
+  { key: 'simulation', label: '시뮬레이션' },
 ]
 
 const CURRENT_YEAR = new Date().getFullYear()
@@ -25,6 +27,7 @@ export default function TaxPage() {
   const summary = useTaxSummary()
   const transactions = useTaxTransactions()
   const calculations = useTaxCalculations()
+  const simulation = useTaxSimulation()
 
   // 요약 로드
   useEffect(() => {
@@ -114,6 +117,15 @@ export default function TaxPage() {
       {/* 탭 콘텐츠 */}
       {tab === 'summary' && (
         <div className="space-y-4">
+          <div className="flex justify-end">
+            <button
+              onClick={handleSync}
+              disabled={syncLoading}
+              className="px-4 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+            >
+              {syncLoading ? '동기화 중...' : 'KIS 동기화 + 재계산'}
+            </button>
+          </div>
           {summary.loading && <LoadingSpinner />}
           {summary.error && <ErrorAlert message={summary.error} />}
           {summary.data && (
@@ -152,6 +164,16 @@ export default function TaxPage() {
           {calculations.error && <ErrorAlert message={calculations.error} />}
           <TaxCalculationDetail calculations={calculations.data?.calculations} />
         </div>
+      )}
+
+      {tab === 'simulation' && (
+        <TaxSimulationPanel
+          holdings={simulation.holdings}
+          result={simulation.result}
+          loadHoldings={simulation.loadHoldings}
+          simulate={simulation.simulate}
+          year={year}
+        />
       )}
     </div>
   )

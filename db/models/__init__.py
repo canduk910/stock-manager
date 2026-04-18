@@ -8,7 +8,7 @@ from .stock_info import StockInfo
 from .macro import MacroGptCache
 from .report import DailyReport, MacroRegimeHistory, RecommendationHistory
 from .backtest import BacktestJob, Strategy
-from .tax import TaxCalculation, TaxTransaction
+from .tax import TaxCalculation, TaxFifoLot, TaxTransaction
 
 __all__ = [
     "Watchlist",
@@ -30,4 +30,5 @@ __all__ = [
     "Strategy",
     "TaxTransaction",
     "TaxCalculation",
+    "TaxFifoLot",
 ]

@@ -1,5 +1,7 @@
 """해외주식 양도소득세 API 라우터."""
 
+from typing import List
+
 from fastapi import APIRouter, Query
 from pydantic import BaseModel
 
@@ -20,6 +22,18 @@ class ManualTransactionRequest(BaseModel):
     currency: str = "USD"
     commission: float = 0
     memo: str = ""
+
+
+class SimulationItem(BaseModel):
+    symbol: str
+    quantity: int
+    price_foreign: float
+    currency: str = "USD"
+
+
+class SimulationRequest(BaseModel):
+    year: int
+    simulations: List[SimulationItem]
 
 
 # ── 엔드포인트 ────────────────────────────────────────────────────────────────
@@ -88,6 +102,21 @@ def get_calculations(
     year: int = Query(..., description="조회 연도"),
     symbol: str = Query(None, description="종목코드 필터"),
 ):
-    """계산 상세 결과 조회 (FIFO)."""
+    """계산 상세 결과 조회 (FIFO). lots 포함."""
     calculations = tax_service.get_calculations(year, symbol)
     return {"calculations": calculations, "count": len(calculations)}
+
+
+@router.get("/simulate/holdings")
+def get_simulation_holdings():
+    """시뮬레이션용 현재 보유종목 목록."""
+    return tax_service.get_simulation_holdings()
+
+
+@router.post("/simulate")
+def simulate_tax(req: SimulationRequest):
+    """가상 매도 시뮬레이션 (DB 저장 없음)."""
+    return tax_service.simulate_tax(
+        year=req.year,
+        simulations=[s.model_dump() for s in req.simulations],
+    )

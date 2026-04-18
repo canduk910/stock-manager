@@ -26,7 +26,7 @@ CLI와 API 라우터 양쪽에서 공용으로 사용한다. 비즈니스 데이
 | `report_store.py` | 보고서 CRUD (추천 이력/체제 이력/일일 보고서). `db/repositories/report_repo.py` 위임 래퍼. 다른 6개 store와 동일 패턴. |
 | `macro_store.py` | 매크로 GPT 결과 일일 캐시. `db/repositories/macro_repo.py` 위임 래퍼. `get_today()`/`save_today()`/`cleanup_old()`. |
 | `strategy_store.py` | 백테스트/전략 CRUD. `db/repositories/backtest_repo.py` 위임 래퍼. `save_backtest_job()`/`save_backtest_result()`/`get_latest_backtest_metrics()`. |
-| `tax_store.py` | 양도세 매매내역/계산 CRUD. `db/repositories/tax_repo.py` 위임 래퍼. `insert_transaction()`/`list_transactions()`/`insert_calculation()`/`list_calculations()`. |
+| `tax_store.py` | 양도세 매매내역/계산/FIFO lot CRUD. `db/repositories/tax_repo.py` 위임 래퍼. `insert_transaction()`/`list_transactions()`/`insert_calculation()`/`list_calculations()`/`insert_fifo_lot()`/`list_fifo_lots()`/`delete_fifo_lots_by_year()`. |
 | `cache.py` | SQLite TTL 캐시. `cache.db`. NaN/Inf → None 자동 sanitize. |
 | `display.py` | Rich 테이블 출력 + CSV 내보내기. |
 | `cli.py` | Click CLI. `stock watch add/remove/list/memo/dashboard/info`. |

@@ -4,7 +4,7 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
-from db.models.tax import TaxCalculation, TaxTransaction
+from db.models.tax import TaxCalculation, TaxFifoLot, TaxTransaction
 from db.utils import now_kst_iso
 
 
@@ -161,5 +161,59 @@ class TaxRepository:
             self.db.query(TaxCalculation)
             .filter_by(year=year, method=method)
             .delete()
+        )
+        return count
+
+    # ── TaxFifoLot CRUD ─────────────────────────────────────────
+
+    def insert_fifo_lot(
+        self,
+        calculation_id: int,
+        sell_tx_id: int,
+        symbol: str,
+        quantity: int,
+        *,
+        buy_tx_id: int = None,
+        buy_price_krw: float = None,
+        buy_trade_date: str = None,
+        cost_krw: float = None,
+        warning: str = None,
+    ) -> dict:
+        lot = TaxFifoLot(
+            calculation_id=calculation_id,
+            sell_tx_id=sell_tx_id,
+            buy_tx_id=buy_tx_id,
+            symbol=symbol,
+            quantity=quantity,
+            buy_price_krw=buy_price_krw,
+            buy_trade_date=buy_trade_date,
+            cost_krw=cost_krw,
+            warning=warning,
+        )
+        self.db.add(lot)
+        self.db.flush()
+        return lot.to_dict()
+
+    def list_fifo_lots(self, calculation_id: int) -> list[dict]:
+        rows = (
+            self.db.query(TaxFifoLot)
+            .filter_by(calculation_id=calculation_id)
+            .order_by(TaxFifoLot.id.asc())
+            .all()
+        )
+        return [r.to_dict() for r in rows]
+
+    def delete_fifo_lots_by_year(self, year: int) -> int:
+        """재계산 전 해당 연도 lot 전체 삭제."""
+        calc_ids = [
+            c.id for c in
+            self.db.query(TaxCalculation.id).filter_by(year=year).all()
+        ]
+        if not calc_ids:
+            return 0
+        count = (
+            self.db.query(TaxFifoLot)
+            .filter(TaxFifoLot.calculation_id.in_(calc_ids))
+            .delete(synchronize_session=False)
         )
         return count

@@ -8,6 +8,8 @@ import {
   recalculateTax,
   addTaxTransaction,
   deleteTaxTransaction,
+  fetchSimulationHoldings,
+  simulateTax,
 } from '../api/tax'
 
 export function useTaxSummary() {
@@ -64,4 +66,27 @@ export function useTaxCalculations() {
   )
 
   return { ...state, load, recalc }
+}
+
+export function useTaxSimulation() {
+  const holdingsState = useAsyncState([])
+  const resultState = useAsyncState(null)
+
+  const loadHoldings = useCallback(
+    () => holdingsState.run(() => fetchSimulationHoldings()).catch(() => {}),
+    [holdingsState.run],
+  )
+
+  const simulate = useCallback(
+    (year, simulations) =>
+      resultState.run(() => simulateTax(year, simulations)).catch(() => {}),
+    [resultState.run],
+  )
+
+  return {
+    holdings: holdingsState,
+    result: resultState,
+    loadHoldings,
+    simulate,
+  }
 }
