@@ -1,5 +1,6 @@
 """백테스트 API 라우터."""
 
+import logging
 from typing import Optional
 
 from fastapi import APIRouter
@@ -7,8 +8,12 @@ from pydantic import BaseModel, Field
 
 from config import KIS_MCP_ENABLED
 from services import backtest_service
+from services.exceptions import NotFoundError
 from services.mcp_client import get_mcp_client
 from stock import strategy_store
+from stock.utils import is_domestic
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/backtest", tags=["backtest"])
 
@@ -22,6 +27,7 @@ class PresetBacktestBody(BaseModel):
     start_date: Optional[str] = None
     end_date: Optional[str] = None
     initial_cash: int = Field(default=10_000_000, ge=100_000)
+    params: Optional[dict] = None
 
 
 class CustomBacktestBody(BaseModel):
@@ -76,6 +82,7 @@ def run_preset(body: PresetBacktestBody):
         start_date=body.start_date,
         end_date=body.end_date,
         initial_cash=body.initial_cash,
+        params=body.params,
     )
 
 
@@ -114,4 +121,24 @@ def get_result(job_id: str):
 @router.get("/history")
 def get_history(symbol: Optional[str] = None, market: Optional[str] = None, limit: int = 20):
     """백테스트 작업 이력."""
-    return strategy_store.get_job_history(symbol=symbol, market=market, limit=limit)
+    jobs = strategy_store.get_job_history(symbol=symbol, market=market, limit=limit)
+    for job in jobs:
+        sym = job.get("symbol", "")
+        if is_domestic(sym):
+            try:
+                from stock.symbol_map import code_to_name
+                job["symbol_name"] = code_to_name(sym) or sym
+            except Exception:
+                job["symbol_name"] = sym
+        else:
+            job["symbol_name"] = sym
+    return jobs
+
+
+@router.delete("/history/{job_id}")
+def delete_history(job_id: str):
+    """백테스트 이력 삭제."""
+    ok = strategy_store.delete_job(job_id)
+    if not ok:
+        raise NotFoundError(f"백테스트 작업을 찾을 수 없습니다: {job_id}")
+    return {"deleted": True}

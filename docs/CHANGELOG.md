@@ -1,5 +1,29 @@
 # 변경 이력
 
+## 2026-04-19 — 백테스트 UI 6가지 개선
+
+### UI 개선
+- 거래 내역 Buy/Sell 색상 수정 (대소문자 무시 비교 → Buy=빨강, Sell=파랑)
+- 거래 내역 날짜 표시 (date/entry_date/timestamp/time 폴백 체인)
+- 매도 거래 수익률 자동 계산 (직전 매수가 대비)
+- 이력 테이블 종목명 표시 (코드+이름, 백엔드 code_to_name 부착)
+- 이력 테이블 한글 전략명 + 카테고리 배지 (STRATEGY_KR/STRATEGY_CATEGORY 매핑)
+- 이력 삭제 기능 (DELETE /api/backtest/history/{job_id} + 프론트 삭제 버튼)
+- 전략 파라미터 편집 UI (StrategySelector input + BacktestPage customParams state)
+- 수익률 곡선 매매 시그널 마커 (Recharts ReferenceDot, 매수=빨간점/매도=파란점 + 범례)
+- 백테스트 결과에 사용된 파라미터 표시 섹션
+
+### 신규 API
+- `DELETE /api/backtest/history/{job_id}` — 이력 삭제
+- `PresetBacktestBody.params` — 전략 파라미터 오버라이드
+
+## 2026-04-19 — 전체 기능 테스트 536개 구현
+
+### 테스트 신규
+- 단위 테스트 306개: indicators, safety_grade, macro_regime, exceptions, schemas, cache, utils
+- 통합 테스트 138개: 9개 DB Repository 전체 CRUD + 엣지케이스
+- API 테스트 91개: 16개 라우터 전체 엔드포인트 + WebSocket
+
 ## 2026-04-19 — 백테스트 MCP 파라미터 수정 + 비동기 2단계 + 이력 조회
 
 ### 버그 수정

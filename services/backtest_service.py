@@ -145,6 +145,7 @@ def run_preset_backtest(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     initial_cash: int = 10_000_000,
+    params: Optional[dict] = None,
 ) -> dict:
     """프리셋 전략 백테스트 실행.
 
@@ -165,18 +166,20 @@ def run_preset_backtest(
         submitted_at=now_kst_iso(),
     )
 
-    params = {
+    mcp_params = {
         "strategy_id": preset,
         "symbols": [symbol],
         "initial_capital": initial_cash,
     }
     if start_date:
-        params["start_date"] = start_date
+        mcp_params["start_date"] = start_date
     if end_date:
-        params["end_date"] = end_date
+        mcp_params["end_date"] = end_date
+    if params:
+        mcp_params["params"] = params
 
     try:
-        data = _run_and_wait(client, "run_preset_backtest_tool", params)
+        data = _run_and_wait(client, "run_preset_backtest_tool", mcp_params)
         _save_completed(job_id, data)
         return {"job_id": job_id, "status": "completed", "result": data}
     except ExternalAPIError:

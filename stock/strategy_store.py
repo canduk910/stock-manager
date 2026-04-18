@@ -57,6 +57,12 @@ def get_latest_backtest_metrics(symbol: str, market: str) -> Optional[dict]:
         return BacktestRepository(db).get_latest_metrics(symbol, market)
 
 
+def delete_job(job_id: str) -> bool:
+    """백테스트 작업 삭제."""
+    with get_session() as db:
+        return BacktestRepository(db).delete_job(job_id)
+
+
 def get_job_history(
     symbol: Optional[str] = None,
     market: Optional[str] = None,

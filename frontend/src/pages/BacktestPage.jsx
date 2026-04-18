@@ -13,7 +13,7 @@ import BacktestHistoryTable from '../components/backtest/BacktestHistoryTable'
 import LoadingSpinner from '../components/common/LoadingSpinner'
 import ErrorAlert from '../components/common/ErrorAlert'
 import { useMcpStatus, usePresets, useBacktest, useBacktestHistory } from '../hooks/useBacktest'
-import { fetchBacktestResult } from '../api/backtest'
+import { fetchBacktestResult, deleteBacktestJob } from '../api/backtest'
 
 const DEFAULT_PRESETS_FOR_BATCH = ['sma_crossover', 'momentum', 'trend_filter_signal', 'volatility_breakout']
 
@@ -32,6 +32,7 @@ export default function BacktestPage() {
   const [strategyMode, setStrategyMode] = useState('preset')
   const [selectedPreset, setSelectedPreset] = useState('')
   const [yamlContent, setYamlContent] = useState('')
+  const [customParams, setCustomParams] = useState({})
 
   const today = new Date().toISOString().slice(0, 10)
   const oneYearAgo = new Date(Date.now() - 365 * 86400000).toISOString().slice(0, 10)
@@ -79,17 +80,22 @@ export default function BacktestPage() {
     if (m) setMarket(m)
   }, [])
 
+  const handlePresetChange = useCallback((preset) => {
+    setSelectedPreset(preset)
+    setCustomParams({})
+  }, [])
+
   const handleRun = useCallback(() => {
     if (!symbol) return
     reset()
     setViewResult(null)
     setResultMode('single')
     if (strategyMode === 'preset' && selectedPreset) {
-      runPreset(selectedPreset, symbol, market, startDate, endDate, initialCash)
+      runPreset(selectedPreset, symbol, market, startDate, endDate, initialCash, customParams)
     } else if (strategyMode === 'custom' && yamlContent.trim()) {
       runCustom(yamlContent, symbol, market, startDate, endDate, initialCash)
     }
-  }, [symbol, strategyMode, selectedPreset, yamlContent, market, startDate, endDate, initialCash, runPreset, runCustom, reset])
+  }, [symbol, strategyMode, selectedPreset, yamlContent, market, startDate, endDate, initialCash, customParams, runPreset, runCustom, reset])
 
   const handleBatch = useCallback(() => {
     if (!symbol) return
@@ -98,6 +104,15 @@ export default function BacktestPage() {
     setResultMode('batch')
     runBatch(DEFAULT_PRESETS_FOR_BATCH, symbol, market, startDate, endDate)
   }, [symbol, market, startDate, endDate, runBatch, reset])
+
+  const handleDelete = useCallback(async (jobId) => {
+    try {
+      await deleteBacktestJob(jobId)
+      loadHistory()
+    } catch {
+      // 삭제 실패 무시
+    }
+  }, [loadHistory])
 
   // 히스토리에서 결과 선택
   const handleHistorySelect = useCallback(async (job) => {
@@ -172,8 +187,10 @@ export default function BacktestPage() {
             yamlContent={yamlContent}
             mode={strategyMode}
             onModeChange={setStrategyMode}
-            onPresetChange={setSelectedPreset}
+            onPresetChange={handlePresetChange}
             onYamlChange={setYamlContent}
+            customParams={customParams}
+            onParamsChange={setCustomParams}
           />
         </div>
 
@@ -284,6 +301,7 @@ export default function BacktestPage() {
         <BacktestHistoryTable
           history={history}
           onSelect={handleHistorySelect}
+          onDelete={handleDelete}
           loading={historyLoading}
         />
       </div>

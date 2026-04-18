@@ -110,6 +110,13 @@ class BacktestRepository:
         rows = q.order_by(BacktestJob.id.desc()).limit(limit).all()
         return [r.to_dict() for r in rows]
 
+    def delete_job(self, job_id: str) -> bool:
+        job = self.db.query(BacktestJob).filter_by(job_id=job_id).first()
+        if not job:
+            return False
+        self.db.delete(job)
+        return True
+
     # ── Strategy CRUD ─────────────────────────────────────────
 
     def save_strategy(

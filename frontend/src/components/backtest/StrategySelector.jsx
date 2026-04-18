@@ -3,7 +3,7 @@
  */
 import { useMemo } from 'react'
 
-const CATEGORY_LABELS = {
+export const CATEGORY_LABELS = {
   trend: '추세추종',
   momentum: '모멘텀',
   mean_reversion: '역추세',
@@ -11,7 +11,7 @@ const CATEGORY_LABELS = {
   composite: '복합',
 }
 
-const CATEGORY_COLORS = {
+export const CATEGORY_COLORS = {
   trend: 'bg-blue-100 text-blue-700',
   momentum: 'bg-orange-100 text-orange-700',
   mean_reversion: 'bg-green-100 text-green-700',
@@ -19,7 +19,7 @@ const CATEGORY_COLORS = {
   composite: 'bg-indigo-100 text-indigo-700',
 }
 
-export default function StrategySelector({ presets, selectedPreset, yamlContent, mode, onModeChange, onPresetChange, onYamlChange }) {
+export default function StrategySelector({ presets, selectedPreset, yamlContent, mode, onModeChange, onPresetChange, onYamlChange, customParams, onParamsChange }) {
   const presetDetail = useMemo(() => {
     if (!selectedPreset || !presets?.length) return null
     return presets.find((p) => {
@@ -104,14 +104,22 @@ export default function StrategySelector({ presets, selectedPreset, yamlContent,
                   <p className="text-xs font-medium text-gray-500 mb-1">파라미터</p>
                   <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
                     {Object.entries(presetDetail.params).map(([key, spec]) => (
-                      <div key={key} className="flex justify-between">
+                      <div key={key} className="flex items-center justify-between">
                         <span className="text-gray-500">{key}</span>
-                        <span className="text-gray-800 font-mono">
-                          {spec?.default ?? '-'}
+                        <div className="flex items-center gap-1">
+                          <input
+                            type="number"
+                            value={customParams?.[key] ?? spec?.default ?? ''}
+                            onChange={(e) => onParamsChange?.({ ...customParams, [key]: Number(e.target.value) })}
+                            min={spec?.min}
+                            max={spec?.max}
+                            step={spec?.step}
+                            className="w-20 text-right border rounded px-1 py-0.5 text-xs font-mono focus:ring-1 focus:ring-blue-500"
+                          />
                           {spec?.min != null && spec?.max != null && (
-                            <span className="text-gray-400 ml-1">({spec.min}~{spec.max})</span>
+                            <span className="text-gray-400">({spec.min}~{spec.max})</span>
                           )}
-                        </span>
+                        </div>
                       </div>
                     ))}
                   </div>

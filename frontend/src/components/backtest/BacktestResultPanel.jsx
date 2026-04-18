@@ -1,7 +1,8 @@
 /**
- * 백테스트 결과 패널 — 수익률 곡선 + 거래 내역 + 추가 메트릭.
+ * 백테스트 결과 패널 — 수익률 곡선 + 매매 시그널 마커 + 거래 내역 + 추가 메트릭.
  */
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
+import { useMemo } from 'react'
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceDot } from 'recharts'
 import MetricsCard from './MetricsCard'
 
 /**
@@ -44,7 +45,37 @@ export default function BacktestResultPanel({ result }) {
   const metrics = flattenMetrics(rawMetrics)
   const rawCurve = result.equity_curve || result.result?.equity_curve || result.result_json?.result?.equity_curve
   const equityCurve = normalizeEquityCurve(rawCurve)
-  const trades = result.trades || result.result?.trades || result.result_json?.result?.trades || []
+  const rawTrades = result.trades || result.result?.trades || result.result_json?.result?.trades || []
+  const resultParams = result.params || result.result?.params || result.result_json?.params
+
+  // 거래 내역 전처리: 매도 수익률 계산
+  const processedTrades = useMemo(() => {
+    let lastBuyPrice = null
+    return rawTrades.map((t) => {
+      const isBuy = (t.direction || t.side || '').toLowerCase() === 'buy'
+      const date = t.date || t.entry_date || t.timestamp || t.time || '-'
+      if (isBuy) {
+        lastBuyPrice = t.price
+        return { ...t, _isBuy: true, _date: date }
+      } else {
+        const profitPct = t.profit_pct ?? t.return_pct ??
+          (lastBuyPrice && t.price ? ((t.price - lastBuyPrice) / lastBuyPrice * 100) : null)
+        return { ...t, _isBuy: false, _profitPct: profitPct, _date: date }
+      }
+    })
+  }, [rawTrades])
+
+  // 수익률 곡선 위 매매 시그널 마커
+  const tradeMarkers = useMemo(() => {
+    return rawTrades.map((t) => {
+      const date = t.date || t.entry_date || t.timestamp || t.time
+      if (!date) return null
+      const isBuy = (t.direction || t.side || '').toLowerCase() === 'buy'
+      const point = equityCurve.find((e) => e.date === date)
+      if (!point) return null
+      return { date: point.date, equity: point.equity, isBuy }
+    }).filter(Boolean)
+  }, [rawTrades, equityCurve])
 
   return (
     <div className="space-y-4">
@@ -81,7 +112,21 @@ export default function BacktestResultPanel({ result }) {
         </div>
       )}
 
-      {/* 수익률 곡선 */}
+      {/* 사용된 파라미터 */}
+      {resultParams && Object.keys(resultParams).length > 0 && (
+        <div className="bg-gray-50 rounded-lg border p-3">
+          <p className="text-xs font-medium text-gray-500 mb-1">사용된 파라미터</p>
+          <div className="flex flex-wrap gap-2">
+            {Object.entries(resultParams).map(([k, v]) => (
+              <span key={k} className="text-xs bg-white border rounded px-2 py-0.5">
+                <span className="text-gray-500">{k}:</span> <span className="font-mono">{v}</span>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* 수익률 곡선 + 매매 시그널 마커 */}
       {equityCurve.length > 0 && (
         <div className="bg-white rounded-lg border p-4">
           <h3 className="text-sm font-medium text-gray-700 mb-3">수익률 곡선</h3>
@@ -95,15 +140,36 @@ export default function BacktestResultPanel({ result }) {
                 formatter={(v) => [v.toLocaleString(), '순자산']}
               />
               <Line type="monotone" dataKey="equity" stroke="#2563eb" dot={false} strokeWidth={1.5} />
+              {tradeMarkers.map((m, i) => (
+                <ReferenceDot
+                  key={i}
+                  x={m.date}
+                  y={m.equity}
+                  r={4}
+                  fill={m.isBuy ? '#dc2626' : '#2563eb'}
+                  stroke="white"
+                  strokeWidth={1.5}
+                />
+              ))}
             </LineChart>
           </ResponsiveContainer>
+          {tradeMarkers.length > 0 && (
+            <div className="flex gap-4 text-xs text-gray-500 mt-2 justify-end">
+              <span className="flex items-center gap-1">
+                <span className="inline-block w-2.5 h-2.5 rounded-full bg-red-600" /> 매수
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="inline-block w-2.5 h-2.5 rounded-full bg-blue-600" /> 매도
+              </span>
+            </div>
+          )}
         </div>
       )}
 
       {/* 거래 내역 */}
-      {trades.length > 0 && (
+      {processedTrades.length > 0 && (
         <div className="bg-white rounded-lg border p-4">
-          <h3 className="text-sm font-medium text-gray-700 mb-3">거래 내역 ({trades.length}건)</h3>
+          <h3 className="text-sm font-medium text-gray-700 mb-3">거래 내역 ({processedTrades.length}건)</h3>
           <div className="overflow-x-auto max-h-64 overflow-y-auto">
             <table className="w-full text-xs">
               <thead className="bg-gray-50 sticky top-0">
@@ -116,27 +182,30 @@ export default function BacktestResultPanel({ result }) {
                 </tr>
               </thead>
               <tbody>
-                {trades.map((t, i) => (
-                  <tr key={i} className="border-t">
-                    <td className="px-3 py-1.5">{t.date || t.entry_date || '-'}</td>
-                    <td className="px-3 py-1.5">
-                      <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${
-                        t.direction === 'BUY' || t.side === 'buy'
-                          ? 'bg-red-50 text-red-700'
-                          : 'bg-blue-50 text-blue-700'
+                {processedTrades.map((t, i) => {
+                  const profitPct = t._isBuy ? null : t._profitPct
+                  return (
+                    <tr key={i} className="border-t">
+                      <td className="px-3 py-1.5">{t._date}</td>
+                      <td className="px-3 py-1.5">
+                        <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${
+                          t._isBuy
+                            ? 'bg-red-50 text-red-700'
+                            : 'bg-blue-50 text-blue-700'
+                        }`}>
+                          {t._isBuy ? 'Buy' : 'Sell'}
+                        </span>
+                      </td>
+                      <td className="px-3 py-1.5 text-right">{t.price?.toLocaleString() || '-'}</td>
+                      <td className="px-3 py-1.5 text-right">{t.quantity || t.qty || '-'}</td>
+                      <td className={`px-3 py-1.5 text-right ${
+                        profitPct != null ? (profitPct >= 0 ? 'text-red-600' : 'text-blue-600') : ''
                       }`}>
-                        {t.direction || t.side || '-'}
-                      </span>
-                    </td>
-                    <td className="px-3 py-1.5 text-right">{t.price?.toLocaleString() || '-'}</td>
-                    <td className="px-3 py-1.5 text-right">{t.quantity || t.qty || '-'}</td>
-                    <td className={`px-3 py-1.5 text-right ${
-                      (t.profit_pct || 0) >= 0 ? 'text-red-600' : 'text-blue-600'
-                    }`}>
-                      {t.profit_pct != null ? `${t.profit_pct >= 0 ? '+' : ''}${t.profit_pct.toFixed(1)}%` : '-'}
-                    </td>
-                  </tr>
-                ))}
+                        {profitPct != null ? `${profitPct >= 0 ? '+' : ''}${profitPct.toFixed(1)}%` : '-'}
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>

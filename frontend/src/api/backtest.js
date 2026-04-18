@@ -20,15 +20,17 @@ export function fetchIndicators() {
 }
 
 /** 프리셋 백테스트 실행 → {job_id, status} */
-export function runPresetBacktest(preset, symbol, market = 'KR', startDate, endDate, initialCash = 10000000) {
+export function runPresetBacktest(preset, symbol, market = 'KR', startDate, endDate, initialCash = 10000000, params) {
+  const body = {
+    preset, symbol, market,
+    start_date: startDate || undefined,
+    end_date: endDate || undefined,
+    initial_cash: initialCash,
+  }
+  if (params && Object.keys(params).length > 0) body.params = params
   return apiFetch('/api/backtest/run/preset', {
     method: 'POST',
-    body: JSON.stringify({
-      preset, symbol, market,
-      start_date: startDate || undefined,
-      end_date: endDate || undefined,
-      initial_cash: initialCash,
-    }),
+    body: JSON.stringify(body),
   })
 }
 
@@ -61,6 +63,11 @@ export function runBatchBacktest(presets, symbol, market = 'KR', startDate, endD
 /** 백테스트 결과 조회 (폴링) → {status, metrics, ...} */
 export function fetchBacktestResult(jobId) {
   return apiFetch(`/api/backtest/result/${jobId}`)
+}
+
+/** 백테스트 이력 삭제 */
+export function deleteBacktestJob(jobId) {
+  return apiFetch(`/api/backtest/history/${jobId}`, { method: 'DELETE' })
 }
 
 /** 백테스트 이력 조회 → [{job_id, strategy_name, symbol, status, ...}] */

@@ -73,9 +73,9 @@ frontend/
                           **SectorRecommendationCard** (신규 섹터 진입 추천: 섹터명+목표비중+타이밍+대표종목→DetailPage 링크),
                           RebalanceCard (리밸런싱 제안), TradeTable (매매안+주문실행),
                           TradeConfirmModal (AI 추천 주문 확인 모달)
-      backtest/           StrategySelector (프리셋 드롭다운+상세 설명 카드(description/category/tags/params) / 커스텀 YAML), MetricsCard (수익률/샤프/낙폭/승률),
-                          BacktestResultPanel (수익률곡선+거래내역, MCP 중첩메트릭 자동 플래트닝), BatchCompareTable (전략 비교),
-                          BacktestHistoryTable (이력 테이블: 일시/종목/전략/수익률/상태/보기)
+      backtest/           StrategySelector (프리셋 드롭다운+상세 설명 카드(description/category/tags/params 편집 가능) / 커스텀 YAML. CATEGORY_LABELS/CATEGORY_COLORS export), MetricsCard (수익률/샤프/낙폭/승률),
+                          BacktestResultPanel (수익률곡선+**ReferenceDot 매매시그널 마커(매수=빨강/매도=파랑)**+거래내역(Buy=빨강/Sell=파랑 대소문자무시)+**매도수익률 자동계산**+**사용 파라미터 표시**, MCP 중첩메트릭 자동 플래트닝), BatchCompareTable (전략 비교),
+                          BacktestHistoryTable (이력 테이블: 일시/종목(**코드+이름**)/카테고리(**한글배지**)/전략(**한글명**)/수익률/샤프/낙폭/상태/**삭제**/보기)
       macro/              IndexSection (4지수+1년스파크라인+툴팁), SentimentSection (VIX+버핏+공포탐욕),
                           NewsSection (한국+NYT 2컬럼), InvestorSection (4명 투자자 코멘트 카드)
       tax/                TaxSummaryCards (4카드: 양도차익/공제/과세표준/세액), TaxBySymbolChart (종목별 BarChart),
