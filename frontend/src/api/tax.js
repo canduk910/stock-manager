@@ -1,7 +1,7 @@
 import { apiFetch } from './client'
 
-export function fetchTaxSummary(year, method = 'FIFO') {
-  return apiFetch(`/api/tax/summary?year=${year}&method=${method}`)
+export function fetchTaxSummary(year) {
+  return apiFetch(`/api/tax/summary?year=${year}`)
 }
 
 export function fetchTaxTransactions(year, side = '') {
@@ -14,12 +14,12 @@ export function syncTax(year) {
   return apiFetch(`/api/tax/sync?year=${year}`, { method: 'POST' })
 }
 
-export function recalculateTax(year, method = 'FIFO') {
-  return apiFetch(`/api/tax/recalculate?year=${year}&method=${method}`, { method: 'POST' })
+export function recalculateTax(year) {
+  return apiFetch(`/api/tax/recalculate?year=${year}`, { method: 'POST' })
 }
 
-export function fetchTaxCalculations(year, method = 'FIFO', symbol = '') {
-  const params = new URLSearchParams({ year, method })
+export function fetchTaxCalculations(year, symbol = '') {
+  const params = new URLSearchParams({ year })
   if (symbol) params.set('symbol', symbol)
   return apiFetch(`/api/tax/calculations?${params}`)
 }

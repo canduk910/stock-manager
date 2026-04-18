@@ -14,8 +14,8 @@ export function useTaxSummary() {
   const state = useAsyncState(null)
 
   const load = useCallback(
-    (year, method = 'FIFO') =>
-      state.run(() => fetchTaxSummary(year, method)).catch(() => {}),
+    (year) =>
+      state.run(() => fetchTaxSummary(year)).catch(() => {}),
     [state.run],
   )
 
@@ -53,13 +53,13 @@ export function useTaxCalculations() {
   const state = useAsyncState({ calculations: [], count: 0 })
 
   const load = useCallback(
-    (year, method = 'FIFO', symbol = '') =>
-      state.run(() => fetchTaxCalculations(year, method, symbol)).catch(() => {}),
+    (year, symbol = '') =>
+      state.run(() => fetchTaxCalculations(year, symbol)).catch(() => {}),
     [state.run],
   )
 
   const recalc = useCallback(
-    (year, method = 'FIFO') => recalculateTax(year, method),
+    (year) => recalculateTax(year),
     [],
   )
 

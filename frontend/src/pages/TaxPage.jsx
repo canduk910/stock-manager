@@ -20,7 +20,6 @@ const YEARS = Array.from({ length: 5 }, (_, i) => CURRENT_YEAR - i)
 export default function TaxPage() {
   const [tab, setTab] = useState('summary')
   const [year, setYear] = useState(CURRENT_YEAR)
-  const [method, setMethod] = useState('FIFO')
   const [syncLoading, setSyncLoading] = useState(false)
 
   const summary = useTaxSummary()
@@ -29,8 +28,8 @@ export default function TaxPage() {
 
   // 요약 로드
   useEffect(() => {
-    if (tab === 'summary') summary.load(year, method)
-  }, [year, method, tab])
+    if (tab === 'summary') summary.load(year)
+  }, [year, tab])
 
   // 매매내역 로드
   useEffect(() => {
@@ -39,8 +38,8 @@ export default function TaxPage() {
 
   // 계산 상세 로드
   useEffect(() => {
-    if (tab === 'detail') calculations.load(year, method)
-  }, [year, method, tab])
+    if (tab === 'detail') calculations.load(year)
+  }, [year, tab])
 
   // 동기화
   const handleSync = useCallback(async () => {
@@ -50,34 +49,34 @@ export default function TaxPage() {
       alert(result.message || `동기화 완료: ${result.synced}건 추가`)
       transactions.load(year)
       // 요약도 갱신
-      summary.load(year, method)
+      summary.load(year)
     } catch (err) {
       alert(`동기화 실패: ${err.message}`)
     } finally {
       setSyncLoading(false)
     }
-  }, [year, method])
+  }, [year])
 
   // 수동 추가
   const handleAdd = useCallback(async (body) => {
     await transactions.add(body)
     transactions.load(year)
-    summary.load(year, method)
-  }, [year, method])
+    summary.load(year)
+  }, [year])
 
   // 삭제
   const handleDelete = useCallback(async (id) => {
     await transactions.remove(id)
     transactions.load(year)
-    summary.load(year, method)
-  }, [year, method])
+    summary.load(year)
+  }, [year])
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-bold text-gray-900">해외주식 양도소득세</h1>
 
-        {/* 연도 + 방식 선택 */}
+        {/* 연도 선택 */}
         <div className="flex items-center gap-3">
           <select
             value={year}
@@ -89,19 +88,7 @@ export default function TaxPage() {
             ))}
           </select>
 
-          <div className="flex rounded-lg border overflow-hidden text-sm">
-            {['FIFO', 'AVG'].map((m) => (
-              <button
-                key={m}
-                onClick={() => setMethod(m)}
-                className={`px-3 py-1.5 transition-colors ${
-                  method === m ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'
-                }`}
-              >
-                {m === 'FIFO' ? '선입선출' : '이동평균'}
-              </button>
-            ))}
-          </div>
+          <span className="text-xs text-gray-400">선입선출(FIFO)</span>
         </div>
       </div>
 

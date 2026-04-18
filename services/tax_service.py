@@ -1,6 +1,6 @@
 """해외주식 양도소득세 계산 서비스.
 
-데이터 수집(KIS API / 로컬 DB / 수동 입력) + 환율 조회 + FIFO/이동평균 계산.
+데이터 수집(KIS API / 로컬 DB / 수동 입력) + 환율 조회 + FIFO 계산.
 """
 
 from __future__ import annotations
@@ -112,20 +112,50 @@ def _fetch_exchange_rate_yf(date: str, currency: str) -> Optional[float]:
 def sync_transactions(year: int) -> dict:
     """KIS API에서 해외 체결내역을 동기화.
 
-    1순위: CTOS4001R (일별거래내역 — 환율+수수료 포함)
-    2순위: TTTS3035R (주문체결내역 — 기간별, 환율 없음 → yfinance 보충)
-    3순위: 로컬 DB orders 테이블
+    과세 연도(year)뿐 아니라 과거 5년(~2020)까지의 매수 내역도
+    함께 동기화하여 FIFO 계산 시 매수 풀 부족을 방지한다.
 
     Returns:
-        {"source": str, "synced": int, "skipped": int, "message": str}
+        {"source": str, "synced": int, "skipped": int, "sync_years": list, "message": str}
     """
+    sync_years = list(range(max(year - 5, 2020), year + 1))
+    total_synced, total_skipped = 0, 0
+    source = "LOCAL"
+
+    for y in sync_years:
+        result = _sync_single_year(y)
+        total_synced += result["synced"]
+        total_skipped += result["skipped"]
+        if result["source"] != "LOCAL":
+            source = result["source"]
+
+    msg_parts = [f"{source} 동기화: {total_synced}건 추가"]
+    if total_skipped:
+        msg_parts.append(f"{total_skipped}건 스킵(중복)")
+    msg_parts.append(f"(탐색 기간: {sync_years[0]}~{sync_years[-1]}년)")
+    if total_synced == 0 and total_skipped == 0:
+        msg = f"KIS API 조회 완료: {sync_years[0]}~{sync_years[-1]}년 체결 내역 없음. '매매내역' 탭에서 수동으로 추가해주세요."
+    else:
+        msg = " ".join(msg_parts)
+
+    return {
+        "source": source,
+        "synced": total_synced,
+        "skipped": total_skipped,
+        "sync_years": sync_years,
+        "message": msg,
+    }
+
+
+def _sync_single_year(year: int) -> dict:
+    """단일 연도 KIS API 동기화 (3단계 fallback)."""
     # 1순위: CTOS4001R (일별거래내역 — 환율/수수료 내장)
     try:
         result = _fetch_from_ctos4001r(year)
         if result["synced"] > 0 or result["source"] == "KIS_DAILY":
             return result
     except Exception as e:
-        logger.info("CTOS4001R 조회 실패: %s", e)
+        logger.info("CTOS4001R 조회 실패 (%d): %s", year, e)
 
     # 2순위: TTTS3035R (주문체결내역 — 기간별)
     try:
@@ -133,13 +163,10 @@ def sync_transactions(year: int) -> dict:
         if result["synced"] > 0 or result["source"] == "KIS_CCNL":
             return result
     except Exception as e:
-        logger.info("TTTS3035R 조회 실패: %s", e)
+        logger.info("TTTS3035R 조회 실패 (%d): %s", year, e)
 
     # 3순위: 로컬 DB
-    result = _sync_from_orders(year)
-    if result["synced"] == 0 and result["skipped"] == 0:
-        result["message"] = "KIS API 및 로컬 주문 이력에 해당 연도 체결 내역이 없습니다. '매매내역' 탭에서 수동으로 추가해주세요."
-    return result
+    return _sync_from_orders(year)
 
 
 def _kis_credentials():
@@ -464,17 +491,13 @@ def get_transactions(year: int, side: str = None) -> list[dict]:
 
 # ── FIFO 계산 ─────────────────────────────────────────────────────────────────
 
-def calculate_tax(year: int, method: str = "FIFO") -> list[dict]:
-    """양도세 계산 (FIFO 또는 이동평균법).
+def calculate_tax(year: int) -> list[dict]:
+    """FIFO 양도세 계산.
 
     해당 연도의 매도 건에 대해 양도차익을 계산하고 DB에 저장한다.
     """
-    method = method.upper()
-    if method not in ("FIFO", "AVG"):
-        raise ExternalAPIError("method는 'FIFO' 또는 'AVG'이어야 합니다.")
-
     # 기존 계산 결과 삭제
-    tax_store.delete_calculations_by_year(year, method)
+    tax_store.delete_calculations_by_year(year, "FIFO")
 
     # 전체 매매내역 조회 (연도 제한 없음 — 매수 풀 구축용)
     all_transactions = tax_store.list_transactions()
@@ -484,10 +507,7 @@ def calculate_tax(year: int, method: str = "FIFO") -> list[dict]:
         tx for tx in tax_store.list_transactions(year=year, side="sell")
     ]
 
-    if method == "FIFO":
-        return _calculate_fifo(all_transactions, sell_transactions, year)
-    else:
-        return _calculate_avg(all_transactions, sell_transactions, year)
+    return _calculate_fifo(all_transactions, sell_transactions, year)
 
 
 def _calculate_fifo(
@@ -609,107 +629,15 @@ def _calculate_fifo(
     return results
 
 
-def _calculate_avg(
-    all_transactions: list[dict],
-    sell_transactions: list[dict],
-    year: int,
-) -> list[dict]:
-    """이동평균법 양도차익 계산."""
-    # 종목별 이동평균 단가 추적
-    avg_pool: dict[str, dict] = {}  # symbol -> {total_cost_krw, total_qty, avg_commission_per_unit_krw}
-
-    for tx in all_transactions:
-        sym = tx["symbol"]
-        if sym not in avg_pool:
-            avg_pool[sym] = {"total_cost_krw": 0.0, "total_qty": 0, "total_commission_krw": 0.0}
-
-        pool = avg_pool[sym]
-        qty = tx["quantity"]
-        price_krw = (tx.get("price_krw") or 0)
-        commission_krw = tx.get("commission_krw") or 0
-
-        if tx["side"] == "buy":
-            pool["total_cost_krw"] += price_krw * qty
-            pool["total_qty"] += qty
-            pool["total_commission_krw"] += commission_krw
-
-        elif tx["side"] == "sell":
-            tx_year = int(tx["trade_date"][:4]) if tx["trade_date"] else 0
-            if tx_year < year:
-                # 이전 연도 매도: 풀에서 차감
-                if pool["total_qty"] > 0:
-                    avg_cost = pool["total_cost_krw"] / pool["total_qty"]
-                    avg_comm = pool["total_commission_krw"] / pool["total_qty"]
-                    consume = min(qty, pool["total_qty"])
-                    pool["total_cost_krw"] -= avg_cost * consume
-                    pool["total_qty"] -= consume
-                    pool["total_commission_krw"] -= avg_comm * consume
-
-    # 해당 연도 매도 건 처리
-    results = []
-    for sell_tx in sell_transactions:
-        sym = sell_tx["symbol"]
-        pool = avg_pool.get(sym, {"total_cost_krw": 0, "total_qty": 0, "total_commission_krw": 0})
-
-        sell_qty = sell_tx["quantity"]
-        sell_price_krw_unit = sell_tx.get("price_krw") or 0
-        sell_commission_krw = sell_tx.get("commission_krw") or 0
-
-        sell_total_krw = sell_price_krw_unit * sell_qty
-
-        warning = False
-        if pool["total_qty"] <= 0:
-            acquisition_total_krw = 0
-            buy_commission_total_krw = 0
-            warning = True
-        else:
-            avg_cost = pool["total_cost_krw"] / pool["total_qty"]
-            avg_comm = pool["total_commission_krw"] / pool["total_qty"]
-            consume = min(sell_qty, pool["total_qty"])
-            acquisition_total_krw = avg_cost * consume
-            buy_commission_total_krw = avg_comm * consume
-
-            # 풀에서 차감
-            pool["total_cost_krw"] -= avg_cost * consume
-            pool["total_qty"] -= consume
-            pool["total_commission_krw"] -= avg_comm * consume
-
-            if sell_qty > consume:
-                warning = True
-
-        commission_total_krw = sell_commission_krw + buy_commission_total_krw
-        gain_loss = sell_total_krw - acquisition_total_krw - commission_total_krw
-
-        calc = tax_store.insert_calculation(
-            sell_tx_id=sell_tx["id"],
-            symbol=sym,
-            method="AVG",
-            sell_quantity=sell_qty,
-            sell_price_krw=round(sell_total_krw),
-            acquisition_cost_krw=round(acquisition_total_krw),
-            commission_total_krw=round(commission_total_krw),
-            gain_loss_krw=round(gain_loss),
-            trade_date=sell_tx["trade_date"],
-            year=year,
-            detail_json=json.dumps({"method": "이동평균법"}, ensure_ascii=False),
-        )
-        if warning:
-            calc["warning"] = "매수 내역 부족"
-        results.append(calc)
-
-    return results
-
-
 # ── 연간 요약 ─────────────────────────────────────────────────────────────────
 
-def get_annual_summary(year: int, method: str = "FIFO") -> dict:
-    """연간 양도세 요약."""
-    method = method.upper()
-    calculations = tax_store.list_calculations(year=year, method=method)
+def get_annual_summary(year: int) -> dict:
+    """연간 양도세 요약 (FIFO)."""
+    calculations = tax_store.list_calculations(year=year, method="FIFO")
 
     # 계산 결과가 없으면 계산 실행
     if not calculations:
-        calculations = calculate_tax(year, method)
+        calculations = calculate_tax(year)
 
     total_gain = 0
     total_loss = 0
@@ -759,7 +687,7 @@ def get_annual_summary(year: int, method: str = "FIFO") -> dict:
 
     return {
         "year": year,
-        "method": method,
+        "method": "FIFO",
         "total_gain": round(total_gain),
         "total_loss": round(total_loss),
         "net_gain": round(net_gain),
@@ -774,6 +702,6 @@ def get_annual_summary(year: int, method: str = "FIFO") -> dict:
     }
 
 
-def get_calculations(year: int, method: str = "FIFO", symbol: str = None) -> list[dict]:
-    """계산 상세 결과 조회."""
-    return tax_store.list_calculations(year=year, method=method, symbol=symbol)
+def get_calculations(year: int, symbol: str = None) -> list[dict]:
+    """계산 상세 결과 조회 (FIFO)."""
+    return tax_store.list_calculations(year=year, method="FIFO", symbol=symbol)

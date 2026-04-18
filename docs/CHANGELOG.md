@@ -1,5 +1,16 @@
 # 변경 이력
 
+## 2026-04-18 — 양도세 FIFO 전용 전환 + 과거 매수 자동 탐색
+
+### 버그 수정
+- 양도세 동기화 시 과세 연도만 조회하여 과거 매수 내역 부족 발생 → 과거 5년(~2020) 자동 탐색으로 FIFO 매수풀 확보
+- `sync_transactions(year)` → `_sync_single_year()` 추출, 다년도 순회 구조
+
+### 리팩토링
+- 이동평균법(AVG) 제거, FIFO 전용으로 단순화
+- 백엔드 `method` 파라미터 제거 (tax_service / routers/tax.py)
+- 프론트엔드 FIFO/AVG 토글 UI 제거 (TaxPage / api/tax.js / useTax.js)
+
 ## 2026-04-18 — 해외주식 양도소득세 계산 서비스 신규 + KIS API 문서
 
 ### 해외주식 양도소득세 신규

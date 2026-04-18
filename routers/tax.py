@@ -27,10 +27,9 @@ class ManualTransactionRequest(BaseModel):
 @router.get("/summary")
 def get_summary(
     year: int = Query(..., description="조회 연도"),
-    method: str = Query("FIFO", description="계산 방식 (FIFO|AVG)"),
 ):
-    """연간 양도세 요약."""
-    return tax_service.get_annual_summary(year, method)
+    """연간 양도세 요약 (FIFO)."""
+    return tax_service.get_annual_summary(year)
 
 
 @router.get("/transactions")
@@ -78,19 +77,17 @@ def sync_transactions(
 @router.post("/recalculate")
 def recalculate(
     year: int = Query(..., description="재계산 연도"),
-    method: str = Query("FIFO", description="계산 방식 (FIFO|AVG)"),
 ):
-    """양도세 재계산."""
-    results = tax_service.calculate_tax(year, method)
+    """양도세 재계산 (FIFO)."""
+    results = tax_service.calculate_tax(year)
     return {"calculations": results, "count": len(results)}
 
 
 @router.get("/calculations")
 def get_calculations(
     year: int = Query(..., description="조회 연도"),
-    method: str = Query("FIFO", description="계산 방식 (FIFO|AVG)"),
     symbol: str = Query(None, description="종목코드 필터"),
 ):
-    """계산 상세 결과 조회."""
-    calculations = tax_service.get_calculations(year, method, symbol)
+    """계산 상세 결과 조회 (FIFO)."""
+    calculations = tax_service.get_calculations(year, symbol)
     return {"calculations": calculations, "count": len(calculations)}
