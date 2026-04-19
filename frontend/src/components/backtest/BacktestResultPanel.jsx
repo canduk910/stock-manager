@@ -1,18 +1,25 @@
 /**
- * 백테스트 결과 패널 — 수익률 곡선 + 매매 시그널 마커 + 거래 내역 + 추가 메트릭.
+ * 백테스트 결과 패널 — 캔들+수익률 통합 차트 + 거래 내역 + 메트릭.
+ *
+ * Props:
+ *   result  - MCP 백테스트 결과 객체
+ *   symbol  - 종목 코드 (OHLCV 조회용)
+ *   market  - 시장 코드 (기본 'KR')
  */
-import { useMemo } from 'react'
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceDot } from 'recharts'
+import { useState, useEffect, useMemo, useCallback } from 'react'
+import {
+  ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid,
+  Tooltip, ResponsiveContainer, ReferenceArea, BarChart,
+} from 'recharts'
 import MetricsCard from './MetricsCard'
+import { PARAM_KR } from './StrategySelector'
+import { fetchAdvisoryOhlcv } from '../../api/advisory'
 
-/**
- * MCP 중첩 메트릭 (basic/risk/trading) → 플랫 메트릭으로 변환.
- */
+// ── 유틸 ──────────────────────────────────────────────────────────────────
+
 function flattenMetrics(raw) {
   if (!raw) return null
-  // 이미 플랫 형태 (total_return_pct 키가 있으면)
   if (raw.total_return_pct != null) return raw
-  // MCP 중첩 형태
   const basic = raw.basic || {}
   const risk = raw.risk || {}
   const trading = raw.trading || {}
@@ -28,17 +35,15 @@ function flattenMetrics(raw) {
   }
 }
 
-/**
- * equity_curve 오브젝트 {date: value} → 배열 [{date, equity}] 변환.
- */
 function normalizeEquityCurve(raw) {
   if (!raw) return []
   if (Array.isArray(raw)) return raw
-  // {date: value} 형태
   return Object.entries(raw).map(([date, equity]) => ({ date, equity }))
 }
 
-export default function BacktestResultPanel({ result }) {
+// ── 메인 컴포넌트 ──────────────────────────────────────────────────────────
+
+export default function BacktestResultPanel({ result, symbol, market }) {
   if (!result) return null
 
   const rawMetrics = result.metrics || result.result?.metrics || result.result_json?.result?.metrics
@@ -47,8 +52,31 @@ export default function BacktestResultPanel({ result }) {
   const equityCurve = normalizeEquityCurve(rawCurve)
   const rawTrades = result.trades || result.result?.trades || result.result_json?.result?.trades || []
   const resultParams = result.params || result.result?.params || result.result_json?.params
+  const resolvedSymbol = symbol || result.symbol || result.result_json?.symbol
 
-  // 거래 내역 전처리: 매도 수익률 계산
+  // ── OHLCV 별도 조회 ──────────────────────────────────────────────────
+  const [ohlcvData, setOhlcvData] = useState(null)
+
+  useEffect(() => {
+    if (!resolvedSymbol || !equityCurve.length) { setOhlcvData(null); return }
+    const firstDate = (equityCurve[0].date || '').slice(0, 10)
+    const lastDate = (equityCurve[equityCurve.length - 1].date || '').slice(0, 10)
+    if (!firstDate || !lastDate) return
+    const days = Math.ceil((new Date(lastDate) - new Date(firstDate)) / 86400000) + 30
+    const period = days > 365 ? `${Math.ceil(days / 365)}y` : `${days}d`
+
+    let cancelled = false
+    fetchAdvisoryOhlcv(resolvedSymbol, market || 'KR', '1d', period)
+      .then((data) => {
+        if (cancelled) return
+        const ohlcv = (data.ohlcv || []).filter((d) => d.time >= firstDate && d.time <= lastDate)
+        setOhlcvData({ ohlcv, indicators: data.indicators || {} })
+      })
+      .catch(() => { if (!cancelled) setOhlcvData(null) })
+    return () => { cancelled = true }
+  }, [resolvedSymbol, market, equityCurve])
+
+  // ── 거래 전처리 ───────────────────────────────────────────────────────
   const processedTrades = useMemo(() => {
     let lastBuyPrice = null
     return rawTrades.map((t) => {
@@ -65,21 +93,56 @@ export default function BacktestResultPanel({ result }) {
     })
   }, [rawTrades])
 
-  // 수익률 곡선 위 매매 시그널 마커
-  const tradeMarkers = useMemo(() => {
-    return rawTrades.map((t) => {
-      const date = t.date || t.entry_date || t.timestamp || t.time
-      if (!date) return null
+  // ── 보유 구간 (OHLCV time 또는 equity date 기준) ────────────────────────
+  const holdingRanges = useMemo(() => {
+    // 차트에서 사용할 날짜 소스 결정
+    const dateSource = ohlcvData?.ohlcv?.length
+      ? ohlcvData.ohlcv.map((d) => d.time)
+      : equityCurve.map((e) => (e.date || '').slice(0, 10))
+    if (!dateSource.length || !rawTrades.length) return []
+
+    const dateSet = new Set(dateSource)
+    const sortedDates = [...dateSource].sort()
+    const toChartDate = (rawDate) => {
+      const nd = (rawDate || '').slice(0, 10)
+      if (!nd) return null
+      if (dateSet.has(nd)) return nd
+      let closest = sortedDates[0]
+      for (const cd of sortedDates) {
+        if (cd <= nd) closest = cd
+        else break
+      }
+      return closest
+    }
+
+    const ranges = []
+    let buyDate = null
+    let buyPrice = null
+    for (const t of rawTrades) {
       const isBuy = (t.direction || t.side || '').toLowerCase() === 'buy'
-      const point = equityCurve.find((e) => e.date === date)
-      if (!point) return null
-      return { date: point.date, equity: point.equity, isBuy }
-    }).filter(Boolean)
-  }, [rawTrades, equityCurve])
+      const rawDate = t.date || t.entry_date || t.timestamp || t.time
+      if (!rawDate) continue
+      if (isBuy) {
+        buyDate = toChartDate(rawDate)
+        buyPrice = t.price
+      } else if (buyDate) {
+        const sellDate = toChartDate(rawDate)
+        if (sellDate) {
+          const isProfit = buyPrice != null && t.price != null ? t.price > buyPrice : null
+          ranges.push({ x1: buyDate, x2: sellDate, isProfit })
+        }
+        buyDate = null
+        buyPrice = null
+      }
+    }
+    if (buyDate) {
+      ranges.push({ x1: buyDate, x2: sortedDates[sortedDates.length - 1], isProfit: null })
+    }
+    return ranges
+  }, [rawTrades, ohlcvData, equityCurve])
 
   return (
     <div className="space-y-4">
-      {/* 메트릭 카드 */}
       <MetricsCard metrics={metrics} />
 
       {/* 추가 메트릭 */}
@@ -117,52 +180,31 @@ export default function BacktestResultPanel({ result }) {
         <div className="bg-gray-50 rounded-lg border p-3">
           <p className="text-xs font-medium text-gray-500 mb-1">사용된 파라미터</p>
           <div className="flex flex-wrap gap-2">
-            {Object.entries(resultParams).map(([k, v]) => (
-              <span key={k} className="text-xs bg-white border rounded px-2 py-0.5">
-                <span className="text-gray-500">{k}:</span> <span className="font-mono">{v}</span>
-              </span>
-            ))}
+            {Object.entries(resultParams).map(([k, v]) => {
+              const kr = PARAM_KR[k]
+              return (
+                <span key={k} className="text-xs bg-white border rounded px-2 py-0.5" title={kr?.desc}>
+                  <span className="text-gray-500">{kr?.label || k}</span>{' '}
+                  <span className="font-mono">{v}</span>
+                </span>
+              )
+            })}
           </div>
         </div>
       )}
 
-      {/* 수익률 곡선 + 매매 시그널 마커 */}
+      {/* 차트: OHLCV 있으면 통합 차트, 없으면 수익률 곡선만 */}
       {equityCurve.length > 0 && (
         <div className="bg-white rounded-lg border p-4">
-          <h3 className="text-sm font-medium text-gray-700 mb-3">수익률 곡선</h3>
-          <ResponsiveContainer width="100%" height={300}>
-            <LineChart data={equityCurve}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="date" tick={{ fontSize: 11 }} />
-              <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `${v.toLocaleString()}`} />
-              <Tooltip
-                labelFormatter={(v) => v}
-                formatter={(v) => [v.toLocaleString(), '순자산']}
-              />
-              <Line type="monotone" dataKey="equity" stroke="#2563eb" dot={false} strokeWidth={1.5} />
-              {tradeMarkers.map((m, i) => (
-                <ReferenceDot
-                  key={i}
-                  x={m.date}
-                  y={m.equity}
-                  r={4}
-                  fill={m.isBuy ? '#dc2626' : '#2563eb'}
-                  stroke="white"
-                  strokeWidth={1.5}
-                />
-              ))}
-            </LineChart>
-          </ResponsiveContainer>
-          {tradeMarkers.length > 0 && (
-            <div className="flex gap-4 text-xs text-gray-500 mt-2 justify-end">
-              <span className="flex items-center gap-1">
-                <span className="inline-block w-2.5 h-2.5 rounded-full bg-red-600" /> 매수
-              </span>
-              <span className="flex items-center gap-1">
-                <span className="inline-block w-2.5 h-2.5 rounded-full bg-blue-600" /> 매도
-              </span>
-            </div>
+          <h3 className="text-sm font-medium text-gray-700 mb-3">
+            {ohlcvData?.ohlcv?.length ? '주가 + 수익률 곡선' : '수익률 곡선'}
+          </h3>
+          {ohlcvData?.ohlcv?.length ? (
+            <CombinedChart ohlcvData={ohlcvData} equityCurve={equityCurve} holdingRanges={holdingRanges} />
+          ) : (
+            <EquityOnlyChart equityCurve={equityCurve} holdingRanges={holdingRanges} />
           )}
+          {holdingRanges.length > 0 && <RangeLegend />}
         </div>
       )}
 
@@ -189,9 +231,7 @@ export default function BacktestResultPanel({ result }) {
                       <td className="px-3 py-1.5">{t._date}</td>
                       <td className="px-3 py-1.5">
                         <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${
-                          t._isBuy
-                            ? 'bg-red-50 text-red-700'
-                            : 'bg-blue-50 text-blue-700'
+                          t._isBuy ? 'bg-red-50 text-red-700' : 'bg-blue-50 text-blue-700'
                         }`}>
                           {t._isBuy ? 'Buy' : 'Sell'}
                         </span>
@@ -212,5 +252,187 @@ export default function BacktestResultPanel({ result }) {
         </div>
       )}
     </div>
+  )
+}
+
+// ── 보유 구간 범례 ────────────────────────────────────────────────────────
+
+function RangeLegend() {
+  return (
+    <div className="flex gap-4 text-xs text-gray-500 mt-2 justify-end">
+      <span className="flex items-center gap-1">
+        <span className="inline-block w-2.5 h-2.5 rounded-sm bg-red-600/20 border border-red-600/40" /> 수익 구간
+      </span>
+      <span className="flex items-center gap-1">
+        <span className="inline-block w-2.5 h-2.5 rounded-sm bg-blue-600/20 border border-blue-600/40" /> 손실 구간
+      </span>
+      <span className="flex items-center gap-1">
+        <span className="inline-block w-2.5 h-2.5 rounded-sm bg-gray-400/20 border border-gray-400/40" /> 보유 중
+      </span>
+    </div>
+  )
+}
+
+// ── 수익률 곡선 전용 차트 (OHLCV 없을 때 fallback) ─────────────────────────
+
+function EquityOnlyChart({ equityCurve, holdingRanges }) {
+  return (
+    <ResponsiveContainer width="100%" height={300}>
+      <ComposedChart data={equityCurve}>
+        <CartesianGrid strokeDasharray="3 3" />
+        <XAxis dataKey="date" tick={{ fontSize: 11 }} tickFormatter={(v) => (v || '').slice(5, 10)} />
+        <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => v.toLocaleString()} />
+        <Tooltip labelFormatter={(v) => v} formatter={(v) => [v.toLocaleString(), '순자산']} />
+        <Line type="monotone" dataKey="equity" stroke="#2563eb" dot={false} strokeWidth={1.5} />
+        {holdingRanges.map((r, i) => (
+          <ReferenceArea key={i} x1={r.x1} x2={r.x2}
+            fill={r.isProfit === null ? '#9ca3af' : r.isProfit ? '#dc2626' : '#2563eb'}
+            fillOpacity={0.12}
+            stroke={r.isProfit === null ? '#9ca3af' : r.isProfit ? '#dc2626' : '#2563eb'}
+            strokeOpacity={0.35} strokeWidth={1}
+          />
+        ))}
+      </ComposedChart>
+    </ResponsiveContainer>
+  )
+}
+
+// ── 통합 차트: 캔들 + 수익률 곡선 + 거래량 ─────────────────────────────────
+
+function CombinedChart({ ohlcvData, equityCurve, holdingRanges }) {
+  const ohlcv = ohlcvData.ohlcv
+  const ma = ohlcvData.indicators?.ma || {}
+
+  // equity_curve를 날짜 Map으로 변환
+  const equityMap = useMemo(() => {
+    const m = new Map()
+    equityCurve.forEach((e) => m.set((e.date || '').slice(0, 10), e.equity))
+    return m
+  }, [equityCurve])
+
+  // 차트 데이터 병합: OHLCV + equity + MA
+  const chartData = useMemo(() =>
+    ohlcv.map((d, i) => ({
+      time: d.time,
+      open: d.open, high: d.high, low: d.low, close: d.close, volume: d.volume,
+      equity: equityMap.get(d.time) ?? null,
+      ma5: (ma.ma5 || [])[i],
+      ma20: (ma.ma20 || [])[i],
+    })),
+  [ohlcv, equityMap, ma])
+
+  // 가격 Y축 도메인
+  const priceDomain = useMemo(() => {
+    const vals = [
+      ...ohlcv.map((d) => d.low).filter((v) => v != null),
+      ...ohlcv.map((d) => d.high).filter((v) => v != null),
+    ]
+    if (!vals.length) return [0, 1]
+    const minP = Math.min(...vals)
+    const maxP = Math.max(...vals)
+    const pad = (maxP - minP) * 0.05
+    return [minP - pad, maxP + pad]
+  }, [ohlcv])
+
+  const [dMin, dMax] = priceDomain
+  const dRange = dMax - dMin
+
+  // 캔들 shape
+  const candleShape = useCallback((props) => {
+    const { x, width, background, payload } = props
+    if (!payload || !background?.height) return null
+    const chartTop = background.y
+    const chartH = background.height
+    if (dRange <= 0 || chartH <= 0) return null
+    const toY = (v) => chartTop + chartH * (dMax - v) / dRange
+    const { open, high, low, close } = payload
+    if (open == null || close == null || high == null || low == null) return null
+    const isUp = close >= open
+    const color = isUp ? '#ef4444' : '#3b82f6'
+    const cx = x + width / 2
+    const bw = Math.max(width * 0.65, 1.5)
+    const yH = toY(high), yL = toY(low), yO = toY(open), yC = toY(close)
+    const yTop = Math.min(yO, yC), yBot = Math.max(yO, yC)
+    return (
+      <g>
+        <line x1={cx} y1={yH} x2={cx} y2={yL} stroke={color} strokeWidth={1} />
+        <rect x={cx - bw / 2} y={yTop} width={bw} height={Math.max(yBot - yTop, 1)} fill={color} />
+      </g>
+    )
+  }, [dMax, dRange])
+
+  // 거래량 shape
+  const volumeShape = useCallback((props) => {
+    const { x, y, width, height: h, payload } = props
+    if (!payload) return null
+    const isUp = (payload.close ?? 0) >= (payload.open ?? 0)
+    return <rect x={x} y={y} width={Math.max(width, 1)} height={Math.max(h, 0)} fill={isUp ? '#ef4444' : '#3b82f6'} opacity={0.6} />
+  }, [])
+
+  const xInterval = Math.max(Math.floor(chartData.length / 10), 1)
+
+  return (
+    <>
+      {/* 메인: 캔들 (좌축) + 수익률 곡선 (우축) + MA + 보유 구간 */}
+      <ResponsiveContainer width="100%" height={320}>
+        <ComposedChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
+          <XAxis dataKey="time" tick={{ fontSize: 9 }} interval={xInterval}
+            tickFormatter={(v) => (v || '').slice(5, 10)} />
+          {/* 좌축: 주가 */}
+          <YAxis yAxisId="price" domain={priceDomain} tick={{ fontSize: 10 }} width={65}
+            tickFormatter={(v) => v.toLocaleString()} />
+          {/* 우축: 순자산 */}
+          <YAxis yAxisId="equity" orientation="right" tick={{ fontSize: 10 }} width={75}
+            tickFormatter={(v) => v >= 1e6 ? `${(v / 1e6).toFixed(1)}M` : v.toLocaleString()} />
+          <Tooltip content={({ active, payload }) => {
+            if (!active || !payload?.length) return null
+            const d = payload[0]?.payload
+            if (!d) return null
+            return (
+              <div className="bg-white border border-gray-200 rounded shadow p-2 text-xs">
+                <p className="text-gray-500 mb-1">{d.time}</p>
+                <p>시: {d.open?.toLocaleString()} 고: {d.high?.toLocaleString()}</p>
+                <p>저: {d.low?.toLocaleString()}{' '}
+                  <span className={d.close >= d.open ? 'text-red-600' : 'text-blue-600'}>
+                    종: {d.close?.toLocaleString()}
+                  </span>
+                </p>
+                {d.equity != null && (
+                  <p className="text-emerald-600 mt-1 border-t pt-1">순자산: {d.equity.toLocaleString()}</p>
+                )}
+              </div>
+            )
+          }} />
+          {/* MA */}
+          <Line yAxisId="price" type="monotone" dataKey="ma5" stroke="#f59e0b" strokeWidth={1} dot={false} name="MA5" />
+          <Line yAxisId="price" type="monotone" dataKey="ma20" stroke="#8b5cf6" strokeWidth={1} dot={false} name="MA20" />
+          {/* 캔들스틱 */}
+          <Bar yAxisId="price" dataKey="close" background={{ fill: 'transparent' }}
+            shape={candleShape} isAnimationActive={false} />
+          {/* 수익률 곡선 (우축) */}
+          <Line yAxisId="equity" type="monotone" dataKey="equity" stroke="#10b981"
+            strokeWidth={2} dot={false} name="순자산" connectNulls />
+          {/* 보유 구간 */}
+          {holdingRanges.map((r, i) => (
+            <ReferenceArea key={i} x1={r.x1} x2={r.x2} yAxisId="price"
+              fill={r.isProfit === null ? '#9ca3af' : r.isProfit ? '#dc2626' : '#2563eb'}
+              fillOpacity={0.1}
+              stroke={r.isProfit === null ? '#9ca3af' : r.isProfit ? '#dc2626' : '#2563eb'}
+              strokeOpacity={0.3} strokeWidth={1}
+            />
+          ))}
+        </ComposedChart>
+      </ResponsiveContainer>
+
+      {/* 거래량 */}
+      <ResponsiveContainer width="100%" height={60}>
+        <BarChart data={chartData} margin={{ top: 0, right: 8, left: 0, bottom: 0 }}>
+          <XAxis dataKey="time" hide />
+          <YAxis tick={{ fontSize: 9 }} width={65} tickFormatter={(v) => (v / 1000).toFixed(0) + 'K'} />
+          <Bar dataKey="volume" shape={volumeShape} isAnimationActive={false} name="거래량" />
+        </BarChart>
+      </ResponsiveContainer>
+    </>
   )
 }

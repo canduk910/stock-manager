@@ -26,6 +26,7 @@ export default function SymbolSearchBar({
   symbolName = '',
   onSymbolSelect,
   defaultQuery = '',
+  markets,
 }) {
   const [searchQuery, setSearchQuery] = useState(defaultQuery || symbol || '')
   const [suggestions, setSuggestions] = useState([])
@@ -152,7 +153,7 @@ export default function SymbolSearchBar({
             onChange={(e) => onMarketChange?.(e.target.value)}
             className="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white"
           >
-            {MARKET_OPTIONS.map((o) => (
+            {(markets ? MARKET_OPTIONS.filter((o) => markets.includes(o.value)) : MARKET_OPTIONS).map((o) => (
               <option key={o.value} value={o.value}>{o.label}</option>
             ))}
           </select>

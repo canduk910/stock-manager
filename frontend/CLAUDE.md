@@ -73,8 +73,8 @@ frontend/
                           **SectorRecommendationCard** (신규 섹터 진입 추천: 섹터명+목표비중+타이밍+대표종목→DetailPage 링크),
                           RebalanceCard (리밸런싱 제안), TradeTable (매매안+주문실행),
                           TradeConfirmModal (AI 추천 주문 확인 모달)
-      backtest/           StrategySelector (프리셋 드롭다운+상세 설명 카드(description/category/tags/params 편집 가능) / 커스텀 YAML. CATEGORY_LABELS/CATEGORY_COLORS export), MetricsCard (수익률/샤프/낙폭/승률),
-                          BacktestResultPanel (수익률곡선+**ReferenceDot 매매시그널 마커(매수=빨강/매도=파랑)**+거래내역(Buy=빨강/Sell=파랑 대소문자무시)+**매도수익률 자동계산**+**사용 파라미터 표시**, MCP 중첩메트릭 자동 플래트닝), BatchCompareTable (전략 비교),
+      backtest/           StrategySelector (프리셋 드롭다운+상세 설명 카드(description/category/tags/params 편집 가능) / 커스텀 YAML. CATEGORY_LABELS/CATEGORY_COLORS/PARAM_KR export. **PARAM_KR**: 80+개 파라미터 한글명+비유적 설명 매핑), MetricsCard (수익률/샤프/낙폭/승률),
+                          BacktestResultPanel (**캔들차트+수익률곡선 이중축 통합차트**(OHLCV advisory API 별도 조회, 좌축=주가캔들+MA5/MA20, 우축=순자산 녹색선) + **거래량 바차트** + **보유구간 ReferenceArea**(수익=빨강/손실=파랑/보유중=회색) + 거래내역(Buy=빨강/Sell=파랑)+매도수익률 자동계산+사용 파라미터 한글 표시. OHLCV 미조회 시 수익률곡선 전용 fallback), BatchCompareTable (전략 비교),
                           BacktestHistoryTable (이력 테이블: 일시/종목(**코드+이름**)/카테고리(**한글배지**)/전략(**한글명**)/수익률/샤프/낙폭/상태/**삭제**/보기)
       macro/              IndexSection (4지수+1년스파크라인+툴팁), SentimentSection (VIX+버핏+공포탐욕),
                           NewsSection (한국+NYT 2컬럼), InvestorSection (4명 투자자 코멘트 카드)
@@ -93,7 +93,7 @@ frontend/
       MacroPage.jsx       /macro         매크로 분석: 지수+심리+뉴스+투자자 코멘트. 4섹션 독립 로딩.
       PortfolioPage.jsx   /portfolio     포트폴리오 통합: 체제배너+자산배분+수익률+AI자문(진단+리밸런싱+매매안+이력). balance+macro+advisor 통합.
       ReportPage.jsx      /reports       투자 보고서: 3탭(일일보고서/추천이력/성과통계). 체제배지+등급배지+PnL 색상.
-      BacktestPage.jsx    /backtest      KIS AI Extensions 백테스트: 프리셋/커스텀 전략, 결과 차트/메트릭, 전략 비교. 진행 현황+백그라운드 안내. **이력 테이블**(마운트 시 로드, 완료 시 새로고침, 과거 결과 "보기" 클릭 → 결과패널). MCP 비활성화 시 안내 표시.
+      BacktestPage.jsx    /backtest      KIS AI Extensions 백테스트: 프리셋/커스텀 전략, 결과 차트/메트릭, 전략 비교. **국내 KRX만 지원**(markets={['KR']}). 진행 현황+백그라운드 안내. **이력 테이블**(마운트 시 로드, 완료 시 새로고침, 과거 결과 "보기" 클릭 → 결과패널). MCP 비활성화 시 안내 표시.
       TaxPage.jsx         /tax           해외주식 양도소득세: 4탭(요약/매매내역/계산상세/시뮬레이션). FIFO 전용, 연도 선택, KIS 적응적 동기화+자동 재계산.
 ```
 
@@ -133,7 +133,7 @@ frontend/
 
 ### 주문 컴포넌트
 
-- **SymbolSearchBar**: 시장 드롭다운(KR/US/FNO). KR·FNO=자동완성, US=티커 직접 입력 검증. `marketRef`로 async race condition 방지
+- **SymbolSearchBar**: 시장 드롭다운(KR/US/FNO). `markets` prop으로 표시할 시장 필터링 가능 (기본: 전체). KR·FNO=자동완성, US=티커 직접 입력 검증. `marketRef`로 async race condition 방지
 - **OrderbookPanel**: `useQuote(symbol, market)` 훅 사용 (REST 폴링 없음). KR/FNO=동일 호가창 그리드. US=현재가만. 매도호가 클릭→`side='sell'`, 매수호가 클릭→`side='buy'`
 - **OrderForm**: `symbol`/`symbolName`/`market` props 외부 제어. `externalPrice`/`externalSide` prop. FNO: 지정가/시장가/조건부지정가/최유리지정가 + IOC/FOK
 - **OpenOrdersTable**: `excg_id_dvsn_cd === 'SOR'`(HTS/MTS 주문)은 "앱취소필요" 안내

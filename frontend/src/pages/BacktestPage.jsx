@@ -176,6 +176,7 @@ export default function BacktestPage() {
             symbol={symbol}
             symbolName={symbolName}
             onSymbolSelect={handleSymbolSelect}
+            markets={['KR']}
           />
         </div>
 
@@ -275,7 +276,7 @@ export default function BacktestPage() {
 
       {/* 현재 실행 결과 */}
       {status === 'completed' && resultMode === 'single' && (
-        <BacktestResultPanel result={result} />
+        <BacktestResultPanel result={result} symbol={symbol} market={market} />
       )}
 
       {status === 'completed' && resultMode === 'batch' && (
@@ -284,7 +285,7 @@ export default function BacktestPage() {
 
       {/* 히스토리에서 선택한 결과 */}
       {viewResult && status !== 'completed' && (
-        <BacktestResultPanel result={viewResult} />
+        <BacktestResultPanel result={viewResult} symbol={viewResult.symbol} market={viewResult.market} />
       )}
 
       {status === 'timeout' && (
