@@ -11,6 +11,13 @@
 - 전략 파라미터 한글명 + 비유적 설명 매핑 (PARAM_KR, 80+개)
 - 파라미터 UI: 카드형 레이아웃 (한글명 + 영문키 서브텍스트 + 설명)
 - 백테스트 종목 검색에서 US/FNO 제거 (SymbolSearchBar `markets` prop, 국내 KRX만 지원)
+- 거래내역 날짜 KST 변환 (UTC 타임스탬프 → +9h, 날짜만이면 그대로)
+- 메트릭 한글화: CAGR→연평균 수익률, Sortino→소르티노 비율, Profit Factor→손익비
+- MetricsCard/추가 메트릭 각 항목 아래 간단 설명 텍스트 추가
+
+### 개발 도구 신규
+- `scripts/run-related-tests.sh` — 변경 파일에 대응하는 테스트만 자동 실행
+- Claude Code postToolUse hook (Edit/Write 후 관련 pytest/npm build 자동 실행)
 
 ## 2026-04-19 — 백테스트 UI 6가지 개선
 

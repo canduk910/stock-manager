@@ -17,6 +17,16 @@ import { fetchAdvisoryOhlcv } from '../../api/advisory'
 
 // ── 유틸 ──────────────────────────────────────────────────────────────────
 
+/** UTC 타임스탬프 → KST 변환. 날짜만 있으면 그대로 반환. */
+function toKST(dateStr) {
+  if (!dateStr || dateStr === '-') return '-'
+  if (!dateStr.includes('T')) return dateStr
+  const d = new Date(dateStr)
+  if (isNaN(d.getTime())) return dateStr
+  const kst = new Date(d.getTime() + 9 * 60 * 60 * 1000)
+  return kst.toISOString().slice(0, 16).replace('T', ' ')
+}
+
 function flattenMetrics(raw) {
   if (!raw) return null
   if (raw.total_return_pct != null) return raw
@@ -81,7 +91,7 @@ export default function BacktestResultPanel({ result, symbol, market }) {
     let lastBuyPrice = null
     return rawTrades.map((t) => {
       const isBuy = (t.direction || t.side || '').toLowerCase() === 'buy'
-      const date = t.date || t.entry_date || t.timestamp || t.time || '-'
+      const date = toKST(t.date || t.entry_date || t.timestamp || t.time || '-')
       if (isBuy) {
         lastBuyPrice = t.price
         return { ...t, _isBuy: true, _date: date }
@@ -150,26 +160,30 @@ export default function BacktestResultPanel({ result, symbol, market }) {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           {metrics.cagr != null && (
             <div className="bg-white rounded-lg border p-3 text-center">
-              <div className="text-xs text-gray-500">CAGR</div>
+              <div className="text-xs text-gray-500">연평균 수익률</div>
               <div className="text-lg font-semibold">{metrics.cagr?.toFixed(1)}%</div>
+              <div className="text-[10px] text-gray-400 mt-0.5">매년 평균 수익 (복리 기준)</div>
             </div>
           )}
           {metrics.sortino_ratio != null && (
             <div className="bg-white rounded-lg border p-3 text-center">
-              <div className="text-xs text-gray-500">Sortino</div>
+              <div className="text-xs text-gray-500">소르티노 비율</div>
               <div className="text-lg font-semibold">{metrics.sortino_ratio?.toFixed(2)}</div>
+              <div className="text-[10px] text-gray-400 mt-0.5">손실만 고려한 위험 대비 수익</div>
             </div>
           )}
           {metrics.profit_factor != null && (
             <div className="bg-white rounded-lg border p-3 text-center">
-              <div className="text-xs text-gray-500">Profit Factor</div>
+              <div className="text-xs text-gray-500">손익비</div>
               <div className="text-lg font-semibold">{metrics.profit_factor?.toFixed(2)}</div>
+              <div className="text-[10px] text-gray-400 mt-0.5">총 이익 / 총 손실. 1 이상 = 이익 우세</div>
             </div>
           )}
           {metrics.total_trades != null && (
             <div className="bg-white rounded-lg border p-3 text-center">
               <div className="text-xs text-gray-500">총 거래 수</div>
               <div className="text-lg font-semibold">{metrics.total_trades}</div>
+              <div className="text-[10px] text-gray-400 mt-0.5">백테스트 기간 내 전체 매매 횟수</div>
             </div>
           )}
         </div>
