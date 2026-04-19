@@ -1,8 +1,9 @@
 /**
  * 백테스트 이력 테이블.
- * 과거 실행 결과 목록 + 한글 전략명 + 카테고리 배지 + 삭제 + "보기" 버튼.
+ * 과거 실행 결과 목록 + 전략명(MCP display name 우선) + 카테고리 배지 + 파라미터 + 삭제 + "보기".
  */
-import { CATEGORY_LABELS, CATEGORY_COLORS } from './StrategySelector'
+import { useState } from 'react'
+import { CATEGORY_LABELS, CATEGORY_COLORS, PARAM_KR } from './StrategySelector'
 
 const STATUS_BADGE = {
   completed: 'bg-green-100 text-green-800',
@@ -10,31 +11,32 @@ const STATUS_BADGE = {
   failed: 'bg-red-100 text-red-800',
 }
 
+/** 전략명 fallback 매핑 (strategy_display_name이 없는 레거시 데이터용) */
 const STRATEGY_KR = {
-  sma_crossover: '이동평균 교차',
-  ema_crossover: 'EMA 교차',
-  momentum: '모멘텀',
-  rsi_reversal: 'RSI 역추세',
-  bollinger_breakout: '볼린저 돌파',
-  macd_signal: 'MACD 시그널',
+  sma_crossover: 'SMA 크로스오버',
+  momentum: '모멘텀 (ROC)',
   volatility_breakout: '변동성 돌파',
-  mean_reversion: '평균회귀',
-  trend_filter_signal: '추세 필터',
-  dual_momentum: '듀얼 모멘텀',
+  false_breakout: '거짓 돌파',
+  consecutive_moves: '연속 상승/하락',
+  short_term_reversal: '단기 반전',
+  ma_divergence: '이평선 이격도',
+  week52_high: '52주 신고가',
+  strong_close: '강한 종가 (IBS)',
+  trend_filter_signal: '추세 필터 + 시그널',
   custom: '커스텀',
 }
 
 const STRATEGY_CATEGORY = {
   sma_crossover: 'trend',
-  ema_crossover: 'trend',
   momentum: 'momentum',
-  rsi_reversal: 'mean_reversion',
-  bollinger_breakout: 'volatility',
-  macd_signal: 'trend',
   volatility_breakout: 'volatility',
-  mean_reversion: 'mean_reversion',
-  trend_filter_signal: 'composite',
-  dual_momentum: 'momentum',
+  false_breakout: 'mean_reversion',
+  consecutive_moves: 'momentum',
+  short_term_reversal: 'mean_reversion',
+  ma_divergence: 'mean_reversion',
+  week52_high: 'trend',
+  strong_close: 'momentum',
+  trend_filter_signal: 'trend',
 }
 
 function formatDate(iso) {
@@ -50,6 +52,8 @@ function formatPct(val) {
 }
 
 export default function BacktestHistoryTable({ history, onSelect, onDelete, loading }) {
+  const [expandedJob, setExpandedJob] = useState(null)
+
   if (loading) {
     return <div className="text-sm text-gray-500 py-4 text-center">이력 로딩 중...</div>
   }
@@ -61,6 +65,11 @@ export default function BacktestHistoryTable({ history, onSelect, onDelete, load
   const handleDelete = (e, jobId) => {
     e.stopPropagation()
     if (onDelete) onDelete(jobId)
+  }
+
+  const toggleParams = (e, jobId) => {
+    e.stopPropagation()
+    setExpandedJob(expandedJob === jobId ? null : jobId)
   }
 
   return (
@@ -87,11 +96,17 @@ export default function BacktestHistoryTable({ history, onSelect, onDelete, load
             const displayStatus = isStale ? 'failed' : job.status
             const category = STRATEGY_CATEGORY[job.strategy_name]
             const symbolDisplay = job.symbol_name && job.symbol_name !== job.symbol
-              ? `${job.symbol_name}`
-              : job.symbol
+              ? job.symbol_name : job.symbol
+            // 전략명: MCP display name 우선 → STRATEGY_KR fallback → ID
+            const strategyLabel = job.strategy_display_name
+              || STRATEGY_KR[job.strategy_name]
+              || job.strategy_name
+            const params = job.params_json
+            const hasParams = params && Object.keys(params).length > 0
+            const isExpanded = expandedJob === job.job_id
 
             return (
-              <tr key={job.job_id} className="border-b border-gray-100 hover:bg-gray-50">
+              <tr key={job.job_id} className="border-b border-gray-100 hover:bg-gray-50 align-top">
                 <td className="py-2 px-2 text-gray-600 whitespace-nowrap">
                   {formatDate(job.submitted_at || job.completed_at)}
                 </td>
@@ -109,7 +124,28 @@ export default function BacktestHistoryTable({ history, onSelect, onDelete, load
                   )}
                 </td>
                 <td className="py-2 px-2">
-                  {STRATEGY_KR[job.strategy_name] || job.strategy_name}
+                  <div>{strategyLabel}</div>
+                  {hasParams && (
+                    <button
+                      onClick={(e) => toggleParams(e, job.job_id)}
+                      className="text-[10px] text-gray-400 hover:text-blue-500 mt-0.5"
+                    >
+                      {isExpanded ? '파라미터 ▲' : '파라미터 ▼'}
+                    </button>
+                  )}
+                  {isExpanded && hasParams && (
+                    <div className="mt-1 space-y-0.5">
+                      {Object.entries(params).map(([k, v]) => {
+                        const kr = PARAM_KR[k]
+                        return (
+                          <div key={k} className="text-[10px] text-gray-500">
+                            <span className="font-medium">{kr?.label || k}</span>: <span className="font-mono">{v}</span>
+                            {kr?.desc && <span className="text-gray-400 ml-1">— {kr.desc}</span>}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
                 </td>
                 <td className="py-2 px-2 text-right font-mono">
                   <span className={job.total_return_pct > 0 ? 'text-red-600' : job.total_return_pct < 0 ? 'text-blue-600' : ''}>

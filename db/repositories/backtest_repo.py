@@ -22,15 +22,19 @@ class BacktestRepository:
         market: str,
         strategy_type: str,
         submitted_at: str,
+        params: dict | None = None,
+        strategy_display_name: str | None = None,
     ) -> dict:
         job = BacktestJob(
             job_id=job_id,
             strategy_name=strategy_name,
+            strategy_display_name=strategy_display_name,
             symbol=symbol.upper(),
             market=market.upper(),
             strategy_type=strategy_type,
             status="submitted",
             submitted_at=submitted_at,
+            params_json=params,
         )
         self.db.add(job)
         self.db.flush()

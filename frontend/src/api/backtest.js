@@ -20,7 +20,7 @@ export function fetchIndicators() {
 }
 
 /** 프리셋 백테스트 실행 → {job_id, status} */
-export function runPresetBacktest(preset, symbol, market = 'KR', startDate, endDate, initialCash = 10000000, params) {
+export function runPresetBacktest(preset, symbol, market = 'KR', startDate, endDate, initialCash = 10000000, params, presetName) {
   const body = {
     preset, symbol, market,
     start_date: startDate || undefined,
@@ -28,6 +28,7 @@ export function runPresetBacktest(preset, symbol, market = 'KR', startDate, endD
     initial_cash: initialCash,
   }
   if (params && Object.keys(params).length > 0) body.params = params
+  if (presetName) body.preset_name = presetName
   return apiFetch('/api/backtest/run/preset', {
     method: 'POST',
     body: JSON.stringify(body),

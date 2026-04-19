@@ -74,8 +74,11 @@ frontend/
                           RebalanceCard (리밸런싱 제안), TradeTable (매매안+주문실행),
                           TradeConfirmModal (AI 추천 주문 확인 모달)
       backtest/           StrategySelector (프리셋 드롭다운+상세 설명 카드(description/category/tags/params 편집 가능) / 커스텀 YAML. CATEGORY_LABELS/CATEGORY_COLORS/PARAM_KR export. **PARAM_KR**: 80+개 파라미터 한글명+비유적 설명 매핑), MetricsCard (수익률/샤프/낙폭/승률),
-                          BacktestResultPanel (**캔들차트+수익률곡선 이중축 통합차트**(OHLCV advisory API 별도 조회, 좌축=주가캔들+MA5/MA20, 우축=순자산 녹색선) + **거래량 바차트** + **보유구간 ReferenceArea**(수익=빨강/손실=파랑/보유중=회색) + 거래내역(Buy=빨강/Sell=파랑)+매도수익률 자동계산+사용 파라미터 한글 표시. OHLCV 미조회 시 수익률곡선 전용 fallback), BatchCompareTable (전략 비교),
-                          BacktestHistoryTable (이력 테이블: 일시/종목(**코드+이름**)/카테고리(**한글배지**)/전략(**한글명**)/수익률/샤프/낙폭/상태/**삭제**/보기)
+                          BacktestResultPanel (**캔들차트+수익률곡선 이중축 통합차트**(OHLCV advisory API 별도 조회, 좌축=주가캔들+MA5/MA20, 우축=순자산 녹색선) + **거래량 바차트** + **보유구간 ReferenceArea**(수익=빨강/손실=파랑/보유중=회색) + 사용 파라미터 한글 표시 + **포지션요약**(6카드: 보유기간/수익거래/손실거래/연승/연패/승패분포) + **연간수익률**(테이블) + **월별수익률히트맵**(6단계 색상) + 거래내역(Buy=빨강/Sell=파랑)+매도수익률 자동계산. OHLCV 미조회 시 수익률곡선 전용 fallback),
+                          backtestUtils.js (순수 계산 유틸: computeAnnualReturns/computeMonthlyReturns/computePositionSummary),
+                          AnnualReturnsTable, MonthlyReturnsHeatmap, PositionSummary (결과 상세 컴포넌트),
+                          BatchCompareTable (전략 비교),
+                          BacktestHistoryTable (이력 테이블: 일시/종목(**코드+이름**)/카테고리(**한글배지**)/전략(**MCP display name 우선**)/수익률/샤프/낙폭/상태/**파라미터 펼침**/삭제/보기)
       macro/              IndexSection (4지수+1년스파크라인+툴팁), SentimentSection (VIX+버핏+공포탐욕),
                           NewsSection (한국+NYT 2컬럼), InvestorSection (4명 투자자 코멘트 카드)
       tax/                TaxSummaryCards (4카드: 양도차익/공제/과세표준/세액), TaxBySymbolChart (종목별 BarChart),

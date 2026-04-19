@@ -129,7 +129,7 @@ export const CATEGORY_COLORS = {
   composite: 'bg-indigo-100 text-indigo-700',
 }
 
-export default function StrategySelector({ presets, selectedPreset, yamlContent, mode, onModeChange, onPresetChange, onYamlChange, customParams, onParamsChange }) {
+export default function StrategySelector({ presets, selectedPreset, customParams, onPresetChange, onParamsChange, mode, onModeChange, yamlContent, onYamlChange }) {
   const presetDetail = useMemo(() => {
     if (!selectedPreset || !presets?.length) return null
     return presets.find((p) => {
@@ -209,11 +209,11 @@ export default function StrategySelector({ presets, selectedPreset, yamlContent,
                 </div>
               )}
 
-              {presetDetail.params && Object.keys(presetDetail.params).length > 0 && (
+              {(presetDetail.params || presetDetail.parameters) && Object.keys(presetDetail.params || presetDetail.parameters).length > 0 && (
                 <div className="border-t border-gray-200 pt-3">
                   <p className="text-xs font-medium text-gray-500 mb-2">파라미터</p>
                   <div className="space-y-2">
-                    {Object.entries(presetDetail.params).map(([key, spec]) => {
+                    {Object.entries(presetDetail.params || presetDetail.parameters).map(([key, spec]) => {
                       const kr = PARAM_KR[key]
                       return (
                         <div key={key} className="flex items-start gap-3 bg-white rounded border px-3 py-2">
@@ -250,13 +250,16 @@ export default function StrategySelector({ presets, selectedPreset, yamlContent,
           )}
         </div>
       ) : (
-        <textarea
-          value={yamlContent}
-          onChange={(e) => onYamlChange(e.target.value)}
-          placeholder={`version: "1.0"\nmetadata:\n  name: 나의 전략\n  category: trend\nstrategy:\n  id: my_strategy\n  indicators:\n    - id: sma\n      alias: fast_ma\n      params:\n        period: 10\n  entry:\n    conditions:\n      - indicator: fast_ma\n        operator: cross_above\n        value: 0\n    logic: AND\n  exit:\n    conditions:\n      - indicator: fast_ma\n        operator: cross_below\n        value: 0\n    logic: AND`}
-          rows={12}
-          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-        />
+        <div className="space-y-2">
+          <p className="text-xs text-gray-500">KIS AI Extensions YAML 포맷으로 전략을 직접 작성하세요.</p>
+          <textarea
+            value={yamlContent}
+            onChange={(e) => onYamlChange(e.target.value)}
+            placeholder="KIS AI Extensions 전략 YAML을 붙여넣으세요"
+            rows={12}
+            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+          />
+        </div>
       )}
     </div>
   )

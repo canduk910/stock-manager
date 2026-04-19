@@ -1,5 +1,28 @@
 # 변경 이력
 
+## 2026-04-19 — 백테스트 결과 상세내역 + 파라미터 표시 수정
+
+### 백테스트 결과 상세내역 신규
+- **포지션 요약** 6카드: 평균보유기간/평균수익거래/평균손실거래/최대연승/최대연패/승패분포
+- **연간 수익률** 테이블: 연도별 수익률+시작자산+종료자산
+- **월별 수익률 히트맵**: 연×월 매트릭스, 6단계 색상 그라데이션(빨강=수익/파랑=손실) + 범례 + 연간 합계
+- `backtestUtils.js` 순수 계산 유틸 신규 (computeAnnualReturns/computeMonthlyReturns/computePositionSummary)
+
+### 버그 수정
+- **입력 파라미터 미표시**: `params_json` lookup 누락 + 프리셋 기본값 미저장 → 기본값+사용자수정값 병합 저장
+- **StrategySelector `mode` not defined**: props 구조분해에 `mode`/`onModeChange`/`yamlContent`/`onYamlChange` 누락
+- **커스텀 YAML 템플릿 오류**: 잘못된 YAML 포맷 템플릿 제거, 안내 텍스트만 표시
+
+### 백엔드 개선
+- `params_json`, `strategy_display_name` 컬럼 추가 (Alembic 마이그레이션)
+- MCP `param_overrides` 파라미터명 수정, YAML 검증 에러 전파 개선
+- `preset_name` API 파라미터 추가 (MCP display name 저장)
+
+### 이력 테이블 개선
+- 전략명: MCP display name 우선 → STRATEGY_KR fallback
+- 파라미터 펼침/접기 토글 버튼 (한글 라벨+설명 포함)
+- STRATEGY_KR 매핑을 실제 MCP 10개 프리셋에 맞게 갱신
+
 ## 2026-04-19 — 백테스트 UI 추가 개선 (캔들차트 통합, 파라미터 한글화)
 
 ### UI 개선

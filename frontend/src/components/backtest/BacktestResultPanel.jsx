@@ -13,6 +13,9 @@ import {
 } from 'recharts'
 import MetricsCard from './MetricsCard'
 import { PARAM_KR } from './StrategySelector'
+import AnnualReturnsTable from './AnnualReturnsTable'
+import MonthlyReturnsHeatmap from './MonthlyReturnsHeatmap'
+import PositionSummary from './PositionSummary'
 import { fetchAdvisoryOhlcv } from '../../api/advisory'
 
 // ── 유틸 ──────────────────────────────────────────────────────────────────
@@ -61,7 +64,7 @@ export default function BacktestResultPanel({ result, symbol, market }) {
   const rawCurve = result.equity_curve || result.result?.equity_curve || result.result_json?.result?.equity_curve
   const equityCurve = normalizeEquityCurve(rawCurve)
   const rawTrades = result.trades || result.result?.trades || result.result_json?.result?.trades || []
-  const resultParams = result.params || result.result?.params || result.result_json?.params
+  const resultParams = result.params || result.params_json || result.result?.params || result.result_json?.params
   const resolvedSymbol = symbol || result.symbol || result.result_json?.symbol
 
   // ── OHLCV 별도 조회 ──────────────────────────────────────────────────
@@ -222,6 +225,15 @@ export default function BacktestResultPanel({ result, symbol, market }) {
         </div>
       )}
 
+      {/* 포지션 요약 */}
+      <PositionSummary trades={rawTrades} />
+
+      {/* 연간 수익률 */}
+      <AnnualReturnsTable equityCurve={equityCurve} />
+
+      {/* 월별 수익률 히트맵 */}
+      <MonthlyReturnsHeatmap equityCurve={equityCurve} />
+
       {/* 거래 내역 */}
       {processedTrades.length > 0 && (
         <div className="bg-white rounded-lg border p-4">
@@ -329,7 +341,7 @@ function CombinedChart({ ohlcvData, equityCurve, holdingRanges }) {
     ohlcv.map((d, i) => ({
       time: d.time,
       open: d.open, high: d.high, low: d.low, close: d.close, volume: d.volume,
-      equity: equityMap.get(d.time) ?? null,
+      equity: equityMap.get((d.time || '').slice(0, 10)) ?? null,
       ma5: (ma.ma5 || [])[i],
       ma20: (ma.ma20 || [])[i],
     })),
@@ -444,6 +456,7 @@ function CombinedChart({ ohlcvData, equityCurve, holdingRanges }) {
         <BarChart data={chartData} margin={{ top: 0, right: 8, left: 0, bottom: 0 }}>
           <XAxis dataKey="time" hide />
           <YAxis tick={{ fontSize: 9 }} width={65} tickFormatter={(v) => (v / 1000).toFixed(0) + 'K'} />
+          <YAxis yAxisId="dummy" orientation="right" width={75} hide />
           <Bar dataKey="volume" shape={volumeShape} isAnimationActive={false} name="거래량" />
         </BarChart>
       </ResponsiveContainer>

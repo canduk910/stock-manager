@@ -27,12 +27,15 @@ class BacktestJob(Base):
     profit_factor = Column(Float, nullable=True)
     total_trades = Column(Integer, nullable=True)
     result_json = Column(JSON, nullable=True)
+    params_json = Column(JSON, nullable=True)
+    strategy_display_name = Column(String, nullable=True)
 
     def to_dict(self) -> dict:
         return {
             "id": self.id,
             "job_id": self.job_id,
             "strategy_name": self.strategy_name,
+            "strategy_display_name": self.strategy_display_name,
             "symbol": self.symbol,
             "market": self.market,
             "strategy_type": self.strategy_type,
@@ -48,6 +51,7 @@ class BacktestJob(Base):
             "profit_factor": self.profit_factor,
             "total_trades": self.total_trades,
             "result_json": self.result_json,
+            "params_json": self.params_json,
         }
 
 

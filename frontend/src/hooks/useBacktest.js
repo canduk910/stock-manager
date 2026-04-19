@@ -93,13 +93,13 @@ export function useBacktest() {
   // cleanup on unmount
   useEffect(() => () => stopPolling(), [stopPolling])
 
-  const runPreset = useCallback(async (preset, symbol, market, startDate, endDate, initialCash, params) => {
+  const runPreset = useCallback(async (preset, symbol, market, startDate, endDate, initialCash, params, presetName) => {
     setStatus('submitting')
     setResult(null)
     setError(null)
     setProgress(null)
     try {
-      const res = await runPresetBacktest(preset, symbol, market, startDate, endDate, initialCash, params)
+      const res = await runPresetBacktest(preset, symbol, market, startDate, endDate, initialCash, params, presetName)
       setJobId(res.job_id)
       startPolling(res.job_id)
     } catch (e) {

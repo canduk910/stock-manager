@@ -28,6 +28,7 @@ class PresetBacktestBody(BaseModel):
     end_date: Optional[str] = None
     initial_cash: int = Field(default=10_000_000, ge=100_000)
     params: Optional[dict] = None
+    preset_name: Optional[str] = None
 
 
 class CustomBacktestBody(BaseModel):
@@ -83,6 +84,7 @@ def run_preset(body: PresetBacktestBody):
         end_date=body.end_date,
         initial_cash=body.initial_cash,
         params=body.params,
+        preset_name=body.preset_name,
     )
 
 

@@ -61,12 +61,14 @@ def _extract_mcp_content(result: dict | list) -> any:
             if text:
                 try:
                     parsed = json.loads(text)
-                    # {"success": true, "data": [...]} 구조면 data만 반환
-                    if isinstance(parsed, dict) and "data" in parsed:
-                        if not parsed.get("success", True):
+                    if isinstance(parsed, dict):
+                        # success: false → 에러 raise (data 유무 무관)
+                        if parsed.get("success") is False:
                             error_msg = parsed.get("error", "알 수 없는 오류")
                             raise ExternalAPIError(f"MCP 백테스트 실패: {error_msg}")
-                        return parsed["data"]
+                        # {"success": true, "data": [...]} 구조면 data만 반환
+                        if "data" in parsed:
+                            return parsed["data"]
                     return parsed
                 except (json.JSONDecodeError, TypeError):
                     return text
@@ -146,6 +148,7 @@ def run_preset_backtest(
     end_date: Optional[str] = None,
     initial_cash: int = 10_000_000,
     params: Optional[dict] = None,
+    preset_name: Optional[str] = None,
 ) -> dict:
     """프리셋 전략 백테스트 실행.
 
@@ -164,6 +167,8 @@ def run_preset_backtest(
         market=market,
         strategy_type="preset",
         submitted_at=now_kst_iso(),
+        params=params,
+        strategy_display_name=preset_name,
     )
 
     mcp_params = {
@@ -176,7 +181,7 @@ def run_preset_backtest(
     if end_date:
         mcp_params["end_date"] = end_date
     if params:
-        mcp_params["params"] = params
+        mcp_params["param_overrides"] = params
 
     try:
         data = _run_and_wait(client, "run_preset_backtest_tool", mcp_params)
@@ -210,7 +215,8 @@ def run_custom_backtest(
 
     # 1단계: YAML 검증
     try:
-        client.call_tool("validate_yaml_tool", {"yaml_content": yaml_content})
+        val_result = client.call_tool("validate_yaml_tool", {"yaml_content": yaml_content})
+        _extract_mcp_content(val_result)  # success:false 시 ExternalAPIError raise
     except ExternalAPIError as e:
         raise ExternalAPIError(f"YAML 검증 실패: {e}")
 

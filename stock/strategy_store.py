@@ -18,11 +18,14 @@ def save_backtest_job(
     market: str,
     strategy_type: str,
     submitted_at: str,
+    params: dict | None = None,
+    strategy_display_name: str | None = None,
 ) -> dict:
     """백테스트 작업 저장."""
     with get_session() as db:
         return BacktestRepository(db).create_job(
             job_id, strategy_name, symbol, market, strategy_type, submitted_at,
+            params=params, strategy_display_name=strategy_display_name,
         )
 
 

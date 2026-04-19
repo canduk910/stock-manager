@@ -91,11 +91,22 @@ export default function BacktestPage() {
     setViewResult(null)
     setResultMode('single')
     if (strategyMode === 'preset' && selectedPreset) {
-      runPreset(selectedPreset, symbol, market, startDate, endDate, initialCash, customParams)
+      const presetObj = (presets || []).find((p) => (typeof p === 'object' ? (p.id || p.strategy_id) : p) === selectedPreset)
+      const presetName = typeof presetObj === 'object' ? presetObj.name : selectedPreset
+      // 프리셋 기본값 + 사용자 수정값 병합 (전체 파라미터 저장)
+      const fullParams = {}
+      const specParams = typeof presetObj === 'object' ? (presetObj.params || presetObj.parameters) : null
+      if (specParams) {
+        for (const [key, spec] of Object.entries(specParams)) {
+          fullParams[key] = customParams[key] ?? (typeof spec === 'object' ? spec.default : spec) ?? spec
+        }
+      }
+      Object.assign(fullParams, customParams)
+      runPreset(selectedPreset, symbol, market, startDate, endDate, initialCash, fullParams, presetName)
     } else if (strategyMode === 'custom' && yamlContent.trim()) {
       runCustom(yamlContent, symbol, market, startDate, endDate, initialCash)
     }
-  }, [symbol, strategyMode, selectedPreset, yamlContent, market, startDate, endDate, initialCash, customParams, runPreset, runCustom, reset])
+  }, [symbol, strategyMode, selectedPreset, yamlContent, market, startDate, endDate, initialCash, customParams, presets, runPreset, runCustom, reset])
 
   const handleBatch = useCallback(() => {
     if (!symbol) return
