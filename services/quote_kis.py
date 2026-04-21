@@ -466,13 +466,19 @@ class KISQuoteManager:
         if len(t) < 6:
             return None
         sf = self._sf
-        return {
+        result = {
             "symbol": t[0],
             "price": sf(t[2]),
             "sign": t[3],
             "change": sf(t[4]),
             "change_rate": sf(t[5]),
         }
+        # H0STCNT0: t[7]=시가, t[8]=고가, t[9]=저가
+        if len(t) > 9:
+            result["open"] = sf(t[7])
+            result["high"] = sf(t[8])
+            result["low"] = sf(t[9])
+        return result
 
     def _parse_orderbook(self, raw: str) -> dict | None:
         t = raw.split('^')

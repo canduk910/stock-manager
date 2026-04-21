@@ -1,10 +1,11 @@
 import { useState, useCallback, useMemo } from 'react'
-import { fetchNewHighsLows, fetchSparklines, fetchCustomStocks, addCustomStock, removeCustomStock, fetchBoardOrder, saveBoardOrder } from '../api/marketBoard'
+import { fetchNewHighsLows, fetchSparklines, fetchIntradayOhlc, fetchCustomStocks, addCustomStock, removeCustomStock, fetchBoardOrder, saveBoardOrder } from '../api/marketBoard'
 import { fetchWatchlist } from '../api/watchlist'
 
 export function useMarketBoard() {
   const [data, setData] = useState(null)   // { new_highs, new_lows, updated_at }
   const [sparklines, setSparklines] = useState({})  // { code: [{date, close}] }
+  const [ohlc, setOhlc] = useState({})  // { code: { open, high, low, close, prev_close } }
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
 
@@ -15,7 +16,7 @@ export function useMarketBoard() {
       const result = await fetchNewHighsLows(10)
       setData(result)
 
-      // sparkline 배치 로드 (신고가 + 신저가 종목)
+      // sparkline + ohlc 배치 로드 (신고가 + 신저가 종목)
       const allItems = [
         ...(result.new_highs || []).map(s => ({ code: s.code, market: 'KR' })),
         ...(result.new_lows  || []).map(s => ({ code: s.code, market: 'KR' })),
@@ -25,8 +26,12 @@ export function useMarketBoard() {
         arr.findIndex(x => x.code === item.code) === idx
       )
       if (unique.length > 0) {
-        const sl = await fetchSparklines(unique)
+        const [sl, oh] = await Promise.all([
+          fetchSparklines(unique),
+          fetchIntradayOhlc(unique),
+        ])
         setSparklines(prev => ({ ...prev, ...sl }))
+        setOhlc(prev => ({ ...prev, ...oh }))
       }
     } catch (e) {
       setError(e.message)
@@ -38,14 +43,18 @@ export function useMarketBoard() {
   const loadSparklines = useCallback(async (items) => {
     if (!items || items.length === 0) return
     try {
-      const sl = await fetchSparklines(items)
+      const [sl, oh] = await Promise.all([
+        fetchSparklines(items),
+        fetchIntradayOhlc(items),
+      ])
       setSparklines(prev => ({ ...prev, ...sl }))
+      setOhlc(prev => ({ ...prev, ...oh }))
     } catch (e) {
-      // sparkline 로드 실패는 조용히 무시
+      // 로드 실패는 조용히 무시
     }
   }, [])
 
-  return { data, sparklines, loading, error, load, loadSparklines }
+  return { data, sparklines, ohlc, loading, error, load, loadSparklines }
 }
 
 

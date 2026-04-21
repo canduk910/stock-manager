@@ -20,7 +20,7 @@ import MarketBoardSearchModal from './MarketBoardSearchModal'
 
 export const MAX_STOCKS = 30  // 별도 등록 종목 최대 수
 
-function SortableCardWrapper({ id, stock, prices, sparklines, onRemove }) {
+function SortableCardWrapper({ id, stock, prices, sparklines, ohlc, onRemove }) {
   const {
     attributes,
     listeners,
@@ -58,6 +58,7 @@ function SortableCardWrapper({ id, stock, prices, sparklines, onRemove }) {
         }}
         livePrice={prices?.[stock.code]}
         sparkline={sparklines?.[stock.code]}
+        ohlc={ohlc?.[stock.code]}
       />
 
       {/* 관심종목 배지 */}
@@ -86,7 +87,7 @@ function SortableCardWrapper({ id, stock, prices, sparklines, onRemove }) {
  * onRemove(code, market): custom 종목 삭제 (DB 삭제)
  * onReorder(newOrderedStocks): 순서 변경 콜백
  */
-export default function CustomStockSection({ stocks = [], onAdd, onRemove, onReorder, prices, sparklines }) {
+export default function CustomStockSection({ stocks = [], onAdd, onRemove, onReorder, prices, sparklines, ohlc }) {
   const [showModal, setShowModal] = useState(false)
 
   const sensors = useSensors(
@@ -142,6 +143,7 @@ export default function CustomStockSection({ stocks = [], onAdd, onRemove, onReo
                 stock={s}
                 prices={prices}
                 sparklines={sparklines}
+                ohlc={ohlc}
                 onRemove={handleRemove}
               />
             ))}

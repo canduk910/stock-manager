@@ -5,7 +5,7 @@ import NewHighLowSection from '../components/market-board/NewHighLowSection'
 import CustomStockSection from '../components/market-board/CustomStockSection'
 
 export default function MarketBoardPage() {
-  const { data, sparklines, loading, error, load, loadSparklines } = useMarketBoard()
+  const { data, sparklines, ohlc, loading, error, load, loadSparklines } = useMarketBoard()
   const { prices, connected, subscribe, unsubscribe } = useMarketBoardWS()
   const { watchlistStocks, customStocks, displayStocks, loadAll, addStock, removeStock, reorder } = useDisplayStocks()
   const subscribedRef = useRef(new Set())
@@ -127,6 +127,7 @@ export default function MarketBoardPage() {
               data={data}
               sparklines={sparklines}
               prices={prices}
+              ohlc={ohlc}
             />
           </div>
 
@@ -139,6 +140,7 @@ export default function MarketBoardPage() {
               onReorder={reorder}
               prices={prices}
               sparklines={sparklines}
+              ohlc={ohlc}
             />
           </div>
         </>

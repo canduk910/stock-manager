@@ -43,6 +43,13 @@ def get_sparklines(body: SparklineRequest):
     return fetch_sparklines_batch(body.items)
 
 
+@router.post("/api/market-board/intraday-ohlc")
+def get_intraday_ohlc(body: SparklineRequest):
+    """복수 종목 당일 OHLC 배치 조회."""
+    from stock.market_board import fetch_intraday_ohlc_batch
+    return fetch_intraday_ohlc_batch(body.items)
+
+
 # ── 시세판 별도 등록 종목 CRUD ──────────────────────────────────────────────────
 
 class CustomStockBody(BaseModel):
@@ -197,7 +204,11 @@ async def market_board_ws(websocket: WebSocket):
                                 batch[sym] = {
                                     "price": msg.get("price"),
                                     "change_pct": msg.get("change_rate"),
+                                    "change": msg.get("change"),
                                     "sign": msg.get("sign"),
+                                    "open": msg.get("open"),
+                                    "high": msg.get("high"),
+                                    "low": msg.get("low"),
                                 }
                             got_any = True
                         except asyncio.QueueEmpty:

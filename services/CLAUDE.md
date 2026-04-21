@@ -75,6 +75,7 @@ ServiceError (기본 400)
 
 ### quote_kis.py (KISQuoteManager)
 - KIS WS 단일 연결 + 심볼별 `asyncio.Queue` pub/sub
+  - `_parse_execution()`: H0STCNT0 t[0~5] + t[7]=시가, t[8]=고가, t[9]=저가 파싱 (시세판 당일캔들용)
   - WS 끊김 → REST fallback(`FHKST01010100`) 3초 폴링, 재연결 시 자동 해제
   - 재연결 지수 백오프 (1→30초)
   - Approval key 12시간 TTL: `_get_approval_key()` 자동 재발급

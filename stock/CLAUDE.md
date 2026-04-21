@@ -16,7 +16,7 @@ CLI와 API 라우터 양쪽에서 공용으로 사용한다. 비즈니스 데이
 | `utils.py` | `is_domestic(code)` — 6자리 숫자=국내. `is_fno(code)` — FNO 단축코드 판별. |
 | `symbol_map.py` | 종목코드↔종목명 매핑 (7일 캐시). `code_to_name()`. |
 | `market.py` | yfinance 기반 시세/시가총액/PER/PBR/배당수익률. |
-| `market_board.py` | 시세판: 신고가/신저가 탐지 + sparkline. |
+| `market_board.py` | 시세판: 신고가/신저가 탐지 + sparkline + 당일 OHLC 배치 조회. |
 | `market_board_store.py` | 시세판 별도 등록 종목 CRUD + 순서 관리. `db/repositories/market_board_repo.py` 위임 래퍼. |
 | `dart_fin.py` | OpenDart 재무제표 조회 (최대 10년) + **`fetch_quarterly_financials()`**(DART 누계→분기 환산, 최근 4분기). |
 | `yf_client.py` | yfinance 기반 해외주식 데이터. EPS/Graham Number 지표 제공. 매출추정 3단계 fallback. **`fetch_quarterly_financials_yf()`**(분기 실적). |
@@ -125,6 +125,7 @@ CLI와 API 라우터 양쪽에서 공용으로 사용한다. 비즈니스 데이
 | `market:price:` | 장중 6분 / 장외 6시간 |
 | `yf:*` | 1~24시간 (장중/장외 분리) |
 | `yf:forward:` | 6시간 |
+| `market_board:intraday_ohlc:` | 장중 6분 / 장외 6시간 |
 
 ### stock_info_store.py (영속 캐시)
 - **Docker 재시작에도 유지**: `stock_info.db`는 `entrypoint.sh`에서 초기화하지 않음

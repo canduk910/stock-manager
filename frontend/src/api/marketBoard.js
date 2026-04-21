@@ -14,6 +14,14 @@ export async function fetchSparklines(items) {
   })
 }
 
+export async function fetchIntradayOhlc(items) {
+  // items: [{ code, market }, ...]
+  return apiFetch(`${BASE}/intraday-ohlc`, {
+    method: 'POST',
+    body: JSON.stringify({ items }),
+  })
+}
+
 // ── 시세판 별도 등록 종목 CRUD ────────────────────────────────────────────────
 
 export async function fetchCustomStocks() {

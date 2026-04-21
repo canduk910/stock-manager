@@ -1077,6 +1077,9 @@ CREATE TABLE reservations (
 ### `POST /api/market-board/sparklines`
 복수 종목 1년 주봉 종가 배치 조회. 바디: `{"items": [{"code": "005930", "market": "KR"}]}`
 
+### `POST /api/market-board/intraday-ohlc`
+복수 종목 당일 OHLC 배치 조회. 바디: `{"items": [{"code": "005930", "market": "KR"}]}`. 응답: `{"005930": {"open": 71000, "high": 72500, "low": 70500, "close": 72000, "prev_close": 71500}}`. 캐시: 장중 6분 / 장외 6시간. yfinance `history(period="5d")` 기반.
+
 ### `GET /api/market-board/custom-stocks`
 시세판 별도 등록 종목 목록. 응답: `{"items": [...]}`
 
@@ -1093,7 +1096,7 @@ CREATE TABLE reservations (
 시세판 종목 표시 순서 저장 (전체 교체). 바디: `{"items": [{"code": "005930", "market": "KR"}, ...]}`. 응답: `{"ok": true}`
 
 ### `WS /ws/market-board`
-다중심볼 실시간 시세 WebSocket. 구독: `{"action": "subscribe", "symbols": ["005930"]}`. 시세: `{"type": "prices", "data": {...}}`
+다중심볼 실시간 시세 WebSocket. 구독: `{"action": "subscribe", "symbols": ["005930"]}`. 시세: `{"type": "prices", "data": {"005930": {"price", "change_pct", "change", "sign", "open", "high", "low"}}}`. KIS WS 연결 시 시가/고가/저가 실시간 갱신.
 
 ---
 

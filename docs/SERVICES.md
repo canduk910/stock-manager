@@ -399,6 +399,9 @@ WS 연결 끊김 감지 시 자동으로 KIS REST API를 폴링합니다.
 | `sign` | 전일대비부호 (items[3]) — '2'=상승, '3'=보합, '5'=하락 |
 | `change` | 전일대비 (items[4]) |
 | `change_rate` | 전일대비율(%) (items[5]) |
+| `open` | 시가 (items[7]) — `len(t) > 9`일 때만 |
+| `high` | 고가 (items[8]) — `len(t) > 9`일 때만 |
+| `low` | 저가 (items[9]) — `len(t) > 9`일 때만 |
 
 #### `_parse_orderbook(raw)` — H0STASP0 (plaintext, AES 복호화 불필요)
 

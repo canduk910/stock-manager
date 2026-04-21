@@ -1,6 +1,6 @@
 import MarketBoardCard from './MarketBoardCard'
 
-export default function NewHighLowSection({ data, sparklines, prices }) {
+export default function NewHighLowSection({ data, sparklines, prices, ohlc }) {
   if (!data) return null
   const { new_highs = [], new_lows = [] } = data
 
@@ -22,6 +22,7 @@ export default function NewHighLowSection({ data, sparklines, prices }) {
                 stock={stock}
                 livePrice={prices?.[stock.code]}
                 sparkline={sparklines?.[stock.code]}
+                ohlc={ohlc?.[stock.code]}
                 badge="high"
               />
             ))}
@@ -45,6 +46,7 @@ export default function NewHighLowSection({ data, sparklines, prices }) {
                 stock={stock}
                 livePrice={prices?.[stock.code]}
                 sparkline={sparklines?.[stock.code]}
+                ohlc={ohlc?.[stock.code]}
                 badge="low"
               />
             ))}

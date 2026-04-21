@@ -14,7 +14,7 @@
 | `quote.py` | `WS /ws/quote/{symbol}`, `WS /ws/execution-notice` | 실시간 호가 WebSocket (KR/FNO/US) + 체결통보 WS |
 | `advisory.py` | `/api/advisory/*` | AI자문 종목 관리 + 데이터 수집/조회 + AI 리포트 생성 |
 | `search.py` | `GET /api/search` | 종목 검색 (KR=자동완성, US=티커 검증, FNO=마스터 검색) |
-| `market_board.py` | `/api/market-board/*`, `WS /ws/market-board` | 신고가/신저가 + sparkline + 시세판 종목 CRUD + 순서 관리(`GET/PUT /api/market-board/order`) + 실시간 WS |
+| `market_board.py` | `/api/market-board/*`, `WS /ws/market-board` | 신고가/신저가 + sparkline + 당일 OHLC + 시세판 종목 CRUD + 순서 관리(`GET/PUT /api/market-board/order`) + 실시간 WS(시가/고가/저가 포함) |
 | `macro.py` | `/api/macro/*` | 매크로 분석: 지수(4대)/뉴스(네이버+NYT)/심리지표(VIX+버핏+공포탐욕)/투자자 코멘트. 5개 GET 엔드포인트 |
 | `portfolio_advisor.py` | `/api/portfolio-advisor/*` | AI 포트폴리오 자문: `POST /analyze` (GPT 분석), `GET /history` (이력 목록), `GET /history/{id}` (리포트 상세) |
 | `report.py` | `/api/reports/*` | 일일 보고서 + 추천 이력 + 성과 통계 + 매크로 체제 이력. 7개 GET 엔드포인트. `/{report_id}` 패스 파라미터는 마지막에 등록 |
