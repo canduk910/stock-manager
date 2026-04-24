@@ -96,6 +96,12 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Stock Manager API", lifespan=lifespan)
 
+
+@app.get("/api/health")
+def health_check():
+    return {"status": "ok"}
+
+
 # ServiceError → HTTP 응답 변환 (서비스 레이어에서 HTTPException 직접 사용 제거)
 from services.exceptions import ServiceError  # noqa: E402
 

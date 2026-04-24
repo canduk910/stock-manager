@@ -114,7 +114,7 @@ cd ..
 uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
-### 방법 4 — Docker (프로덕션)
+### 방법 4 — Docker (로컬)
 
 ```bash
 docker-compose up --build
@@ -123,6 +123,26 @@ docker-compose up --build
 멀티스테이지 빌드(Node.js → Python) 후 `http://localhost:8000` 에서 접속합니다.
 
 > **개발 시**: Docker 볼륨 마운트가 `frontend/dist/`를 가리므로 개발 중에는 방법 2를 권장합니다.
+
+### 방법 5 — AWS 배포 (Terraform + GitHub Actions)
+
+EC2 t3.micro + RDS PostgreSQL + ECR + SSM 기반 프로덕션 배포:
+
+```bash
+# 1. 인프라 생성 (Terraform)
+cd infra
+cp terraform.tfvars.example terraform.tfvars  # 값 수정
+terraform init && terraform apply
+
+# 2. GitHub Secrets 설정 (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, EC2_HOST, EC2_SSH_KEY)
+
+# 3. main에 push → CI/CD 자동 배포
+git push origin main
+```
+
+`main` 브랜치에 push하면 GitHub Actions가 자동으로: pytest → frontend build → Docker 빌드 → ECR 푸시 → EC2 배포를 수행합니다.
+
+상세: `infra/` (Terraform), `.github/workflows/` (CI/CD), `scripts/ec2-deploy.sh` (수동 배포)
 
 ---
 
@@ -560,7 +580,11 @@ stock-manager/
 │       ├── hooks/         #   커스텀 훅 (API 통신 + 상태 관리)
 │       └── api/           #   fetch 래퍼 (hooks에서만 사용)
 ├── Dockerfile             # 멀티스테이지 빌드 (Node → Python)
-└── docker-compose.yml     # 프로덕션 배포
+├── docker-compose.yml     # 로컬 개발/프로덕션 배포
+├── docker-compose.prod.yml# AWS 프로덕션 (ECR 이미지, 포트 80)
+├── infra/                 # Terraform IaC (VPC, EC2, RDS, ECR, SSM)
+├── .github/workflows/     # GitHub Actions CI/CD (ci.yml, deploy.yml)
+└── scripts/ec2-deploy.sh  # EC2 수동 배포 스크립트
 ```
 
 **국내/해외/FNO 분기 기준**: `stock/utils.py`의 `is_domestic(code)` — 6자리 숫자이면 국내(KRX), `is_fno(code)` — 1/2/3xxx 형식이면 선물옵션, 나머지는 해외(US).

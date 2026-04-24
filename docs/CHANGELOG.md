@@ -1,5 +1,28 @@
 # 변경 이력
 
+## 2026-04-24 — AWS 배포 + CI/CD 구축
+
+### AWS 인프라 신규
+- **Terraform IaC**: `infra/` 디렉토리에 6개 모듈 (network, security, compute, database, ecr, secrets)
+- **EC2 t3.micro** (프리티어): Amazon Linux 2023, Docker + docker-compose, 1GB swap, Elastic IP
+- **RDS PostgreSQL 16**: db.t3.micro (프리티어), 프라이빗 서브넷, 자동 백업
+- **ECR**: Docker 이미지 리포지토리, 최근 5개 유지 + 미태그 1일 삭제
+- **SSM Parameter Store**: 15개 환경변수 SecureString 저장, 배포 시 .env 자동 생성
+- **VPC**: 퍼블릭 서브넷 1개(EC2) + 프라이빗 서브넷 2개(RDS)
+
+### CI/CD 신규
+- **GitHub Actions**: `ci.yml` (모든 push: pytest + frontend build) + `deploy.yml` (main push: ECR → EC2)
+- **자동 배포**: main push → Docker 빌드 → ECR 푸시 → SSH EC2 → SSM .env 생성 → docker-compose up
+- **GitHub Secrets**: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, EC2_HOST, EC2_SSH_KEY
+
+### 코드 변경
+- `requirements.txt`: `psycopg2-binary` 추가 (PostgreSQL 드라이버)
+- `main.py`: `/api/health` 엔드포인트 추가 (ALB/모니터링용)
+- `docker-compose.prod.yml` 신규: ECR 이미지, 포트 80, 로그 로테이션
+- `scripts/ec2-deploy.sh` 신규: EC2 수동 배포 스크립트
+- `.gitignore`: Terraform 상태 파일 제외
+- `.dockerignore`: `infra/`, `.github/` 제외
+
 ## 2026-04-20 — 시세판 카드 개선 (당일 OHLC + 전일대비 + 미니캔들)
 
 ### UI 개선

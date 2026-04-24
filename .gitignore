@@ -34,5 +34,13 @@ frontend/dist/
 # Claude Code plans
 .claude/plans/
 
+# Terraform
+infra/.terraform/
+infra/*.tfstate
+infra/*.tfstate.backup
+infra/.terraform.lock.hcl
+*.tfvars
+!*.tfvars.example
+
 # Excel 참고 문서
 docs/*.xlsx

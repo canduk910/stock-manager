@@ -1,0 +1,19 @@
+# AWS 리전 (서울)
+aws_region = "ap-northeast-2"
+
+# SSH 접속 허용 IP (본인 IP로 변경)
+my_ip = "0.0.0.0/32"
+
+# EC2 키 페어 이름 (AWS 콘솔에서 미리 생성)
+key_pair_name = "stock-manager-key"
+
+# EC2 인스턴스 타입 (프리티어: t3.micro)
+ec2_instance_type = "t3.micro"
+
+# RDS 인스턴스 클래스 (프리티어: db.t3.micro)
+rds_instance_class = "db.t3.micro"
+
+# PostgreSQL 설정
+db_name     = "stockmanager"
+db_username = "stockadmin"
+db_password = "CHANGE_ME_TO_A_STRONG_PASSWORD"

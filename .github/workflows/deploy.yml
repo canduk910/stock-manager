@@ -1,0 +1,111 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+
+env:
+  AWS_REGION: ap-northeast-2
+
+jobs:
+  ci:
+    name: CI
+    uses: ./.github/workflows/ci.yml
+
+  deploy:
+    name: Build & Deploy
+    runs-on: ubuntu-latest
+    needs: ci
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build & Push Docker image
+        env:
+          ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+          ECR_REPO: ${{ steps.ecr-login.outputs.registry }}/stock-manager
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker build -t $ECR_REPO:$IMAGE_TAG -t $ECR_REPO:latest .
+          docker push $ECR_REPO:$IMAGE_TAG
+          docker push $ECR_REPO:latest
+
+      - name: Deploy to EC2
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ec2-user
+          key: ${{ secrets.EC2_SSH_KEY }}
+          envs: AWS_REGION
+          script: |
+            set -euo pipefail
+            REGION="${AWS_REGION}"
+            ECR_REPO="${{ steps.ecr-login.outputs.registry }}/stock-manager"
+            IMAGE_TAG="${{ github.sha }}"
+
+            echo "[1/5] ECR 로그인..."
+            aws ecr get-login-password --region "$REGION" | \
+              docker login --username AWS --password-stdin "$ECR_REPO"
+
+            echo "[2/5] 이미지 pull..."
+            docker pull "$ECR_REPO:$IMAGE_TAG"
+
+            echo "[3/5] SSM에서 환경변수 로드..."
+            aws ssm get-parameters-by-path \
+              --path "/stock-manager/prod/" \
+              --with-decryption \
+              --region "$REGION" \
+              --query "Parameters[*].[Name,Value]" \
+              --output text | while IFS=$'\t' read -r name value; do
+                echo "$(basename "$name")=$value"
+            done > /opt/stock-manager/.env
+
+            echo "[4/5] 컨테이너 시작..."
+            cd /opt/stock-manager
+
+            # docker-compose.prod.yml 생성 (최신 이미지 반영)
+            cat > docker-compose.prod.yml << COMPOSE_EOF
+            services:
+              web:
+                image: ${ECR_REPO}:${IMAGE_TAG}
+                container_name: stock-manager
+                restart: unless-stopped
+                env_file: [.env]
+                ports: ["80:8000"]
+                volumes: [watchlist-data:/home/app/stock-watchlist]
+                healthcheck:
+                  test: ["CMD-SHELL", "curl -f http://localhost:8000/api/health || exit 1"]
+                  interval: 30s
+                  timeout: 5s
+                  retries: 3
+                logging:
+                  driver: json-file
+                  options:
+                    max-size: "10m"
+                    max-file: "3"
+            volumes:
+              watchlist-data:
+            COMPOSE_EOF
+
+            docker compose -f docker-compose.prod.yml up -d --remove-orphans
+
+            echo "[5/5] 정리..."
+            docker image prune -f
+
+            echo "배포 완료. Health check:"
+            sleep 5
+            curl -sf http://localhost/api/health || echo "WARNING: Health check 실패"

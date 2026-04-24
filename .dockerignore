@@ -16,3 +16,7 @@ frontend/dist/
 screener_cache.db
 *.csv
 token.dat
+
+# 인프라/CI (Docker 빌드 컨텍스트에서 제외)
+infra/
+.github/
