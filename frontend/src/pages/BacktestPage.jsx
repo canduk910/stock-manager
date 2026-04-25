@@ -39,6 +39,9 @@ export default function BacktestPage() {
   const [startDate, setStartDate] = useState(oneYearAgo)
   const [endDate, setEndDate] = useState(today)
   const [initialCash, setInitialCash] = useState(10000000)
+  const [commissionRate, setCommissionRate] = useState(0.015)
+  const [taxRate, setTaxRate] = useState(0.23)
+  const [slippage, setSlippage] = useState(0.05)
   const [resultMode, setResultMode] = useState(null)
   const [viewResult, setViewResult] = useState(null) // 히스토리에서 선택한 결과
 
@@ -102,11 +105,13 @@ export default function BacktestPage() {
         }
       }
       Object.assign(fullParams, customParams)
-      runPreset(selectedPreset, symbol, market, startDate, endDate, initialCash, fullParams, presetName)
+      const costParams = { commission_rate: commissionRate / 100, tax_rate: taxRate / 100, slippage: slippage / 100 }
+      runPreset(selectedPreset, symbol, market, startDate, endDate, initialCash, fullParams, presetName, costParams)
     } else if (strategyMode === 'custom' && yamlContent.trim()) {
-      runCustom(yamlContent, symbol, market, startDate, endDate, initialCash)
+      const costParams = { commission_rate: commissionRate / 100, tax_rate: taxRate / 100, slippage: slippage / 100 }
+      runCustom(yamlContent, symbol, market, startDate, endDate, initialCash, costParams)
     }
-  }, [symbol, strategyMode, selectedPreset, yamlContent, market, startDate, endDate, initialCash, customParams, presets, runPreset, runCustom, reset])
+  }, [symbol, strategyMode, selectedPreset, yamlContent, market, startDate, endDate, initialCash, commissionRate, taxRate, slippage, customParams, presets, runPreset, runCustom, reset])
 
   const handleBatch = useCallback(() => {
     if (!symbol) return
@@ -206,7 +211,7 @@ export default function BacktestPage() {
           />
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
           <div>
             <label className="block text-xs text-gray-500 mb-1">시작일</label>
             <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)}
@@ -221,6 +226,21 @@ export default function BacktestPage() {
             <label className="block text-xs text-gray-500 mb-1">초기자금</label>
             <input type="number" value={initialCash} onChange={(e) => setInitialCash(Number(e.target.value))}
               className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm" step={1000000} />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">수수료 (%)</label>
+            <input type="number" value={commissionRate} onChange={(e) => setCommissionRate(Number(e.target.value))}
+              className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm" step={0.001} min={0} />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">세금 (%)</label>
+            <input type="number" value={taxRate} onChange={(e) => setTaxRate(Number(e.target.value))}
+              className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm" step={0.01} min={0} />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">슬리피지 (%)</label>
+            <input type="number" value={slippage} onChange={(e) => setSlippage(Number(e.target.value))}
+              className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm" step={0.01} min={0} />
           </div>
         </div>
 

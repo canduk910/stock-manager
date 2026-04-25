@@ -29,6 +29,9 @@ class PresetBacktestBody(BaseModel):
     initial_cash: int = Field(default=10_000_000, ge=100_000)
     params: Optional[dict] = None
     preset_name: Optional[str] = None
+    commission_rate: Optional[float] = None
+    tax_rate: Optional[float] = None
+    slippage: Optional[float] = None
 
 
 class CustomBacktestBody(BaseModel):
@@ -38,6 +41,9 @@ class CustomBacktestBody(BaseModel):
     start_date: Optional[str] = None
     end_date: Optional[str] = None
     initial_cash: int = Field(default=10_000_000, ge=100_000)
+    commission_rate: Optional[float] = None
+    tax_rate: Optional[float] = None
+    slippage: Optional[float] = None
 
 
 class BatchBacktestBody(BaseModel):
@@ -85,6 +91,9 @@ def run_preset(body: PresetBacktestBody):
         initial_cash=body.initial_cash,
         params=body.params,
         preset_name=body.preset_name,
+        commission_rate=body.commission_rate,
+        tax_rate=body.tax_rate,
+        slippage=body.slippage,
     )
 
 
@@ -98,6 +107,9 @@ def run_custom(body: CustomBacktestBody):
         start_date=body.start_date,
         end_date=body.end_date,
         initial_cash=body.initial_cash,
+        commission_rate=body.commission_rate,
+        tax_rate=body.tax_rate,
+        slippage=body.slippage,
     )
 
 

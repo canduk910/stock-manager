@@ -149,6 +149,9 @@ def run_preset_backtest(
     initial_cash: int = 10_000_000,
     params: Optional[dict] = None,
     preset_name: Optional[str] = None,
+    commission_rate: Optional[float] = None,
+    tax_rate: Optional[float] = None,
+    slippage: Optional[float] = None,
 ) -> dict:
     """프리셋 전략 백테스트 실행.
 
@@ -182,6 +185,12 @@ def run_preset_backtest(
         mcp_params["end_date"] = end_date
     if params:
         mcp_params["param_overrides"] = params
+    if commission_rate is not None:
+        mcp_params["commission_rate"] = commission_rate
+    if tax_rate is not None:
+        mcp_params["tax_rate"] = tax_rate
+    if slippage is not None:
+        mcp_params["slippage"] = slippage
 
     try:
         data = _run_and_wait(client, "run_preset_backtest_tool", mcp_params)
@@ -203,6 +212,9 @@ def run_custom_backtest(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     initial_cash: int = 10_000_000,
+    commission_rate: Optional[float] = None,
+    tax_rate: Optional[float] = None,
+    slippage: Optional[float] = None,
 ) -> dict:
     """커스텀 YAML 전략 백테스트 실행.
 
@@ -239,6 +251,12 @@ def run_custom_backtest(
         params["start_date"] = start_date
     if end_date:
         params["end_date"] = end_date
+    if commission_rate is not None:
+        params["commission_rate"] = commission_rate
+    if tax_rate is not None:
+        params["tax_rate"] = tax_rate
+    if slippage is not None:
+        params["slippage"] = slippage
 
     try:
         data = _run_and_wait(client, "run_backtest_tool", params)

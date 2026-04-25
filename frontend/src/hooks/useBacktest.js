@@ -93,13 +93,13 @@ export function useBacktest() {
   // cleanup on unmount
   useEffect(() => () => stopPolling(), [stopPolling])
 
-  const runPreset = useCallback(async (preset, symbol, market, startDate, endDate, initialCash, params, presetName) => {
+  const runPreset = useCallback(async (preset, symbol, market, startDate, endDate, initialCash, params, presetName, costParams) => {
     setStatus('submitting')
     setResult(null)
     setError(null)
     setProgress(null)
     try {
-      const res = await runPresetBacktest(preset, symbol, market, startDate, endDate, initialCash, params, presetName)
+      const res = await runPresetBacktest(preset, symbol, market, startDate, endDate, initialCash, params, presetName, costParams)
       setJobId(res.job_id)
       startPolling(res.job_id)
     } catch (e) {
@@ -108,13 +108,13 @@ export function useBacktest() {
     }
   }, [startPolling])
 
-  const runCustom = useCallback(async (yaml, symbol, market, startDate, endDate, initialCash) => {
+  const runCustom = useCallback(async (yaml, symbol, market, startDate, endDate, initialCash, costParams) => {
     setStatus('submitting')
     setResult(null)
     setError(null)
     setProgress(null)
     try {
-      const res = await runCustomBacktest(yaml, symbol, market, startDate, endDate, initialCash)
+      const res = await runCustomBacktest(yaml, symbol, market, startDate, endDate, initialCash, costParams)
       setJobId(res.job_id)
       startPolling(res.job_id)
     } catch (e) {

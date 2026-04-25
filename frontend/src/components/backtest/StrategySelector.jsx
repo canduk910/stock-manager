@@ -226,7 +226,22 @@ export default function StrategySelector({ presets, selectedPreset, customParams
                               <p className="text-[11px] text-gray-400 mt-0.5 leading-snug">{kr.desc}</p>
                             )}
                           </div>
-                          <div className="flex items-center gap-1 shrink-0">
+                          {spec?.min != null && spec?.max != null ? (
+                            <div className="flex items-center gap-2 shrink-0 w-40">
+                              <input
+                                type="range"
+                                value={customParams?.[key] ?? spec?.default ?? spec.min}
+                                onChange={(e) => onParamsChange?.({ ...customParams, [key]: Number(e.target.value) })}
+                                min={spec.min}
+                                max={spec.max}
+                                step={spec?.step ?? 1}
+                                className="flex-1 h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-500"
+                              />
+                              <span className="text-xs font-mono font-medium text-gray-700 w-10 text-right tabular-nums">
+                                {customParams?.[key] ?? spec?.default ?? spec.min}
+                              </span>
+                            </div>
+                          ) : (
                             <input
                               type="number"
                               value={customParams?.[key] ?? spec?.default ?? ''}
@@ -234,12 +249,9 @@ export default function StrategySelector({ presets, selectedPreset, customParams
                               min={spec?.min}
                               max={spec?.max}
                               step={spec?.step}
-                              className="w-20 text-right border rounded px-1.5 py-1 text-xs font-mono focus:ring-1 focus:ring-blue-500"
+                              className="w-20 text-right border rounded px-1.5 py-1 text-xs font-mono focus:ring-1 focus:ring-blue-500 shrink-0"
                             />
-                            {spec?.min != null && spec?.max != null && (
-                              <span className="text-[10px] text-gray-400 whitespace-nowrap">({spec.min}~{spec.max})</span>
-                            )}
-                          </div>
+                          )}
                         </div>
                       )
                     })}

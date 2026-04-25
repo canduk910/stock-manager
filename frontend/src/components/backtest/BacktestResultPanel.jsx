@@ -20,6 +20,11 @@ import { fetchAdvisoryOhlcv } from '../../api/advisory'
 
 // ── 유틸 ──────────────────────────────────────────────────────────────────
 
+/** 원화 금액 소수점 절사 (원 단위). 비숫자는 그대로 반환. */
+function floorKRW(v) {
+  return typeof v === 'number' ? Math.floor(v) : v
+}
+
 /** UTC 타임스탬프 → KST 변환. 날짜만 있으면 그대로 반환. */
 function toKST(dateStr) {
   if (!dateStr || dateStr === '-') return '-'
@@ -262,7 +267,7 @@ export default function BacktestResultPanel({ result, symbol, market }) {
                           {t._isBuy ? 'Buy' : 'Sell'}
                         </span>
                       </td>
-                      <td className="px-3 py-1.5 text-right">{t.price?.toLocaleString() || '-'}</td>
+                      <td className="px-3 py-1.5 text-right">{t.price != null ? floorKRW(t.price).toLocaleString() : '-'}</td>
                       <td className="px-3 py-1.5 text-right">{t.quantity || t.qty || '-'}</td>
                       <td className={`px-3 py-1.5 text-right ${
                         profitPct != null ? (profitPct >= 0 ? 'text-red-600' : 'text-blue-600') : ''
@@ -307,8 +312,8 @@ function EquityOnlyChart({ equityCurve, holdingRanges }) {
       <ComposedChart data={equityCurve}>
         <CartesianGrid strokeDasharray="3 3" />
         <XAxis dataKey="date" tick={{ fontSize: 11 }} tickFormatter={(v) => (v || '').slice(5, 10)} />
-        <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => v.toLocaleString()} />
-        <Tooltip labelFormatter={(v) => v} formatter={(v) => [v.toLocaleString(), '순자산']} />
+        <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => floorKRW(v).toLocaleString()} />
+        <Tooltip labelFormatter={(v) => v} formatter={(v) => [floorKRW(v).toLocaleString(), '순자산']} />
         <Line type="monotone" dataKey="equity" stroke="#2563eb" dot={false} strokeWidth={1.5} />
         {holdingRanges.map((r, i) => (
           <ReferenceArea key={i} x1={r.x1} x2={r.x2}
@@ -407,10 +412,10 @@ function CombinedChart({ ohlcvData, equityCurve, holdingRanges }) {
             tickFormatter={(v) => (v || '').slice(5, 10)} />
           {/* 좌축: 주가 */}
           <YAxis yAxisId="price" domain={priceDomain} tick={{ fontSize: 10 }} width={65}
-            tickFormatter={(v) => v.toLocaleString()} />
+            tickFormatter={(v) => floorKRW(v).toLocaleString()} />
           {/* 우축: 순자산 */}
           <YAxis yAxisId="equity" orientation="right" tick={{ fontSize: 10 }} width={75}
-            tickFormatter={(v) => v >= 1e6 ? `${(v / 1e6).toFixed(1)}M` : v.toLocaleString()} />
+            tickFormatter={(v) => v >= 1e6 ? `${Math.floor(v / 1e4).toLocaleString()}만` : floorKRW(v).toLocaleString()} />
           <Tooltip content={({ active, payload }) => {
             if (!active || !payload?.length) return null
             const d = payload[0]?.payload
@@ -418,14 +423,14 @@ function CombinedChart({ ohlcvData, equityCurve, holdingRanges }) {
             return (
               <div className="bg-white border border-gray-200 rounded shadow p-2 text-xs">
                 <p className="text-gray-500 mb-1">{d.time}</p>
-                <p>시: {d.open?.toLocaleString()} 고: {d.high?.toLocaleString()}</p>
-                <p>저: {d.low?.toLocaleString()}{' '}
+                <p>시: {floorKRW(d.open)?.toLocaleString()} 고: {floorKRW(d.high)?.toLocaleString()}</p>
+                <p>저: {floorKRW(d.low)?.toLocaleString()}{' '}
                   <span className={d.close >= d.open ? 'text-red-600' : 'text-blue-600'}>
-                    종: {d.close?.toLocaleString()}
+                    종: {floorKRW(d.close)?.toLocaleString()}
                   </span>
                 </p>
                 {d.equity != null && (
-                  <p className="text-emerald-600 mt-1 border-t pt-1">순자산: {d.equity.toLocaleString()}</p>
+                  <p className="text-emerald-600 mt-1 border-t pt-1">순자산: {floorKRW(d.equity).toLocaleString()}</p>
                 )}
               </div>
             )
