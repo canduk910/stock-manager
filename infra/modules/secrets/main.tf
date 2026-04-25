@@ -26,6 +26,8 @@ locals {
     KIS_BASE_URL          = "https://openapi.koreainvestment.com:9443"
     OPENAI_MODEL          = "gpt-5-mini"
     DATABASE_URL          = "postgresql://${var.db_username}:${var.db_password}@${var.db_endpoint}:5432/${var.db_name}"
+    KIS_MCP_URL           = "CHANGE_ME"
+    KIS_MCP_ENABLED       = "true"
   }
 }
 

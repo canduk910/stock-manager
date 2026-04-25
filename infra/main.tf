@@ -70,6 +70,16 @@ module "compute" {
   ec2_instance_type  = var.ec2_instance_type
 }
 
+# ── Backtester EC2 ───────────────────────────────────────────
+module "backtester" {
+  source           = "./modules/backtester"
+  project_name     = var.project_name
+  subnet_id        = module.network.public_subnet_id
+  backtester_sg_id = module.security.backtester_sg_id
+  key_pair_name    = var.key_pair_name
+  instance_type    = var.backtester_instance_type
+}
+
 # ── SSM Parameter Store ─────────────────────────────────────
 module "secrets" {
   source       = "./modules/secrets"

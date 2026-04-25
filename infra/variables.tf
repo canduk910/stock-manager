@@ -26,6 +26,12 @@ variable "ec2_instance_type" {
   default     = "t3.micro"
 }
 
+variable "backtester_instance_type" {
+  description = "Backtester EC2 인스턴스 타입"
+  type        = string
+  default     = "t3.micro"
+}
+
 variable "rds_instance_class" {
   description = "RDS 인스턴스 클래스"
   type        = string
