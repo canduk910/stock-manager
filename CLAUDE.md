@@ -214,15 +214,15 @@ infra/              Terraform IaC (VPC, EC2×2, RDS, ECR, SSM)
 scripts/            ec2-deploy.sh (수동 배포 스크립트)
 ```
 
-- **컴퓨팅 (stock-manager)**: EC2 t3.micro (프리티어, docker-compose). 1GB swap 자동 설정
+- **컴퓨팅 (stock-manager)**: EC2 t3.small (2GB RAM, docker-compose). 2GB swap 자동 설정
 - **컴퓨팅 (backtester)**: EC2 t3.micro (Lean 엔진 + MCP 서버). 2GB swap + 50GB EBS. `infra/modules/backtester/`
-  - QuantConnect Lean Docker (27.5GB) + FastAPI(8002) + Next.js(3001) + MCP(3846)
-  - `open-trading-api/backtester` 레포 clone, 수동 배포 (`./start.sh`)
+  - QuantConnect Lean Docker (27.5GB) + MCP(3846, `0.0.0.0` 바인딩)
+  - `open-trading-api/backtester` 레포 clone → `/opt/backtester/open-trading-api/`
   - stock-manager → `KIS_MCP_URL=http://<backtester-private-ip>:3846/mcp` 연결
 - **DB**: RDS PostgreSQL 16 (db.t3.micro, 프리티어). `DATABASE_URL` 환경변수로 전환
 - **이미지**: ECR `stock-manager` 리포. GitHub Actions에서 빌드+푸시
-- **시크릿**: SSM Parameter Store `/stock-manager/prod/*` (SecureString)
-- **CI/CD**: `main` push → pytest + frontend build → Docker 빌드 → ECR → EC2 자동 배포
+- **시크릿**: SSM Parameter Store `/stock-manager/prod/*` (SecureString). `BACKTESTER_HOST` GitHub Secret
+- **CI/CD**: `main` push → pytest + frontend build → Docker 빌드 → ECR → **백테스터 MCP 확인** → EC2 자동 배포 (command_timeout: 5m)
 - **캐시 DB**: `cache.db`, `screener_cache.db`는 EC2 로컬 Docker 볼륨에 SQLite 유지
 
 ---

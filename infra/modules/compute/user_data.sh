@@ -15,8 +15,8 @@ curl -SL "https://github.com/docker/compose/releases/latest/download/docker-comp
   -o "$DOCKER_CLI_PLUGINS/docker-compose"
 chmod +x "$DOCKER_CLI_PLUGINS/docker-compose"
 
-# ── 1GB Swap 설정 (t3.micro 1GB RAM 보완) ───────────────────
-fallocate -l 1G /swapfile
+# ── 2GB Swap 설정 (Docker pull/build 메모리 보완) ────────────
+fallocate -l 2G /swapfile
 chmod 600 /swapfile
 mkswap /swapfile
 swapon /swapfile

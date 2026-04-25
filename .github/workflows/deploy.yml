@@ -44,6 +44,26 @@ jobs:
           docker push $ECR_REPO:$IMAGE_TAG
           docker push $ECR_REPO:latest
 
+      - name: Ensure Backtester MCP
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.BACKTESTER_HOST }}
+          username: ec2-user
+          key: ${{ secrets.EC2_SSH_KEY }}
+          command_timeout: 30s
+          script: |
+            # MCP 서버가 이미 실행 중이면 스킵
+            if curl -sf http://localhost:3846/health > /dev/null 2>&1; then
+              echo "MCP 서버 정상 실행 ���"
+            else
+              echo "MCP 서버 기동..."
+              cd /opt/backtester/open-trading-api/backtester
+              export MCP_HOST=0.0.0.0 MCP_PORT=3846
+              nohup /home/ec2-user/.local/bin/uv run python -m kis_mcp.server > /tmp/mcp.log 2>&1 &
+              sleep 3
+              curl -sf http://localhost:3846/health && echo "MCP 기동 완료" || echo "WARNING: MCP 기동 실패"
+            fi
+
       - name: Deploy to EC2
         uses: appleboy/ssh-action@v1
         with:
@@ -51,6 +71,7 @@ jobs:
           username: ec2-user
           key: ${{ secrets.EC2_SSH_KEY }}
           envs: AWS_REGION
+          command_timeout: 5m
           script: |
             set -euo pipefail
             REGION="${AWS_REGION}"

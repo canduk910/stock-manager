@@ -126,7 +126,7 @@ docker-compose up --build
 
 ### 방법 5 — AWS 배포 (Terraform + GitHub Actions)
 
-EC2 t3.micro + RDS PostgreSQL + ECR + SSM 기반 프로덕션 배포:
+EC2 t3.small + RDS PostgreSQL + ECR + SSM 기반 프로덕션 배포:
 
 ```bash
 # 1. 인프라 생성 (Terraform)
@@ -134,13 +134,13 @@ cd infra
 cp terraform.tfvars.example terraform.tfvars  # 값 수정
 terraform init && terraform apply
 
-# 2. GitHub Secrets 설정 (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, EC2_HOST, EC2_SSH_KEY)
+# 2. GitHub Secrets 설정 (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, EC2_HOST, EC2_SSH_KEY, BACKTESTER_HOST)
 
 # 3. main에 push → CI/CD 자동 배포
 git push origin main
 ```
 
-`main` 브랜치에 push하면 GitHub Actions가 자동으로: pytest → frontend build → Docker 빌드 → ECR 푸시 → EC2 배포를 수행합니다.
+`main` 브랜치에 push하면 GitHub Actions가 자동으로: pytest → frontend build → Docker 빌드 → ECR 푸시 → 백테스터 MCP 확인 → EC2 배포를 수행합니다.
 
 상세: `infra/` (Terraform), `.github/workflows/` (CI/CD), `scripts/ec2-deploy.sh` (수동 배포)
 

@@ -1,5 +1,19 @@
 # 변경 이력
 
+## 2026-04-25 — 인프라 개선 + CI/CD 백테스터 연동
+
+### 인프라 개선
+- EC2 인스턴스 타입 `t3.micro`(1GB) → `t3.small`(2GB) 업그레이드 (Docker pull 시 OOM hang 방지)
+- Swap 1GB → 2GB 증설 (`user_data.sh`)
+- SSM `KIS_MCP_ENABLED` `false` → `true` 활성화
+
+### CI/CD 개선
+- `deploy.yml`: **Ensure Backtester MCP** 단계 추가 — 배포 전 백테스터 MCP 서버 생존 확인 + 자동 기동
+- `deploy.yml`: Deploy to EC2에 `command_timeout: 5m` 추가 (무한 hang 방지)
+- GitHub Secret `BACKTESTER_HOST` 추가
+
+---
+
 ## 2026-04-25 — 전략빌더(Strategy Builder) 신규
 
 ### 전략빌더 백엔드 신규
