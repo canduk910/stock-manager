@@ -44,6 +44,8 @@ class CustomBacktestBody(BaseModel):
     commission_rate: Optional[float] = None
     tax_rate: Optional[float] = None
     slippage: Optional[float] = None
+    strategy_display_name: Optional[str] = None
+    builder_state: Optional[dict] = None
 
 
 class BatchBacktestBody(BaseModel):
@@ -110,6 +112,8 @@ def run_custom(body: CustomBacktestBody):
         commission_rate=body.commission_rate,
         tax_rate=body.tax_rate,
         slippage=body.slippage,
+        strategy_display_name=body.strategy_display_name,
+        builder_state=body.builder_state,
     )
 
 
@@ -155,4 +159,93 @@ def delete_history(job_id: str):
     ok = strategy_store.delete_job(job_id)
     if not ok:
         raise NotFoundError(f"백테스트 작업을 찾을 수 없습니다: {job_id}")
+    return {"deleted": True}
+
+
+# ── 전략빌더 엔드포인트 ───────────────────────────────────────────────────────
+
+
+class BuilderConvertBody(BaseModel):
+    builder_state: dict
+    run_validate: bool = True
+
+
+class StrategySaveBody(BaseModel):
+    name: str
+    description: Optional[str] = None
+    yaml_content: Optional[str] = None
+    builder_state: Optional[dict] = None
+
+
+class StrategyValidateBody(BaseModel):
+    yaml_content: str
+
+
+@router.post("/strategy/convert")
+def convert_strategy(body: BuilderConvertBody):
+    """BuilderState -> YAML 변환."""
+    from services.strategy_builder_service import convert_builder_to_yaml
+
+    yaml_content = convert_builder_to_yaml(body.builder_state)
+
+    result = {"yaml_content": yaml_content, "valid": None, "errors": []}
+
+    if body.run_validate and KIS_MCP_ENABLED:
+        try:
+            client = get_mcp_client()
+            client.call_tool("validate_yaml_tool", {"yaml_content": yaml_content})
+            result["valid"] = True
+        except Exception as e:
+            result["valid"] = False
+            result["errors"] = [str(e)]
+
+    return result
+
+
+@router.post("/strategy/validate")
+def validate_yaml(body: StrategyValidateBody):
+    """YAML MCP 검증."""
+    if not KIS_MCP_ENABLED:
+        return {"valid": None, "reason": "MCP 비활성화"}
+    client = get_mcp_client()
+    try:
+        client.call_tool("validate_yaml_tool", {"yaml_content": body.yaml_content})
+        return {"valid": True}
+    except Exception as e:
+        return {"valid": False, "errors": [str(e)]}
+
+
+@router.get("/strategies")
+def list_strategies(strategy_type: Optional[str] = None):
+    """저장된 전략 목록."""
+    return strategy_store.list_strategies(strategy_type)
+
+
+@router.post("/strategies")
+def save_strategy(body: StrategySaveBody):
+    """전략 저장."""
+    return strategy_store.save_strategy(
+        name=body.name,
+        strategy_type="builder",
+        description=body.description,
+        yaml_content=body.yaml_content,
+        builder_state=body.builder_state,
+    )
+
+
+@router.get("/strategies/{name}")
+def get_strategy(name: str):
+    """전략 조회."""
+    s = strategy_store.get_strategy(name)
+    if not s:
+        raise NotFoundError(f"전략을 찾을 수 없습니다: {name}")
+    return s
+
+
+@router.delete("/strategies/{name}")
+def delete_strategy(name: str):
+    """전략 삭제."""
+    ok = strategy_store.delete_strategy(name)
+    if not ok:
+        raise NotFoundError(f"전략을 찾을 수 없습니다: {name}")
     return {"deleted": True}

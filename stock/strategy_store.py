@@ -74,3 +74,38 @@ def get_job_history(
     """작업 이력 조회."""
     with get_session() as db:
         return BacktestRepository(db).list_jobs(symbol, market, limit)
+
+
+# ── Strategy CRUD ─────────────────────────────────────────────────────────
+
+
+def save_strategy(
+    name: str,
+    strategy_type: str,
+    description: Optional[str] = None,
+    yaml_content: Optional[str] = None,
+    builder_state: Optional[dict] = None,
+) -> dict:
+    """전략 저장."""
+    with get_session() as db:
+        return BacktestRepository(db).save_strategy(
+            name, strategy_type, description, yaml_content, builder_state,
+        )
+
+
+def list_strategies(strategy_type: Optional[str] = None) -> list[dict]:
+    """전략 목록 조회."""
+    with get_session() as db:
+        return BacktestRepository(db).list_strategies(strategy_type)
+
+
+def get_strategy(name: str) -> Optional[dict]:
+    """전략 조회."""
+    with get_session() as db:
+        return BacktestRepository(db).get_strategy(name)
+
+
+def delete_strategy(name: str) -> bool:
+    """전략 삭제."""
+    with get_session() as db:
+        return BacktestRepository(db).delete_strategy(name)

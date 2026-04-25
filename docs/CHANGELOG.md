@@ -1,5 +1,40 @@
 # 변경 이력
 
+## 2026-04-25 — 전략빌더(Strategy Builder) 신규
+
+### 전략빌더 백엔드 신규
+- `services/strategy_builder_service.py`: BuilderState JSON → .kis.yaml 변환(`convert_builder_to_yaml`) + 검증(`validate_builder_state`) + YAML 요약 추출(`extract_strategy_summary`)
+- `routers/backtest.py`: 6개 엔드포인트 추가 (8→15개) — `POST /strategy/convert`, `POST /strategy/validate`, `GET/POST /strategies`, `GET/DELETE /strategies/{name}`
+- `db/models/backtest.py`: Strategy 모델에 `builder_state_json` 컬럼 추가
+- `db/repositories/backtest_repo.py`: `get_strategy()`, `delete_strategy()` 추가, `save_strategy()`에 `builder_state_json` 파라미터
+- `stock/strategy_store.py`: Strategy CRUD 래퍼 4개 추가 (`save_strategy`/`list_strategies`/`get_strategy`/`delete_strategy`)
+- `services/backtest_service.py`: `run_custom_backtest`에 `strategy_display_name`, `builder_state` 파라미터 추가, `extract_strategy_summary` 연동
+- `stock/symbol_map.py`: `_build_map()`에 DART corpCode fallback 추가 (pykrx 실패 시), 빈 결과 캐시 방지
+- Alembic 마이그레이션: `f3a8b1c7d9e2_add_builder_state_json_to_strategies.py`
+- `requirements.txt`: `pyyaml` 추가
+
+### 전략빌더 프론트엔드 신규 (14개 파일)
+- `frontend/src/components/strategy-builder/` 디렉토리 전체:
+  - `strategyBuilderConstants.js` — 83개 기술지표 + 66종 캔들패턴 카탈로그, 연산자, 프리셋 6개
+  - `useStrategyBuilder.js` — 빌더 상태 관리 훅
+  - `StrategyBuilder.jsx` — 5단계 스테퍼 메인 컨테이너
+  - `StepMetadata.jsx`/`StepIndicators.jsx`/`StepConditions.jsx`/`StepRisk.jsx`/`StepPreview.jsx` — 각 단계 UI
+  - `IndicatorCard.jsx`/`IndicatorPickerModal.jsx` — 지표 카드 + 모달
+  - `ConditionCard.jsx`/`ConditionGroupCard.jsx`/`OperandSelector.jsx` — 조건 빌더
+  - `StrategyListPanel.jsx` — 저장된 전략 목록 + 프리셋
+- `frontend/src/api/strategyBuilder.js` — 변환/검증/저장/로드/삭제 API 6개
+
+### 프론트엔드 수정
+- `StrategySelector.jsx`: "전략 빌더" 세 번째 탭 추가 (프리셋/커스텀 YAML/빌더)
+- `BacktestPage.jsx`: 빌더 YAML → `runCustom` 연결, 저장 전략 직접 실행
+- `BacktestHistoryTable.jsx`: builder/custom 전략은 지표+파라미터 형식으로 표시 (YAML 대신)
+- `api/backtest.js`: `runCustomBacktest`에 `strategyDisplayName`, `builderState` 추가
+- `hooks/useBacktest.js`: `runCustom`에 추가 파라미터 전달
+
+### 테스트
+- `tests/unit/test_strategy_builder.py` — 114개 단위 테스트 (변환/검증/연산자/리스크/프리셋/null방어/요약추출)
+- `tests/api/test_backtest_api.py` — 전략빌더 API 10개 테스트 추가
+
 ## 2026-04-25 — Lean 백테스터 EC2 + 백테스트 UI 개선
 
 ### Lean 백테스터 EC2 신규

@@ -37,7 +37,7 @@ export function runPresetBacktest(preset, symbol, market = 'KR', startDate, endD
 }
 
 /** 커스텀 YAML 백테스트 실행 → {job_id, status} */
-export function runCustomBacktest(yamlContent, symbol, market = 'KR', startDate, endDate, initialCash = 10000000, costParams) {
+export function runCustomBacktest(yamlContent, symbol, market = 'KR', startDate, endDate, initialCash = 10000000, costParams, strategyDisplayName, builderState) {
   const body = {
     yaml_content: yamlContent,
     symbol, market,
@@ -46,6 +46,8 @@ export function runCustomBacktest(yamlContent, symbol, market = 'KR', startDate,
     initial_cash: initialCash,
   }
   if (costParams) Object.assign(body, costParams)
+  if (strategyDisplayName) body.strategy_display_name = strategyDisplayName
+  if (builderState) body.builder_state = builderState
   return apiFetch('/api/backtest/run/custom', {
     method: 'POST',
     body: JSON.stringify(body),

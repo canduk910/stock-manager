@@ -129,12 +129,14 @@ class BacktestRepository:
         strategy_type: str,
         description: Optional[str] = None,
         yaml_content: Optional[str] = None,
+        builder_state_json: Optional[dict] = None,
     ) -> dict:
         existing = self.db.query(Strategy).filter_by(name=name).first()
         if existing:
             existing.description = description
             existing.strategy_type = strategy_type
             existing.yaml_content = yaml_content
+            existing.builder_state_json = builder_state_json
             self.db.flush()
             return existing.to_dict()
         s = Strategy(
@@ -142,11 +144,23 @@ class BacktestRepository:
             description=description,
             strategy_type=strategy_type,
             yaml_content=yaml_content,
+            builder_state_json=builder_state_json,
             created_at=now_kst_iso(),
         )
         self.db.add(s)
         self.db.flush()
         return s.to_dict()
+
+    def get_strategy(self, name: str) -> Optional[dict]:
+        s = self.db.query(Strategy).filter_by(name=name).first()
+        return s.to_dict() if s else None
+
+    def delete_strategy(self, name: str) -> bool:
+        s = self.db.query(Strategy).filter_by(name=name).first()
+        if not s:
+            return False
+        self.db.delete(s)
+        return True
 
     def list_strategies(self, strategy_type: Optional[str] = None) -> list[dict]:
         q = self.db.query(Strategy)

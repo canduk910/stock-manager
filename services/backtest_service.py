@@ -215,6 +215,8 @@ def run_custom_backtest(
     commission_rate: Optional[float] = None,
     tax_rate: Optional[float] = None,
     slippage: Optional[float] = None,
+    strategy_display_name: Optional[str] = None,
+    builder_state: Optional[dict] = None,
 ) -> dict:
     """커스텀 YAML 전략 백테스트 실행.
 
@@ -222,7 +224,12 @@ def run_custom_backtest(
     1) validate_yaml_tool로 YAML 검증
     2) run_backtest_tool → 즉시 MCP job_id 반환
     3) get_backtest_result_tool(wait=true) → 완료 대기
+
+    builder_state가 있으면 전략빌더에서 생성된 YAML로 판단하여
+    strategy_name="builder", params에 지표/조건 요약을 저장한다.
     """
+    from services.strategy_builder_service import extract_strategy_summary
+
     client = get_mcp_client()
 
     # 1단계: YAML 검증
@@ -232,14 +239,23 @@ def run_custom_backtest(
     except ExternalAPIError as e:
         raise ExternalAPIError(f"YAML 검증 실패: {e}")
 
+    # 전략 요약 추출
+    summary = extract_strategy_summary(yaml_content)
+    is_builder = builder_state is not None
+    job_strategy_name = "builder" if is_builder else "custom"
+    job_display_name = strategy_display_name or summary.get("name") or None
+    job_params = summary if summary else None
+
     job_id = str(uuid.uuid4())
     strategy_store.save_backtest_job(
         job_id=job_id,
-        strategy_name="custom",
+        strategy_name=job_strategy_name,
         symbol=symbol,
         market=market,
-        strategy_type="custom",
+        strategy_type=job_strategy_name,
         submitted_at=now_kst_iso(),
+        params=job_params,
+        strategy_display_name=job_display_name,
     )
 
     params = {

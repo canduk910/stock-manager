@@ -44,6 +44,7 @@ export default function BacktestPage() {
   const [slippage, setSlippage] = useState(0.05)
   const [resultMode, setResultMode] = useState(null)
   const [viewResult, setViewResult] = useState(null) // 히스토리에서 선택한 결과
+  const [builderYamlState, setBuilderYamlState] = useState(null) // 빌더에서 YAML 생성 시 빌더 상태
 
   // 경과 시간 카운터
   const [elapsed, setElapsed] = useState(0)
@@ -109,9 +110,9 @@ export default function BacktestPage() {
       runPreset(selectedPreset, symbol, market, startDate, endDate, initialCash, fullParams, presetName, costParams)
     } else if (strategyMode === 'custom' && yamlContent.trim()) {
       const costParams = { commission_rate: commissionRate / 100, tax_rate: taxRate / 100, slippage: slippage / 100 }
-      runCustom(yamlContent, symbol, market, startDate, endDate, initialCash, costParams)
+      runCustom(yamlContent, symbol, market, startDate, endDate, initialCash, costParams, undefined, builderYamlState)
     }
-  }, [symbol, strategyMode, selectedPreset, yamlContent, market, startDate, endDate, initialCash, commissionRate, taxRate, slippage, customParams, presets, runPreset, runCustom, reset])
+  }, [symbol, strategyMode, selectedPreset, yamlContent, market, startDate, endDate, initialCash, commissionRate, taxRate, slippage, customParams, presets, runPreset, runCustom, reset, builderYamlState])
 
   const handleBatch = useCallback(() => {
     if (!symbol) return
@@ -147,7 +148,8 @@ export default function BacktestPage() {
 
   const canRun = symbol && (
     (strategyMode === 'preset' && selectedPreset) ||
-    (strategyMode === 'custom' && yamlContent.trim())
+    (strategyMode === 'custom' && yamlContent.trim()) ||
+    (strategyMode === 'builder')
   ) && !isRunning
 
   // MCP 비활성화 시 안내
@@ -205,9 +207,21 @@ export default function BacktestPage() {
             mode={strategyMode}
             onModeChange={setStrategyMode}
             onPresetChange={handlePresetChange}
-            onYamlChange={setYamlContent}
+            onYamlChange={(yaml) => { setYamlContent(yaml); setBuilderYamlState(null) }}
             customParams={customParams}
             onParamsChange={setCustomParams}
+            onBuilderYaml={(yaml, builderState) => {
+              setYamlContent(yaml)
+              setBuilderYamlState(builderState || null)
+              setStrategyMode('custom')
+            }}
+            onRunSavedStrategy={(strategy) => {
+              if (strategy.yaml_content) {
+                setYamlContent(strategy.yaml_content)
+                setBuilderYamlState(strategy.builder_state_json || null)
+                setStrategyMode('custom')
+              }
+            }}
           />
         </div>
 

@@ -25,7 +25,7 @@ CLI와 API 라우터 양쪽에서 공용으로 사용한다. 비즈니스 데이
 | `macro_fetcher.py` | 매크로 분석 데이터 수집: yfinance 지수/VIX/버핏/공포탐욕, feedparser RSS(**다중 피드 + 중복 제거 + 최신순 정렬**: 한국=비즈니스토픽+시장키워드, 해외=NYT+Google News US, 투자자=최신순), 캐시 키 `macro:*` |
 | `report_store.py` | 보고서 CRUD (추천 이력/체제 이력/일일 보고서). `db/repositories/report_repo.py` 위임 래퍼. 다른 6개 store와 동일 패턴. |
 | `macro_store.py` | 매크로 GPT 결과 일일 캐시. `db/repositories/macro_repo.py` 위임 래퍼. `get_today()`/`save_today()`/`cleanup_old()`. |
-| `strategy_store.py` | 백테스트/전략 CRUD. `db/repositories/backtest_repo.py` 위임 래퍼. `save_backtest_job()`/`save_backtest_result()`/`update_job_status()`/`delete_job()`/`get_latest_backtest_metrics()`/`get_job_history()`. |
+| `strategy_store.py` | 백테스트/전략 CRUD. `db/repositories/backtest_repo.py` 위임 래퍼. Job: `save_backtest_job()`/`save_backtest_result()`/`update_job_status()`/`delete_job()`/`get_latest_backtest_metrics()`/`get_job_history()`. Strategy: `save_strategy()`/`list_strategies()`/`get_strategy()`/`delete_strategy()` (전략빌더 저장/로드/삭제, builder_state_json 포함). |
 | `tax_store.py` | 양도세 매매내역/계산/FIFO lot CRUD. `db/repositories/tax_repo.py` 위임 래퍼. `insert_transaction()`/`list_transactions()`/`insert_calculation()`/`list_calculations()`/`insert_fifo_lot()`/`list_fifo_lots()`/`delete_fifo_lots_by_year()`. |
 | `cache.py` | SQLite TTL 캐시. `cache.db`. NaN/Inf → None 자동 sanitize. |
 | `display.py` | Rich 테이블 출력 + CSV 내보내기. |
@@ -74,6 +74,7 @@ CLI와 API 라우터 양쪽에서 공용으로 사용한다. 비즈니스 데이
 적용 파일: `market.py`(`fetch_market_metrics`), `yf_client.py`(`fetch_detail_yf`)
 
 ### symbol_map.py
+- `_build_map()`: pykrx 실패 시 DART corpCode.xml fallback 추가 (빈 결과 캐시 방지).
 - `_find_latest_trading_day()`: 최근 10거래일 역순 탐색.
 - `code_to_name()`: 맵 빌드 실패 시 `get_market_ticker_name()` 직접 호출 fallback.
 - 종목명이 코드로 저장되는 현상 → 이 fallback 경로 확인할 것.

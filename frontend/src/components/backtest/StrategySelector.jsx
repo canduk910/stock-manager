@@ -1,7 +1,8 @@
 /**
- * 전략 선택기 — 프리셋 드롭다운(상세 설명 카드) / 커스텀 YAML 텍스트 에디터.
+ * 전략 선택기 — 프리셋 드롭다운(상세 설명 카드) / 커스텀 YAML / 전략 빌더.
  */
 import { useMemo } from 'react'
+import StrategyBuilder from '../strategy-builder/StrategyBuilder'
 
 /** 파라미터 한글 매핑: { label: 한글명, desc: 비유적 설명 } */
 export const PARAM_KR = {
@@ -129,7 +130,7 @@ export const CATEGORY_COLORS = {
   composite: 'bg-indigo-100 text-indigo-700',
 }
 
-export default function StrategySelector({ presets, selectedPreset, customParams, onPresetChange, onParamsChange, mode, onModeChange, yamlContent, onYamlChange }) {
+export default function StrategySelector({ presets, selectedPreset, customParams, onPresetChange, onParamsChange, mode, onModeChange, yamlContent, onYamlChange, onBuilderYaml, onRunSavedStrategy }) {
   const presetDetail = useMemo(() => {
     if (!selectedPreset || !presets?.length) return null
     return presets.find((p) => {
@@ -162,9 +163,27 @@ export default function StrategySelector({ presets, selectedPreset, customParams
         >
           커스텀 YAML
         </button>
+        <button
+          onClick={() => onModeChange('builder')}
+          className={`px-4 py-1.5 text-sm rounded font-medium transition-colors ${
+            mode === 'builder'
+              ? 'bg-blue-600 text-white'
+              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+          }`}
+        >
+          전략 빌더
+        </button>
       </div>
 
-      {mode === 'preset' ? (
+      {mode === 'builder' ? (
+        <StrategyBuilder
+          onYamlGenerated={(yaml, builderState) => {
+            onYamlChange(yaml)
+            onBuilderYaml?.(yaml, builderState)
+          }}
+          onRunSavedStrategy={onRunSavedStrategy}
+        />
+      ) : mode === 'preset' ? (
         <div>
           <select
             value={selectedPreset}

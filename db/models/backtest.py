@@ -63,6 +63,7 @@ class Strategy(Base):
     description = Column(Text, nullable=True)
     strategy_type = Column(String, nullable=False)  # preset/custom
     yaml_content = Column(Text, nullable=True)
+    builder_state_json = Column(JSON, nullable=True)
     created_at = Column(String, nullable=False)
 
     def to_dict(self) -> dict:
@@ -72,5 +73,6 @@ class Strategy(Base):
             "description": self.description,
             "strategy_type": self.strategy_type,
             "yaml_content": self.yaml_content,
+            "builder_state_json": self.builder_state_json,
             "created_at": self.created_at,
         }

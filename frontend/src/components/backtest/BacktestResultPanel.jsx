@@ -201,17 +201,56 @@ export default function BacktestResultPanel({ result, symbol, market }) {
       {resultParams && Object.keys(resultParams).length > 0 && (
         <div className="bg-gray-50 rounded-lg border p-3">
           <p className="text-xs font-medium text-gray-500 mb-1">사용된 파라미터</p>
-          <div className="flex flex-wrap gap-2">
-            {Object.entries(resultParams).map(([k, v]) => {
-              const kr = PARAM_KR[k]
-              return (
-                <span key={k} className="text-xs bg-white border rounded px-2 py-0.5" title={kr?.desc}>
-                  <span className="text-gray-500">{kr?.label || k}</span>{' '}
-                  <span className="font-mono">{v}</span>
+          {Array.isArray(resultParams.indicators) ? (
+            /* 빌더/커스텀 전략: 지표+조건+리스크 요약 */
+            <div className="flex flex-wrap gap-2">
+              {resultParams.indicators.map((ind, i) => {
+                const id = (ind.id || '').toUpperCase()
+                const p = ind.params || {}
+                const paramStr = Object.values(p).join(',')
+                return (
+                  <span key={i} className="text-xs bg-white border rounded px-2 py-0.5">
+                    <span className="text-gray-500">지표</span>{' '}
+                    <span className="font-mono">{paramStr ? `${id}(${paramStr})` : id}</span>
+                  </span>
+                )
+              })}
+              {resultParams.entry_count != null && (
+                <span className="text-xs bg-white border rounded px-2 py-0.5">
+                  <span className="text-gray-500">진입</span> <span className="font-mono">{resultParams.entry_count}개</span>
                 </span>
-              )
-            })}
-          </div>
+              )}
+              {resultParams.exit_count != null && (
+                <span className="text-xs bg-white border rounded px-2 py-0.5">
+                  <span className="text-gray-500">청산</span> <span className="font-mono">{resultParams.exit_count}개</span>
+                </span>
+              )}
+              {resultParams.risk?.stop_loss != null && (
+                <span className="text-xs bg-white border rounded px-2 py-0.5">
+                  <span className="text-gray-500">손절</span> <span className="font-mono">{resultParams.risk.stop_loss}%</span>
+                </span>
+              )}
+              {resultParams.risk?.take_profit != null && (
+                <span className="text-xs bg-white border rounded px-2 py-0.5">
+                  <span className="text-gray-500">익절</span> <span className="font-mono">{resultParams.risk.take_profit}%</span>
+                </span>
+              )}
+            </div>
+          ) : (
+            /* 프리셋 전략: 기존 PARAM_KR 매핑 */
+            <div className="flex flex-wrap gap-2">
+              {Object.entries(resultParams).map(([k, v]) => {
+                const kr = PARAM_KR[k]
+                const display = typeof v === 'object' ? JSON.stringify(v) : v
+                return (
+                  <span key={k} className="text-xs bg-white border rounded px-2 py-0.5" title={kr?.desc}>
+                    <span className="text-gray-500">{kr?.label || k}</span>{' '}
+                    <span className="font-mono">{display}</span>
+                  </span>
+                )
+              })}
+            </div>
+          )}
         </div>
       )}
 

@@ -24,6 +24,7 @@ const STRATEGY_KR = {
   strong_close: '강한 종가 (IBS)',
   trend_filter_signal: '추세 필터 + 시그널',
   custom: '커스텀',
+  builder: '빌더 전략',
 }
 
 const STRATEGY_CATEGORY = {
@@ -37,6 +38,32 @@ const STRATEGY_CATEGORY = {
   week52_high: 'trend',
   strong_close: 'momentum',
   trend_filter_signal: 'trend',
+  builder: 'composite',
+  custom: 'composite',
+}
+
+/** 빌더/커스텀 전략 요약 정보 포맷 (indicators 배열이 있는 경우) */
+function formatBuilderSummary(params) {
+  if (!params || !Array.isArray(params.indicators)) return null
+  const indicators = params.indicators
+    .map((ind) => {
+      const id = (ind.id || '').toUpperCase()
+      const p = ind.params || {}
+      const paramStr = Object.values(p).join(',')
+      return paramStr ? `${id}(${paramStr})` : id
+    })
+    .filter(Boolean)
+    .join(', ')
+  const conditions = []
+  if (params.entry_count != null) conditions.push(`진입 ${params.entry_count}개`)
+  if (params.exit_count != null) conditions.push(`청산 ${params.exit_count}개`)
+  const riskParts = []
+  if (params.risk) {
+    if (params.risk.stop_loss != null) riskParts.push(`손절 ${params.risk.stop_loss}%`)
+    if (params.risk.take_profit != null) riskParts.push(`익절 ${params.risk.take_profit}%`)
+    if (params.risk.trailing_stop != null) riskParts.push(`추적 ${params.risk.trailing_stop}%`)
+  }
+  return { indicators, conditions: conditions.join(' / '), risk: riskParts.join(' | ') }
 }
 
 function formatDate(iso) {
@@ -125,27 +152,60 @@ export default function BacktestHistoryTable({ history, onSelect, onDelete, load
                 </td>
                 <td className="py-2 px-2">
                   <div>{strategyLabel}</div>
-                  {hasParams && (
-                    <button
-                      onClick={(e) => toggleParams(e, job.job_id)}
-                      className="text-[10px] text-gray-400 hover:text-blue-500 mt-0.5"
-                    >
-                      {isExpanded ? '파라미터 ▲' : '파라미터 ▼'}
-                    </button>
-                  )}
-                  {isExpanded && hasParams && (
-                    <div className="mt-1 space-y-0.5">
-                      {Object.entries(params).map(([k, v]) => {
-                        const kr = PARAM_KR[k]
-                        return (
-                          <div key={k} className="text-[10px] text-gray-500">
-                            <span className="font-medium">{kr?.label || k}</span>: <span className="font-mono">{v}</span>
-                            {kr?.desc && <span className="text-gray-400 ml-1">— {kr.desc}</span>}
+                  {hasParams && (() => {
+                    const builderSummary = formatBuilderSummary(params)
+                    return builderSummary ? (
+                      <>
+                        <button
+                          onClick={(e) => toggleParams(e, job.job_id)}
+                          className="text-[10px] text-gray-400 hover:text-blue-500 mt-0.5"
+                        >
+                          {isExpanded ? '전략 상세 ▲' : '전략 상세 ▼'}
+                        </button>
+                        {isExpanded && (
+                          <div className="mt-1 space-y-0.5">
+                            {builderSummary.indicators && (
+                              <div className="text-[10px] text-gray-500">
+                                <span className="font-medium">지표</span>: <span className="font-mono">{builderSummary.indicators}</span>
+                              </div>
+                            )}
+                            {builderSummary.conditions && (
+                              <div className="text-[10px] text-gray-500">
+                                <span className="font-medium">조건</span>: {builderSummary.conditions}
+                              </div>
+                            )}
+                            {builderSummary.risk && (
+                              <div className="text-[10px] text-gray-500">
+                                <span className="font-medium">리스크</span>: {builderSummary.risk}
+                              </div>
+                            )}
                           </div>
-                        )
-                      })}
-                    </div>
-                  )}
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        <button
+                          onClick={(e) => toggleParams(e, job.job_id)}
+                          className="text-[10px] text-gray-400 hover:text-blue-500 mt-0.5"
+                        >
+                          {isExpanded ? '파라미터 ▲' : '파라미터 ▼'}
+                        </button>
+                        {isExpanded && (
+                          <div className="mt-1 space-y-0.5">
+                            {Object.entries(params).map(([k, v]) => {
+                              const kr = PARAM_KR[k]
+                              return (
+                                <div key={k} className="text-[10px] text-gray-500">
+                                  <span className="font-medium">{kr?.label || k}</span>: <span className="font-mono">{typeof v === 'object' ? JSON.stringify(v) : v}</span>
+                                  {kr?.desc && <span className="text-gray-400 ml-1">— {kr.desc}</span>}
+                                </div>
+                              )
+                            })}
+                          </div>
+                        )}
+                      </>
+                    )
+                  })()}
                 </td>
                 <td className="py-2 px-2 text-right font-mono">
                   <span className={job.total_return_pct > 0 ? 'text-red-600' : job.total_return_pct < 0 ? 'text-blue-600' : ''}>

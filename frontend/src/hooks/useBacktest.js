@@ -108,13 +108,13 @@ export function useBacktest() {
     }
   }, [startPolling])
 
-  const runCustom = useCallback(async (yaml, symbol, market, startDate, endDate, initialCash, costParams) => {
+  const runCustom = useCallback(async (yaml, symbol, market, startDate, endDate, initialCash, costParams, strategyDisplayName, builderState) => {
     setStatus('submitting')
     setResult(null)
     setError(null)
     setProgress(null)
     try {
-      const res = await runCustomBacktest(yaml, symbol, market, startDate, endDate, initialCash, costParams)
+      const res = await runCustomBacktest(yaml, symbol, market, startDate, endDate, initialCash, costParams, strategyDisplayName, builderState)
       setJobId(res.job_id)
       startPolling(res.job_id)
     } catch (e) {

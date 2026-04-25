@@ -28,9 +28,10 @@ def _find_latest_trading_day() -> str:
 
 
 def _build_map() -> dict[str, dict]:
-    """pykrx로 KOSPI + KOSDAQ 전 종목 코드/이름/시장 수집.
+    """KOSPI + KOSDAQ 전 종목 코드/이름/시장 수집.
 
-    KRX_ID / KRX_PASSWORD 환경변수가 설정된 경우 인증 세션을 사용한다.
+    1단계: pykrx로 KRX API 조회 (KRX_ID 인증 세션 시도)
+    2단계: pykrx 실패 시 DART corpCode.xml fallback (시장 구분 없이 종목명만)
     """
     # KRX 인증 세션 주입 시도 (실패해도 계속 진행)
     try:
@@ -43,11 +44,26 @@ def _build_map() -> dict[str, dict]:
 
     trading_date = _find_latest_trading_day()
     result: dict[str, dict] = {}
-    for market in ("KOSPI", "KOSDAQ"):
-        for code in krx.get_market_ticker_list(trading_date, market=market):
-            name = krx.get_market_ticker_name(code)
-            if name:
-                result[code] = {"name": name, "market": market}
+    for market_name in ("KOSPI", "KOSDAQ"):
+        try:
+            for code in krx.get_market_ticker_list(trading_date, market=market_name):
+                name = krx.get_market_ticker_name(code)
+                if name:
+                    result[code] = {"name": name, "market": market_name}
+        except Exception:
+            pass
+
+    # pykrx 결과가 너무 적으면 DART corpCode.xml fallback
+    if len(result) < 100:
+        try:
+            from .dart_fin import _load_corp_name_map
+            dart_map = _load_corp_name_map()
+            for code, name in dart_map.items():
+                if code not in result and re.match(r"^\d{6}$", code):
+                    result[code] = {"name": name, "market": "KRX"}
+        except Exception:
+            pass
+
     return result
 
 
@@ -60,7 +76,9 @@ def get_symbol_map(refresh: bool = False) -> dict[str, dict]:
         if cached:
             return cached
     sym_map = _build_map()
-    set_cached(_CACHE_KEY, sym_map, ttl_hours=_TTL_HOURS)
+    # 빈 결과는 캐시하지 않음 (다음 호출에서 재시도)
+    if sym_map:
+        set_cached(_CACHE_KEY, sym_map, ttl_hours=_TTL_HOURS)
     return sym_map
 
 
