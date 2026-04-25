@@ -6,6 +6,7 @@ from sqlalchemy.orm import sessionmaker
 from fastapi.testclient import TestClient
 
 from db.base import Base
+from db.session import get_db
 
 
 @pytest.fixture
@@ -22,6 +23,26 @@ def db_session():
 
 @pytest.fixture
 def client():
-    """FastAPI TestClient — API 엔드포인트 테스트용."""
+    """FastAPI TestClient — 인메모리 DB로 get_db 교체."""
     from main import app
-    return TestClient(app)
+
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    TestSession = sessionmaker(bind=engine)
+
+    def _override_get_db():
+        db = TestSession()
+        try:
+            yield db
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
+    app.dependency_overrides[get_db] = _override_get_db
+    with TestClient(app) as c:
+        yield c
+    app.dependency_overrides.clear()
+    engine.dispose()
