@@ -27,7 +27,7 @@
 | `pipeline_service.py` | 투자 파이프라인: 체제 판단(`macro_regime.py` 위임) → 체제별 스크리닝 → 심층 분석(`safety_grade.py` 위임) → 추천 생성 → 보고서 저장. `run_pipeline(market)` 단일 진입점. |
 | `scheduler_service.py` | APScheduler: 08:00 KR / 16:00 US BackgroundScheduler. `setup_scheduler()` / `shutdown_scheduler()` / `get_scheduler_status()`. main.py lifespan 통합. |
 | `mcp_client.py` | KIS AI Extensions MCP Streamable HTTP 클라이언트. 세션 기반 프로토콜(initialize → session ID → tools/call). SSE 응답 파싱. Host 헤더 고정(Docker 내부 접근). `health_check()`/`call_tool()`. 싱글턴 `get_mcp_client()`. |
-| `backtest_service.py` | 백테스트 오케스트레이션: **비동기 2단계**(run_tool→job_id→get_backtest_result_tool(wait=true)). MCP 파라미터: `strategy_id`/`symbols`(배열)/`initial_capital`. `_extract_metrics()` 중첩 메트릭(basic/risk/trading) 플래트닝. 실패 시 `update_job_status("failed")`. `get_strategy_signals()` — 대표 3전략 신호 + 합의. MCP 비활성화 시 None. |
+| `backtest_service.py` | 백테스트 오케스트레이션: **비동기 2단계**(run_tool→job_id→get_backtest_result_tool(wait=true)). MCP 파라미터: `strategy_id`/`symbols`(배열)/`initial_capital`/`commission_rate`/`tax_rate`/`slippage`. `_extract_metrics()` 중첩 메트릭(basic/risk/trading) 플래트닝. 실패 시 `update_job_status("failed")`. `get_strategy_signals()` — 대표 3전략 신호 + 합의. MCP 비활성화 시 None. |
 | `tax_service.py` | 해외주식 양도소득세: CTOS4001R+TTTS3035R 병합 동기화(연속조회 `tr_cont:N` 헤더) + 잔고 기반 적응적 소급(2015년까지) + 시간순 FIFO 재생(매도 시점 이전 매수만 소진) + `tax_fifo_lots` 매도→매수 매핑 + 잔고 `avg_price` fallback + 가상 매도 시뮬레이션 + 동기화 후 자동 재계산. `stock/tax_store.py` 래퍼 경유. 도메인 규칙: `docs/TAX_DOMAIN.md`. |
 
 ---

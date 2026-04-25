@@ -1,5 +1,20 @@
 # 변경 이력
 
+## 2026-04-25 — Lean 백테스터 EC2 + 백테스트 UI 개선
+
+### Lean 백테스터 EC2 신규
+- **Terraform 모듈**: `infra/modules/backtester/` (EC2 t3.micro + EIP + IAM + 보안그룹)
+- QuantConnect Lean Docker 이미지 (27.5GB) + FastAPI(8002) + Next.js(3001) + MCP(3846) 배포
+- 50GB EBS + 2GB swap, `open-trading-api/backtester` 레포 clone
+- stock-manager EC2 → `KIS_MCP_URL=http://<private-ip>:3846/mcp` VPC 내부 연결
+- SSM Parameter Store에 `KIS_MCP_URL`, `KIS_MCP_ENABLED` 추가
+
+### 백테스트 UI 개선
+- **파라미터 슬라이더**: `StrategySelector` number input → range slider 변환 (min/max 있는 파라미터)
+- **거래비용 입력**: 수수료(0.015%), 세금(0.23%), 슬리피지(0.05%) 3개 필드 추가
+- **API 전체 레이어**: `commission_rate`/`tax_rate`/`slippage` 파라미터 전달 (프론트→API→서비스→MCP)
+- **원화 절사**: `BacktestResultPanel` 모든 금액 `Math.floor()` 적용 (거래가격/순자산/Y축/툴팁)
+
 ## 2026-04-24 — AWS 배포 + CI/CD 구축
 
 ### AWS 인프라 신규

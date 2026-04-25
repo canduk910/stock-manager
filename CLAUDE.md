@@ -208,12 +208,16 @@ Stage 2  python:3.11-slim → pip install + 앱 소스 + COPY --from Stage 1
 ## AWS 배포
 
 ```
-infra/              Terraform IaC (VPC, EC2, RDS, ECR, SSM)
+infra/              Terraform IaC (VPC, EC2×2, RDS, ECR, SSM)
 .github/workflows/  GitHub Actions CI/CD (ci.yml, deploy.yml)
 scripts/            ec2-deploy.sh (수동 배포 스크립트)
 ```
 
-- **컴퓨팅**: EC2 t3.micro (프리티어, docker-compose). 1GB swap 자동 설정
+- **컴퓨팅 (stock-manager)**: EC2 t3.micro (프리티어, docker-compose). 1GB swap 자동 설정
+- **컴퓨팅 (backtester)**: EC2 t3.micro (Lean 엔진 + MCP 서버). 2GB swap + 50GB EBS. `infra/modules/backtester/`
+  - QuantConnect Lean Docker (27.5GB) + FastAPI(8002) + Next.js(3001) + MCP(3846)
+  - `open-trading-api/backtester` 레포 clone, 수동 배포 (`./start.sh`)
+  - stock-manager → `KIS_MCP_URL=http://<backtester-private-ip>:3846/mcp` 연결
 - **DB**: RDS PostgreSQL 16 (db.t3.micro, 프리티어). `DATABASE_URL` 환경변수로 전환
 - **이미지**: ECR `stock-manager` 리포. GitHub Actions에서 빌드+푸시
 - **시크릿**: SSM Parameter Store `/stock-manager/prod/*` (SecureString)
