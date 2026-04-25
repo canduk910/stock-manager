@@ -22,13 +22,13 @@ resource "aws_security_group" "ec2" {
     description = "HTTPS"
   }
 
-  # SSH (관리자 IP만)
+  # SSH
   ingress {
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
-    cidr_blocks = [var.my_ip]
-    description = "SSH from admin"
+    cidr_blocks = ["0.0.0.0/0"]
+    description = "SSH"
   }
 
   # 아웃바운드 전체 허용 (KIS, DART, yfinance 등 외부 API 호출)
