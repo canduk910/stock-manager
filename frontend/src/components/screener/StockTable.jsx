@@ -85,9 +85,12 @@ function makeColumns(watchlistSet, hasGuru) {
           <span className="text-gray-400 text-xs ml-1">{row.code}</span>
         </Link>
       )},
+    { key: 'sector', label: '섹터', align: 'left',
+      render: (v) => v ? <span className="text-xs text-gray-600 truncate max-w-24 inline-block">{v}</span> : <span className="text-gray-300">-</span> },
     { key: 'current_price', label: '현재가', align: 'right', render: fmtPrice },
     { key: 'change_pct', label: '당일', align: 'right', render: fmtPct },
     { key: 'return_1y', label: '1Y', align: 'right', render: fmtPct },
+    { key: 'drop_from_high', label: '52H대비', align: 'right', render: fmtPct },
     { key: 'per', label: 'PER', align: 'right', render: fmtFloat },
     { key: 'pbr', label: 'PBR', align: 'right', render: fmtFloat },
     { key: 'roe', label: 'ROE', align: 'right', render: fmtFloat },

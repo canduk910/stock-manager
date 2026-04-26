@@ -186,6 +186,7 @@ function SortableRow({ id, stock, onDelete, onMemoSave, onShowInfo }) {
           {stock.name}
         </button>
       </td>
+      <td className="px-3 py-2.5 text-xs text-gray-600 max-w-24 truncate">{stock.sector || '-'}</td>
       <td className="px-3 py-2.5 text-right font-medium">{fmtPrice(stock.price, currency)}</td>
       <td className="px-3 py-2.5 text-right whitespace-nowrap">
         <ChangeCell change={stock.change} changePct={stock.change_pct} currency={currency} />
@@ -319,7 +320,7 @@ export default function WatchlistDashboard({
                 <thead className="bg-gray-50 border-b border-gray-200">
                   <tr>
                     {[
-                      '','종목코드','종목명','현재가','전일대비','시가총액',
+                      '','종목코드','종목명','섹터','현재가','전일대비','시가총액',
                       '매출액','영업이익','순이익','영업이익률','배당수익률','보고서기준','메모','',
                     ].map((h, i) => (
                       <th key={`${h}-${i}`} className={`px-3 py-2.5 text-left text-xs font-semibold text-gray-600 whitespace-nowrap ${i === 0 ? 'w-8 px-2' : ''}`}>

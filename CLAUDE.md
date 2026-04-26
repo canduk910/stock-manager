@@ -235,24 +235,34 @@ scripts/            ec2-deploy.sh (수동 배포 스크립트)
 
 ---
 
-## 하네스: TDD 애자일 투자 자동화
+## 하네스: 계층형 TDD 애자일 투자 자동화
 
-**목표:** 도메인 전문가 팀 토론 → 요건 수립 → TDD(RED-GREEN-VERIFY) 사이클로 투자 자동화 시스템을 개발한다.
+**목표:** 부서장 → 팀장 → 팀원 계층 구조로 모든 개발 요청을 자동 라우팅하고, TDD(RED-GREEN-VERIFY) 사이클로 투자 자동화 시스템을 개발한다.
 
-**트리거:** 시스템 개발, 기능 추가, 파이프라인, 대시보드 등 개발 요청 시 `asset-dev` 스킬을 사용하라. 단순 질문은 직접 응답 가능.
+**트리거:** 코드 변경이 수반되는 모든 요청(기능 개발, 리팩토링, QA, 구조 개선 등) 시 반드시 `asset-dev` 스킬을 사용하라. 단순 질문, 설명 요청, 환경설정만 직접 응답 가능.
 
-### 에이전트 8명 (`.claude/agents/`)
+### 에이전트 12명 (`.claude/agents/`)
 
-#### TDD 개발 에이전트 (5명)
+#### 관리 에이전트 (3명) — 부서장 + 팀장
+
+| 에이전트 | 파일 | 역할 |
+|---------|------|------|
+| **부서장** | `department-head.md` | 단일 진입점. 요청 분석 → 팀장에게 업무 배분 → 결과 취합 |
+| **도메인팀장** | `domain-lead.md` | 도메인 전문가 팀 관리. 요건 정의 + 도메인 자문 제공 |
+| **개발팀장** | `dev-lead.md` | 개발 팀 관리. TDD 개발 + QA 검증 + 리팩토링 |
+
+#### TDD 개발 에이전트 (5명) — 개발팀장 휘하
+
 | 에이전트 | 파일 | TDD 역할 |
 |---------|------|----------|
 | TestEngineer | `test-engineer.md` | **RED**: 요건 수용 기준 → pytest 테스트 선행 작성 |
 | BackendDev | `backend-dev.md` | **BACKEND GREEN**: FastAPI+SQLAlchemy 백엔드 구현 |
 | FrontendDev | `frontend-dev.md` | **FRONTEND**: React+Tailwind 프론트엔드 구현 |
 | QA Inspector | `qa-inspector.md` | **VERIFY**: 각 GREEN 직후 경계면 교차 비교 검증 |
-| RefactorEngineer | `refactor-engineer.md` | 도메인 인지 리팩토링 (별도 스킬) |
+| RefactorEngineer | `refactor-engineer.md` | 도메인 인지 리팩토링 |
 
-#### 도메인 전문가 에이전트 (4명) — 요건 정의 팀 참여 + 자문
+#### 도메인 전문가 에이전트 (4명) — 도메인팀장 휘하
+
 | 에이전트 | 파일 | 역할 |
 |---------|------|------|
 | MacroSentinel | `macro-sentinel.md` | 체제 판단 요건 수립 + 임계값 자문 |
@@ -260,22 +270,29 @@ scripts/            ec2-deploy.sh (수동 배포 스크립트)
 | MarginAnalyst | `margin-analyst.md` | 등급/안전마진 요건 수립 + 공식 자문 |
 | OrderAdvisor | `order-advisor.md` | 주문/포지션 요건 수립 + 안전 규칙 자문 |
 
-### TDD 워크플로우
+### 워크플로우 (계층형)
 
 ```
-Phase 1: 도메인 전문가 팀 (TeamCreate) → 토론 → 구조화된 요건서
-Phase 2: TDD 개발 팀 (TeamCreate) → 요건 항목별:
-  TestEngineer RED → BackendDev GREEN → FrontendDev 구현 → QA VERIFY
-Phase 3: 전체 테스트 + 빌드 + 종합 보고
+사용자 요청 → asset-dev 스킬 (부서장)
+  ├── 유형 A (기능 개발):
+  │   Phase 1: 부서장 → 도메인팀장 → 도메인전문가 팀 → 요건서
+  │   Phase 2: 부서장 → 개발팀장 → TDD 팀 → RED→GREEN→VERIFY
+  │   Phase 3: 부서장 → 결과 취합 + 보고
+  ├── 유형 B (리팩토링):
+  │   부서장 → 개발팀장 → RefactorEngineer + QA (도메인 자문 시 도메인팀장)
+  ├── 유형 C (QA 검증):
+  │   부서장 → 개발팀장 → QA Inspector (도메인 검증 시 도메인팀장)
+  └── 유형 D (소규모 수정):
+      부서장 → 직접 처리 (팀 구성 불필요)
 ```
 
 ### 스킬 4개 (`.claude/skills/`)
 
 | 스킬 | 트리거 | 용도 |
 |------|--------|------|
-| `asset-dev/` | "시스템 개발", "기능 추가", "파이프라인", "대시보드" | TDD 애자일: 요건→RED→GREEN→VERIFY |
-| `qa-verify/` | "QA", "정합성 검사" | 교차 비교 검증 + 파이프라인 로직 검증 |
-| `refactor-audit/` | "리팩토링", "코드 감사" | 감사→자문→실행→QA |
+| `asset-dev/` | **코드 변경이 수반되는 모든 요청** | 부서장 오케스트레이터: 유형 A/B/C/D 자동 라우팅 |
+| `qa-verify/` | "QA", "정합성 검사" (직접 호출용) | 교차 비교 검증 (asset-dev 유형 C로도 접근 가능) |
+| `refactor-audit/` | "리팩토링", "코드 감사" (직접 호출용) | 감사→자문→실행→QA (asset-dev 유형 B로도 접근 가능) |
 | `doc-commit/` | "커밋", "문서 반영" | 문서 반영(CLAUDE.md+CHANGELOG) + 커밋 |
 
 ### 테스트 (`tests/`)
@@ -294,3 +311,4 @@ pytest tests/api/ -v          # API 엔드포인트 테스트
 | 2026-04-25 | 멀티유저 인증 추가 | 전체 | JWT+역할기반접근 |
 | 2026-04-26 | TDD 애자일 재구성 | 에이전트 7개 + asset-dev 스킬 | 도메인 전문가 팀 토론→요건 수립, RED-GREEN-VERIFY TDD 사이클 도입 |
 | 2026-04-26 | DevArchitect → BackendDev + FrontendDev 분리 | agents/ + asset-dev 스킬 | 백엔드(FastAPI)/프론트(React) 전문성 분리, API shape 명세 기반 협업 |
+| 2026-04-26 | 계층형 하네스 재구성 | 부서장+도메인팀장+개발팀장 신규, asset-dev 스킬 | 부서장→팀장→팀원 계층으로 자동 라우팅. 단일 진입점(asset-dev)으로 통합 |

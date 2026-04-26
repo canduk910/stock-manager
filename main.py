@@ -22,76 +22,80 @@ from db.session import engine  # noqa: E402
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Alembic 마이그레이션 적용 (신규 설치 / 스키마 변경 시)
-    try:
-        from alembic.config import Config as AlembicConfig
-        from alembic import command as alembic_command
-        alembic_cfg = AlembicConfig(os.path.join(os.path.dirname(__file__), "alembic.ini"))
-        alembic_cfg.set_main_option("script_location", os.path.join(os.path.dirname(__file__), "alembic"))
-        alembic_command.upgrade(alembic_cfg, "head")
-        print("[정보] DB 마이그레이션 완료 (alembic upgrade head)")
-    except Exception as e:
-        print(f"[경고] DB 마이그레이션 실패: {e}")
+    _testing = os.environ.get("TESTING")
 
-    missing = [name for name, val in (
-        ("KIS_APP_KEY", KIS_APP_KEY),
-        ("KIS_APP_SECRET", KIS_APP_SECRET),
-        ("KIS_ACNT_NO", KIS_ACNT_NO),
-        ("KIS_ACNT_PRDT_CD_STK", KIS_ACNT_PRDT_CD_STK),
-    ) if not val]
-    if missing:
-        print(f"[경고] KIS 환경변수 누락: {', '.join(missing)} — 잔고/주문 비활성화")
-    if not KIS_ACNT_PRDT_CD_FNO:
-        print("[정보] KIS_ACNT_PRDT_CD_FNO 미설정 — 선물옵션 잔고 조회 비활성화")
-
-    if not FINNHUB_API_KEY:
-        print("[정보] FINNHUB_API_KEY 미설정 — 해외주식 시세 yfinance 폴링 모드 (15분 지연)")
-
-    # 종목 심볼맵 pre-warm (Docker 재시작 후 캐시 초기화 → 첫 검색 지연 방지)
-    def _prewarm_symbol_map():
+    if not _testing:
+        # Alembic 마이그레이션 적용 (신규 설치 / 스키마 변경 시)
         try:
-            from stock.symbol_map import get_symbol_map
-            get_symbol_map()
-            print("[정보] 종목 심볼맵 로딩 완료")
+            from alembic.config import Config as AlembicConfig
+            from alembic import command as alembic_command
+            alembic_cfg = AlembicConfig(os.path.join(os.path.dirname(__file__), "alembic.ini"))
+            alembic_cfg.set_main_option("script_location", os.path.join(os.path.dirname(__file__), "alembic"))
+            alembic_command.upgrade(alembic_cfg, "head")
+            print("[정보] DB 마이그레이션 완료 (alembic upgrade head)")
         except Exception as e:
-            print(f"[경고] 종목 심볼맵 로딩 실패: {e}")
-        try:
-            from stock.fno_master import get_fno_symbol_map
-            fno_map = get_fno_symbol_map()
-            print(f"[정보] FNO 마스터 로딩 완료 ({len(fno_map)}종목)")
-        except Exception as e:
-            print(f"[경고] FNO 마스터 로딩 실패: {e}")
-    threading.Thread(target=_prewarm_symbol_map, daemon=True).start()
+            print(f"[경고] DB 마이그레이션 실패: {e}")
 
-    # 실시간 호가 WebSocket 관리자 시작
-    from services.quote_service import get_manager as get_quote_manager, get_overseas_manager
-    quote_manager = get_quote_manager()
-    await quote_manager.start()
+        missing = [name for name, val in (
+            ("KIS_APP_KEY", KIS_APP_KEY),
+            ("KIS_APP_SECRET", KIS_APP_SECRET),
+            ("KIS_ACNT_NO", KIS_ACNT_NO),
+            ("KIS_ACNT_PRDT_CD_STK", KIS_ACNT_PRDT_CD_STK),
+        ) if not val]
+        if missing:
+            print(f"[경고] KIS 환경변수 누락: {', '.join(missing)} — 잔고/주문 비활성화")
+        if not KIS_ACNT_PRDT_CD_FNO:
+            print("[정보] KIS_ACNT_PRDT_CD_FNO 미설정 — 선물옵션 잔고 조회 비활성화")
 
-    # 해외주식 시세 폴링 관리자 시작
-    overseas_manager = get_overseas_manager()
-    await overseas_manager.start()
+        if not FINNHUB_API_KEY:
+            print("[정보] FINNHUB_API_KEY 미설정 — 해외주식 시세 yfinance 폴링 모드 (15분 지연)")
 
-    # 예약주문 스케줄러 백그라운드 시작
-    from services.reservation_service import start_scheduler, stop_scheduler
-    scheduler_task = asyncio.create_task(start_scheduler())
+        # 종목 심볼맵 pre-warm (Docker 재시작 후 캐시 초기화 → 첫 검색 지연 방지)
+        def _prewarm_symbol_map():
+            try:
+                from stock.symbol_map import get_symbol_map
+                get_symbol_map()
+                print("[정보] 종목 심볼맵 로딩 완료")
+            except Exception as e:
+                print(f"[경고] 종목 심볼맵 로딩 실패: {e}")
+            try:
+                from stock.fno_master import get_fno_symbol_map
+                fno_map = get_fno_symbol_map()
+                print(f"[정보] FNO 마스터 로딩 완료 ({len(fno_map)}종목)")
+            except Exception as e:
+                print(f"[경고] FNO 마스터 로딩 실패: {e}")
+        threading.Thread(target=_prewarm_symbol_map, daemon=True).start()
 
-    # 투자 파이프라인 스케줄러 시작 (08:00 KR / 16:00 US)
-    from services.scheduler_service import setup_scheduler as setup_pipeline_scheduler, shutdown_scheduler as shutdown_pipeline_scheduler
-    setup_pipeline_scheduler()
+        # 실시간 호가 WebSocket 관리자 시작
+        from services.quote_service import get_manager as get_quote_manager, get_overseas_manager
+        quote_manager = get_quote_manager()
+        await quote_manager.start()
+
+        # 해외주식 시세 폴링 관리자 시작
+        overseas_manager = get_overseas_manager()
+        await overseas_manager.start()
+
+        # 예약주문 스케줄러 백그라운드 시작
+        from services.reservation_service import start_scheduler, stop_scheduler
+        scheduler_task = asyncio.create_task(start_scheduler())
+
+        # 투자 파이프라인 스케줄러 시작 (08:00 KR / 16:00 US)
+        from services.scheduler_service import setup_scheduler as setup_pipeline_scheduler, shutdown_scheduler as shutdown_pipeline_scheduler
+        setup_pipeline_scheduler()
 
     yield
 
-    shutdown_pipeline_scheduler()
-    stop_scheduler()
-    scheduler_task.cancel()
-    try:
-        await scheduler_task
-    except asyncio.CancelledError:
-        pass
+    if not _testing:
+        shutdown_pipeline_scheduler()
+        stop_scheduler()
+        scheduler_task.cancel()
+        try:
+            await scheduler_task
+        except asyncio.CancelledError:
+            pass
 
-    await overseas_manager.stop()
-    await quote_manager.stop()
+        await overseas_manager.stop()
+        await quote_manager.stop()
 
 
 app = FastAPI(title="Stock Manager API", lifespan=lifespan)

@@ -1,312 +1,228 @@
 ---
 name: asset-dev
-description: "TDD 애자일 개발 오케스트레이터. 도메인 전문가 팀이 토론으로 요건을 수립하고, TestEngineer+BackendDev+FrontendDev+QA가 요건 항목별 RED-GREEN-VERIFY 사이클을 반복하여 투자 자동화 시스템을 개발한다. '파이프라인 만들어줘', '시스템 개발', '자동화 구현', '대시보드 만들어줘', 'Telegram 연동', '스케줄러 설정', '기능 추가', '기능 개발' 등 시스템 개발 요청 시 반드시 이 스킬을 사용할 것. 후속 작업: 다시 실행, 재실행, 업데이트, 수정, 보완, 이전 결과 개선, 테스트 추가, 요건 수정 요청 시에도 사용."
+description: "부서장 오케스트레이터. 모든 개발·리팩토링·QA 요청의 단일 진입점. 사용자 요청을 분석하여 도메인팀장(domain-lead)과 개발팀장(dev-lead)에게 업무를 지시하고 결과를 취합한다. 코드 변경이 수반되는 모든 요청 시 반드시 이 스킬을 사용할 것. '만들어줘', '개발', '구현', '추가', '리팩토링', '코드 정리', 'QA', '검증', '테스트', '파이프라인', '대시보드', '연동', '기능 개발', '구조 개선', '중복 제거', '코드 감사', '수정', '보완', '업데이트' 등 모든 개발 요청 시 사용."
 ---
 
-# TDD 애자일 개발 오케스트레이터
+# 부서장 오케스트레이터
 
-도메인 전문가 팀이 요건을 수립하고, TDD 개발 팀이 요건 항목별로 테스트 선행 → 구현 → 즉시 검증 사이클을 반복하여 투자 자동화 기능을 개발한다.
+모든 개발 요청의 단일 진입점. 사용자 요청을 분석하여 도메인팀장과 개발팀장에게 업무를 배분하고, 결과를 취합하여 보고한다.
 
-**실행 모드**: 하이브리드 (Phase 1: 에이전트 팀 → Phase 2: 에이전트 팀 재구성)
-
-## 워크플로우 개요
+## 조직 구조
 
 ```
-Phase 0: 컨텍스트 확인
-Phase 1: 도메인 전문가 팀 → 구조화된 요건서
-  ├── macro-sentinel ──┐
-  ├── margin-analyst ──┼── 토론 + 합의 → 요건서
-  ├── order-advisor  ──┤
-  └── value-screener ──┘
-       │
-Phase 2: TDD 개발 팀 → 요건 항목별 RED-GREEN-VERIFY
-  ├── test-engineer  (RED)           ──┐
-  ├── backend-dev    (BACKEND GREEN) ──┼── 요건 R_i마다 반복
-  ├── frontend-dev   (FRONTEND)      ──┤
-  └── qa-inspector   (VERIFY)        ──┘
+부서장 (이 스킬 = 당신)
+├── 도메인팀장 (domain-lead)
+│   ├── MacroSentinel — 매크로/체제
+│   ├── MarginAnalyst — 안전마진/등급
+│   ├── OrderAdvisor — 주문/포지션
+│   └── ValueScreener — 스크리닝/필터
+└── 개발팀장 (dev-lead)
+    ├── TestEngineer — TDD 테스트
+    ├── BackendDev — FastAPI 백엔드
+    ├── FrontendDev — React 프론트
+    ├── QA Inspector — 경계면 검증
+    └── RefactorEngineer — 리팩토링
 ```
 
-## Phase 0: 컨텍스트 확인
+## Phase 0: 요청 분석 + 라우팅
+
+사용자 요청을 분석하여 작업 유형을 결정한다:
+
+| 유형 | 트리거 키워드 | 라우팅 |
+|------|-------------|--------|
+| **A: 기능 개발** | "만들어줘", "추가", "개발", "구현", "파이프라인", "대시보드", "연동", "기능" | 도메인팀장 → 개발팀장 (순차) |
+| **B: 리팩토링** | "리팩토링", "코드 정리", "구조 개선", "중복 제거", "코드 감사" | 개발팀장 (도메인 자문 필요 시 도메인팀장) |
+| **C: QA/검증** | "QA", "검증", "테스트", "정합성 검사" | 개발팀장 (도메인 검증 시 도메인팀장) |
+| **D: 소규모 수정** | 단일 파일 수정, 간단한 버그 수정 | 직접 처리 (팀 구성 불필요) |
+
+### 규모 판단 기준
+
+- 변경 예상 파일 ≤ 3개, 새 엔드포인트/페이지 없음 → **유형 D** (직접 처리)
+- 새 API 엔드포인트 또는 새 페이지 필요 → **유형 A**
+- 기존 코드 구조 변경 → **유형 B**
+- 기존 코드 정합성 확인 → **유형 C**
+
+### 컨텍스트 확인
 
 1. `_workspace/dev/` 디렉토리 존재 여부 확인
-2. 실행 모드 결정:
-   - **미존재** → 초기 실행. Phase 1부터 진행
-   - **존재 + 부분 수정 요청** → 기존 요건서 기반으로 해당 요건만 재실행
-   - **존재 + 새 입력** → `_workspace/dev/`를 `_workspace/dev_{timestamp}/`로 이동 후 Phase 1
+2. **미존재** → 초기 실행
+3. **존재 + 부분 수정 요청** → 기존 요건서 기반 해당 요건만 재실행
+4. **존재 + 새 입력** → `_workspace/dev/`를 `_workspace/dev_{timestamp}/`로 이동
 
-## Phase 1: 도메인 전문가 팀 — 요건 정의
+---
 
-**실행 모드:** 에이전트 팀
+## 유형 A: 기능 개발 (도메인팀장 → 개발팀장)
 
-### 1-1. 사용자 입력 파싱
+### Phase 1: 도메인팀장에게 요건 정의 지시
 
-사용자 요청에서 추출:
-- **개발 대상 모듈**: 포트폴리오 대시보드 / 리밸런싱 / 리스크 모니터링 / 성과 추적 / 투자 일지 / 파이프라인 / 전체
-- **범위**: 백엔드만 / 프론트엔드만 / 풀스택
-- **우선순위**: 단일 모듈 / 전체 시스템 점진 개발
-
-`_workspace/dev/00_request.json`에 파싱된 요청 저장.
-
-### 1-2. 도메인 전문가 팀 구성
+도메인팀장(domain-lead) 에이전트를 호출한다:
 
 ```
-TeamCreate(
-  team_name: "domain-consultation",
-  members: [
-    { name: "macro-sentinel", agent_type: "macro-sentinel", model: "opus",
-      prompt: "사용자가 '{기능}'을 요청했다. 이 기능의 매크로/체제 관련 요건을 다른 전문가와 토론하여 수립하라. 요건서 형식: [REQ-MACRO-{번호}] 제목 + 설명 + 수용 기준 + 테스트 힌트. _workspace/dev/01_requirements.md에 작성." },
-    { name: "margin-analyst", agent_type: "margin-analyst", model: "opus",
-      prompt: "사용자가 '{기능}'을 요청했다. 이 기능의 안전마진/등급 관련 요건을 다른 전문가와 토론하여 수립하라." },
-    { name: "order-advisor", agent_type: "order-advisor", model: "opus",
-      prompt: "사용자가 '{기능}'을 요청했다. 이 기능의 주문/포지션 관련 요건을 다른 전문가와 토론하여 수립하라. 안전 규칙 누락 여부를 반드시 점검." },
-    { name: "value-screener", agent_type: "value-screener", model: "opus",
-      prompt: "사용자가 '{기능}'을 요청했다. 이 기능의 스크리닝/필터 관련 요건을 다른 전문가와 토론하여 수립하라." }
-  ]
+Agent(
+  subagent_type: "domain-lead",
+  name: "domain-lead",
+  prompt: """
+  [부서장 → 도메인팀장] 요건 정의 지시
+
+  사용자 요청: {사용자 원문}
+  개발 대상: {모듈명}
+  범위: {백엔드/프론트/풀스택}
+
+  도메인 전문가 팀(MacroSentinel, MarginAnalyst, OrderAdvisor, ValueScreener)을 구성하여
+  기능 요건을 정의하라. 전문가 간 교차 토론을 통해 정합성을 확보하고,
+  _workspace/dev/01_requirements.md에 통합 요건서를 산출하라.
+
+  프로젝트 참조:
+  - CLAUDE.md (프로젝트 구조, 레이어, 예외 계층)
+  - .claude/skills/asset-dev/references/feature-specs.md (기존 모듈 상세 스펙)
+
+  요건서 형식: [REQ-{영역}-{번호}] 제목 + 설명 + 수용 기준(구체적 수치) + 테스트 힌트 + 레이어
+  요건서 산출 후 팀을 정리하고, 요건 요약을 보고하라.
+  """
 )
 ```
 
-> ValueScreener는 스크리닝과 무관한 기능(예: 투자 일지)이면 생략 가능.
+**사용자 승인**: 요건서 요약을 사용자에게 보여주고 승인을 받는다. 수정 요청 시 도메인팀장을 재호출한다.
 
-### 1-3. 요건 정의 작업 등록
+### Phase 2: 개발팀장에게 TDD 개발 지시
 
-```
-TaskCreate(tasks: [
-  { title: "매크로/체제 관련 요건 수립",
-    assignee: "macro-sentinel",
-    description: "체제 판단, VIX/버핏지수 임계값, 체제별 파라미터 관련 요건 항목 작성" },
-  { title: "안전마진/등급 관련 요건 수립",
-    assignee: "margin-analyst",
-    description: "Graham Number, 7점 등급, 재무건전성 관련 요건 항목 작성" },
-  { title: "주문/포지션 관련 요건 수립",
-    assignee: "order-advisor",
-    description: "포지션 사이징, 손절/익절, 안전 규칙 관련 요건 항목 작성" },
-  { title: "스크리닝/필터 관련 요건 수립",
-    assignee: "value-screener",
-    description: "복합 점수, value trap, 업종 분산 관련 요건 항목 작성" },
-  { title: "요건 교차 검토 + 통합",
-    description: "각 전문가의 요건을 교차 검토하여 불일치/누락을 해소하고, 최종 요건서를 _workspace/dev/01_requirements.md에 통합",
-    depends_on: ["매크로/체제 관련 요건 수립", "안전마진/등급 관련 요건 수립", "주문/포지션 관련 요건 수립", "스크리닝/필터 관련 요건 수립"] }
-])
-```
-
-### 1-4. 도메인 전문가 토론 규칙
-
-**팀원 간 통신:**
-- 각 전문가는 자기 영역 요건을 작성하면서, 다른 영역에 영향을 주는 부분을 SendMessage로 알린다
-- 예: MacroSentinel이 "defensive 체제에서 투자 중단" 요건 → OrderAdvisor에게 "포지션 한도 0% 확인 필요" 전달
-- 상충 발견 시 직접 토론하여 합의안 도출
-
-**교차 검토 체크리스트:**
-- 체제별 파라미터가 모든 전문가 요건에서 일관되는가?
-- 등급 기준과 스크리닝 점수 간 정합성이 있는가?
-- 안전 규칙(자동 주문 금지, Write-Ahead)이 주문 관련 모든 요건에 포함되었는가?
-- 데이터 부족 시 처리(None, 기본값)가 명시되었는가?
-
-### 1-5. 요건서 산출물 형식
-
-```markdown
-# 기능 요건서: {기능명}
-
-## 개요
-{기능 설명}
-
-## 요건 항목
-
-### [REQ-MACRO-001] {제목}
-설명: {무엇을 구현해야 하는지}
-수용 기준:
-  - {검증 가능한 조건 1 — 구체적 수치}
-  - {검증 가능한 조건 2}
-테스트 힌트:
-  - 입력: {params} → 기대 출력: {result}
-도메인 근거: {Graham 원칙/매트릭스 기반}
-레이어: unit / integration / api
-관련 전문가: MacroSentinel, OrderAdvisor
-
-### [REQ-MARGIN-001] ...
-### [REQ-ORDER-001] ...
-### [REQ-SCREEN-001] ...
-
-## 비기능 요건
-- 예외 계층: ServiceError 하위만 사용
-- DB: SQLAlchemy ORM + Alembic
-- 프론트: Tailwind CSS v4 + Recharts
-```
-
-### 1-6. Phase 1 완료
-
-1. 리더가 모든 전문가 작업 완료 확인 (TaskGet)
-2. `_workspace/dev/01_requirements.md` 통합 완성 확인
-3. 도메인 전문가 팀 정리 (TeamDelete)
-4. 사용자에게 요건서 요약 보고 + 승인 요청
-
-> **사용자 승인 후** Phase 2 진행. 사용자가 요건 수정을 요청하면 Phase 1을 재실행한다.
-
-## Phase 2: TDD 개발 팀 — RED-GREEN-VERIFY 사이클
-
-**실행 모드:** 에이전트 팀 (Phase 1 팀 정리 후 새 팀 구성)
-
-### 2-1. TDD 팀 구성
+개발팀장(dev-lead) 에이전트를 호출한다:
 
 ```
-TeamCreate(
-  team_name: "tdd-dev",
-  members: [
-    { name: "test-engineer", agent_type: "test-engineer", model: "opus",
-      prompt: "_workspace/dev/01_requirements.md를 읽고, 요건 항목 순서대로 테스트를 선행 작성하라(RED). 각 요건의 수용 기준을 pytest 테스트로 변환. 테스트 작성 후 backend-dev에게 구현 요청. 백엔드 GREEN 후 프론트 빌드 검증." },
-    { name: "backend-dev", agent_type: "backend-dev", model: "opus",
-      prompt: "_workspace/dev/01_requirements.md를 읽고, test-engineer가 작성한 테스트를 통과하는 백엔드 코드를 구현하라(GREEN). FastAPI+SQLAlchemy 레이어 패턴 준수. GREEN 후 frontend-dev에게 API shape 명세 전달." },
-    { name: "frontend-dev", agent_type: "frontend-dev", model: "opus",
-      prompt: "_workspace/dev/01_requirements.md를 읽고, backend-dev의 API shape 명세를 받아 프론트엔드를 구현하라. React+Tailwind+Recharts 패턴 준수. 구현 후 npm run build 검증." },
-    { name: "qa-inspector", agent_type: "qa-inspector", model: "opus",
-      prompt: "test-engineer가 GREEN을 확인할 때마다 경계면 교차 비교 검증을 수행하라(VERIFY). 특히 backend-dev API 응답 shape ↔ frontend-dev fetch/훅 접근 패턴을 교차 비교." }
-  ]
+Agent(
+  subagent_type: "dev-lead",
+  name: "dev-lead",
+  prompt: """
+  [부서장 → 개발팀장] TDD 개발 지시
+
+  요건서: _workspace/dev/01_requirements.md
+  작업 유형: TDD 개발
+
+  개발 팀(TestEngineer, BackendDev, FrontendDev, QA Inspector)을 구성하여
+  요건 항목별로 RED→GREEN→VERIFY TDD 사이클을 실행하라.
+
+  TDD 사이클:
+    R_i마다: test-engineer RED → backend-dev GREEN → frontend-dev 구현 → qa-inspector VERIFY
+  회귀 방지: 각 R_i 후 pytest tests/ -v 전체 실행
+  도메인 자문 필요 시: 해당 도메인 전문가를 Agent로 개별 호출하여 확인
+
+  프로젝트 참조:
+  - CLAUDE.md (레이어 구성, 예외 계층, DB 시스템)
+  - 기존 서비스 재사용: services/ 내 기존 함수 직접 호출
+
+  완료 후 팀을 정리하고, 결과를 보고하라.
+  """
 )
 ```
 
-### 2-2. TDD 사이클 작업 등록
+### Phase 3: 결과 취합 + 보고
 
-요건서의 각 항목 R_i에 대해 4개 작업을 등록한다:
-
-```
-요건 R_1에 대해:
-  Task: "R_1 테스트 작성 (RED)"
-    assignee: test-engineer
-    description: "[REQ-XXX-001] {제목}의 수용 기준을 pytest로 작성"
-
-  Task: "R_1 백엔드 구현 (GREEN)"
-    assignee: backend-dev
-    description: "test-engineer 테스트를 통과하는 백엔드 코드 구현 + API shape 명세 작성"
-    depends_on: "R_1 테스트 작성 (RED)"
-
-  Task: "R_1 프론트엔드 구현"
-    assignee: frontend-dev
-    description: "backend-dev API shape 명세 기반 프론트엔드 구현"
-    depends_on: "R_1 백엔드 구현 (GREEN)"
-
-  Task: "R_1 경계면 검증 (VERIFY)"
-    assignee: qa-inspector
-    description: "백엔드 API shape ↔ 프론트 접근 패턴 교차 비교"
-    depends_on: "R_1 프론트엔드 구현"
-
-요건 R_2에 대해:
-  (동일 패턴, R_1 VERIFY 완료 후 시작)
-  ...
-```
-
-> 요건 간 의존성: R_i+1의 RED는 R_i의 VERIFY 완료 후 시작 (순차 보장).
-> 단, 독립적인 요건(예: 서로 다른 모듈)은 병렬 진행 가능.
-> 백엔드 전용 요건(API만)은 프론트엔드 Task 생략 가능.
-
-### 2-3. RED-GREEN-VERIFY 사이클 상세
-
-```
-┌──────────────────────────────────────────────────────┐
-│ 요건 R_i                                              │
-│                                                        │
-│  [RED] test-engineer:                                  │
-│    1. 요건 R_i의 수용 기준 → pytest 테스트 작성         │
-│    2. → backend-dev: "백엔드 테스트 완료, 구현 요청"     │
-│                                                        │
-│  [BACKEND GREEN] backend-dev:                          │
-│    3. 테스트 파일 Read → 함수 시그니처 파악              │
-│    4. 백엔드 코드 구현 (DB → 서비스 → 라우터)            │
-│    5. → test-engineer: "백엔드 구현 완료, 테스트 실행"    │
-│    6. test-engineer: pytest 실행                        │
-│       ├─ FAIL → backend-dev 수정 → 4로 복귀             │
-│       └─ PASS → backend-dev가 API shape을 frontend-dev에 전달 │
-│                                                        │
-│  [FRONTEND] frontend-dev:                              │
-│    7. API shape 명세 기반 프론트엔드 구현                │
-│    8. → test-engineer: "프론트 구현 완료"                │
-│    9. test-engineer: npm run build 검증                 │
-│       ├─ FAIL → frontend-dev 수정 → 7로 복귀            │
-│       └─ PASS → qa-inspector에게 경계면 검증 요청        │
-│                                                        │
-│  [VERIFY] qa-inspector:                                │
-│   10. API shape ↔ 프론트 접근 패턴 교차 비교             │
-│       ├─ 이슈 → backend-dev 또는 frontend-dev 수정       │
-│       └─ PASS → R_i 완료, R_i+1 진행                    │
-│                                                        │
-└──────────────────────────────────────────────────────┘
-```
-
-### 2-4. 팀 통신 흐름
-
-```
-test-engineer ──[RED 완료]──→ backend-dev
-backend-dev   ──[GREEN 완료]──→ test-engineer
-test-engineer ──[PASS]──→ (backend-dev가 API shape → frontend-dev)
-backend-dev   ──[API SHAPE]──→ frontend-dev
-frontend-dev  ──[구현 완료]──→ test-engineer (빌드 검증)
-test-engineer ──[전체 PASS]──→ qa-inspector (경계면 검증)
-qa-inspector  ──[VERIFY PASS]──→ 리더 (다음 요건 진행)
-qa-inspector  ──[이슈 발견]──→ backend-dev / frontend-dev (수정)
-```
-
-도메인 전문가 자문이 필요한 경우 (구현 중 불명확):
-```
-backend-dev ──[자문 요청]──→ 도메인 전문가 (별도 서브 에이전트로 호출)
-```
-
-> Phase 2에서 도메인 전문가는 팀원이 아님. 필요 시 리더가 서브 에이전트로 호출하여 답변 전달.
-
-### 2-5. 회귀 방지
-
-각 R_i GREEN 후 **전체 테스트 스위트를 실행**하여 기존 테스트가 깨지지 않았는지 확인:
-```bash
-pytest tests/ -v  # 전체 회귀 테스트
-```
-
-회귀 발견 시:
-1. test-engineer가 깨진 테스트 상세를 dev-architect에게 보고
-2. dev-architect가 수정 후 전체 재실행
-3. 전체 GREEN 확인 후 다음 요건 진행
-
-## Phase 3: 최종 통합 + 보고
-
-### 3-1. 통합 검증
-
-모든 요건 완료 후:
-1. `pytest tests/ -v` 전체 테스트 실행
-2. `cd frontend && npm run build` 프론트 빌드 검증
-3. qa-inspector가 전체 경계면 종합 검증
-4. 누락된 라우팅, Header 네비게이션, App.jsx Route 확인
-
-### 3-2. 최종 보고서
+양 팀장의 결과를 통합하여 사용자에게 보고:
 
 ```markdown
-## TDD 개발 완료 보고
+## 작업 완료 보고
 
-### 요건 이행 현황
+### 요청
+{사용자 원문 요약}
+
+### 도메인 요건 (도메인팀장)
+- 요건 {n}개 수립
+- 주요 내용: {핵심 요건 목록}
+
+### 개발 결과 (개발팀장)
 | 요건 ID | 제목 | RED | GREEN | VERIFY | 상태 |
 |---------|------|-----|-------|--------|------|
-| REQ-MACRO-001 | ... | O | O | O | 완료 |
-| REQ-MARGIN-001 | ... | O | O | O | 완료 |
+
+### 테스트 결과
+- 전체: {total} pass / {fail} fail
+
+### 신규 API 엔드포인트
+- {목록}
 
 ### 변경 파일
 - 신규: {file_list}
 - 수정: {file_list}
 
-### 테스트 결과
-- 단위: {n} pass / {m} fail
-- 통합: {n} pass / {m} fail
-- API: {n} pass / {m} fail
-- 전체: {total} pass / {total_fail} fail
-
-### 신규 API 엔드포인트
-- GET /api/{module}/... — 설명
-
-### QA 검증 결과
-- 경계면 검증: {n}건 PASS / {m}건 수정 완료
-- 도메인 로직: 요건서 수용 기준 기반 검증 완료
+### QA 검증
+- 경계면: PASS/FAIL
 - 빌드: OK/FAIL
 ```
 
-### 3-3. 팀 정리
-1. tdd-dev 팀 정리 (TeamDelete)
-2. `_workspace/dev/` 보존 (사후 검증용)
-3. 사용자에게 결과 보고
+---
+
+## 유형 B: 리팩토링 (개발팀장, 도메인 자문 시 도메인팀장)
+
+### Phase 1: 개발팀장에게 리팩토링 지시
+
+```
+Agent(
+  subagent_type: "dev-lead",
+  name: "dev-lead",
+  prompt: """
+  [부서장 → 개발팀장] 리팩토링 지시
+
+  사용자 요청: {사용자 원문}
+  작업 유형: 리팩토링
+
+  RefactorEngineer + QA Inspector를 구성하여:
+  1. 코드 감사 → 리팩토링 후보 목록
+  2. 도메인 자문 필요 시 해당 전문가를 Agent로 호출하여 확인
+  3. 자문 결과 반영 → 계획 수립 → 점진적 실행
+  4. QA Inspector가 기능 퇴행 검증
+
+  참조: .claude/skills/refactor-audit/references/project-hotspots.md (기존 핫스팟 목록)
+  
+  완료 후 결과를 보고하라.
+  """
+)
+```
+
+### Phase 2: 결과 취합 + 보고
+
+리팩토링 결과를 사용자에게 보고 (변경 파일, 코드 증감, QA 결과).
+
+---
+
+## 유형 C: QA 검증 (개발팀장, 도메인 검증 시 도메인팀장)
+
+### Phase 1: 개발팀장에게 QA 지시
+
+```
+Agent(
+  subagent_type: "dev-lead",
+  name: "dev-lead",
+  prompt: """
+  [부서장 → 개발팀장] QA 검증 지시
+
+  검증 대상: {대상 모듈/파일}
+  작업 유형: QA 검증
+
+  QA Inspector를 호출하여 경계면 교차 비교 검증을 수행하라:
+  - API 응답 shape ↔ 프론트 접근 패턴
+  - 라우트 등록 ↔ 프론트 경로
+  - DB 스키마 ↔ API 필드
+  - 예외 계층 준수
+
+  도메인 로직 검증 필요 시 해당 전문가를 Agent로 호출하라.
+  
+  완료 후 QA 리포트를 보고하라.
+  """
+)
+```
+
+### Phase 2: 결과 취합 + 보고
+
+QA 리포트를 사용자에게 보고 (PASS/FAIL, 발견 이슈, 수정 상태).
+
+---
+
+## 유형 D: 소규모 수정 (직접 처리)
+
+팀 구성 없이 직접 코드를 수정한다. 에이전트 오버헤드가 작업량보다 크기 때문.
+
+필요 시 단일 도메인 전문가를 Agent로 호출하여 자문받을 수 있다.
+
+---
 
 ## 기존 API 재활용 맵
 
@@ -326,39 +242,36 @@ pytest tests/ -v  # 전체 회귀 테스트
 
 | 상황 | 전략 |
 |------|------|
-| Phase 1 전문가 합의 불가 | 리더가 보수적 입장(Graham 원칙) 기반으로 결정, 불일치 사항 요건서에 명시 |
-| Phase 2 테스트 반복 실패 (3회 이상) | dev-architect 구현 접근법 재검토 + 요건 수용 기준 재확인 |
-| Phase 2 도메인 자문 필요 | 리더가 해당 도메인 전문가를 서브 에이전트로 호출하여 답변 전달 |
-| 기존 테스트 회귀 | 다음 요건 진행 중지, 회귀 수정 후 전체 GREEN 확인 후 재개 |
+| 도메인 전문가 합의 불가 | 부서장이 보수적 입장(Graham 원칙) 기반 결정 |
+| 테스트 반복 실패 (3회+) | 개발팀장이 접근법 재검토 + 요건 수용 기준 재확인 |
+| 기존 테스트 회귀 | 다음 요건 중지, 회귀 수정 후 재개 |
 | 프론트 빌드 실패 | 에러 분석 + 수정 후 재빌드 |
-| KIS 키 미설정 | 모의 데이터로 테스트, 실제 연동은 키 설정 후 |
+| 규모 판단 오류 | 유형 D → A/B/C로 에스컬레이션 가능 |
+| 도메인 자문 필요 (개발 중) | 개발팀장이 해당 전문가를 Agent로 직접 호출 |
 
 ## 테스트 시나리오
 
-### 정상 흐름 — 포트폴리오 대시보드
+### 정상 흐름 — 기능 개발 (유형 A)
 ```
 사용자: "포트폴리오 대시보드 만들어줘"
-→ Phase 1: domain-consultation 팀 구성
-  → macro-sentinel: REQ-MACRO-001 "체제 배너 표시" 요건
-  → margin-analyst: REQ-MARGIN-001 "종목별 안전마진 등급 뱃지" 요건
-  → order-advisor: REQ-ORDER-001 "자산 배분 기준" 요건
-  → 교차 검토 + 통합 → 01_requirements.md
+→ Phase 0: 유형 A 판정 (새 페이지 + 새 API)
+→ Phase 1: domain-lead 호출 → 도메인 전문가 팀 구성 → 요건서 산출
 → 사용자 승인
-→ Phase 2: tdd-dev 팀 구성
-  → R_1(체제 배너): test-engineer RED → dev-architect GREEN → 테스트 PASS → qa-inspector VERIFY
-  → R_2(등급 뱃지): test-engineer RED → dev-architect GREEN → 테스트 PASS → qa-inspector VERIFY
-  → R_3(자산 배분): ...
-→ Phase 3: 전체 테스트 + 빌드 + 종합 보고
+→ Phase 2: dev-lead 호출 → TDD 팀 구성 → R_1~R_n RED→GREEN→VERIFY
+→ Phase 3: 결과 취합 + 보고
 ```
 
-### 에러 흐름 — 테스트 실패
+### 리팩토링 (유형 B)
 ```
-→ Phase 2 R_2:
-  → test-engineer: RED 테스트 작성 (Graham Number 계산)
-  → dev-architect: GREEN 구현
-  → test-engineer: 실행 → 2/5 FAIL (경계값 처리 오류)
-  → dev-architect: 수정 + 재실행 요청
-  → test-engineer: 재실행 → 5/5 PASS
-  → qa-inspector: VERIFY → PASS
-  → R_3로 진행
+사용자: "프론트엔드 훅 중복 정리해줘"
+→ Phase 0: 유형 B 판정
+→ Phase 1: dev-lead 호출 → refactor-engineer 감사 → qa-inspector 검증
+→ Phase 2: 결과 취합 + 보고
+```
+
+### 소규모 수정 (유형 D)
+```
+사용자: "Header에 포트폴리오 링크 추가해줘"
+→ Phase 0: 유형 D 판정 (파일 2개 수정)
+→ 직접 Header.jsx + App.jsx 수정
 ```

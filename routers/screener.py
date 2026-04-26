@@ -60,6 +60,7 @@ def _enrich_stock(stock: dict) -> dict:
     try:
         metrics = fetch_market_metrics(code)
         enriched["dividend_yield"] = metrics.get("dividend_yield")
+        enriched["sector"] = metrics.get("sector")
         enriched["high_52"] = metrics.get("high_52")
         enriched["low_52"] = metrics.get("low_52")
         # 52주 고점 대비 하락률 (%)

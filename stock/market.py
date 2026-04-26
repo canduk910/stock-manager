@@ -362,6 +362,7 @@ def fetch_market_metrics(code: str) -> dict:
         "roe": None,
         "dividend_yield": None,
         "dividend_per_share": None,
+        "sector": None,
     }
 
     if not ticker_str:
@@ -374,6 +375,7 @@ def fetch_market_metrics(code: str) -> dict:
         info = t.info
 
         result["market_type"] = _market_type(ticker_str)
+        result["sector"] = info.get("sector")
         result["mktcap"] = int(fi.market_cap) if fi.market_cap else None
         result["shares"] = int(fi.shares) if fi.shares else None
         result["high_52"] = int(fi.year_high) if fi.year_high else None

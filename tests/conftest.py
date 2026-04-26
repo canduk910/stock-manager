@@ -1,5 +1,8 @@
 """공용 pytest fixtures."""
 
+import os
+os.environ["TESTING"] = "1"
+
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -54,7 +57,8 @@ def _make_client(app, *, override_auth=True):
 
     app.dependency_overrides.clear()
     _db_session_mod.SessionLocal.configure(bind=orig_bind)
-    engine.dispose()
+    # engine.dispose() 제거 — StaticPool + in-memory SQLite는 프로세스 종료 시 자동 정리.
+    # daemon 스레드(pipeline 등)가 DB 접근 중 dispose되면 segfault 발생.
 
 
 @pytest.fixture

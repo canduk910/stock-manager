@@ -64,6 +64,7 @@ def _fetch_dashboard_row(item: dict) -> dict:
         "oi_margin": None,
         "report_date": None,
         "dividend_yield": None,
+        "sector": None,
     }
 
     # ── stock_info.db 영속 캐시 우선 조회 ──
@@ -118,6 +119,7 @@ def _fetch_dashboard_row(item: dict) -> dict:
         try:
             metrics = fetch_market_metrics(code)
             row["dividend_yield"] = metrics.get("dividend_yield")
+            row["sector"] = metrics.get("sector")
         except Exception as e:
             logger.debug("지표 조회 실패 (%s): %s", code, e)
 
@@ -152,6 +154,7 @@ def _fetch_dashboard_row(item: dict) -> dict:
             detail = yf_client.fetch_detail_yf(code)
             if detail:
                 row["dividend_yield"] = detail.get("dividend_yield")
+                row["sector"] = detail.get("sector")
         except Exception as e:
             logger.debug("해외 상세 조회 실패 (%s): %s", code, e)
 
