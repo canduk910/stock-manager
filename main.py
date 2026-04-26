@@ -119,8 +119,9 @@ app.add_middleware(
 )
 
 # 라우터 등록
-from routers import screener, earnings, balance, watchlist, detail, order, quote, advisory, search, market_board, macro, portfolio_advisor, report, pipeline, backtest, tax  # noqa: E402
+from routers import auth, screener, earnings, balance, watchlist, detail, order, quote, advisory, search, market_board, macro, portfolio_advisor, report, pipeline, backtest, tax  # noqa: E402
 
+app.include_router(auth.router)
 app.include_router(screener.router)
 app.include_router(earnings.router)
 app.include_router(balance.router)

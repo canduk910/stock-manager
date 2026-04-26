@@ -1,6 +1,6 @@
 """Backtest models: BacktestJob, Strategy."""
 
-from sqlalchemy import Column, Float, Integer, String, Text
+from sqlalchemy import Column, Float, Integer, String, Text, UniqueConstraint
 from sqlalchemy.types import JSON
 
 from db.base import Base
@@ -10,6 +10,7 @@ class BacktestJob(Base):
     __tablename__ = "backtest_jobs"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, nullable=False, default=1)
     job_id = Column(String, unique=True, nullable=False)
     strategy_name = Column(String, nullable=False)
     symbol = Column(String, nullable=False)
@@ -59,12 +60,17 @@ class Strategy(Base):
     __tablename__ = "strategies"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    name = Column(String, unique=True, nullable=False)
+    user_id = Column(Integer, nullable=False, default=1)
+    name = Column(String, nullable=False)
     description = Column(Text, nullable=True)
     strategy_type = Column(String, nullable=False)  # preset/custom
     yaml_content = Column(Text, nullable=True)
     builder_state_json = Column(JSON, nullable=True)
     created_at = Column(String, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "name", name="uq_strategy_user_name"),
+    )
 
     def to_dict(self) -> dict:
         return {

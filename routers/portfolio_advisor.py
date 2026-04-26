@@ -5,9 +5,10 @@ GET  /api/portfolio-advisor/history  — 자문 이력 목록.
 GET  /api/portfolio-advisor/history/{report_id} — 특정 자문 리포트 조회.
 """
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
+from services.auth_deps import require_admin
 from services import portfolio_advisor_service
 
 router = APIRouter(prefix="/api/portfolio-advisor", tags=["portfolio-advisor"])
@@ -19,7 +20,7 @@ class AnalyzeBody(BaseModel):
 
 
 @router.post("/analyze")
-def analyze(body: AnalyzeBody):
+def analyze(body: AnalyzeBody, _user: dict = Depends(require_admin)):
     """포트폴리오 AI 자문 분석. 캐시 히트 시 즉시 반환."""
     return portfolio_advisor_service.analyze_portfolio(
         body.balance_data, body.force_refresh
@@ -27,12 +28,12 @@ def analyze(body: AnalyzeBody):
 
 
 @router.get("/history")
-def get_history(limit: int = 20):
+def get_history(limit: int = 20, _user: dict = Depends(require_admin)):
     """포트폴리오 자문 이력 목록 (최신순, 본문 제외)."""
     return portfolio_advisor_service.get_report_history(limit)
 
 
 @router.get("/history/{report_id}")
-def get_report(report_id: int):
+def get_report(report_id: int, _user: dict = Depends(require_admin)):
     """특정 자문 리포트 상세 조회."""
     return portfolio_advisor_service.get_report_by_id(report_id)

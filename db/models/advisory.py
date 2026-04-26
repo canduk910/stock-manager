@@ -9,6 +9,7 @@ from db.base import Base
 class AdvisoryStock(Base):
     __tablename__ = "advisory_stocks"
 
+    user_id = Column(Integer, primary_key=True)
     code = Column(String, primary_key=True)
     market = Column(String, primary_key=True, default="KR")
     name = Column(String, nullable=False)
@@ -28,6 +29,7 @@ class AdvisoryStock(Base):
 class AdvisoryCache(Base):
     __tablename__ = "advisory_cache"
 
+    user_id = Column(Integer, primary_key=True)
     code = Column(String, primary_key=True)
     market = Column(String, primary_key=True, default="KR")
     updated_at = Column(String, nullable=False)
@@ -50,17 +52,17 @@ class AdvisoryReport(Base):
     __tablename__ = "advisory_reports"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, nullable=False, default=1)
     code = Column(String, nullable=False)
     market = Column(String, nullable=False, default="KR")
     generated_at = Column(String, nullable=False)
     model = Column(String, nullable=False)
     report = Column(JSON, nullable=False)
-    # Phase 3 신규 컬럼 (모두 nullable, 기존 데이터 영향 없음)
-    grade = Column(String, nullable=True)               # A/B+/B/C/D
-    grade_score = Column(Integer, nullable=True)         # 0~28
-    composite_score = Column(Float, nullable=True)       # 0~100
-    regime_alignment = Column(Float, nullable=True)      # 0~100
-    schema_version = Column(String, nullable=True, default="v1")  # v1/v2
+    grade = Column(String, nullable=True)
+    grade_score = Column(Integer, nullable=True)
+    composite_score = Column(Float, nullable=True)
+    regime_alignment = Column(Float, nullable=True)
+    schema_version = Column(String, nullable=True, default="v1")
     value_trap_warning = Column(Boolean, nullable=True, default=False)
 
     __table_args__ = (
@@ -104,7 +106,6 @@ class PortfolioReport(Base):
     generated_at = Column(String, nullable=False)
     model = Column(String, nullable=False)
     report = Column(JSON, nullable=False)
-    # Phase 3 신규 컬럼
     weighted_grade_avg = Column(Float, nullable=True)
     regime = Column(String, nullable=True)
     schema_version = Column(String, nullable=True, default="v1")

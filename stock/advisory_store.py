@@ -1,7 +1,6 @@
 """AI자문 종목 목록 + 캐시 + 리포트 + 포트폴리오 자문 CRUD — SQLAlchemy ORM adapter.
 
-기존 함수 시그니처 100% 유지. 내부는 AdvisoryRepository에 위임.
-services/, routers/ 변경 없음.
+user_id 파라미터 추가. 내부는 AdvisoryRepository에 위임.
 """
 
 from typing import Optional
@@ -12,49 +11,50 @@ from db.session import get_session
 
 # ── 자문종목 CRUD ─────────────────────────────────────────────────────────────
 
-def add_stock(code: str, market: str, name: str, memo: str = "") -> bool:
+def add_stock(user_id: int, code: str, market: str, name: str, memo: str = "") -> bool:
     """종목 추가. 이미 존재하면 False."""
     with get_session() as db:
-        return AdvisoryRepository(db).add_stock(code, market, name, memo)
+        return AdvisoryRepository(db).add_stock(user_id, code, market, name, memo)
 
 
-def remove_stock(code: str, market: str) -> bool:
+def remove_stock(user_id: int, code: str, market: str) -> bool:
     """종목 삭제. 삭제된 행이 있으면 True."""
     with get_session() as db:
-        return AdvisoryRepository(db).remove_stock(code, market)
+        return AdvisoryRepository(db).remove_stock(user_id, code, market)
 
 
-def all_stocks() -> list[dict]:
+def all_stocks(user_id: int) -> list[dict]:
     """전체 자문종목 목록 (added_date 역순)."""
     with get_session() as db:
-        return AdvisoryRepository(db).all_stocks()
+        return AdvisoryRepository(db).all_stocks(user_id)
 
 
-def get_stock(code: str, market: str) -> Optional[dict]:
+def get_stock(user_id: int, code: str, market: str) -> Optional[dict]:
     """단일 종목 조회."""
     with get_session() as db:
-        return AdvisoryRepository(db).get_stock(code, market)
+        return AdvisoryRepository(db).get_stock(user_id, code, market)
 
 
 # ── 캐시 CRUD ─────────────────────────────────────────────────────────────────
 
-def save_cache(code: str, market: str, fundamental: dict, technical: dict,
+def save_cache(user_id: int, code: str, market: str, fundamental: dict, technical: dict,
                strategy_signals: dict = None) -> None:
     """분석 데이터 캐시 저장 (upsert)."""
     with get_session() as db:
-        AdvisoryRepository(db).save_cache(code, market, fundamental, technical,
+        AdvisoryRepository(db).save_cache(user_id, code, market, fundamental, technical,
                                           strategy_signals=strategy_signals)
 
 
-def get_cache(code: str, market: str) -> Optional[dict]:
+def get_cache(user_id: int, code: str, market: str) -> Optional[dict]:
     """캐시 조회. 없으면 None."""
     with get_session() as db:
-        return AdvisoryRepository(db).get_cache(code, market)
+        return AdvisoryRepository(db).get_cache(user_id, code, market)
 
 
 # ── 리포트 CRUD ───────────────────────────────────────────────────────────────
 
 def save_report(
+    user_id: int,
     code: str,
     market: str,
     model: str,
@@ -69,17 +69,17 @@ def save_report(
     """AI 리포트 저장. 생성된 ID 반환."""
     with get_session() as db:
         return AdvisoryRepository(db).save_report(
-            code, market, model, report,
+            user_id, code, market, model, report,
             grade=grade, grade_score=grade_score,
             composite_score=composite_score, regime_alignment=regime_alignment,
             schema_version=schema_version, value_trap_warning=value_trap_warning,
         )
 
 
-def get_report_history(code: str, market: str, limit: int = 20) -> list[dict]:
+def get_report_history(user_id: int, code: str, market: str, limit: int = 20) -> list[dict]:
     """AI 리포트 히스토리 목록 (최신순, 본문 제외)."""
     with get_session() as db:
-        return AdvisoryRepository(db).get_report_history(code, market, limit)
+        return AdvisoryRepository(db).get_report_history(user_id, code, market, limit)
 
 
 def get_report_by_id(report_id: int) -> Optional[dict]:
@@ -88,13 +88,13 @@ def get_report_by_id(report_id: int) -> Optional[dict]:
         return AdvisoryRepository(db).get_report_by_id(report_id)
 
 
-def get_latest_report(code: str, market: str) -> Optional[dict]:
+def get_latest_report(user_id: int, code: str, market: str) -> Optional[dict]:
     """최신 AI 리포트 조회."""
     with get_session() as db:
-        return AdvisoryRepository(db).get_latest_report(code, market)
+        return AdvisoryRepository(db).get_latest_report(user_id, code, market)
 
 
-# ── 포트폴리오 자문 리포트 CRUD ──────────────────────────────────────────────
+# ── 포트폴리오 자문 리포트 CRUD (user_id 불필요 — admin 전용) ──────────────────
 
 def save_portfolio_report(
     model: str,

@@ -1,6 +1,10 @@
 import { useState } from 'react'
 import { Routes, Route } from 'react-router-dom'
+import { useAuth } from './hooks/useAuth'
 import Header from './components/layout/Header'
+import ProtectedRoute from './components/common/ProtectedRoute'
+import LoginPage from './pages/LoginPage'
+import RegisterPage from './pages/RegisterPage'
 import DashboardPage from './pages/DashboardPage'
 import ScreenerPage from './pages/ScreenerPage'
 import EarningsPage from './pages/EarningsPage'
@@ -24,6 +28,7 @@ export const WIDTH_OPTIONS = [
 ]
 
 export default function App() {
+  const { user } = useAuth()
   const [widthKey, setWidthKey] = useState(
     () => localStorage.getItem('layout-width') || 'normal'
   )
@@ -36,27 +41,37 @@ export default function App() {
 
   const maxCls = WIDTH_OPTIONS.find((o) => o.key === widthKey)?.maxCls ?? 'max-w-7xl mx-auto'
 
+  // 로그인/회원가입 페이지는 Header 없이 렌더링
   return (
     <div className="min-h-screen bg-gray-50">
-      <Header widthKey={widthKey} onWidthChange={handleWidth} maxCls={maxCls} />
-      <main className={`px-4 py-6 ${maxCls}`}>
-        <Routes>
-          <Route path="/" element={<DashboardPage />} />
-          <Route path="/screener" element={<ScreenerPage />} />
-          <Route path="/earnings" element={<EarningsPage />} />
-          <Route path="/balance" element={<BalancePage notify={notify} />} />
-          <Route path="/watchlist" element={<WatchlistPage />} />
-          <Route path="/detail/:symbol" element={<DetailPage />} />
-          <Route path="/order" element={<OrderPage notify={notify} />} />
-          <Route path="/market-board" element={<MarketBoardPage />} />
-          <Route path="/macro" element={<MacroPage />} />
-          <Route path="/portfolio" element={<PortfolioPage notify={notify} />} />
-          <Route path="/reports" element={<ReportPage />} />
-          <Route path="/backtest" element={<BacktestPage />} />
-          <Route path="/tax" element={<TaxPage />} />
-        </Routes>
-      </main>
-      <ToastNotification toasts={toasts} removeToast={removeToast} />
+      <Routes>
+        <Route path="/login" element={<LoginPage />} />
+        <Route path="/register" element={<RegisterPage />} />
+        <Route path="*" element={
+          <>
+            {user && <Header widthKey={widthKey} onWidthChange={handleWidth} maxCls={maxCls} />}
+            <main className={`px-4 py-6 ${maxCls}`}>
+              <Routes>
+                <Route path="/" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
+                <Route path="/screener" element={<ProtectedRoute><ScreenerPage /></ProtectedRoute>} />
+                <Route path="/earnings" element={<ProtectedRoute><EarningsPage /></ProtectedRoute>} />
+                <Route path="/watchlist" element={<ProtectedRoute><WatchlistPage /></ProtectedRoute>} />
+                <Route path="/detail/:symbol" element={<ProtectedRoute><DetailPage /></ProtectedRoute>} />
+                <Route path="/market-board" element={<ProtectedRoute><MarketBoardPage /></ProtectedRoute>} />
+                <Route path="/macro" element={<ProtectedRoute><MacroPage /></ProtectedRoute>} />
+                <Route path="/reports" element={<ProtectedRoute><ReportPage /></ProtectedRoute>} />
+                <Route path="/backtest" element={<ProtectedRoute><BacktestPage /></ProtectedRoute>} />
+                {/* Admin-only routes */}
+                <Route path="/balance" element={<ProtectedRoute adminOnly><BalancePage notify={notify} /></ProtectedRoute>} />
+                <Route path="/order" element={<ProtectedRoute adminOnly><OrderPage notify={notify} /></ProtectedRoute>} />
+                <Route path="/portfolio" element={<ProtectedRoute adminOnly><PortfolioPage notify={notify} /></ProtectedRoute>} />
+                <Route path="/tax" element={<ProtectedRoute adminOnly><TaxPage /></ProtectedRoute>} />
+              </Routes>
+            </main>
+            <ToastNotification toasts={toasts} removeToast={removeToast} />
+          </>
+        } />
+      </Routes>
     </div>
   )
 }

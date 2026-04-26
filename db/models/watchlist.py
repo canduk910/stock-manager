@@ -8,6 +8,7 @@ from db.base import Base
 class Watchlist(Base):
     __tablename__ = "watchlist"
 
+    user_id = Column(Integer, primary_key=True)
     code = Column(String, primary_key=True)
     market = Column(String, primary_key=True, default="KR")
     name = Column(String, nullable=False)
@@ -27,6 +28,7 @@ class Watchlist(Base):
 class WatchlistOrder(Base):
     __tablename__ = "watchlist_order"
 
+    user_id = Column(Integer, primary_key=True)
     code = Column(String, primary_key=True)
     market = Column(String, primary_key=True, default="KR")
     position = Column(Integer, nullable=False)

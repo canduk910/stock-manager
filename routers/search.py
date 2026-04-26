@@ -1,7 +1,9 @@
 """종목 검색 API — KR 자동완성 / US 티커 검증 / FNO 선물옵션 검색."""
 
 import re
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
+
+from services.auth_deps import get_current_user
 
 router = APIRouter(prefix="/api/search", tags=["search"])
 
@@ -10,6 +12,7 @@ router = APIRouter(prefix="/api/search", tags=["search"])
 def search_stocks(
     q: str = Query("", description="검색어 (종목명, 코드, 티커)"),
     market: str = Query("KR", description="시장 구분: KR | US | FNO"),
+    _user: dict = Depends(get_current_user),
 ):
     """
     KR: 종목명/코드 부분 검색 → 최대 10건 자동완성 목록

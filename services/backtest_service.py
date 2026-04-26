@@ -152,6 +152,7 @@ def run_preset_backtest(
     commission_rate: Optional[float] = None,
     tax_rate: Optional[float] = None,
     slippage: Optional[float] = None,
+    user_id: int = 1,
 ) -> dict:
     """프리셋 전략 백테스트 실행.
 
@@ -164,6 +165,7 @@ def run_preset_backtest(
 
     # DB에 작업 기록 (Write-Ahead)
     strategy_store.save_backtest_job(
+        user_id=user_id,
         job_id=job_id,
         strategy_name=preset,
         symbol=symbol,
@@ -217,6 +219,7 @@ def run_custom_backtest(
     slippage: Optional[float] = None,
     strategy_display_name: Optional[str] = None,
     builder_state: Optional[dict] = None,
+    user_id: int = 1,
 ) -> dict:
     """커스텀 YAML 전략 백테스트 실행.
 
@@ -248,6 +251,7 @@ def run_custom_backtest(
 
     job_id = str(uuid.uuid4())
     strategy_store.save_backtest_job(
+        user_id=user_id,
         job_id=job_id,
         strategy_name=job_strategy_name,
         symbol=symbol,

@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { Link } from 'react-router-dom'
+import { useAuth } from '../hooks/useAuth'
 import { usePortfolio } from '../hooks/usePortfolio'
 import { useEarnings } from '../hooks/useEarnings'
 import PortfolioSummary from '../components/balance/PortfolioSummary'
@@ -28,6 +29,7 @@ function SectionHeader({ title, linkTo, linkLabel }) {
 }
 
 export default function DashboardPage() {
+  const { isAdmin } = useAuth()
   const {
     balance, sentiment, loading, error,
     allocation, totalReturn, cashRatio,
@@ -46,35 +48,37 @@ export default function DashboardPage() {
       {/* 매크로 체제 배너 */}
       <RegimeBanner sentiment={sentiment} />
 
-      {/* 잔고 요약 */}
-      <section>
-        <SectionHeader title="자산 현황" linkTo="/portfolio" linkLabel="포트폴리오" />
-        {loading && <LoadingSpinner message="잔고 조회 중..." />}
-        {error && !loading && (
-          <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-700">
-            KIS API 키가 설정되지 않아 잔고 조회를 사용할 수 없습니다.
-            <Link to="/balance" className="ml-2 underline">설정 안내 →</Link>
-          </div>
-        )}
-        {balance && !loading && (
-          <div className="space-y-4">
-            <PortfolioSummary data={balance} />
-            {totalReturn != null && (
-              <div className="flex gap-4 text-sm text-gray-600">
-                <span>총 수익률 <strong className={totalReturn >= 0 ? 'text-red-500' : 'text-blue-500'}>
-                  {totalReturn >= 0 ? '+' : ''}{totalReturn}%
-                </strong></span>
-                <span>현금 비중 <strong>{cashRatio}%</strong></span>
-              </div>
-            )}
-          </div>
-        )}
-      </section>
+      {/* 잔고 요약 (admin only) */}
+      {isAdmin && (
+        <section>
+          <SectionHeader title="자산 현황" linkTo="/portfolio" linkLabel="포트폴리오" />
+          {loading && <LoadingSpinner message="잔고 조회 중..." />}
+          {error && !loading && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-700">
+              KIS API 키가 설정되지 않아 잔고 조회를 사용할 수 없습니다.
+              <Link to="/balance" className="ml-2 underline">설정 안내 →</Link>
+            </div>
+          )}
+          {balance && !loading && (
+            <div className="space-y-4">
+              <PortfolioSummary data={balance} />
+              {totalReturn != null && (
+                <div className="flex gap-4 text-sm text-gray-600">
+                  <span>총 수익률 <strong className={totalReturn >= 0 ? 'text-red-500' : 'text-blue-500'}>
+                    {totalReturn >= 0 ? '+' : ''}{totalReturn}%
+                  </strong></span>
+                  <span>현금 비중 <strong>{cashRatio}%</strong></span>
+                </div>
+              )}
+            </div>
+          )}
+        </section>
+      )}
 
       {/* 자산 배분 + 오늘 공시 */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* 자산 배분 */}
-        {allocation.length > 0 && (
+        {/* 자산 배분 (admin only) */}
+        {isAdmin && allocation.length > 0 && (
           <AllocationChart allocation={allocation} />
         )}
 

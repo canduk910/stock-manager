@@ -117,5 +117,8 @@ export function useWebSocket(url, { onMessage, onOpen } = {}) {
 /** WebSocket URL 생성 헬퍼 */
 export function buildWsUrl(path) {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  return `${protocol}//${window.location.host}${path}`
+  const token = localStorage.getItem('access_token')
+  const sep = path.includes('?') ? '&' : '?'
+  const tokenParam = token ? `${sep}token=${encodeURIComponent(token)}` : ''
+  return `${protocol}//${window.location.host}${path}${tokenParam}`
 }

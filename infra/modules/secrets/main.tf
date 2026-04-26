@@ -17,6 +17,7 @@ locals {
     KRX_PASSWORD     = "CHANGE_ME"
     FINNHUB_API_KEY  = "CHANGE_ME"
     KIS_HTS_ID       = "CHANGE_ME"
+    JWT_SECRET_KEY   = "CHANGE_ME"
   }
 
   # String (비민감 설정)

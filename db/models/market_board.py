@@ -8,6 +8,7 @@ from db.base import Base
 class MarketBoardStock(Base):
     __tablename__ = "market_board_stocks"
 
+    user_id = Column(Integer, primary_key=True)
     code = Column(String, primary_key=True)
     market = Column(String, primary_key=True, default="KR")
     name = Column(String, nullable=False)
@@ -25,6 +26,7 @@ class MarketBoardStock(Base):
 class MarketBoardOrder(Base):
     __tablename__ = "market_board_order"
 
+    user_id = Column(Integer, primary_key=True)
     code = Column(String, primary_key=True)
     market = Column(String, primary_key=True, default="KR")
     position = Column(Integer, nullable=False)

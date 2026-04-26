@@ -183,7 +183,7 @@ def _fetch_latest_report_summary(code: str, market: str) -> dict:
     GPT가 포트폴리오 판단 시 개별 종목의 기존 분석 결과를 참고하도록 한다.
     """
     try:
-        latest = advisory_store.get_latest_report(code, market)
+        latest = advisory_store.get_latest_report(1, code, market)  # admin-only
     except Exception as e:
         logger.debug("개별 리포트 조회 실패 [%s %s]: %s", code, market, e)
         return {"grade": None, "summary_2lines": None, "discount_rate": None, "risks": []}

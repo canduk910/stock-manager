@@ -16,6 +16,7 @@ class BacktestRepository:
 
     def create_job(
         self,
+        user_id: int,
         job_id: str,
         strategy_name: str,
         symbol: str,
@@ -26,6 +27,7 @@ class BacktestRepository:
         strategy_display_name: str | None = None,
     ) -> dict:
         job = BacktestJob(
+            user_id=user_id,
             job_id=job_id,
             strategy_name=strategy_name,
             strategy_display_name=strategy_display_name,
@@ -102,11 +104,12 @@ class BacktestRepository:
 
     def list_jobs(
         self,
+        user_id: int,
         symbol: Optional[str] = None,
         market: Optional[str] = None,
         limit: int = 20,
     ) -> list[dict]:
-        q = self.db.query(BacktestJob)
+        q = self.db.query(BacktestJob).filter_by(user_id=user_id)
         if symbol:
             q = q.filter_by(symbol=symbol.upper())
         if market:
@@ -125,13 +128,14 @@ class BacktestRepository:
 
     def save_strategy(
         self,
+        user_id: int,
         name: str,
         strategy_type: str,
         description: Optional[str] = None,
         yaml_content: Optional[str] = None,
         builder_state_json: Optional[dict] = None,
     ) -> dict:
-        existing = self.db.query(Strategy).filter_by(name=name).first()
+        existing = self.db.query(Strategy).filter_by(user_id=user_id, name=name).first()
         if existing:
             existing.description = description
             existing.strategy_type = strategy_type
@@ -140,6 +144,7 @@ class BacktestRepository:
             self.db.flush()
             return existing.to_dict()
         s = Strategy(
+            user_id=user_id,
             name=name,
             description=description,
             strategy_type=strategy_type,
@@ -151,19 +156,19 @@ class BacktestRepository:
         self.db.flush()
         return s.to_dict()
 
-    def get_strategy(self, name: str) -> Optional[dict]:
-        s = self.db.query(Strategy).filter_by(name=name).first()
+    def get_strategy(self, user_id: int, name: str) -> Optional[dict]:
+        s = self.db.query(Strategy).filter_by(user_id=user_id, name=name).first()
         return s.to_dict() if s else None
 
-    def delete_strategy(self, name: str) -> bool:
-        s = self.db.query(Strategy).filter_by(name=name).first()
+    def delete_strategy(self, user_id: int, name: str) -> bool:
+        s = self.db.query(Strategy).filter_by(user_id=user_id, name=name).first()
         if not s:
             return False
         self.db.delete(s)
         return True
 
-    def list_strategies(self, strategy_type: Optional[str] = None) -> list[dict]:
-        q = self.db.query(Strategy)
+    def list_strategies(self, user_id: int, strategy_type: Optional[str] = None) -> list[dict]:
+        q = self.db.query(Strategy).filter_by(user_id=user_id)
         if strategy_type:
             q = q.filter_by(strategy_type=strategy_type)
         rows = q.order_by(Strategy.id.desc()).all()

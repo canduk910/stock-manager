@@ -7,7 +7,7 @@ from db.repositories.backtest_repo import BacktestRepository
 class TestBacktestJob:
     def test_create_job(self, db_session):
         repo = BacktestRepository(db_session)
-        job = repo.create_job(
+        job = repo.create_job(1, 
             job_id="job-001",
             strategy_name="SMA Cross",
             symbol="005930",
@@ -23,7 +23,7 @@ class TestBacktestJob:
 
     def test_update_job_result(self, db_session):
         repo = BacktestRepository(db_session)
-        repo.create_job(
+        repo.create_job(1, 
             job_id="job-001", strategy_name="SMA Cross",
             symbol="005930", market="KR", strategy_type="preset",
             submitted_at="2026-04-19T10:00:00",
@@ -62,7 +62,7 @@ class TestBacktestJob:
 
     def test_update_job_status(self, db_session):
         repo = BacktestRepository(db_session)
-        repo.create_job(
+        repo.create_job(1, 
             job_id="job-001", strategy_name="SMA Cross",
             symbol="005930", market="KR", strategy_type="preset",
             submitted_at="2026-04-19T10:00:00",
@@ -84,7 +84,7 @@ class TestBacktestJob:
 
     def test_get_job(self, db_session):
         repo = BacktestRepository(db_session)
-        repo.create_job(
+        repo.create_job(1, 
             job_id="job-001", strategy_name="SMA Cross",
             symbol="005930", market="KR", strategy_type="preset",
             submitted_at="2026-04-19T10:00:00",
@@ -101,12 +101,12 @@ class TestBacktestJob:
 
     def test_get_latest_metrics(self, db_session):
         repo = BacktestRepository(db_session)
-        repo.create_job(
+        repo.create_job(1, 
             job_id="job-001", strategy_name="SMA Cross",
             symbol="005930", market="KR", strategy_type="preset",
             submitted_at="2026-04-19T10:00:00",
         )
-        repo.create_job(
+        repo.create_job(1, 
             job_id="job-002", strategy_name="RSI",
             symbol="005930", market="KR", strategy_type="preset",
             submitted_at="2026-04-19T11:00:00",
@@ -136,7 +136,7 @@ class TestBacktestJob:
 
     def test_get_latest_metrics_no_completed(self, db_session):
         repo = BacktestRepository(db_session)
-        repo.create_job(
+        repo.create_job(1, 
             job_id="job-001", strategy_name="SMA",
             symbol="005930", market="KR", strategy_type="preset",
             submitted_at="2026-04-19T10:00:00",
@@ -148,33 +148,33 @@ class TestBacktestJob:
 
     def test_list_jobs_filter(self, db_session):
         repo = BacktestRepository(db_session)
-        repo.create_job(
+        repo.create_job(1, 
             job_id="job-kr", strategy_name="SMA",
             symbol="005930", market="KR", strategy_type="preset",
             submitted_at="2026-04-19T10:00:00",
         )
-        repo.create_job(
+        repo.create_job(1, 
             job_id="job-us", strategy_name="RSI",
             symbol="AAPL", market="US", strategy_type="preset",
             submitted_at="2026-04-19T10:00:00",
         )
         db_session.commit()
 
-        kr_jobs = repo.list_jobs(market="KR")
+        kr_jobs = repo.list_jobs(1, market="KR")
         assert len(kr_jobs) == 1
         assert kr_jobs[0]["symbol"] == "005930"
 
-        all_jobs = repo.list_jobs()
+        all_jobs = repo.list_jobs(1, )
         assert len(all_jobs) == 2
 
-        aapl_jobs = repo.list_jobs(symbol="AAPL")
+        aapl_jobs = repo.list_jobs(1, symbol="AAPL")
         assert len(aapl_jobs) == 1
 
 
 class TestStrategy:
     def test_save_strategy(self, db_session):
         repo = BacktestRepository(db_session)
-        strategy = repo.save_strategy(
+        strategy = repo.save_strategy(1, 
             name="My SMA", strategy_type="custom",
             description="SMA crossover", yaml_content="sma: {fast: 5, slow: 20}",
         )
@@ -185,33 +185,33 @@ class TestStrategy:
 
     def test_save_strategy_upsert(self, db_session):
         repo = BacktestRepository(db_session)
-        repo.save_strategy(name="My SMA", strategy_type="custom", description="v1")
+        repo.save_strategy(1, name="My SMA", strategy_type="custom", description="v1")
         db_session.commit()
 
         # 같은 이름으로 다시 저장 → 덮어쓰기
-        updated = repo.save_strategy(
+        updated = repo.save_strategy(1, 
             name="My SMA", strategy_type="custom", description="v2",
         )
         db_session.commit()
 
         assert updated["description"] == "v2"
 
-        strategies = repo.list_strategies()
+        strategies = repo.list_strategies(1, )
         assert len(strategies) == 1
 
     def test_list_strategies(self, db_session):
         repo = BacktestRepository(db_session)
-        repo.save_strategy(name="SMA", strategy_type="preset")
-        repo.save_strategy(name="Custom1", strategy_type="custom")
+        repo.save_strategy(1, name="SMA", strategy_type="preset")
+        repo.save_strategy(1, name="Custom1", strategy_type="custom")
         db_session.commit()
 
-        all_s = repo.list_strategies()
+        all_s = repo.list_strategies(1, )
         assert len(all_s) == 2
 
-        presets = repo.list_strategies(strategy_type="preset")
+        presets = repo.list_strategies(1, strategy_type="preset")
         assert len(presets) == 1
         assert presets[0]["name"] == "SMA"
 
     def test_list_strategies_empty(self, db_session):
         repo = BacktestRepository(db_session)
-        assert repo.list_strategies() == []
+        assert repo.list_strategies(1, ) == []

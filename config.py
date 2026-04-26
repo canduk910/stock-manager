@@ -44,3 +44,9 @@ DATABASE_URL = os.getenv(
 # ── KIS AI Extensions (MCP 서버) ──────────────────────────────────────
 KIS_MCP_URL = os.getenv("KIS_MCP_URL", "http://127.0.0.1:3846/mcp")
 KIS_MCP_ENABLED = os.getenv("KIS_MCP_ENABLED", "false").lower() == "true"
+
+# ── JWT 인증 ──────────────────────────────────────────────────────────
+JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "change-me-in-production-please")
+JWT_ALGORITHM = "HS256"
+JWT_ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("JWT_ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
+JWT_REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv("JWT_REFRESH_TOKEN_EXPIRE_DAYS", "7"))

@@ -3,9 +3,10 @@
 자문종목 CRUD + 데이터 새로고침 + AI 리포트 생성.
 """
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
+from services.auth_deps import get_current_user
 from services import advisory_service
 from services.exceptions import ServiceError, NotFoundError, ConflictError
 from stock import advisory_store
@@ -25,22 +26,22 @@ class AddStockBody(BaseModel):
 # ── 엔드포인트 ────────────────────────────────────────────────────────────────
 
 @router.get("")
-def list_stocks():
+def list_stocks(user: dict = Depends(get_current_user)):
     """자문종목 목록 (캐시 updated_at 포함)."""
-    stocks = advisory_store.all_stocks()
+    stocks = advisory_store.all_stocks(user["id"])
     result = []
     for s in stocks:
-        cache = advisory_store.get_cache(s["code"], s["market"])
+        cache = advisory_store.get_cache(user["id"], s["code"], s["market"])
         result.append({
             **s,
             "updated_at": cache["updated_at"] if cache else None,
-            "has_report": advisory_store.get_latest_report(s["code"], s["market"]) is not None,
+            "has_report": advisory_store.get_latest_report(user["id"], s["code"], s["market"]) is not None,
         })
     return result
 
 
 @router.post("")
-def add_stock(body: AddStockBody):
+def add_stock(body: AddStockBody, user: dict = Depends(get_current_user)):
     """자문종목 추가."""
     raw = body.code.strip()
     market = body.market.upper()
@@ -81,23 +82,23 @@ def add_stock(body: AddStockBody):
         code = raw.upper()
         name = _resolve_name(code, market)
 
-    ok = advisory_store.add_stock(code, market, name, body.memo)
+    ok = advisory_store.add_stock(user["id"], code, market, name, body.memo)
     if not ok:
         raise ConflictError("이미 등록된 종목입니다.")
-    return advisory_store.get_stock(code, market)
+    return advisory_store.get_stock(user["id"], code, market)
 
 
 @router.delete("/{code}")
-def remove_stock(code: str, market: str = Query("KR")):
+def remove_stock(code: str, market: str = Query("KR"), user: dict = Depends(get_current_user)):
     """자문종목 삭제."""
-    ok = advisory_store.remove_stock(code.upper(), market.upper())
+    ok = advisory_store.remove_stock(user["id"], code.upper(), market.upper())
     if not ok:
         raise NotFoundError("종목을 찾을 수 없습니다.")
     return {"ok": True}
 
 
 @router.post("/{code}/refresh")
-def refresh_data(code: str, market: str = Query("KR"), name: str = Query(None)):
+def refresh_data(code: str, market: str = Query("KR"), name: str = Query(None), user: dict = Depends(get_current_user)):
     """데이터 새로고침 (30초+ 소요). 기본적/기술적 분석 전체 수집.
 
     advisory_stocks 미등록 종목도 허용 (DetailPage에서 직접 호출 가능).
@@ -106,24 +107,24 @@ def refresh_data(code: str, market: str = Query("KR"), name: str = Query(None)):
     code = code.upper()
     market = market.upper()
 
-    stock = advisory_store.get_stock(code, market)
+    stock = advisory_store.get_stock(user["id"], code, market)
     stock_name = stock["name"] if stock else (name or code)
 
-    result = advisory_service.refresh_stock_data(code, market, stock_name)
+    result = advisory_service.refresh_stock_data(code, market, stock_name, user_id=user["id"])
     return result
 
 
 @router.get("/{code}/data")
-def get_data(code: str, market: str = Query("KR")):
+def get_data(code: str, market: str = Query("KR"), user: dict = Depends(get_current_user)):
     """캐시된 분석 데이터 조회."""
-    cache = advisory_store.get_cache(code.upper(), market.upper())
+    cache = advisory_store.get_cache(user["id"], code.upper(), market.upper())
     if not cache:
         raise NotFoundError("데이터 없음. 새로고침을 먼저 해주세요.")
     return cache
 
 
 @router.post("/{code}/analyze")
-def analyze(code: str, market: str = Query("KR")):
+def analyze(code: str, market: str = Query("KR"), user: dict = Depends(get_current_user)):
     """OpenAI GPT-4o 리포트 생성 (10~30초 소요).
 
     OPENAI_API_KEY 미설정 시 503 반환.
@@ -132,10 +133,10 @@ def analyze(code: str, market: str = Query("KR")):
     code = code.upper()
     market = market.upper()
 
-    stock = advisory_store.get_stock(code, market)
+    stock = advisory_store.get_stock(user["id"], code, market)
     name = stock["name"] if stock else code
 
-    result = advisory_service.generate_ai_report(code, market, name)
+    result = advisory_service.generate_ai_report(code, market, name, user_id=user["id"])
     return result
 
 
@@ -145,6 +146,7 @@ def get_ohlcv(
     market: str = Query("KR"),
     interval: str = Query("15m"),
     period: str = Query("60d"),
+    _user: dict = Depends(get_current_user),
 ):
     """타임프레임/기간 지정 OHLCV + 기술지표 조회.
 
@@ -157,24 +159,24 @@ def get_ohlcv(
 
 
 @router.get("/{code}/reports")
-def get_report_history(code: str, market: str = Query("KR"), limit: int = Query(20)):
+def get_report_history(code: str, market: str = Query("KR"), limit: int = Query(20), user: dict = Depends(get_current_user)):
     """AI 리포트 히스토리 목록 (최신순, 본문 제외)."""
-    return advisory_store.get_report_history(code.upper(), market.upper(), limit)
+    return advisory_store.get_report_history(user["id"], code.upper(), market.upper(), limit)
 
 
 @router.get("/{code}/reports/{report_id}")
-def get_report_by_id(code: str, report_id: int, market: str = Query("KR")):
+def get_report_by_id(code: str, report_id: int, market: str = Query("KR"), user: dict = Depends(get_current_user)):
     """특정 ID의 AI 리포트 조회."""
-    report = advisory_store.get_report_by_id(report_id)
+    report = advisory_store.get_report_by_id(user["id"], report_id)
     if not report or report["code"] != code.upper():
         raise NotFoundError("리포트를 찾을 수 없습니다.")
     return report
 
 
 @router.get("/{code}/report")
-def get_report(code: str, market: str = Query("KR")):
+def get_report(code: str, market: str = Query("KR"), user: dict = Depends(get_current_user)):
     """최신 AI 리포트 조회."""
-    report = advisory_store.get_latest_report(code.upper(), market.upper())
+    report = advisory_store.get_latest_report(user["id"], code.upper(), market.upper())
     if not report:
         raise NotFoundError("생성된 리포트가 없습니다.")
     return report

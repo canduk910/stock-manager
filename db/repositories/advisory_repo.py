@@ -19,16 +19,17 @@ class AdvisoryRepository:
 
     # ── Advisory Stocks CRUD ────────────────────────────────────
 
-    def add_stock(self, code: str, market: str, name: str, memo: str = "") -> bool:
+    def add_stock(self, user_id: int, code: str, market: str, name: str, memo: str = "") -> bool:
         code_u, market_u = code.upper(), market.upper()
         existing = (
             self.db.query(AdvisoryStock)
-            .filter_by(code=code_u, market=market_u)
+            .filter_by(user_id=user_id, code=code_u, market=market_u)
             .first()
         )
         if existing:
             return False
         self.db.add(AdvisoryStock(
+            user_id=user_id,
             code=code_u,
             market=market_u,
             name=name,
@@ -37,42 +38,43 @@ class AdvisoryRepository:
         ))
         return True
 
-    def remove_stock(self, code: str, market: str) -> bool:
+    def remove_stock(self, user_id: int, code: str, market: str) -> bool:
         count = (
             self.db.query(AdvisoryStock)
-            .filter_by(code=code.upper(), market=market.upper())
+            .filter_by(user_id=user_id, code=code.upper(), market=market.upper())
             .delete()
         )
         return count > 0
 
-    def all_stocks(self) -> list[dict]:
+    def all_stocks(self, user_id: int) -> list[dict]:
         rows = (
             self.db.query(AdvisoryStock)
+            .filter_by(user_id=user_id)
             .order_by(AdvisoryStock.added_date.desc())
             .all()
         )
         return [r.to_dict() for r in rows]
 
-    def get_stock(self, code: str, market: str) -> Optional[dict]:
+    def get_stock(self, user_id: int, code: str, market: str) -> Optional[dict]:
         row = (
             self.db.query(AdvisoryStock)
-            .filter_by(code=code.upper(), market=market.upper())
+            .filter_by(user_id=user_id, code=code.upper(), market=market.upper())
             .first()
         )
         return row.to_dict() if row else None
 
     # ── Cache CRUD ──────────────────────────────────────────────
 
-    def save_cache(self, code: str, market: str, fundamental: dict, technical: dict,
+    def save_cache(self, user_id: int, code: str, market: str, fundamental: dict, technical: dict,
                    strategy_signals: dict = None) -> None:
         code_u, market_u = code.upper(), market.upper()
         row = (
             self.db.query(AdvisoryCache)
-            .filter_by(code=code_u, market=market_u)
+            .filter_by(user_id=user_id, code=code_u, market=market_u)
             .first()
         )
         if not row:
-            row = AdvisoryCache(code=code_u, market=market_u)
+            row = AdvisoryCache(user_id=user_id, code=code_u, market=market_u)
             self.db.add(row)
         row.updated_at = now_kst_iso()
         row.fundamental = fundamental
@@ -80,10 +82,10 @@ class AdvisoryRepository:
         if hasattr(row, 'strategy_signals'):
             row.strategy_signals = strategy_signals
 
-    def get_cache(self, code: str, market: str) -> Optional[dict]:
+    def get_cache(self, user_id: int, code: str, market: str) -> Optional[dict]:
         row = (
             self.db.query(AdvisoryCache)
-            .filter_by(code=code.upper(), market=market.upper())
+            .filter_by(user_id=user_id, code=code.upper(), market=market.upper())
             .first()
         )
         return row.to_dict() if row else None
@@ -92,6 +94,7 @@ class AdvisoryRepository:
 
     def save_report(
         self,
+        user_id: int,
         code: str,
         market: str,
         model: str,
@@ -104,6 +107,7 @@ class AdvisoryRepository:
         value_trap_warning: bool = False,
     ) -> int:
         r = AdvisoryReport(
+            user_id=user_id,
             code=code.upper(),
             market=market.upper(),
             generated_at=now_kst_iso(),
@@ -120,10 +124,10 @@ class AdvisoryRepository:
         self.db.flush()
         return r.id
 
-    def get_report_history(self, code: str, market: str, limit: int = 20) -> list[dict]:
+    def get_report_history(self, user_id: int, code: str, market: str, limit: int = 20) -> list[dict]:
         rows = (
             self.db.query(AdvisoryReport)
-            .filter_by(code=code.upper(), market=market.upper())
+            .filter_by(user_id=user_id, code=code.upper(), market=market.upper())
             .order_by(AdvisoryReport.id.desc())
             .limit(limit)
             .all()
@@ -134,10 +138,10 @@ class AdvisoryRepository:
         row = self.db.query(AdvisoryReport).filter_by(id=report_id).first()
         return row.to_dict() if row else None
 
-    def get_latest_report(self, code: str, market: str) -> Optional[dict]:
+    def get_latest_report(self, user_id: int, code: str, market: str) -> Optional[dict]:
         row = (
             self.db.query(AdvisoryReport)
-            .filter_by(code=code.upper(), market=market.upper())
+            .filter_by(user_id=user_id, code=code.upper(), market=market.upper())
             .order_by(AdvisoryReport.id.desc())
             .first()
         )

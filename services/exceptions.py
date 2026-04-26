@@ -47,3 +47,17 @@ class PaymentRequiredError(ServiceError):
 
     def __init__(self, message: str = "결제 정보를 확인해주세요."):
         super().__init__(message, status_code=402)
+
+
+class AuthenticationError(ServiceError):
+    """인증 실패 (401)."""
+
+    def __init__(self, message: str = "인증이 필요합니다."):
+        super().__init__(message, status_code=401)
+
+
+class ForbiddenError(ServiceError):
+    """권한 부족 (403)."""
+
+    def __init__(self, message: str = "접근 권한이 없습니다."):
+        super().__init__(message, status_code=403)

@@ -53,7 +53,7 @@ logger = logging.getLogger(__name__)
 
 # ── 공개 API ──────────────────────────────────────────────────────────────────
 
-def refresh_stock_data(code: str, market: str, name: str) -> dict:
+def refresh_stock_data(code: str, market: str, name: str, user_id: int = 1) -> dict:
     """전체 데이터 수집 → advisory_cache 저장 → 저장된 캐시 반환.
 
     국내(KR): dart_fin + market.fetch_market_metrics + 15분봉KIS
@@ -64,12 +64,12 @@ def refresh_stock_data(code: str, market: str, name: str) -> dict:
     technical = _collect_technical(code, market)
     strategy_signals = _collect_strategy_signals(code, market)
 
-    advisory_store.save_cache(code, market, fundamental, technical,
+    advisory_store.save_cache(user_id, code, market, fundamental, technical,
                               strategy_signals=strategy_signals)
-    return advisory_store.get_cache(code, market) or {}
+    return advisory_store.get_cache(user_id, code, market) or {}
 
 
-def generate_ai_report(code: str, market: str, name: str) -> dict:
+def generate_ai_report(code: str, market: str, name: str, user_id: int = 1) -> dict:
     """저장된 캐시 데이터를 기반으로 OpenAI GPT-4o 리포트 생성.
 
     Phase 3: max_completion_tokens 10000 기본, 재시도 시 12000.
@@ -79,7 +79,7 @@ def generate_ai_report(code: str, market: str, name: str) -> dict:
     if not OPENAI_API_KEY:
         raise ConfigError("OPENAI_API_KEY가 설정되지 않았습니다.")
 
-    cache = advisory_store.get_cache(code, market)
+    cache = advisory_store.get_cache(user_id, code, market)
     if not cache:
         raise NotFoundError("분석 데이터가 없습니다. 먼저 새로고침을 해주세요.")
 
@@ -166,7 +166,7 @@ def generate_ai_report(code: str, market: str, name: str) -> dict:
     v2_fields = extract_v2_fields(report)
 
     report_id = advisory_store.save_report(
-        code, market, model, report,
+        user_id, code, market, model, report,
         grade=v2_fields.get("grade"),
         grade_score=v2_fields.get("grade_score"),
         composite_score=v2_fields.get("composite_score"),
@@ -182,7 +182,7 @@ def generate_ai_report(code: str, market: str, name: str) -> dict:
                      code, gpt_grade, v2_fields.get("schema_version"),
                      v2_fields.get("value_trap_warning"))
 
-    return advisory_store.get_latest_report(code, market) or {}
+    return advisory_store.get_latest_report(user_id, code, market) or {}
 
 
 # ── 내부 헬퍼 ─────────────────────────────────────────────────────────────────

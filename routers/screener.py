@@ -2,8 +2,9 @@
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
+from services.auth_deps import get_current_user
 from services.exceptions import ExternalAPIError
 from screener.dart import fetch_filings
 from screener.krx import get_all_stocks
@@ -84,6 +85,7 @@ def get_stocks(
     include_negative: bool = Query(False, description="적자기업(PER 음수) 포함 여부"),
     earnings_only: bool = Query(False, description="당일 실적발표 종목만 대상"),
     drop_from_high: float | None = Query(None, description="52주 고점 대비 최대 하락률 (%, 예: -30)"),
+    _user: dict = Depends(get_current_user),
 ):
     """전종목 멀티팩터 스크리닝."""
     # 날짜 정규화

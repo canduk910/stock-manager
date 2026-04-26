@@ -16,6 +16,16 @@ logger = logging.getLogger(__name__)
 
 @router.websocket("/ws/quote/{symbol}")
 async def quote_ws(websocket: WebSocket, symbol: str, market: str = ""):
+    token = websocket.query_params.get("token")
+    if not token:
+        await websocket.close(code=1008)
+        return
+    try:
+        from services.auth_service import verify_token
+        verify_token(token)
+    except Exception:
+        await websocket.close(code=1008)
+        return
     await websocket.accept()
     symbol = symbol.upper()
     try:
@@ -122,6 +132,16 @@ async def _stream_overseas(websocket: WebSocket, symbol: str):
 @router.websocket("/ws/execution-notice")
 async def execution_notice_ws(websocket: WebSocket):
     """체결통보(H0STCNI0) 실시간 수신 WebSocket."""
+    token = websocket.query_params.get("token")
+    if not token:
+        await websocket.close(code=1008)
+        return
+    try:
+        from services.auth_service import verify_token
+        verify_token(token)
+    except Exception:
+        await websocket.close(code=1008)
+        return
     await websocket.accept()
     manager = get_manager()
     queue: asyncio.Queue = asyncio.Queue(maxsize=50)

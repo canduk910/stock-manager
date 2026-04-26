@@ -5,10 +5,11 @@ KIS API 키 미설정 시 503 반환.
 모든 엔드포인트는 services.order_service를 통해서만 데이터에 접근한다.
 """
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 from typing import Optional
 
+from services.auth_deps import require_admin
 from services import order_service
 from services.exceptions import NotFoundError
 
@@ -69,7 +70,7 @@ class ReservationBody(BaseModel):
 # ── 주문 발송 ─────────────────────────────────────────────────────────────────
 
 @router.post("/place", status_code=201)
-def place_order(body: PlaceOrderBody):
+def place_order(body: PlaceOrderBody, _user: dict = Depends(require_admin)):
     """주문 발송 (국내/해외 매수/매도).
 
     KIS API 키 미설정 시 503.
@@ -100,6 +101,7 @@ def get_buyable(
     price: float = Query(0.0),
     order_type: str = Query("00"),
     side: str = Query("buy"),
+    _user: dict = Depends(require_admin),
 ):
     """매수가능 금액/수량 조회. FNO는 side 파라미터 필요."""
     return order_service.get_buyable(symbol, market, price, order_type, side=side)
@@ -108,7 +110,7 @@ def get_buyable(
 # ── 미체결 주문 목록 (KIS) ────────────────────────────────────────────────────
 
 @router.get("/open")
-def get_open_orders(market: str = Query("KR")):
+def get_open_orders(market: str = Query("KR"), _user: dict = Depends(require_admin)):
     """미체결 주문 목록 (KIS 실시간). market: KR / US."""
     orders = order_service.get_open_orders(market)
     return {"orders": orders}
@@ -117,7 +119,7 @@ def get_open_orders(market: str = Query("KR")):
 # ── 주문 정정 ─────────────────────────────────────────────────────────────────
 
 @router.post("/{order_no}/modify")
-def modify_order(order_no: str, body: ModifyOrderBody):
+def modify_order(order_no: str, body: ModifyOrderBody, _user: dict = Depends(require_admin)):
     """주문 정정 (가격/수량 변경)."""
     result = order_service.modify_order(
         order_no=order_no,
@@ -137,7 +139,7 @@ def modify_order(order_no: str, body: ModifyOrderBody):
 # ── 주문 취소 ─────────────────────────────────────────────────────────────────
 
 @router.post("/{order_no}/cancel")
-def cancel_order(order_no: str, body: CancelOrderBody):
+def cancel_order(order_no: str, body: CancelOrderBody, _user: dict = Depends(require_admin)):
     """주문 취소 (잔량전부/일부)."""
     result = order_service.cancel_order(
         order_no=order_no,
@@ -153,7 +155,7 @@ def cancel_order(order_no: str, body: CancelOrderBody):
 # ── 당일 체결 내역 (KIS) ──────────────────────────────────────────────────────
 
 @router.get("/executions")
-def get_executions(market: str = Query("KR")):
+def get_executions(market: str = Query("KR"), _user: dict = Depends(require_admin)):
     """당일 체결 내역 (KIS). market: KR / US."""
     executions = order_service.get_executions(market)
     return {"executions": executions}
@@ -165,6 +167,7 @@ def get_executions(market: str = Query("KR")):
 def get_fno_price(
     symbol: str = Query(..., description="선물옵션 단축코드 (예: 101W09)"),
     mrkt_div: str = Query("F", description="시장분류: F=지수선물, O=지수옵션, JF=주식선물"),
+    _user: dict = Depends(require_admin),
 ):
     """선물옵션 현재가 조회. 주문 전 시세 확인 및 종목 유효성 검증에 사용."""
     return order_service.get_fno_price(symbol, mrkt_div)
@@ -180,6 +183,7 @@ def get_order_history(
     date_from: Optional[str] = Query(None),
     date_to: Optional[str] = Query(None),
     limit: int = Query(100, ge=1, le=500),
+    _user: dict = Depends(require_admin),
 ):
     """로컬 DB 주문 이력. 반환 전 활성 주문을 KIS와 자동 대사."""
     orders = order_service.get_order_history(
@@ -196,7 +200,7 @@ def get_order_history(
 # ── 대사/동기화 ───────────────────────────────────────────────────────────────
 
 @router.post("/sync")
-def sync_orders():
+def sync_orders(_user: dict = Depends(require_admin)):
     """KIS 체결+미체결 내역과 로컬 DB 대사(Reconciliation)."""
     result = order_service.sync_orders()
     return result
@@ -205,7 +209,7 @@ def sync_orders():
 # ── 예약주문 ──────────────────────────────────────────────────────────────────
 
 @router.post("/reserve", status_code=201)
-def create_reservation(body: ReservationBody):
+def create_reservation(body: ReservationBody, _user: dict = Depends(require_admin)):
     """예약주문 등록. 도메인 규칙 검증 포함."""
     reservation = order_service.create_reservation(
         symbol=body.symbol,
@@ -223,14 +227,14 @@ def create_reservation(body: ReservationBody):
 
 
 @router.get("/reserves")
-def list_reservations(status: Optional[str] = Query(None)):
+def list_reservations(status: Optional[str] = Query(None), _user: dict = Depends(require_admin)):
     """예약주문 목록. status: WAITING / TRIGGERED / EXECUTED / FAILED / CANCELLED"""
     reservations = order_service.get_reservations(status=status)
     return {"reservations": reservations}
 
 
 @router.delete("/reserve/{res_id}")
-def delete_reservation(res_id: int):
+def delete_reservation(res_id: int, _user: dict = Depends(require_admin)):
     """예약주문 삭제 (WAITING 상태만 가능)."""
     deleted = order_service.delete_reservation(res_id)
     if not deleted:

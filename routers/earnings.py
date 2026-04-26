@@ -1,7 +1,8 @@
 """공시(정기보고서) API 라우터."""
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
+from services.auth_deps import get_current_user
 from services.exceptions import ExternalAPIError
 from screener.dart import fetch_filings
 from screener.service import ScreenerValidationError, normalize_date
@@ -22,6 +23,7 @@ def get_filings(
     ),
     start_date: str | None = Query(None, description="시작 날짜 (YYYYMMDD 또는 YYYY-MM-DD)"),
     end_date: str | None = Query(None, description="종료 날짜 (YYYYMMDD 또는 YYYY-MM-DD)"),
+    _user: dict = Depends(get_current_user),
 ):
     """기간별 정기보고서 제출 목록 조회.
 

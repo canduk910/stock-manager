@@ -11,9 +11,10 @@ import asyncio
 import json
 import logging
 
-from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
+from services.auth_deps import get_current_user
 from services.exceptions import NotFoundError, ConflictError
 
 from services.quote_service import get_manager, get_overseas_manager
@@ -26,7 +27,7 @@ logger = logging.getLogger(__name__)
 # ── REST 엔드포인트 ────────────────────────────────────────────────────────────
 
 @router.get("/api/market-board/new-highs-lows")
-def get_new_highs_lows(top: int = 10):
+def get_new_highs_lows(top: int = 10, _user: dict = Depends(get_current_user)):
     """당일 신고가/신저가 종목 조회 (시총 상위 기준)."""
     from stock.market_board import fetch_new_highs_lows
     return fetch_new_highs_lows(top_n=top)
@@ -37,14 +38,14 @@ class SparklineRequest(BaseModel):
 
 
 @router.post("/api/market-board/sparklines")
-def get_sparklines(body: SparklineRequest):
+def get_sparklines(body: SparklineRequest, _user: dict = Depends(get_current_user)):
     """복수 종목 1년 주봉 종가 배치 조회."""
     from stock.market_board import fetch_sparklines_batch
     return fetch_sparklines_batch(body.items)
 
 
 @router.post("/api/market-board/intraday-ohlc")
-def get_intraday_ohlc(body: SparklineRequest):
+def get_intraday_ohlc(body: SparklineRequest, _user: dict = Depends(get_current_user)):
     """복수 종목 당일 OHLC 배치 조회."""
     from stock.market_board import fetch_intraday_ohlc_batch
     return fetch_intraday_ohlc_batch(body.items)
@@ -68,27 +69,27 @@ class SaveOrderBody(BaseModel):
 
 
 @router.get("/api/market-board/custom-stocks")
-def list_custom_stocks():
+def list_custom_stocks(user: dict = Depends(get_current_user)):
     """시세판 별도 등록 종목 목록."""
     from stock.market_board_store import all_items
-    return {"items": all_items()}
+    return {"items": all_items(user["id"])}
 
 
 @router.post("/api/market-board/custom-stocks", status_code=201)
-def add_custom_stock(body: CustomStockBody):
+def add_custom_stock(body: CustomStockBody, user: dict = Depends(get_current_user)):
     """시세판 별도 종목 추가."""
     from stock.market_board_store import add_item
-    ok = add_item(body.code, body.name, body.market)
+    ok = add_item(user["id"], body.code, body.name, body.market)
     if not ok:
         raise ConflictError("이미 등록된 종목입니다.")
     return {"item": {"code": body.code, "market": body.market, "name": body.name}}
 
 
 @router.delete("/api/market-board/custom-stocks/{code}", status_code=204)
-def remove_custom_stock(code: str, market: str = Query("KR")):
+def remove_custom_stock(code: str, market: str = Query("KR"), user: dict = Depends(get_current_user)):
     """시세판 별도 종목 삭제."""
     from stock.market_board_store import remove_item
-    ok = remove_item(code, market)
+    ok = remove_item(user["id"], code, market)
     if not ok:
         raise NotFoundError("등록되지 않은 종목입니다.")
 
@@ -96,17 +97,17 @@ def remove_custom_stock(code: str, market: str = Query("KR")):
 # ── 종목 순서 ────────────────────────────────────────────────────────────────
 
 @router.get("/api/market-board/order")
-def get_board_order():
+def get_board_order(user: dict = Depends(get_current_user)):
     """시세판 종목 표시 순서 조회."""
     from stock.market_board_store import get_order
-    return {"items": get_order()}
+    return {"items": get_order(user["id"])}
 
 
 @router.put("/api/market-board/order")
-def save_board_order(body: SaveOrderBody):
+def save_board_order(body: SaveOrderBody, user: dict = Depends(get_current_user)):
     """시세판 종목 표시 순서 저장 (전체 교체)."""
     from stock.market_board_store import save_order
-    save_order([item.model_dump() for item in body.items])
+    save_order(user["id"], [item.model_dump() for item in body.items])
     return {"ok": True}
 
 
@@ -124,6 +125,16 @@ async def market_board_ws(websocket: WebSocket):
       {"type": "prices", "data": {"005930": {"price": 72000, "change_pct": 1.5, "sign": "2"}, ...}}
       {"type": "ping"}
     """
+    token = websocket.query_params.get("token")
+    if not token:
+        await websocket.close(code=1008)
+        return
+    try:
+        from services.auth_service import verify_token
+        verify_token(token)
+    except Exception:
+        await websocket.close(code=1008)
+        return
     await websocket.accept()
 
     domestic_mgr = get_manager()

@@ -2,11 +2,12 @@
 
 import logging
 import requests
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
 logger = logging.getLogger(__name__)
 
 from routers._kis_auth import BASE_URL, get_access_token, get_kis_credentials, clear_token_cache
+from services.auth_deps import require_admin
 from services.exceptions import ExternalAPIError, ServiceError
 from stock.market import fetch_market_metrics
 from stock.yf_client import fetch_detail_yf
@@ -243,7 +244,7 @@ def _fetch_futures_balance(token: str, app_key: str, app_secret: str, acnt_no: s
 
 
 @router.get("/balance")
-def get_balance():
+def get_balance(_user: dict = Depends(require_admin)):
     """주식 잔고 조회 (국내주식 + 해외주식 + 국내선물옵션).
 
     KIS API 키가 없으면 503을 반환한다.

@@ -1,8 +1,9 @@
 """관심종목 API 라우터."""
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
+from services.auth_deps import get_current_user
 from services.exceptions import NotFoundError, ConflictError, ExternalAPIError
 from services.watchlist_service import WatchlistService
 from stock import store
@@ -35,65 +36,65 @@ class SaveOrderBody(BaseModel):
 # ── 종목 순서 (/{code} 라우트보다 앞에 등록해야 경로 충돌 방지) ────────────────
 
 @router.get("/order")
-def get_watchlist_order():
+def get_watchlist_order(user: dict = Depends(get_current_user)):
     """관심종목 표시 순서 조회."""
-    return {"items": store.get_order()}
+    return {"items": store.get_order(user["id"])}
 
 
 @router.put("/order")
-def save_watchlist_order(body: SaveOrderBody):
+def save_watchlist_order(body: SaveOrderBody, user: dict = Depends(get_current_user)):
     """관심종목 표시 순서 저장 (전체 교체)."""
-    store.save_order([item.model_dump() for item in body.items])
+    store.save_order(user["id"], [item.model_dump() for item in body.items])
     return {"ok": True}
 
 
 # ── CRUD ────────────────────────────────────────────────────────────────────
 
 @router.get("")
-def list_watchlist():
+def list_watchlist(user: dict = Depends(get_current_user)):
     """관심종목 목록."""
-    return {"items": store.all_items()}
+    return {"items": store.all_items(user["id"])}
 
 
 @router.post("", status_code=201)
-def add_watchlist(body: AddBody):
+def add_watchlist(body: AddBody, user: dict = Depends(get_current_user)):
     """관심종목 추가 (종목코드 또는 종목명 허용). market: KR | US."""
     try:
         code, name, market = _svc.resolve_symbol(body.code, body.market)
     except ValueError as e:
         raise NotFoundError(str(e))
 
-    added = store.add_item(code, name, body.memo, market)
+    added = store.add_item(user["id"], code, name, body.memo, market)
     if not added:
         raise ConflictError(f"이미 등록된 종목입니다: {name} ({code})")
 
-    item = store.get_item(code, market)
+    item = store.get_item(user["id"], code, market)
     return {"item": item}
 
 
 @router.delete("/{code}")
-def remove_watchlist(code: str, market: str = Query("KR")):
+def remove_watchlist(code: str, market: str = Query("KR"), user: dict = Depends(get_current_user)):
     """관심종목 삭제."""
-    if not store.remove_item(code, market):
+    if not store.remove_item(user["id"], code, market):
         raise NotFoundError(f"관심종목에 없는 종목코드입니다: {code}")
     return {"deleted": True}
 
 
 @router.patch("/{code}")
-def update_memo(code: str, body: MemoBody, market: str = Query("KR")):
+def update_memo(code: str, body: MemoBody, market: str = Query("KR"), user: dict = Depends(get_current_user)):
     """메모 수정."""
-    if not store.update_memo(code, body.memo, market):
+    if not store.update_memo(user["id"], code, body.memo, market):
         raise NotFoundError(f"관심종목에 없는 종목코드입니다: {code}")
-    item = store.get_item(code, market)
+    item = store.get_item(user["id"], code, market)
     return {"item": item}
 
 
 # ── 대시보드 / 상세 ──────────────────────────────────────────────────────────
 
 @router.get("/dashboard")
-def get_dashboard():
+def get_dashboard(user: dict = Depends(get_current_user)):
     """전체 관심종목 시세 + 재무 대시보드."""
-    items = store.all_items()
+    items = store.all_items(user["id"])
     if not items:
         return {"stocks": []}
     stocks = _svc.get_dashboard_data(items)
@@ -101,7 +102,7 @@ def get_dashboard():
 
 
 @router.get("/info/{code}")
-def get_stock_info(code: str, market: str = Query("KR")):
+def get_stock_info(code: str, market: str = Query("KR"), _user: dict = Depends(get_current_user)):
     """단일 종목 상세 (기본정보 + 재무)."""
     try:
         detail = _svc.get_stock_detail(code, market)

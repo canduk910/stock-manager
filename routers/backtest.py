@@ -3,10 +3,11 @@
 import logging
 from typing import Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from config import KIS_MCP_ENABLED
+from services.auth_deps import get_current_user
 from services import backtest_service
 from services.exceptions import NotFoundError
 from services.mcp_client import get_mcp_client
@@ -60,7 +61,7 @@ class BatchBacktestBody(BaseModel):
 # ── 엔드포인트 ────────────────────────────────────────────────────────────────
 
 @router.get("/status")
-def mcp_status():
+def mcp_status(_user: dict = Depends(get_current_user)):
     """MCP 서버 연결 상태."""
     if not KIS_MCP_ENABLED:
         return {"available": False, "reason": "KIS_MCP_ENABLED=false"}
@@ -70,19 +71,19 @@ def mcp_status():
 
 
 @router.get("/presets")
-def get_presets():
+def get_presets(_user: dict = Depends(get_current_user)):
     """프리셋 전략 목록."""
     return backtest_service.list_presets()
 
 
 @router.get("/indicators")
-def get_indicators():
+def get_indicators(_user: dict = Depends(get_current_user)):
     """사용 가능한 기술 지표 목록."""
     return backtest_service.list_indicators()
 
 
 @router.post("/run/preset")
-def run_preset(body: PresetBacktestBody):
+def run_preset(body: PresetBacktestBody, user: dict = Depends(get_current_user)):
     """프리셋 전략 백테스트 실행."""
     return backtest_service.run_preset_backtest(
         preset=body.preset,
@@ -96,11 +97,12 @@ def run_preset(body: PresetBacktestBody):
         commission_rate=body.commission_rate,
         tax_rate=body.tax_rate,
         slippage=body.slippage,
+        user_id=user["id"],
     )
 
 
 @router.post("/run/custom")
-def run_custom(body: CustomBacktestBody):
+def run_custom(body: CustomBacktestBody, user: dict = Depends(get_current_user)):
     """커스텀 YAML 전략 백테스트 실행."""
     return backtest_service.run_custom_backtest(
         yaml_content=body.yaml_content,
@@ -114,11 +116,12 @@ def run_custom(body: CustomBacktestBody):
         slippage=body.slippage,
         strategy_display_name=body.strategy_display_name,
         builder_state=body.builder_state,
+        user_id=user["id"],
     )
 
 
 @router.post("/run/batch")
-def run_batch(body: BatchBacktestBody):
+def run_batch(body: BatchBacktestBody, _user: dict = Depends(get_current_user)):
     """배치 비교 (여러 전략)."""
     return backtest_service.run_batch_backtest(
         presets=body.presets,
@@ -131,15 +134,15 @@ def run_batch(body: BatchBacktestBody):
 
 
 @router.get("/result/{job_id}")
-def get_result(job_id: str):
+def get_result(job_id: str, _user: dict = Depends(get_current_user)):
     """백테스트 결과 조회."""
     return backtest_service.get_backtest_result(job_id)
 
 
 @router.get("/history")
-def get_history(symbol: Optional[str] = None, market: Optional[str] = None, limit: int = 20):
+def get_history(symbol: Optional[str] = None, market: Optional[str] = None, limit: int = 20, user: dict = Depends(get_current_user)):
     """백테스트 작업 이력."""
-    jobs = strategy_store.get_job_history(symbol=symbol, market=market, limit=limit)
+    jobs = strategy_store.get_job_history(user["id"], symbol=symbol, market=market, limit=limit)
     for job in jobs:
         sym = job.get("symbol", "")
         if is_domestic(sym):
@@ -154,7 +157,7 @@ def get_history(symbol: Optional[str] = None, market: Optional[str] = None, limi
 
 
 @router.delete("/history/{job_id}")
-def delete_history(job_id: str):
+def delete_history(job_id: str, _user: dict = Depends(get_current_user)):
     """백테스트 이력 삭제."""
     ok = strategy_store.delete_job(job_id)
     if not ok:
@@ -182,7 +185,7 @@ class StrategyValidateBody(BaseModel):
 
 
 @router.post("/strategy/convert")
-def convert_strategy(body: BuilderConvertBody):
+def convert_strategy(body: BuilderConvertBody, _user: dict = Depends(get_current_user)):
     """BuilderState -> YAML 변환."""
     from services.strategy_builder_service import convert_builder_to_yaml
 
@@ -203,7 +206,7 @@ def convert_strategy(body: BuilderConvertBody):
 
 
 @router.post("/strategy/validate")
-def validate_yaml(body: StrategyValidateBody):
+def validate_yaml(body: StrategyValidateBody, _user: dict = Depends(get_current_user)):
     """YAML MCP 검증."""
     if not KIS_MCP_ENABLED:
         return {"valid": None, "reason": "MCP 비활성화"}
@@ -216,15 +219,16 @@ def validate_yaml(body: StrategyValidateBody):
 
 
 @router.get("/strategies")
-def list_strategies(strategy_type: Optional[str] = None):
+def list_strategies(strategy_type: Optional[str] = None, user: dict = Depends(get_current_user)):
     """저장된 전략 목록."""
-    return strategy_store.list_strategies(strategy_type)
+    return strategy_store.list_strategies(user["id"], strategy_type)
 
 
 @router.post("/strategies")
-def save_strategy(body: StrategySaveBody):
+def save_strategy(body: StrategySaveBody, user: dict = Depends(get_current_user)):
     """전략 저장."""
     return strategy_store.save_strategy(
+        user["id"],
         name=body.name,
         strategy_type="builder",
         description=body.description,
@@ -234,18 +238,18 @@ def save_strategy(body: StrategySaveBody):
 
 
 @router.get("/strategies/{name}")
-def get_strategy(name: str):
+def get_strategy(name: str, user: dict = Depends(get_current_user)):
     """전략 조회."""
-    s = strategy_store.get_strategy(name)
+    s = strategy_store.get_strategy(user["id"], name)
     if not s:
         raise NotFoundError(f"전략을 찾을 수 없습니다: {name}")
     return s
 
 
 @router.delete("/strategies/{name}")
-def delete_strategy(name: str):
+def delete_strategy(name: str, user: dict = Depends(get_current_user)):
     """전략 삭제."""
-    ok = strategy_store.delete_strategy(name)
+    ok = strategy_store.delete_strategy(user["id"], name)
     if not ok:
         raise NotFoundError(f"전략을 찾을 수 없습니다: {name}")
     return {"deleted": True}

@@ -2,9 +2,10 @@
 
 from typing import List
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
+from services.auth_deps import require_admin
 from services import tax_service
 
 router = APIRouter(prefix="/api/tax", tags=["Tax"])
@@ -41,6 +42,7 @@ class SimulationRequest(BaseModel):
 @router.get("/summary")
 def get_summary(
     year: int = Query(..., description="조회 연도"),
+    _user: dict = Depends(require_admin),
 ):
     """연간 양도세 요약 (FIFO)."""
     return tax_service.get_annual_summary(year)
@@ -50,6 +52,7 @@ def get_summary(
 def get_transactions(
     year: int = Query(..., description="조회 연도"),
     side: str = Query(None, description="매매구분 (buy|sell, 미지정 시 전체)"),
+    _user: dict = Depends(require_admin),
 ):
     """매매내역 목록 조회."""
     transactions = tax_service.get_transactions(year, side)
@@ -57,7 +60,7 @@ def get_transactions(
 
 
 @router.post("/transactions")
-def add_transaction(req: ManualTransactionRequest):
+def add_transaction(req: ManualTransactionRequest, _user: dict = Depends(require_admin)):
     """매매내역 수동 추가."""
     tx = tax_service.add_manual_transaction(
         symbol=req.symbol,
@@ -74,7 +77,7 @@ def add_transaction(req: ManualTransactionRequest):
 
 
 @router.delete("/transactions/{tx_id}")
-def remove_transaction(tx_id: int):
+def remove_transaction(tx_id: int, _user: dict = Depends(require_admin)):
     """매매내역 삭제."""
     tax_service.delete_transaction(tx_id)
     return {"deleted": True}
@@ -83,6 +86,7 @@ def remove_transaction(tx_id: int):
 @router.post("/sync")
 def sync_transactions(
     year: int = Query(..., description="동기화 연도"),
+    _user: dict = Depends(require_admin),
 ):
     """KIS API 또는 로컬 DB에서 체결내역 동기화."""
     return tax_service.sync_transactions(year)
@@ -91,6 +95,7 @@ def sync_transactions(
 @router.post("/recalculate")
 def recalculate(
     year: int = Query(..., description="재계산 연도"),
+    _user: dict = Depends(require_admin),
 ):
     """양도세 재계산 (FIFO)."""
     results = tax_service.calculate_tax(year)
@@ -101,6 +106,7 @@ def recalculate(
 def get_calculations(
     year: int = Query(..., description="조회 연도"),
     symbol: str = Query(None, description="종목코드 필터"),
+    _user: dict = Depends(require_admin),
 ):
     """계산 상세 결과 조회 (FIFO). lots 포함."""
     calculations = tax_service.get_calculations(year, symbol)
@@ -108,13 +114,13 @@ def get_calculations(
 
 
 @router.get("/simulate/holdings")
-def get_simulation_holdings():
+def get_simulation_holdings(_user: dict = Depends(require_admin)):
     """시뮬레이션용 현재 보유종목 목록."""
     return tax_service.get_simulation_holdings()
 
 
 @router.post("/simulate")
-def simulate_tax(req: SimulationRequest):
+def simulate_tax(req: SimulationRequest, _user: dict = Depends(require_admin)):
     """가상 매도 시뮬레이션 (DB 저장 없음)."""
     return tax_service.simulate_tax(
         year=req.year,

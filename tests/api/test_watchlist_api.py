@@ -7,7 +7,7 @@ class TestWatchlistCRUD:
     """관심종목 CRUD 엔드포인트."""
 
     def test_list_watchlist(self, client):
-        """A-001: GET /api/watchlist → 200, items 리스트."""
+        """A-001: GET /api/watchlist -> 200, items 리스트."""
         resp = client.get("/api/watchlist")
         assert resp.status_code == 200
         data = resp.json()
@@ -15,13 +15,13 @@ class TestWatchlistCRUD:
         assert isinstance(data["items"], list)
 
     def test_add_watchlist(self, client):
-        """A-002: POST /api/watchlist → 201 or 409(이미 존재) or 404."""
+        """A-002: POST /api/watchlist -> 201 or 409(이미 존재) or 404."""
         resp = client.post("/api/watchlist", json={
             "code": "005930",
             "memo": "테스트",
             "market": "KR",
         })
-        # 종목명 조회 실패 → 404, 이미 존재 → 409, 성공 → 201
+        # 종목명 조회 실패 -> 404, 이미 존재 -> 409, 성공 -> 201
         assert resp.status_code in (201, 404, 409)
 
     def test_add_watchlist_duplicate(self, client):
@@ -33,12 +33,12 @@ class TestWatchlistCRUD:
             assert second.status_code == 409
 
     def test_remove_nonexistent(self, client):
-        """A-005: 없는 종목 삭제 → 404."""
+        """A-005: 없는 종목 삭제 -> 404."""
         resp = client.delete("/api/watchlist/999999", params={"market": "KR"})
         assert resp.status_code == 404
 
     def test_update_memo_not_found(self, client):
-        """A-006: 없는 종목 메모 수정 → 404."""
+        """A-006: 없는 종목 메모 수정 -> 404."""
         resp = client.patch(
             "/api/watchlist/999999",
             json={"memo": "새 메모"},
@@ -51,7 +51,7 @@ class TestWatchlistDashboard:
     """대시보드 + 종목정보 엔드포인트."""
 
     def test_get_dashboard(self, client):
-        """A-007: GET /api/watchlist/dashboard → 200."""
+        """A-007: GET /api/watchlist/dashboard -> 200."""
         resp = client.get("/api/watchlist/dashboard")
         assert resp.status_code == 200
         data = resp.json()
@@ -69,7 +69,7 @@ class TestWatchlistOrder:
     """관심종목 순서 관리."""
 
     def test_get_order(self, client):
-        """A-009: GET /api/watchlist/order → 200."""
+        """A-009: GET /api/watchlist/order -> 200."""
         resp = client.get("/api/watchlist/order")
         assert resp.status_code == 200
         data = resp.json()
@@ -77,7 +77,7 @@ class TestWatchlistOrder:
         assert isinstance(data["items"], list)
 
     def test_save_order(self, client):
-        """A-010: PUT /api/watchlist/order → 200."""
+        """A-010: PUT /api/watchlist/order -> 200."""
         resp = client.put("/api/watchlist/order", json={
             "items": [
                 {"code": "005930", "market": "KR"},

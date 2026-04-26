@@ -2,8 +2,9 @@
 
 import threading
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
+from services.auth_deps import require_admin
 from services.scheduler_service import get_scheduler_status
 
 router = APIRouter(prefix="/api/pipeline", tags=["pipeline"])
@@ -14,7 +15,7 @@ _last_result = {"KR": None, "US": None}
 
 
 @router.post("/run")
-def run_pipeline(market: str = "KR"):
+def run_pipeline(market: str = "KR", _user: dict = Depends(require_admin)):
     """수동 파이프라인 실행 (비동기 — 즉시 응답)."""
     market = market.upper()
     if market not in ("KR", "US"):
@@ -39,7 +40,7 @@ def run_pipeline(market: str = "KR"):
 
 
 @router.post("/run-sync")
-def run_pipeline_sync(market: str = "KR"):
+def run_pipeline_sync(market: str = "KR", _user: dict = Depends(require_admin)):
     """수동 파이프라인 동기 실행 (완료까지 대기)."""
     from services.pipeline_service import run_pipeline as _run_impl
     market = market.upper()
@@ -52,7 +53,7 @@ def run_pipeline_sync(market: str = "KR"):
 
 
 @router.get("/status")
-def get_status():
+def get_status(_user: dict = Depends(require_admin)):
     """스케줄러 상태 + 실행 상태."""
     scheduler = get_scheduler_status()
     return {
