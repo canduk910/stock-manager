@@ -1,5 +1,20 @@
 # 변경 이력
 
+## 2026-04-26 — 스크리너 구루 공식 + 체제 연계
+
+### 스크리너 구루 공식 신규
+- `services/guru_formulas.py` 신규: Greenblatt Magic Formula(ROIC+Earnings Yield), Neff Total Return Ratio(EPS CAGR+배당/PER), 서준식 기대수익률(ROE/PBR)
+- 통합 구루 패널 (12점=3공식×4점), Value Trap 경고 5규칙, 체제별 파라미터(`REGIME_GURU_PARAMS`)
+- `screener/service.py` 확장: `enrich_seo_scores`(서준식 일괄 계산), `sort_by_greenblatt_rank`(Combined Rank), `get_preset_filters`(프리셋별 기본 필터)
+- `routers/screener.py` 확장: DART guru enrichment(`_enrich_guru`), 신규 파라미터(`preset`/`regime_aware`/`include_guru`/`guru_top`), 체제 응답 포함
+- 4단계 파이프라인: KRX 기본 필터 → yfinance enrichment → DART guru enrichment → 체제 연계
+- 단위 테스트 32개 (`tests/unit/test_guru_formulas.py`)
+
+### 스크리너 UI 재설계
+- FilterPanel: 구루 프리셋 드롭다운(Greenblatt/Neff/서준식), 체제 연계 토글, DART 분석 대상 수, 필터 설명 보강
+- StockTable: 서준식 기대수익률 컬럼(항상), 구루 점수 배지/개별 점수/Value Trap 경고(DART enrichment 시)
+- ScreenerPage: 체제 배너(regime+VIX/버핏/F&G+한줄메시지), 프리셋 배지, DART 로딩 메시지
+
 ## 2026-04-26 — 투자보고서 전면 개선 + AI자문 리포트 강화
 
 ### 투자보고서 페이지 전면 개선

@@ -4,7 +4,15 @@ screener/cli.py에서 추출한 핵심 함수들.
 FastAPI 라우터와 CLI 양쪽에서 사용한다.
 """
 
+from __future__ import annotations
+
 from datetime import date, datetime
+from typing import Optional
+
+from services.guru_formulas import (
+    calc_seo_expected_return,
+    REGIME_GURU_PARAMS,
+)
 
 
 class ScreenerValidationError(Exception):
@@ -49,7 +57,8 @@ def parse_sort_spec(sort_str: str, order: str | None = None) -> list[tuple[str, 
     Raises:
         ScreenerValidationError: 유효하지 않은 필드명이나 정렬 방향.
     """
-    valid_fields = {"per", "pbr", "roe", "mktcap"}
+    valid_fields = {"per", "pbr", "roe", "mktcap", "seo_return", "guru_score",
+                     "greenblatt_rank", "neff_ratio"}
     specs = []
 
     for part in sort_str.split(","):
@@ -156,3 +165,86 @@ def sort_stocks(
         return keys
 
     return sorted(stocks, key=sort_key)
+
+
+# ── 구루 확장 함수 ───────────────────────────────────────────────
+
+def enrich_seo_scores(stocks: list[dict]) -> list[dict]:
+    """KRX 기본 데이터(PER/PBR/ROE)로 서준식 기대수익률 일괄 계산.
+
+    DART 호출 불필요 → 1차 필터 단계에서 즉시 실행.
+    """
+    for s in stocks:
+        seo = calc_seo_expected_return(
+            roe=s.get("roe"),
+            pbr=s.get("pbr"),
+            per=s.get("per"),
+            dividend_yield=s.get("dividend_yield"),
+        )
+        s["seo_return"] = seo["expected_return"]
+        s["seo_score"] = seo["seo_score"]
+    return stocks
+
+
+def sort_by_greenblatt_rank(stocks: list[dict]) -> list[dict]:
+    """Greenblatt Combined Rank(ROIC순위+EY순위 합산)로 정렬."""
+    # ROIC 순위 (높을수록 좋음 → 내림차순 순위)
+    calculable = [
+        s for s in stocks
+        if s.get("guru_scores") and (s["guru_scores"].get("greenblatt") or {}).get("calculable")
+    ]
+    not_calculable = [s for s in stocks if s not in calculable]
+
+    calculable.sort(key=lambda s: s["guru_scores"]["greenblatt"].get("roic") or -999, reverse=True)
+    for i, s in enumerate(calculable):
+        s["_roic_rank"] = i + 1
+
+    calculable.sort(key=lambda s: s["guru_scores"]["greenblatt"].get("earnings_yield") or -999, reverse=True)
+    for i, s in enumerate(calculable):
+        s["_ey_rank"] = i + 1
+
+    for s in calculable:
+        s["greenblatt_rank"] = s.pop("_roic_rank") + s.pop("_ey_rank")
+
+    calculable.sort(key=lambda s: s["greenblatt_rank"])
+
+    for s in not_calculable:
+        s["greenblatt_rank"] = None
+
+    return calculable + not_calculable
+
+
+def get_preset_filters(preset: str, regime: Optional[str] = None) -> dict:
+    """구루 프리셋별 권장 필터 반환.
+
+    Args:
+        preset: "greenblatt" | "neff" | "seo"
+        regime: 체제명 (None이면 selective 기본값)
+    """
+    rgp = REGIME_GURU_PARAMS.get(regime or "selective", REGIME_GURU_PARAMS["selective"])
+
+    if preset == "greenblatt":
+        return {
+            "per_min": 0,
+            "per_max": 50,
+            "roe_min": None,
+            "pbr_max": None,
+            "include_negative": False,
+        }
+    elif preset == "neff":
+        return {
+            "per_min": 0,
+            "per_max": 20,
+            "roe_min": 5,
+            "pbr_max": None,
+            "include_negative": False,
+        }
+    elif preset == "seo":
+        return {
+            "per_min": 0,
+            "per_max": None,
+            "roe_min": max(5, rgp.get("seo_return_min", 5)),
+            "pbr_max": 3.0,
+            "include_negative": False,
+        }
+    return {}

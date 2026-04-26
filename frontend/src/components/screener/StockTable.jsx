@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react'
+import { Link } from 'react-router-dom'
 import { fetchWatchlist } from '../../api/watchlist'
 import DataTable from '../common/DataTable'
 import WatchlistButton from '../common/WatchlistButton'
 
-/** 시가총액 억/조 포맷팅 */
 function fmtMktcap(val) {
   if (!val || val === 0) return '-'
   const eok = val / 1_0000_0000
@@ -21,7 +21,6 @@ function fmtPrice(val) {
   return Math.floor(val).toLocaleString('ko-KR')
 }
 
-/** 등락률/수익률 컬러 셀 (한국 관례: 상승=빨강, 하락=파랑) */
 function fmtPct(val) {
   if (val === null || val === undefined) return <span className="text-gray-400">-</span>
   const color = val > 0 ? 'text-red-600' : val < 0 ? 'text-blue-600' : 'text-gray-600'
@@ -38,40 +37,96 @@ function fmtDivYield(val) {
   return `${val.toLocaleString('ko-KR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`
 }
 
-function makeColumns(watchlistSet) {
-  return [
-  { key: '_watchlist', label: '', align: 'center', sortable: false,
-    render: (_, row) => <WatchlistButton code={row.code} alreadyAdded={watchlistSet.has(row.code)} /> },
-  { key: '_rank', label: '순위', align: 'right' },
-  { key: 'code', label: '종목코드', align: 'center' },
-  { key: 'name', label: '종목명', align: 'left' },
-  { key: 'market', label: '시장', align: 'center',
-    render: (v) => (
-      <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${v === 'KOSPI' ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700'}`}>
-        {v}
-      </span>
-    )
-  },
-  { key: 'prev_close', label: '전일종가', align: 'right', render: fmtPrice },
-  { key: 'current_price', label: '현재가', align: 'right', render: fmtPrice },
-  { key: 'change_pct', label: '당일(%)', align: 'right', render: fmtPct },
-  { key: 'return_3m', label: '3개월(%)', align: 'right', render: fmtPct },
-  { key: 'return_6m', label: '6개월(%)', align: 'right', render: fmtPct },
-  { key: 'return_1y', label: '1년(%)', align: 'right', render: fmtPct },
-  { key: 'dividend_yield', label: '배당수익률', align: 'right', render: fmtDivYield },
-  { key: 'per', label: 'PER', align: 'right', render: fmtFloat },
-  { key: 'pbr', label: 'PBR', align: 'right', render: fmtFloat },
-  { key: 'roe', label: 'ROE(%)', align: 'right', render: fmtFloat },
-  { key: 'mktcap', label: '시가총액', align: 'right', render: fmtMktcap },
-]}
+function GuruScoreBadge({ scores }) {
+  if (!scores) return <span className="text-gray-300">-</span>
+  const { normalized_score, formulas_available } = scores
+  const color = normalized_score >= 75 ? 'bg-green-100 text-green-700'
+    : normalized_score >= 50 ? 'bg-yellow-100 text-yellow-700'
+    : 'bg-red-100 text-red-700'
+  return (
+    <span className={`px-2 py-0.5 rounded text-xs font-bold ${color}`}>
+      {Math.round(normalized_score)} ({formulas_available}/3)
+    </span>
+  )
+}
 
-export default function StockTable({ stocks }) {
+function FormulaScore({ score, maxScore = 4 }) {
+  if (score == null) return <span className="text-gray-300">N/A</span>
+  return (
+    <div className="flex gap-0.5 justify-center">
+      {Array(maxScore).fill(0).map((_, i) => (
+        <span key={i} className={`w-2 h-2 rounded-full ${i < score ? 'bg-blue-500' : 'bg-gray-200'}`} />
+      ))}
+    </div>
+  )
+}
+
+function ValueTrapIcon({ warnings }) {
+  if (!warnings || warnings.length === 0) return null
+  return (
+    <span className="relative group cursor-pointer" title={warnings.join('\n')}>
+      <span className="text-amber-500 text-base">!</span>
+      <div className="absolute z-50 hidden group-hover:block bg-gray-900 text-white text-xs rounded-lg p-2 w-48 -left-20 top-6 shadow-lg">
+        {warnings.map((w, i) => <p key={i} className="mb-1 last:mb-0">{w}</p>)}
+      </div>
+    </span>
+  )
+}
+
+function makeColumns(watchlistSet, hasGuru) {
+  const cols = [
+    { key: '_watchlist', label: '', align: 'center', sortable: false,
+      render: (_, row) => <WatchlistButton code={row.code} alreadyAdded={watchlistSet.has(row.code)} /> },
+    { key: '_rank', label: '#', align: 'right' },
+    { key: 'code', label: '코드', align: 'center' },
+    { key: 'name', label: '종목명', align: 'left',
+      render: (v, row) => <Link to={`/detail/${row.code}`} className="hover:text-blue-600">{v}</Link> },
+    { key: 'market', label: '시장', align: 'center',
+      render: (v) => (
+        <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${v === 'KOSPI' ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700'}`}>{v}</span>
+      )},
+    { key: 'current_price', label: '현재가', align: 'right', render: fmtPrice },
+    { key: 'change_pct', label: '당일(%)', align: 'right', render: fmtPct },
+    { key: 'return_3m', label: '3M(%)', align: 'right', render: fmtPct },
+    { key: 'return_1y', label: '1Y(%)', align: 'right', render: fmtPct },
+    { key: 'dividend_yield', label: '배당', align: 'right', render: fmtDivYield },
+    { key: 'per', label: 'PER', align: 'right', render: fmtFloat },
+    { key: 'pbr', label: 'PBR', align: 'right', render: fmtFloat },
+    { key: 'roe', label: 'ROE(%)', align: 'right', render: fmtFloat },
+    { key: 'seo_return', label: '기대수익률', align: 'right',
+      render: (v) => v != null ? `${fmtFloat(v)}%` : '-' },
+    { key: 'mktcap', label: '시가총액', align: 'right', render: fmtMktcap },
+  ]
+
+  if (hasGuru) {
+    cols.push(
+      { key: '_guru', label: '구루점수', align: 'center', sortable: false,
+        render: (_, row) => <GuruScoreBadge scores={row.guru_scores} /> },
+      { key: '_gb', label: 'GB', align: 'center', sortable: false,
+        render: (_, row) => {
+          const gb = row.guru_scores?.greenblatt
+          if (!gb?.calculable) return <span className="text-gray-300">-</span>
+          return <FormulaScore score={Math.min(4, Math.round(gb.total_score / 2))} />
+        }},
+      { key: '_nf', label: 'NF', align: 'center', sortable: false,
+        render: (_, row) => {
+          const nf = row.guru_scores?.neff
+          return <FormulaScore score={nf?.calculable ? nf.neff_score : null} />
+        }},
+      { key: '_vt', label: '', align: 'center', sortable: false,
+        render: (_, row) => <ValueTrapIcon warnings={row.value_trap_warnings} /> },
+    )
+  }
+
+  return cols
+}
+
+export default function StockTable({ stocks, hasGuru }) {
   const [watchlistSet, setWatchlistSet] = useState(new Set())
 
   useEffect(() => {
     fetchWatchlist()
       .then(data => {
-        // 스크리너는 KR 전용이므로 code만으로 Set 구성
         const s = new Set((data.items || []).filter(i => i.market === 'KR').map(i => i.code))
         setWatchlistSet(s)
       })
@@ -82,5 +137,5 @@ export default function StockTable({ stocks }) {
 
   const enriched = stocks.map((s, i) => ({ ...s, _rank: i + 1 }))
 
-  return <DataTable columns={makeColumns(watchlistSet)} data={enriched} rowKey="code" />
+  return <DataTable columns={makeColumns(watchlistSet, hasGuru)} data={enriched} rowKey="code" />
 }

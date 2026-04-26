@@ -58,7 +58,7 @@ frontend/
       common/             LoadingSpinner, ErrorAlert, EmptyState, DataTable, ToastNotification
                           WatchlistButton (code/market/alreadyAdded props, ★/+ 버튼, StockTable·FilingsTable 공용)
                           CandlestickChart (ohlcv/indicators props, 캔들+MA5/20/60+BB+거래량, PriceChartPanel·TechnicalPanel 공용)
-      screener/           FilterPanel, StockTable
+      screener/           FilterPanel (구루 프리셋 드롭다운+체제 토글+guru_top), StockTable (서준식 기대수익률+구루점수배지+Value Trap 경고)
       earnings/           FilingsTable (국내/미국 컬럼 분기, market prop)
       balance/            PortfolioSummary, HoldingsTable, OverseasHoldingsTable, FuturesTable
       watchlist/          AddStockForm (자동완성 검색, searchStocks API 사용), WatchlistDashboard, StockInfoModal
@@ -98,7 +98,7 @@ frontend/
                           TaxSimulationPanel (가상매도 시뮬레이션: 보유종목 선택+매도가/수량 입력+예상 세액)
     pages/
       DashboardPage.jsx   /         포트폴리오 요약(체제배너+자산현황+배분차트) + 오늘 공시
-      ScreenerPage.jsx    /screener
+      ScreenerPage.jsx    /screener   구루 프리셋(Greenblatt/Neff/서준식) + 체제 배너 + 프리셋 배지 + 구루 점수 테이블
       EarningsPage.jsx    /earnings  국내/미국 탭 선택 + 기간 조회
       BalancePage.jsx     /balance
       WatchlistPage.jsx   /watchlist
@@ -132,7 +132,7 @@ frontend/
 
 ### 페이지별 규칙
 
-- **ScreenerPage**: "조회하기" 버튼 클릭 시만 API 호출 (onChange 즉시 호출 안 함)
+- **ScreenerPage**: "조회하기" 버튼 클릭 시만 API 호출 (onChange 즉시 호출 안 함). 구루 프리셋(greenblatt/neff/seo) 선택 시 DART enrichment 자동 활성화. 체제 연계(regime_aware) 기본 ON → 상단 체제 배너 표시. 서준식 기대수익률은 항상 컬럼 표시, 구루 점수/Value Trap은 DART enrichment 시에만 표시
 - **EarningsPage**: 국내/미국 탭 선택 → 조회 시 필터 초기화. 종목명/종목코드 클라이언트 사이드 필터
 - **BalancePage**: 국내/해외/선물옵션 3섹션 분리. 국내는 항상 표시, FNO는 `fno_enabled`일 때 표시(빈 목록이면 EmptyState). KIS 키 없으면 안내 메시지 (에러 대신)
 - **WatchlistDashboard**: 종목명 클릭 → `/detail/:symbol`. 통화 배지 (US=`[US]`). 삭제/편집 시 market 파라미터 포함

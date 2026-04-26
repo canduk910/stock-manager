@@ -6,7 +6,7 @@ CLI와 API 라우터 양쪽에서 공용으로 사용한다.
 
 | 파일 | 역할 |
 |------|------|
-| `service.py` | CLI 독립 비즈니스 로직. `normalize_date`, `parse_sort_spec`, `apply_filters`, `sort_stocks`. `ScreenerValidationError` 예외. |
+| `service.py` | CLI 독립 비즈니스 로직. `normalize_date`, `parse_sort_spec`, `apply_filters`, `sort_stocks` + **구루 확장**: `enrich_seo_scores`(서준식 일괄계산), `sort_by_greenblatt_rank`(Combined Rank 정렬), `get_preset_filters`(프리셋별 기본 필터). `ScreenerValidationError` 예외. |
 | `cli.py` | Click CLI. `service.py`를 호출하는 얇은 래퍼. `ScreenerValidationError` → `click.BadParameter` 변환. |
 | `krx.py` | pykrx로 전종목 PER/PBR/EPS/BPS/시가총액 수집. ROE = EPS/BPS × 100. |
 | `dart.py` | OpenDart API. `pblntf_ty=A` 단일 쿼리로 정기보고서 조회. `rcept_no` 기준 중복 제거. |
