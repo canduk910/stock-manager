@@ -23,6 +23,22 @@ def list_reports(
     return report_service.list_daily_reports(market=market, limit=limit, offset=offset)
 
 
+# ── 날짜별 보고서 조회 (/{report_id}보다 먼저 등록) ────────────
+
+@router.get("/by-date")
+def get_report_by_date(
+    date: str,
+    market: str = "KR",
+    _user: dict = Depends(get_current_user),
+):
+    """날짜+시장으로 일일 보고서 조회. 없으면 404."""
+    report = report_service.get_daily_report_by_date(date, market)
+    if not report:
+        from services.exceptions import NotFoundError
+        raise NotFoundError(f"{date} {market} 보고서를 찾을 수 없습니다.")
+    return report
+
+
 # ── 추천 이력 (/{report_id}보다 먼저 등록) ────────────────────
 
 @router.get("/recommendations")

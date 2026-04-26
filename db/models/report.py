@@ -144,7 +144,7 @@ class DailyReport(Base):
         }
 
     def to_summary_dict(self) -> dict:
-        return {
+        d = {
             "id": self.id,
             "date": self.date,
             "market": self.market,
@@ -154,3 +154,16 @@ class DailyReport(Base):
             "telegram_sent": bool(self.telegram_sent),
             "created_at": self.created_at,
         }
+        rj = self.report_json or {}
+        concepts = (rj.get("sector_recommendations") or {}).get("concepts", [])
+        if concepts:
+            parts = []
+            for c in concepts:
+                label = c.get("concept_label", "")
+                sectors = ", ".join(s.get("sector_name", "") for s in c.get("sectors", []))
+                if sectors:
+                    parts.append(f"{label}: {sectors}")
+            d["sector_summary"] = " | ".join(parts) if parts else None
+        else:
+            d["sector_summary"] = None
+        return d

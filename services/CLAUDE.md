@@ -17,14 +17,15 @@
 | `quote_service.py` | 실시간 시세 공개 API 진입점 (get_manager/get_overseas_manager 싱글턴) |
 | `quote_kis.py` | KIS WebSocket 단일 연결 + 심볼별 pub/sub (국내+FNO). KISQuoteManager 클래스. |
 | `quote_overseas.py` | 해외주식 시세 (Finnhub WS 또는 yfinance 2초 폴링). OverseasQuoteManager 클래스. |
-| `advisory_service.py` | AI자문 데이터 수집(ThreadPoolExecutor 7~8 workers 병렬) + GPT 리포트 생성. v2 스키마: 7점등급/복합점수/체제정합성/Value Trap 정량 필드. Pydantic 검증 + 토큰 잘림 재시도. |
+| `advisory_service.py` | AI자문 데이터 수집(ThreadPoolExecutor 7~8 workers 병렬) + GPT 리포트 생성. v2 스키마: 7점등급/복합점수/체제정합성/Value Trap 정량 필드 + **4개 신규 섹션**(매크로환경분석/밸류에이션심화/시나리오분석/관련투자대안). Pydantic 검증 + 토큰 잘림 재시도. `max_completion_tokens` 14000→18000. |
 | `macro_regime.py` | **공용 체제 판단 모듈** (신규). REGIME_MATRIX 20셀(버핏×공포탐욕) + REGIME_PARAMS(margin/stock_max/cash_min/single_cap) + VIX>35 오버라이드 + 하이스테리시스 ±5. 3개 서비스(advisory/portfolio_advisor/pipeline) 공유. |
 | `safety_grade.py` | **7점 등급/복합점수 공유 모듈** (신규). `compute_grade_7point()`(7지표×4점=28점→A/B+/B/C/D), `compute_composite_score()`(ValueScreener 공식), `compute_regime_alignment()`, `compute_position_sizing()`. advisory_service + pipeline_service 공유. |
-| `schemas/advisory_report_v2.py` | **Pydantic v2 응답 스키마** (신규). `AdvisoryReportV2Schema` 11개 모델 계층. `validate_v2_report()`/`extract_v2_fields()`. 등급=Literal, 점수=ge/le 범위 검증. |
+| `schemas/advisory_report_v2.py` | **Pydantic v2 응답 스키마**. `AdvisoryReportV2Schema` 15개 모델 계층(+MacroAnalysis/ValuationDeepDive/ScenarioAnalysis/InvestmentAlternative). `validate_v2_report()`/`extract_v2_fields()`. 신규 4섹션 Optional. |
 | `macro_service.py` | 매크로 분석 오케스트레이션: quote+sparkline 완전 병렬 수집 + GPT 번역/추출 + 섹션별 독립 실패 허용. GPT 결과는 `macro.db`에 일일 캐싱 (KST 기준) |
 | `portfolio_advisor_service.py` | AI 포트폴리오 자문: 잔고 컨텍스트(52주 하락률+**개별 AI 리포트 연계**) + 매크로 체제 + **매크로 뉴스 헤드라인** → OpenAI 호출(체제별 프롬프트 + 역발상 + **가중 등급 집계 + 체제 정합성 + 신규 섹터 진입 추천(규칙 29-32)**) → 진단/리밸런싱/매매안/**섹터 추천**. `cache.db` 30분 TTL + `advisory.db` 영구 저장. 52주 고가 6h 캐시. |
-| `report_service.py` | 투자 보고서: 추천 이력 + 매크로 체제 이력 + 일일 보고서 비즈니스 로직 + 통합 Markdown 생성 + 성과 통계. `stock/report_store.py` 래퍼 경유 (다른 서비스와 동일 패턴). |
-| `pipeline_service.py` | 투자 파이프라인: 체제 판단(`macro_regime.py` 위임) → 체제별 스크리닝 → 심층 분석(`safety_grade.py` 위임) → 추천 생성 → 보고서 저장. `run_pipeline(market)` 단일 진입점. |
+| `sector_recommendation_service.py` | **GPT 섹터 추천 서비스** (신규). 매크로 현황(체제/VIX/버핏/공포탐욕/지수/뉴스) 기반 3컨셉(모멘텀/역발상/3개월선점) 탑픽 섹터+종목 추천. `macro_store` 일일 캐싱. `response_format=json_object`, `max_completion_tokens=5000→8000` 재시도. |
+| `report_service.py` | 투자 보고서: 추천 이력 + 매크로 체제 이력 + 일일 보고서 + Markdown 생성(**섹터 추천 섹션 포함**) + 성과 통계. `stock/report_store.py` 래퍼 경유. |
+| `pipeline_service.py` | 투자 파이프라인: **Step 0 중복방지**(날짜+market 기존 보고서 체크) → 체제 판단 → **Step 1.5 매크로 수집+GPT 섹터 추천** → 스크리닝 → 심층 분석 → 추천 생성 → 보고서 저장(**report_json version 2**: regime_data+macro_snapshot+sector_recommendations). `run_pipeline(market)` 단일 진입점. |
 | `scheduler_service.py` | APScheduler: 08:00 KR / 16:00 US BackgroundScheduler. `setup_scheduler()` / `shutdown_scheduler()` / `get_scheduler_status()`. main.py lifespan 통합. |
 | `mcp_client.py` | KIS AI Extensions MCP Streamable HTTP 클라이언트. 세션 기반 프로토콜(initialize → session ID → tools/call). SSE 응답 파싱. Host 헤더 고정(Docker 내부 접근). `health_check()`/`call_tool()`. 싱글턴 `get_mcp_client()`. |
 | `backtest_service.py` | 백테스트 오케스트레이션: **비동기 2단계**(run_tool→job_id→get_backtest_result_tool(wait=true)). MCP 파라미터: `strategy_id`/`symbols`(배열)/`initial_capital`/`commission_rate`/`tax_rate`/`slippage`. `_extract_metrics()` 중첩 메트릭(basic/risk/trading) 플래트닝. 실패 시 `update_job_status("failed")`. `get_strategy_signals()` — 대표 3전략 신호 + 합의. MCP 비활성화 시 None. |

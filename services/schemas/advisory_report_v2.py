@@ -66,6 +66,45 @@ class PositionGuide(BaseModel):
         extra = "allow"  # 1차익절가 등 추가 키 허용
 
 
+class MacroAnalysis(BaseModel):
+    """매크로 환경 분석."""
+    시장체제해석: str
+    금리영향: Optional[str] = None
+    섹터전망: Optional[str] = None
+    매크로리스크: Optional[str] = None
+
+
+class ValuationDeepDive(BaseModel):
+    """밸류에이션 심화 분석."""
+    적정가치: Optional[float] = None
+    산출방법: Optional[str] = None
+    업종대비: Optional[str] = None
+    PEG분석: Optional[str] = None
+    밸류에이션판단: str
+
+
+class ScenarioCase(BaseModel):
+    """시나리오 분석 개별 케이스."""
+    목표가: Optional[float] = None
+    확률: Optional[float] = Field(None, ge=0, le=100)
+    근거: str
+
+
+class ScenarioAnalysis(BaseModel):
+    """시나리오 분석 (낙관/기본/비관)."""
+    낙관: ScenarioCase
+    기본: ScenarioCase
+    비관: ScenarioCase
+
+
+class InvestmentAlternative(BaseModel):
+    """관련 투자 대안."""
+    유형: str  # ETF, 지수, 원자재, 채권 등
+    종목명: str
+    코드: Optional[str] = None
+    사유: str
+
+
 class RiskFactor(BaseModel):
     요인: str
     설명: str
@@ -95,6 +134,10 @@ class AdvisoryReportV2Schema(BaseModel):
     포지션가이드: PositionGuide
     리스크요인: list[RiskFactor]
     투자포인트: list[InvestmentPoint]
+    매크로환경분석: Optional[MacroAnalysis] = None
+    밸류에이션심화: Optional[ValuationDeepDive] = None
+    시나리오분석: Optional[ScenarioAnalysis] = None
+    관련투자대안: Optional[list[InvestmentAlternative]] = Field(default_factory=list)
     Value_Trap_경고: bool = False
     Value_Trap_근거: list[str] = Field(default_factory=list)
 

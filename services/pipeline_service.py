@@ -408,6 +408,22 @@ def run_pipeline(market: str = "KR") -> dict:
     today = datetime.now(KST).strftime("%Y-%m-%d")
     logger.info(f"=== 파이프라인 시작: {market} ({today}) ===")
 
+    # Step 0: 중복 방지 — 같은 날짜+market에 이미 보고서가 있으면 재생성하지 않음
+    existing = report_service.get_daily_report_by_date(today, market)
+    if existing:
+        logger.info(f"오늘({today}) {market} 보고서 이미 존재: #{existing['id']}")
+        return {
+            "report_id": existing["id"],
+            "date": today,
+            "market": market,
+            "regime": existing.get("regime"),
+            "candidates_count": existing.get("candidates_count", 0),
+            "analyses_count": 0,
+            "recommended_count": existing.get("recommended_count", 0),
+            "cached": True,
+            "errors": [],
+        }
+
     # Step 1: 매크로 체제 판단
     try:
         sentiment = macro_service.get_sentiment()
@@ -425,6 +441,35 @@ def run_pipeline(market: str = "KR") -> dict:
         vix=regime_data.get("vix"),
         fear_greed_score=regime_data.get("fear_greed_score"),
     )
+
+    # Step 1.5: 매크로 수집 + GPT 섹터 추천
+    sector_recs = {"concepts": []}
+    macro_snapshot = {"indices": [], "news_headlines": []}
+    try:
+        indices_data = macro_service.get_indices()
+        news_data = macro_service.get_news()
+
+        # 매크로 스냅샷 (보고�� 저장용)
+        macro_snapshot["indices"] = [
+            {"name": idx.get("name", ""), "price": idx.get("price"), "change_pct": idx.get("change_pct")}
+            for idx in (indices_data.get("indices") or [])
+        ]
+        macro_snapshot["news_headlines"] = [
+            n.get("title", "") for n in (news_data.get("korean") or [])[:10]
+        ]
+
+        from services.sector_recommendation_service import generate_sector_recommendations
+        # regime_data에 regime_desc 추가 (공용 모듈에서 가져옴)
+        from services.macro_regime import REGIME_DESC
+        regime_data_with_desc = dict(regime_data)
+        regime_data_with_desc["regime_desc"] = REGIME_DESC.get(regime_data["regime"], regime_data["regime"])
+        sector_recs = generate_sector_recommendations(
+            regime_data_with_desc, indices_data, news_data, market
+        )
+        logger.info(f"섹터 추천: {len(sector_recs.get('concepts', []))}개 컨셉")
+    except Exception as e:
+        logger.error(f"섹터 추천 실패 (보고서는 계속 생성): {e}")
+        errors.append(f"섹터 추천 실패: {e}")
 
     # Step 2: 종목 스크리닝
     if regime_data["regime"] == "defensive":
@@ -451,18 +496,25 @@ def run_pipeline(market: str = "KR") -> dict:
         report_service.save_recommendations_batch(recommendations)
 
     # 보고서 생성 + 저장
+    from services.macro_regime import REGIME_DESC as _REGIME_DESC
     md = report_service.generate_daily_report_markdown(
         regime_data=regime_data,
         recommendations=recommendations,
         market=market,
         date=today,
+        sector_recommendations=sector_recs,
     )
+    regime_data_json = {k: v for k, v in regime_data.items() if k != "params"}
+    regime_data_json["regime_desc"] = _REGIME_DESC.get(regime_data["regime"], regime_data["regime"])
     report_id = report_service.save_daily_report(
         date=today,
         market=market,
         report_markdown=md,
         report_json={
-            "regime_data": {k: v for k, v in regime_data.items() if k != "params"},
+            "version": 2,
+            "regime_data": regime_data_json,
+            "macro_snapshot": macro_snapshot,
+            "sector_recommendations": sector_recs,
             "candidates_count": len(candidates),
             "analyses_count": len(analyses),
             "recommendations": recommendations,

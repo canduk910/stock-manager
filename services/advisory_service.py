@@ -118,14 +118,14 @@ def generate_ai_report(code: str, market: str, name: str, user_id: int = 1) -> d
     try:
         import time as _time
 
-        # 1차 호출 (max_completion_tokens=10000)
-        content, finish_reason = _call_openai(10000)
+        # 1차 호출 (max_completion_tokens=14000, 4개 신규 섹션 대응)
+        content, finish_reason = _call_openai(14000)
 
-        # 토큰 잘림 1차 재시도 (12000)
+        # 토큰 잘림 1차 재시도 (18000)
         if finish_reason == "length":
-            logger.warning("종목 자문 응답 토큰 잘림 1차 (%s), 12000으로 재시도", code)
+            logger.warning("종목 자문 응답 토큰 잘림 1차 (%s), 18000으로 재시도", code)
             _time.sleep(1)
-            content, finish_reason = _call_openai(12000)
+            content, finish_reason = _call_openai(18000)
             if finish_reason == "length":
                 logger.error("종목 자문 응답 토큰 잘림 2차 (%s), 저장 거부", code)
                 raise ExternalAPIError("응답이 토큰 제한으로 잘렸습니다. 다시 시도해주세요.")
@@ -138,7 +138,7 @@ def generate_ai_report(code: str, market: str, name: str, user_id: int = 1) -> d
         if not v2_ok:
             logger.warning("v2 검증 실패 (%s): %s — 1회 재시도", code, v2_err[:200])
             _time.sleep(1)
-            content2, finish2 = _call_openai(10000, "\n\n응답을 반드시 유효한 JSON으로 작성하세요. schema_version='v2' 필수 필드를 누락하지 마세요.")
+            content2, finish2 = _call_openai(14000, "\n\n응답을 반드시 유효한 JSON으로 작성하세요. schema_version='v2' 필수 필드를 누락하지 마세요.")
             if finish2 == "length":
                 logger.warning("v2 재시도도 토큰 잘림 (%s)", code)
             report = _parse_report(content2)
@@ -156,7 +156,7 @@ def generate_ai_report(code: str, market: str, name: str, user_id: int = 1) -> d
         logger.warning("OpenAI 1차 호출 실패 (%s): %s — 2초 후 재시도", code, err_str[:200])
         _time.sleep(2)
         try:
-            content, finish_reason = _call_openai(10000)
+            content, finish_reason = _call_openai(14000)
             report = _parse_report(content)
         except Exception as e2:
             raise ExternalAPIError(f"OpenAI 호출 실패: {str(e2)}")
@@ -686,6 +686,30 @@ def _build_system_prompt(regime: str, regime_desc: str) -> str:
         "【업종 상대평가】\n"
         "종목의 섹터/업종을 감안하여 동종 업종 평균 PER/PBR 대비 상대적 위치를 평가하세요 (참고용).\n\n"
         f"【현재 매크로 환경】\n{regime_rule}\n\n"
+        "【매크로 환경 분석 (신규 섹션)】\n"
+        "현재 시장 체제가 이 종목에 미치는 구체적 영향을 분석하세요:\n"
+        "- 시장체제해석: 현재 체제(accumulation/selective/cautious/defensive)가 이 종목/업종에 어떤 의미인지\n"
+        "- 금리영향: 금리 환경이 이 업종/종목의 밸류에이션과 실적에 미치는 영향\n"
+        "- 섹터전망: 이 종목이 속한 섹터의 향후 3~6개월 전망과 섹터 로테이션 관점\n"
+        "- 매크로리스크: 환율, 원자재 가격, 지정학적 리스크 등 매크로 차원의 위험 요소\n\n"
+        "【밸류에이션 심화 분석 (신규 섹션)】\n"
+        "Graham Number 외에 다각적 밸류에이션 분석을 수행하세요:\n"
+        "- 적정가치: 수익가치(PER×EPS) 또는 자산가치(BPS) 기반 적정주가 산출. 산출 방법 명시\n"
+        "- 업종대비: 동종 업종 평균 PER/PBR 대비 할인/프리미엄 수준 평가\n"
+        "- PEG분석: Forward EPS 성장률 대비 PER 적정성 (PEG<1 저평가, >2 고평가)\n"
+        "- 밸류에이션판단: 위 분석을 종합한 1~2문장 판단 (저평가/적정/고평가 + 근거)\n\n"
+        "【시나리오 분석 (신규 섹션)】\n"
+        "향후 12개월 기준 3가지 시나리오를 제시하세요:\n"
+        "- 낙관(Bull): 긍정 촉매(실적 서프라이즈, 업황 호전 등) 발생 시 목표가 + 확률(%)\n"
+        "- 기본(Base): 현재 추세 유지 시 목표가 + 확률(%)\n"
+        "- 비관(Bear): 부정 촉매(실적 미달, 매크로 악화 등) 발생 시 목표가 + 확률(%)\n"
+        "3개 확률 합계는 100%로 맞추세요. 각 시나리오의 핵심 전제와 근거를 명시.\n\n"
+        "【관련 투자 대안 (신규 섹션)】\n"
+        "이 종목 대신 또는 보완으로 고려할 수 있는 투자 대안을 2~4개 제시하세요:\n"
+        "- 유형: ETF, 지수, 원자재, 채권, 동종업종 대체주 등\n"
+        "- 동일 섹터 ETF, 관련 원자재(해당 시), 방어적 대안(채권 ETF 등)\n"
+        "- 각 대안의 현재 종목 대비 장단점을 사유에 포함\n"
+        "코드(티커)를 알면 포함하고, 모르면 null.\n\n"
         "각 전략 신호를 독립적으로 평가하고, 전략 간 일치/불일치도 종합 의견에 반영하세요.\n"
         "매크로 체제가 defensive이면 어떤 경우에도 '매수' 등급을 부여하지 마세요.\n"
         "7점 등급 계산 시 C/D 등급은 매수 추천 금지(최대 '관망'). 손절가는 등급별 기준에 정확히 맞추세요."
@@ -1009,6 +1033,28 @@ def _build_prompt(code: str, market: str, name: str, fundamental: dict, technica
   "투자포인트": [
     {{"포인트": "포인트명", "설명": "설명"}},
     ...
+  ],
+  "매크로환경분석": {{
+    "시장체제해석": "현재 체제가 이 종목/업종에 미치는 구체적 영향 해석 (2~3문장)",
+    "금리영향": "금리 환경이 밸류에이션/실적에 미치는 영향 (1~2문장, 없으면 null)",
+    "섹터전망": "해당 섹터 향후 3~6개월 전망 + 로테이션 관점 (2~3문장)",
+    "매크로리스크": "환율/원자재/지정학적 리스크 등 핵심 매크로 위험 요소 (1~2문장)"
+  }},
+  "밸류에이션심화": {{
+    "적정가치": 수익가치 또는 자산가치 기반 적정주가 숫자 (null 가능),
+    "산출방법": "PER×EPS, BPS×배수, DCF근사 등 산출 방법 설명",
+    "업종대비": "동종 업종 평균 PER/PBR 대비 할인/프리미엄 평가 (1~2문장)",
+    "PEG분석": "PEG 비율 기반 성장 대비 밸류에이션 적정성 (Forward EPS 있을 때, 없으면 null)",
+    "밸류에이션판단": "종합 밸류에이션 판단 1~2문장 (저평가/적정/고평가 + 핵심 근거)"
+  }},
+  "시나리오분석": {{
+    "낙관": {{ "목표가": 숫자, "확률": 0~100 %, "근거": "긍정 촉매 + 핵심 전제" }},
+    "기본": {{ "목표가": 숫자, "확률": 0~100 %, "근거": "현재 추세 유지 전제" }},
+    "비관": {{ "목표가": 숫자, "확률": 0~100 %, "근거": "부정 촉매 + 핵심 전제" }}
+  }},
+  "관련투자대안": [
+    {{ "유형": "ETF 또는 지수 또는 원자재 또는 채권 또는 대체주", "종목명": "이름", "코드": "티커 또는 null", "사유": "이 종목 대비 장단점" }},
+    ...2~4개
   ],
   "Value_Trap_경고": true 또는 false (ValueScreener 5규칙 중 2개 이상 해당 시 true),
   "Value_Trap_근거": ["근거1", "근거2"] (경고=true일 때 해당 규칙 번호와 근거 명시, 경고=false면 빈 배열)

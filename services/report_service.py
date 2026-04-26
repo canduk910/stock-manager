@@ -125,6 +125,7 @@ def generate_daily_report_markdown(
     recommendations: list[dict],
     market: str,
     date: str,
+    sector_recommendations: Optional[dict] = None,
 ) -> str:
     """분석 결과를 통합 Markdown 보고서로 생성."""
     lines = []
@@ -148,6 +149,22 @@ def generate_daily_report_markdown(
         if parts:
             lines.append(f"지표: {' / '.join(parts)}")
         lines.append("")
+
+    # 섹터 추천 (GPT)
+    concepts = (sector_recommendations or {}).get("concepts", [])
+    if concepts:
+        lines.append("## 탑픽 섹터 추천")
+        lines.append("")
+        concept_labels = {"momentum": "모멘텀", "contrarian": "역발상", "forward_3m": "3개월 선점"}
+        for concept in concepts:
+            label = concept.get("concept_label") or concept_labels.get(concept.get("concept"), "")
+            desc = concept.get("description", "")
+            lines.append(f"### {label}: {desc}")
+            for sector in concept.get("sectors", []):
+                lines.append(f"**{sector.get('sector_name', '')}** — {sector.get('rationale', '')}")
+                for stock in sector.get("stocks", []):
+                    lines.append(f"- {stock.get('name', '')} ({stock.get('code', '')}) : {stock.get('reason', '')}")
+            lines.append("")
 
     # 추천 종목
     if recommendations:

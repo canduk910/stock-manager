@@ -1,487 +1,167 @@
 /**
  * 투자 보고서 페이지 (/reports).
  *
- * 3탭 구조:
- *   1) 일일 보고서 — pipeline_service가 매일 생성하는 시장 분석 보고서 (Markdown)
- *      - 체제 배지: accumulation(초록) / selective(노랑) / cautious(주황) / defensive(빨강)
- *      - 좌측 목록 + 우측 상세 2패널 레이아웃
- *   2) 추천 이력 — 파이프라인이 추천한 종목의 이력 추적
- *      - 시장/상태 필터, 등급 배지(A~D 색상), PnL 색상(한국 관례: 상승=빨강, 하락=파랑)
- *   3) 성과 통계 — 추천 종목의 등급별/시장별 통계
- *      - 체제 이력 타임라인 (최근 30일)
- *
- * 데이터 소스: /api/reports/* (7개 GET 엔드포인트)
- * 훅: useReports, useReportDetail, useRecommendations, usePerformance, useRegimes
+ * 페이지 진입 시 KR/US 파이프라인 자동 실행 (Step 0 중복방지).
+ * 매크로 카드는 공유, 섹터 추천은 KR/US 토글로 전환.
+ * 하단에 과거 보고서 이력.
  */
-import { useEffect, useState, useCallback } from 'react'
-import { useReports, useReportDetail, useRecommendations, usePerformance, useRegimes } from '../hooks/useReport'
-import { runPipelineSync, fetchPipelineStatus } from '../api/pipeline'
+import { useEffect, useState, useRef, useCallback } from 'react'
+import { useReports, useReportDetail } from '../hooks/useReport'
+import { fetchReport } from '../api/report'
+import { runPipelineSync } from '../api/pipeline'
 import LoadingSpinner from '../components/common/LoadingSpinner'
 import ErrorAlert from '../components/common/ErrorAlert'
-import EmptyState from '../components/common/EmptyState'
-
-const TABS = [
-  { key: 'reports', label: '일일 보고서' },
-  { key: 'recommendations', label: '추천 이력' },
-  { key: 'performance', label: '성과 통계' },
-]
-
-const MARKET_FILTERS = [
-  { key: '', label: '전체' },
-  { key: 'KR', label: '한국' },
-  { key: 'US', label: '미국' },
-]
-
-const STATUS_FILTERS = [
-  { key: '', label: '전체' },
-  { key: 'recommended', label: '추천' },
-  { key: 'approved', label: '승인' },
-  { key: 'ordered', label: '주문' },
-  { key: 'closed', label: '종료' },
-]
-
-const REGIME_COLORS = {
-  accumulation: 'bg-green-100 text-green-800',
-  selective: 'bg-yellow-100 text-yellow-800',
-  cautious: 'bg-orange-100 text-orange-800',
-  defensive: 'bg-red-100 text-red-800',
-}
-
-const GRADE_COLORS = {
-  A: 'bg-green-100 text-green-800',
-  'B+': 'bg-blue-100 text-blue-800',
-  B: 'bg-yellow-100 text-yellow-800',
-  C: 'bg-orange-100 text-orange-800',
-  D: 'bg-red-100 text-red-800',
-}
-
-function RegimeBadge({ regime }) {
-  if (!regime) return null
-  const cls = REGIME_COLORS[regime] || 'bg-gray-100 text-gray-800'
-  return <span className={`px-2 py-0.5 rounded text-xs font-medium ${cls}`}>{regime}</span>
-}
-
-function GradeBadge({ grade }) {
-  if (!grade) return <span className="text-gray-400">-</span>
-  const cls = GRADE_COLORS[grade] || 'bg-gray-100 text-gray-800'
-  return <span className={`px-2 py-0.5 rounded text-xs font-bold ${cls}`}>{grade}</span>
-}
-
-function PnlCell({ value }) {
-  if (value == null) return <span className="text-gray-400">-</span>
-  const cls = value > 0 ? 'text-red-600' : value < 0 ? 'text-blue-600' : 'text-gray-600'
-  return <span className={`font-medium ${cls}`}>{value > 0 ? '+' : ''}{value.toFixed(2)}%</span>
-}
-
-// ── 일일 보고서 탭 ──────────────────────────────────────────
-
-function ReportsTab() {
-  const reports = useReports()
-  const detail = useReportDetail()
-  const [market, setMarket] = useState('')
-  const [selectedId, setSelectedId] = useState(null)
-
-  useEffect(() => { reports.load(market || undefined) }, [market])
-
-  const handleView = (id) => {
-    setSelectedId(id)
-    detail.load(id)
-  }
-
-  if (reports.loading) return <LoadingSpinner />
-  if (reports.error) return <ErrorAlert message={reports.error} />
-
-  const items = reports.data?.items || []
-
-  return (
-    <div className="space-y-4">
-      {/* 필터 */}
-      <div className="flex gap-2">
-        {MARKET_FILTERS.map((f) => (
-          <button
-            key={f.key}
-            onClick={() => setMarket(f.key)}
-            className={`px-3 py-1 text-sm rounded ${market === f.key ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}
-          >
-            {f.label}
-          </button>
-        ))}
-      </div>
-
-      {items.length === 0 ? (
-        <EmptyState message="보고서가 없습니다. AI 분석을 실행하면 자동으로 생성됩니다." />
-      ) : (
-        <div className="bg-white rounded-lg shadow overflow-hidden">
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50 text-gray-600">
-              <tr>
-                <th className="px-4 py-3 text-left">날짜</th>
-                <th className="px-4 py-3 text-left">시장</th>
-                <th className="px-4 py-3 text-left">체제</th>
-                <th className="px-4 py-3 text-right">후보</th>
-                <th className="px-4 py-3 text-right">추천</th>
-                <th className="px-4 py-3 text-center">Telegram</th>
-                <th className="px-4 py-3 text-center">상세</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {items.map((r) => (
-                <tr key={r.id} className="hover:bg-gray-50">
-                  <td className="px-4 py-2 font-mono">{r.date}</td>
-                  <td className="px-4 py-2">{r.market}</td>
-                  <td className="px-4 py-2"><RegimeBadge regime={r.regime} /></td>
-                  <td className="px-4 py-2 text-right">{r.candidates_count}</td>
-                  <td className="px-4 py-2 text-right font-medium">{r.recommended_count}</td>
-                  <td className="px-4 py-2 text-center">{r.telegram_sent ? '  O' : '-'}</td>
-                  <td className="px-4 py-2 text-center">
-                    <button
-                      onClick={() => handleView(r.id)}
-                      className="text-blue-600 hover:underline text-xs"
-                    >
-                      보기
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {/* 보고서 상세 모달 */}
-      {selectedId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setSelectedId(null)}>
-          <div className="bg-white rounded-xl shadow-2xl max-w-3xl w-full mx-4 max-h-[80vh] overflow-y-auto p-6" onClick={(e) => e.stopPropagation()}>
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="text-lg font-bold">보고서 상세</h3>
-              <button onClick={() => setSelectedId(null)} className="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
-            </div>
-            {detail.loading ? (
-              <LoadingSpinner />
-            ) : detail.error ? (
-              <ErrorAlert message={detail.error} />
-            ) : detail.data ? (
-              <div className="prose prose-sm max-w-none">
-                <pre className="whitespace-pre-wrap text-sm bg-gray-50 p-4 rounded-lg">{detail.data.report_markdown}</pre>
-              </div>
-            ) : null}
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ── 추천 이력 탭 ────────────────────────────────────────────
-
-function RecommendationsTab() {
-  const recs = useRecommendations()
-  const [market, setMarket] = useState('')
-  const [status, setStatus] = useState('')
-
-  useEffect(() => {
-    recs.load(market || undefined, status || undefined)
-  }, [market, status])
-
-  if (recs.loading) return <LoadingSpinner />
-  if (recs.error) return <ErrorAlert message={recs.error} />
-
-  const items = recs.data?.items || []
-
-  return (
-    <div className="space-y-4">
-      <div className="flex gap-4 flex-wrap">
-        <div className="flex gap-2">
-          {MARKET_FILTERS.map((f) => (
-            <button
-              key={f.key}
-              onClick={() => setMarket(f.key)}
-              className={`px-3 py-1 text-sm rounded ${market === f.key ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}
-            >
-              {f.label}
-            </button>
-          ))}
-        </div>
-        <div className="flex gap-2">
-          {STATUS_FILTERS.map((f) => (
-            <button
-              key={f.key}
-              onClick={() => setStatus(f.key)}
-              className={`px-3 py-1 text-sm rounded ${status === f.key ? 'bg-green-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}
-            >
-              {f.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {items.length === 0 ? (
-        <EmptyState message="추천 이력이 없습니다." />
-      ) : (
-        <div className="bg-white rounded-lg shadow overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50 text-gray-600">
-              <tr>
-                <th className="px-3 py-3 text-left">날짜</th>
-                <th className="px-3 py-3 text-left">시장</th>
-                <th className="px-3 py-3 text-left">종목</th>
-                <th className="px-3 py-3 text-center">등급</th>
-                <th className="px-3 py-3 text-right">진입가</th>
-                <th className="px-3 py-3 text-right">수량</th>
-                <th className="px-3 py-3 text-right">할인율</th>
-                <th className="px-3 py-3 text-right">R:R</th>
-                <th className="px-3 py-3 text-center">상태</th>
-                <th className="px-3 py-3 text-right">실현손익</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {items.map((r) => (
-                <tr key={r.id} className="hover:bg-gray-50">
-                  <td className="px-3 py-2 font-mono text-xs">{(r.created_at || '').slice(0, 10)}</td>
-                  <td className="px-3 py-2">{r.market}</td>
-                  <td className="px-3 py-2 font-medium">{r.name} <span className="text-gray-400 text-xs">({r.code})</span></td>
-                  <td className="px-3 py-2 text-center"><GradeBadge grade={r.safety_grade} /></td>
-                  <td className="px-3 py-2 text-right font-mono">{r.entry_price?.toLocaleString()}</td>
-                  <td className="px-3 py-2 text-right">{r.recommended_qty}</td>
-                  <td className="px-3 py-2 text-right">{r.discount_rate != null ? `${r.discount_rate.toFixed(0)}%` : '-'}</td>
-                  <td className="px-3 py-2 text-right">{r.risk_reward != null ? r.risk_reward.toFixed(1) : '-'}</td>
-                  <td className="px-3 py-2 text-center">
-                    <span className={`px-2 py-0.5 rounded text-xs ${
-                      r.status === 'closed' ? 'bg-gray-200' :
-                      r.status === 'ordered' ? 'bg-blue-100 text-blue-800' :
-                      r.status === 'approved' ? 'bg-green-100 text-green-800' :
-                      'bg-yellow-100 text-yellow-800'
-                    }`}>
-                      {r.status}
-                    </span>
-                  </td>
-                  <td className="px-3 py-2 text-right"><PnlCell value={r.realized_pnl_pct} /></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ── 성과 통계 탭 ────────────────────────────────────────────
-
-function PerformanceTab() {
-  const perf = usePerformance()
-  const regimes = useRegimes()
-  const [market, setMarket] = useState('')
-
-  useEffect(() => {
-    perf.load(market || undefined)
-    regimes.load()
-  }, [market])
-
-  return (
-    <div className="space-y-6">
-      <div className="flex gap-2">
-        {MARKET_FILTERS.map((f) => (
-          <button
-            key={f.key}
-            onClick={() => setMarket(f.key)}
-            className={`px-3 py-1 text-sm rounded ${market === f.key ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}
-          >
-            {f.label}
-          </button>
-        ))}
-      </div>
-
-      {/* 성과 요약 카드 */}
-      {perf.loading ? <LoadingSpinner /> : perf.error ? <ErrorAlert message={perf.error} /> : perf.data ? (
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-          <StatCard label="총 종료" value={perf.data.total} />
-          <StatCard label="승리" value={perf.data.wins} color="text-red-600" />
-          <StatCard label="패배" value={perf.data.losses} color="text-blue-600" />
-          <StatCard label="승률" value={`${perf.data.win_rate}%`} color={perf.data.win_rate >= 50 ? 'text-red-600' : 'text-blue-600'} />
-          <StatCard label="평균 손익" value={`${perf.data.avg_pnl > 0 ? '+' : ''}${perf.data.avg_pnl}%`} color={perf.data.avg_pnl > 0 ? 'text-red-600' : 'text-blue-600'} />
-        </div>
-      ) : (
-        <EmptyState message="종료된 추천이 없어 성과를 계산할 수 없습니다." />
-      )}
-
-      {/* 체제 이력 */}
-      <div>
-        <h3 className="text-lg font-bold text-gray-900 mb-3">매크로 체제 이력</h3>
-        {regimes.loading ? <LoadingSpinner /> : regimes.error ? <ErrorAlert message={regimes.error} /> : (
-          <div className="bg-white rounded-lg shadow overflow-x-auto">
-            {regimes.data?.length === 0 ? (
-              <EmptyState message="체제 이력이 없습니다." />
-            ) : (
-              <table className="w-full text-sm">
-                <thead className="bg-gray-50 text-gray-600">
-                  <tr>
-                    <th className="px-4 py-3 text-left">날짜</th>
-                    <th className="px-4 py-3 text-left">체제</th>
-                    <th className="px-4 py-3 text-right">VIX</th>
-                    <th className="px-4 py-3 text-right">버핏지수</th>
-                    <th className="px-4 py-3 text-right">공포탐욕</th>
-                    <th className="px-4 py-3 text-right">KOSPI</th>
-                    <th className="px-4 py-3 text-right">S&P 500</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {(regimes.data || []).slice(0, 30).map((r) => (
-                    <tr key={r.id} className="hover:bg-gray-50">
-                      <td className="px-4 py-2 font-mono">{r.date}</td>
-                      <td className="px-4 py-2"><RegimeBadge regime={r.regime} /></td>
-                      <td className="px-4 py-2 text-right">{r.vix?.toFixed(1) ?? '-'}</td>
-                      <td className="px-4 py-2 text-right">{r.buffett_ratio?.toFixed(2) ?? '-'}</td>
-                      <td className="px-4 py-2 text-right">{r.fear_greed_score?.toFixed(0) ?? '-'}</td>
-                      <td className="px-4 py-2 text-right">{r.kospi?.toLocaleString() ?? '-'}</td>
-                      <td className="px-4 py-2 text-right">{r.sp500?.toLocaleString() ?? '-'}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}
-
-function StatCard({ label, value, color = 'text-gray-900' }) {
-  return (
-    <div className="bg-white rounded-lg shadow p-4 text-center">
-      <div className="text-xs text-gray-500 mb-1">{label}</div>
-      <div className={`text-2xl font-bold ${color}`}>{value}</div>
-    </div>
-  )
-}
-
-// ── 메인 페이지 ─────────────────────────────────────────────
-
-// ── 분석 실행 패널 ──────────────────────────────────────────
-
-function PipelinePanel() {
-  const [running, setRunning] = useState(null)  // 'KR' | 'US' | null
-  const [result, setResult] = useState(null)
-  const [error, setError] = useState(null)
-  const [schedulerStatus, setSchedulerStatus] = useState(null)
-
-  useEffect(() => {
-    fetchPipelineStatus().then(setSchedulerStatus).catch(() => {})
-  }, [])
-
-  const handleRun = useCallback(async (market) => {
-    setRunning(market)
-    setResult(null)
-    setError(null)
-    try {
-      const res = await runPipelineSync(market)
-      setResult(res)
-    } catch (e) {
-      setError(e.message)
-    } finally {
-      setRunning(null)
-    }
-  }, [])
-
-  const jobs = schedulerStatus?.scheduler?.jobs || []
-
-  return (
-    <div className="bg-white rounded-lg shadow p-4 space-y-3">
-      <div className="flex items-center justify-between">
-        <h3 className="font-bold text-gray-900">분석 파이프라인</h3>
-        <div className="flex gap-2">
-          <button
-            onClick={() => handleRun('KR')}
-            disabled={running != null}
-            className={`px-4 py-2 rounded text-sm font-medium transition-colors ${
-              running === 'KR' ? 'bg-gray-400 text-white cursor-wait' :
-              running ? 'bg-gray-200 text-gray-400 cursor-not-allowed' :
-              'bg-blue-600 text-white hover:bg-blue-700'
-            }`}
-          >
-            {running === 'KR' ? 'KR 분석 중...' : 'KR 분석 실행'}
-          </button>
-          <button
-            onClick={() => handleRun('US')}
-            disabled={running != null}
-            className={`px-4 py-2 rounded text-sm font-medium transition-colors ${
-              running === 'US' ? 'bg-gray-400 text-white cursor-wait' :
-              running ? 'bg-gray-200 text-gray-400 cursor-not-allowed' :
-              'bg-green-600 text-white hover:bg-green-700'
-            }`}
-          >
-            {running === 'US' ? 'US 분석 중...' : 'US 분석 실행'}
-          </button>
-        </div>
-      </div>
-
-      {/* 스케줄러 상태 */}
-      {jobs.length > 0 && (
-        <div className="text-xs text-gray-500">
-          {jobs.map((j) => (
-            <span key={j.id} className="mr-4">
-              {j.name}: 다음 실행 {j.next_run ? new Date(j.next_run).toLocaleString('ko-KR') : '-'}
-            </span>
-          ))}
-        </div>
-      )}
-
-      {/* 실행 결과 */}
-      {error && <ErrorAlert message={error} />}
-      {result && (
-        <div className="bg-gray-50 rounded p-3 text-sm space-y-1">
-          <div className="font-medium text-gray-900">
-            분석 완료 — 보고서 #{result.report_id}
-          </div>
-          <div className="text-gray-600">
-            체제: <span className="font-medium">{result.regime}</span>
-            {' / '}후보: {result.candidates_count}개
-            {' / '}분석: {result.analyses_count}개
-            {' / '}추천: <span className="font-bold text-blue-600">{result.recommended_count}개</span>
-          </div>
-          {result.errors?.length > 0 && (
-            <div className="text-orange-600 text-xs">{result.errors.join(', ')}</div>
-          )}
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ── 메인 페이지 ─────────────────────────────────────────────
+import ReportDetailView from '../components/report/ReportDetailView'
+import ReportHistoryList from '../components/report/ReportHistoryList'
 
 export default function ReportPage() {
-  const [tab, setTab] = useState('reports')
+  const reports = useReports()
+  const [market, setMarket] = useState('KR')
+  const [generating, setGenerating] = useState(false)
+  const [genError, setGenError] = useState(null)
+  const didRun = useRef(false)
+
+  // KR/US 오늘 보고서
+  const [krReport, setKrReport] = useState(null)
+  const [usReport, setUsReport] = useState(null)
+  const [detailLoading, setDetailLoading] = useState(false)
+
+  // 이력에서 선택한 보고서 (오늘이 아닌 과거)
+  const [historyReport, setHistoryReport] = useState(null)
+  const [historyAlt, setHistoryAlt] = useState(null)
+  const [activeHistoryId, setActiveHistoryId] = useState(null)
+
+  // 마운트 시 KR/US 파이프라인 병렬 자동 실행
+  useEffect(() => {
+    if (didRun.current) return
+    didRun.current = true
+
+    setGenerating(true)
+    setGenError(null)
+
+    Promise.allSettled([
+      runPipelineSync('KR'),
+      runPipelineSync('US'),
+    ]).then(async ([krResult, usResult]) => {
+      const krId = krResult.status === 'fulfilled' ? krResult.value.report_id : null
+      const usId = usResult.status === 'fulfilled' ? usResult.value.report_id : null
+
+      // 보고서 상세 병렬 로드
+      const loads = []
+      if (krId) loads.push(fetchReport(krId).then(r => setKrReport(r)).catch(() => {}))
+      if (usId) loads.push(fetchReport(usId).then(r => setUsReport(r)).catch(() => {}))
+      await Promise.allSettled(loads)
+
+      if (krResult.status === 'rejected' && usResult.status === 'rejected') {
+        setGenError('보고서 생성에 실패했습니다.')
+      }
+
+      reports.load(undefined, 30)
+    }).finally(() => setGenerating(false))
+  }, [])
+
+  // 이력에서 보고서 선택
+  const handleSelectHistory = useCallback(async (id) => {
+    setActiveHistoryId(id)
+    setHistoryReport(null)
+    setHistoryAlt(null)
+    setDetailLoading(true)
+
+    try {
+      const r = await fetchReport(id)
+      setHistoryReport(r)
+      // 같은 날짜의 다른 시장 보고서 찾기
+      const items = reports.data?.items || []
+      const same = items.find(i => i.date === r.date && i.market !== r.market)
+      if (same) {
+        const alt = await fetchReport(same.id)
+        setHistoryAlt(alt)
+      }
+      setMarket(r.market || 'KR')
+    } catch {
+      // ignore
+    } finally {
+      setDetailLoading(false)
+    }
+  }, [reports.data])
+
+  // 오늘로 돌아가기
+  const handleBackToToday = () => {
+    setActiveHistoryId(null)
+    setHistoryReport(null)
+    setHistoryAlt(null)
+    setMarket('KR')
+  }
+
+  // 현재 표시할 보고서 결정
+  const isHistory = !!activeHistoryId
+  const mainReport = isHistory ? historyReport : krReport
+  const altReportData = isHistory ? historyAlt : usReport
+  const displayLoading = isHistory ? detailLoading : generating
+
+  // 현재 market에 맞는 보고서를 메인으로
+  const currentReport = (market === 'US' && altReportData?.market === 'US') ? altReportData
+    : (market === 'KR' && altReportData?.market === 'KR') ? altReportData
+    : mainReport
+  const currentAlt = currentReport === mainReport ? altReportData : mainReport
+
+  const historyItems = reports.data?.items || []
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold text-gray-900">투자 보고서</h1>
-
-      {/* 분석 실행 패널 */}
-      <PipelinePanel />
-
-      {/* 탭 네비게이션 */}
-      <div className="flex gap-1 border-b border-gray-200">
-        {TABS.map((t) => (
+      {/* 헤더 */}
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold text-gray-900">투자 보고서</h1>
+        {isHistory && (
           <button
-            key={t.key}
-            onClick={() => setTab(t.key)}
-            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-              tab === t.key
-                ? 'border-blue-600 text-blue-600'
-                : 'border-transparent text-gray-500 hover:text-gray-700'
-            }`}
+            onClick={handleBackToToday}
+            className="text-sm text-blue-600 hover:text-blue-800 font-medium"
           >
-            {t.label}
+            오늘 보고서로 돌아가기
           </button>
-        ))}
+        )}
       </div>
 
-      {/* 탭 콘텐츠 */}
-      {tab === 'reports' && <ReportsTab />}
-      {tab === 'recommendations' && <RecommendationsTab />}
-      {tab === 'performance' && <PerformanceTab />}
+      {/* 생성 중 */}
+      {generating && (
+        <div className="flex items-center gap-3 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+          <div className="animate-spin w-5 h-5 border-2 border-blue-500 border-t-transparent rounded-full" />
+          <span className="text-sm text-blue-700">오늘의 보고서를 생성하고 있습니다...</span>
+        </div>
+      )}
+
+      {genError && <ErrorAlert message={genError} />}
+
+      {/* 메인 보고서 */}
+      {!displayLoading && (
+        <ReportDetailView
+          report={currentReport}
+          altReport={currentAlt}
+          market={market}
+          onMarketChange={setMarket}
+          loading={false}
+          error={null}
+        />
+      )}
+
+      {displayLoading && <LoadingSpinner />}
+
+      {!displayLoading && !currentReport && !genError && (
+        <div className="text-center py-12 text-gray-400">
+          <p className="text-3xl mb-3">📊</p>
+          <p className="text-sm">보고서가 아직 없습니다.</p>
+          <p className="text-xs mt-1">잠시 후 자동으로 생성됩니다.</p>
+        </div>
+      )}
+
+      {/* 과거 이력 */}
+      {historyItems.length > 0 && (
+        <ReportHistoryList
+          items={historyItems}
+          activeId={activeHistoryId}
+          onSelect={handleSelectHistory}
+        />
+      )}
     </div>
   )
 }

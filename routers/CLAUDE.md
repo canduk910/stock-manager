@@ -17,7 +17,7 @@
 | `market_board.py` | `/api/market-board/*`, `WS /ws/market-board` | 신고가/신저가 + sparkline + 당일 OHLC + 시세판 종목 CRUD + 순서 관리(`GET/PUT /api/market-board/order`) + 실시간 WS(시가/고가/저가 포함) |
 | `macro.py` | `/api/macro/*` | 매크로 분석: 지수(4대)/뉴스(네이버+NYT)/심리지표(VIX+버핏+공포탐욕)/투자자 코멘트. 5개 GET 엔드포인트 |
 | `portfolio_advisor.py` | `/api/portfolio-advisor/*` | AI 포트폴리오 자문: `POST /analyze` (GPT 분석), `GET /history` (이력 목록), `GET /history/{id}` (리포트 상세) |
-| `report.py` | `/api/reports/*` | 일일 보고서 + 추천 이력 + 성과 통계 + 매크로 체제 이력. 7개 GET 엔드포인트. `/{report_id}` 패스 파라미터는 마지막에 등록 |
+| `report.py` | `/api/reports/*` | 일일 보고서 + 추천 이력 + 성과 통계 + 매크로 체제 이력. 8개 GET 엔드포인트. `GET /by-date` 날짜+시장 조회(신규). `/{report_id}` 패스 파라미터는 마지막에 등록 |
 | `pipeline.py` | `/api/pipeline/*` | 투자 파이프라인: `POST /run` (비동기), `POST /run-sync` (동기), `GET /status` (스케줄러+실행 상태) |
 | `backtest.py` | `/api/backtest/*` | KIS AI Extensions MCP 연동 백테스트: 프리셋/커스텀/배치 실행, 결과 조회, 이력 삭제 + **전략빌더 CRUD**(변환/검증/저장/로드/삭제). `KIS_MCP_ENABLED=true` 필요. 15개 엔드포인트. 이력에 종목명(`symbol_name`) 부착. 프리셋 params 오버라이드. `commission_rate`/`tax_rate`/`slippage` 거래비용 파라미터 지원. 전략빌더: `POST /strategy/convert`, `POST /strategy/validate`, `GET/POST /strategies`, `GET/DELETE /strategies/{name}` |
 | `tax.py` | `/api/tax/*` | 해외주식 양도소득세: 연간 요약/매매내역 CRUD/KIS 적응적 동기화/FIFO 재계산/계산 상세(lots)/시뮬레이션(가상매도). 9개 엔드포인트 |

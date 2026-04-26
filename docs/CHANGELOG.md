@@ -1,5 +1,21 @@
 # 변경 이력
 
+## 2026-04-26 — 투자보고서 전면 개선 + AI자문 리포트 강화
+
+### 투자보고서 페이지 전면 개선
+- GPT 섹터 추천 서비스 신규 (`sector_recommendation_service.py`): 매크로 현황 기반 3컨셉(모멘텀/역발상/3개월선점) 탑픽 섹터+종목 추천. `macro_store` 일일 캐싱
+- 파이프라인 확장: Step 0 중복방지(날짜+market) + Step 1.5 매크로 수집+GPT 섹터 추천 + report_json version 2 구조
+- 보고서 페이지 UI 전면 재설계: 3탭 제거 → 페이지 진입 시 KR/US 자동 실행, 매크로 체제 카드(공유) + KR/US 토글 + 섹터 추천 + 종목+관심종목 버튼, 하단 이력 카드
+- 신규 컴포넌트: `ReportDetailView`, `SectorConceptTabs`, `ReportHistoryList`
+- `DailyReport.to_summary_dict()`에 `sector_summary` 필드 추가 (이력 목록에 전략별 섹터 요약)
+- `GET /api/reports/by-date` 엔드포인트 추가
+
+### AI자문 리포트 강화
+- System/User Prompt에 4개 신규 분석 가이드라인 추가 (매크로환경분석/밸류에이션심화/시나리오분석/관련투자대안)
+- Pydantic v2 스키마 확장: `MacroAnalysis`, `ValuationDeepDive`, `ScenarioAnalysis`, `InvestmentAlternative` 모델
+- AIReportPanel에 4개 신규 섹션 UI: 매크로 카드, 밸류에이션 심화, 시나리오 3컬럼(낙관/기본/비관), 관련 투자 대안
+- `max_completion_tokens` 10000→14000 (재시도 12000→18000)
+
 ## 2026-04-26 — KLineChart 차트 추가 + ROE/PBR 버그 수정
 
 ### KLineChart 캔들차트 신규

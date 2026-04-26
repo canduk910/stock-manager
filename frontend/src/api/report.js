@@ -11,6 +11,9 @@ export const fetchReports = (market, limit = 30, offset = 0) => {
 
 export const fetchReport = (id) => apiFetch(`/api/reports/${id}`)
 
+export const fetchReportByDate = (date, market = 'KR') =>
+  apiFetch(`/api/reports/by-date?date=${date}&market=${market}`)
+
 // 추천 이력
 export const fetchRecommendations = (market, status, limit = 50, offset = 0) => {
   const params = new URLSearchParams()

@@ -113,6 +113,10 @@ export default function AIReportPanel({ report, history = [], loading, error, on
   const risks = reportData['리스크요인'] || reportData.risk_factors || []
   const points = reportData['투자포인트'] || reportData.investment_points || []
   const posGuide = reportData['포지션가이드'] || {}
+  const macroAnalysis = reportData['매크로환경분석'] || null
+  const valuationDeep = reportData['밸류에이션심화'] || null
+  const scenarioAnalysis = reportData['시나리오분석'] || null
+  const alternatives = reportData['관련투자대안'] || []
 
   // Phase 3 v2 필드 (부재 시 null → 카드 숨김)
   const safetyGrade = report?.grade || reportData['종목등급']
@@ -319,6 +323,128 @@ export default function AIReportPanel({ report, history = [], loading, error, on
               )
             })()}
 
+          </div>
+        </Section>
+      )}
+
+      {/* 매크로 환경 분석 */}
+      {!loading && !rawText && macroAnalysis && (
+        <Section title="매크로 환경 분석" icon="🌍">
+          <div className="space-y-3">
+            <div>
+              <p className="text-sm text-gray-700 leading-relaxed">{macroAnalysis['시장체제해석']}</p>
+            </div>
+            {(macroAnalysis['금리영향'] || macroAnalysis['섹터전망'] || macroAnalysis['매크로리스크']) && (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                {macroAnalysis['금리영향'] && (
+                  <div className="bg-blue-50 rounded-lg p-3">
+                    <p className="text-xs font-semibold text-blue-700 mb-1">금리 영향</p>
+                    <p className="text-xs text-gray-700 leading-relaxed">{macroAnalysis['금리영향']}</p>
+                  </div>
+                )}
+                {macroAnalysis['섹터전망'] && (
+                  <div className="bg-green-50 rounded-lg p-3">
+                    <p className="text-xs font-semibold text-green-700 mb-1">섹터 전망</p>
+                    <p className="text-xs text-gray-700 leading-relaxed">{macroAnalysis['섹터전망']}</p>
+                  </div>
+                )}
+                {macroAnalysis['매크로리스크'] && (
+                  <div className="bg-orange-50 rounded-lg p-3">
+                    <p className="text-xs font-semibold text-orange-700 mb-1">매크로 리스크</p>
+                    <p className="text-xs text-gray-700 leading-relaxed">{macroAnalysis['매크로리스크']}</p>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </Section>
+      )}
+
+      {/* 밸류에이션 심화 분석 */}
+      {!loading && !rawText && valuationDeep && (
+        <Section title="밸류에이션 심화" icon="💰">
+          <div className="space-y-3">
+            <p className="text-sm text-gray-700 font-medium">{valuationDeep['밸류에이션판단']}</p>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              {valuationDeep['적정가치'] != null && (
+                <PosGuideCard
+                  label="적정가치"
+                  value={fmtPrice(valuationDeep['적정가치'])}
+                  sub={valuationDeep['산출방법']}
+                  color="green"
+                />
+              )}
+              {valuationDeep['업종대비'] && (
+                <div className="border rounded-lg p-3 bg-gray-50 border-gray-200 col-span-1">
+                  <p className="text-xs font-medium text-gray-500 mb-1">업종 대비</p>
+                  <p className="text-xs text-gray-700 leading-relaxed">{valuationDeep['업종대비']}</p>
+                </div>
+              )}
+              {valuationDeep['PEG분석'] && (
+                <div className="border rounded-lg p-3 bg-gray-50 border-gray-200 col-span-1 md:col-span-2">
+                  <p className="text-xs font-medium text-gray-500 mb-1">PEG 분석</p>
+                  <p className="text-xs text-gray-700 leading-relaxed">{valuationDeep['PEG분석']}</p>
+                </div>
+              )}
+            </div>
+          </div>
+        </Section>
+      )}
+
+      {/* 시나리오 분석 */}
+      {!loading && !rawText && scenarioAnalysis && (
+        <Section title="시나리오 분석 (12개월)" icon="🎲">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            {['낙관', '기본', '비관'].map(key => {
+              const s = scenarioAnalysis[key]
+              if (!s) return null
+              const colorMap = {
+                '낙관': { bg: 'bg-red-50', border: 'border-red-200', text: 'text-red-700', label: 'Bull' },
+                '기본': { bg: 'bg-gray-50', border: 'border-gray-200', text: 'text-gray-700', label: 'Base' },
+                '비관': { bg: 'bg-blue-50', border: 'border-blue-200', text: 'text-blue-700', label: 'Bear' },
+              }
+              const c = colorMap[key]
+              return (
+                <div key={key} className={`border ${c.border} rounded-lg p-3 ${c.bg}`}>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className={`text-xs font-bold ${c.text}`}>{key} ({c.label})</span>
+                    {s['확률'] != null && (
+                      <span className="text-xs font-semibold text-gray-500">{s['확률']}%</span>
+                    )}
+                  </div>
+                  {s['목표가'] != null && (
+                    <p className={`text-lg font-bold ${c.text} mb-1`}>{fmtPrice(s['목표가'])}</p>
+                  )}
+                  <p className="text-xs text-gray-600 leading-relaxed">{s['근거']}</p>
+                </div>
+              )
+            })}
+          </div>
+        </Section>
+      )}
+
+      {/* 관련 투자 대안 */}
+      {!loading && !rawText && Array.isArray(alternatives) && alternatives.length > 0 && (
+        <Section title="관련 투자 대안" icon="🔄">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {alternatives.map((alt, i) => (
+              <div key={i} className="flex gap-3 border border-gray-200 rounded-lg p-3">
+                <span className={`shrink-0 px-2 py-0.5 h-fit rounded text-xs font-bold ${
+                  alt['유형'] === 'ETF' ? 'bg-purple-100 text-purple-700' :
+                  alt['유형'] === '원자재' ? 'bg-yellow-100 text-yellow-700' :
+                  alt['유형'] === '채권' ? 'bg-blue-100 text-blue-700' :
+                  alt['유형'] === '지수' ? 'bg-green-100 text-green-700' :
+                  'bg-gray-100 text-gray-700'
+                }`}>{alt['유형']}</span>
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-gray-800">
+                    {alt['종목명']}
+                    {alt['코드'] && <span className="text-xs text-gray-400 ml-1">({alt['코드']})</span>}
+                  </p>
+                  <p className="text-xs text-gray-600 mt-0.5 leading-relaxed">{alt['사유']}</p>
+                </div>
+              </div>
+            ))}
           </div>
         </Section>
       )}
