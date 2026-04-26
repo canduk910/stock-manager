@@ -8,7 +8,7 @@
 |------|------|
 | `exceptions.py` | 공용 예외 계층 |
 | `watchlist_service.py` | 관심종목 대시보드(ThreadPoolExecutor 병렬) + 종목 상세 (국내=pykrx+DART, 해외=yfinance) |
-| `detail_service.py` | 재무 테이블 + PER/PBR 히스토리 + CAGR 종합 리포트 |
+| `detail_service.py` | 재무 테이블 + PER/PBR 히스토리 + CAGR 종합 리포트. KR: metrics에서 PBR/PER/ROE fallback 보충 |
 | `order_service.py` | 주문 오케스트레이션 + 대사 (시장별 실행은 order_kr/us/fno에 위임) |
 | `order_kr.py` | 국내주식 KIS API 주문 실행 (발주/조회/정정/취소) |
 | `order_us.py` | 해외주식 KIS API 주문 실행 |

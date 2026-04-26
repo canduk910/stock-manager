@@ -3,6 +3,7 @@ import { useParams, Link } from 'react-router-dom'
 import { useDetailReport } from '../hooks/useDetail'
 import { useAdvisoryData, useAdvisoryReport } from '../hooks/useAdvisory'
 import StockHeader from '../components/detail/StockHeader'
+import KLineChartPanel from '../components/detail/KLineChartPanel'
 import FinancialTable from '../components/detail/FinancialTable'
 import ReportSummary from '../components/detail/ReportSummary'
 import FundamentalPanel from '../components/advisory/FundamentalPanel'
@@ -126,6 +127,9 @@ export default function DetailPage() {
             basic={data.basic}
             summary={data.summary}
           />
+
+          {/* 차트 */}
+          <KLineChartPanel symbol={symbol} market={market} />
 
           {/* 탭 네비게이션 */}
           <div className="flex border-b border-gray-200 bg-white rounded-t-xl px-2 pt-2">

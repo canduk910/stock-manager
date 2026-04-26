@@ -1,5 +1,20 @@
 # 변경 이력
 
+## 2026-04-26 — KLineChart 차트 추가 + ROE/PBR 버그 수정
+
+### KLineChart 캔들차트 신규
+- 관심종목 상세(`DetailPage`)에 KLineChart(Canvas 기반) 캔들차트 추가
+- StockHeader와 탭(재무분석/종합리포트) 사이에 배치
+- 타임프레임 선택(15분/60분/1일/1주), 기간 선택, 기술지표 토글(MA/BB/VOL/MACD/RSI)
+- 한국식 색상 테마(상승=빨강, 하락=파랑), 기존 OHLCV API 재사용
+- `klinecharts@9.8.12` 의존성 추가
+
+### 버그 수정
+- ROE 미표기: `fetch_market_metrics()` — yfinance `returnOnEquity` None 시 분기 TTM순이익/자기자본 fallback 추가
+- PBR 미표기: `_get_report_kr()` ��� `fetch_detail()` PBR/PER None 시 `fetch_market_metrics()` 값으로 보충
+
+---
+
 ## 2026-04-26 — 하네스 TDD 애자일 재구성 + 개발자 분리
 
 ### 하네스 재구성

@@ -417,6 +417,29 @@ def fetch_market_metrics(code: str) -> dict:
             except Exception:
                 pass
         result["roe"] = round(roe_raw * 100, 2) if roe_raw else None
+        # ROE fallback: returnOnEquity가 None이면 분기 재무로 직접 계산
+        if result["roe"] is None:
+            try:
+                qi = t.quarterly_income_stmt
+                qbs = t.quarterly_balance_sheet
+                if qi is not None and not qi.empty and qbs is not None and not qbs.empty:
+                    ni_row = None
+                    for name in ("Net Income", "Net Income Common Stockholders"):
+                        if name in qi.index:
+                            ni_row = qi.loc[name].dropna()
+                            break
+                    eq_row = None
+                    for name in ("Stockholders Equity", "Common Stock Equity"):
+                        if name in qbs.index:
+                            eq_row = qbs.loc[name].dropna()
+                            break
+                    if ni_row is not None and len(ni_row) >= 4 and eq_row is not None and len(eq_row) > 0:
+                        ttm_ni = float(ni_row.iloc[:4].sum())
+                        equity = float(eq_row.iloc[0])
+                        if equity > 0:
+                            result["roe"] = round(ttm_ni / equity * 100, 2)
+            except Exception:
+                pass
         result["dividend_yield"] = div_yield
         result["dividend_per_share"] = round(float(div_per_share_raw)) if div_per_share_raw else None
 

@@ -217,6 +217,11 @@ class DetailService:
             basic["roe"] = metrics.get("roe")
             basic["dividend_yield"] = metrics.get("dividend_yield")
             basic["dividend_per_share"] = metrics.get("dividend_per_share")
+            # PBR/PER fallback: fetch_detail()에서 None이면 metrics에서 보충
+            if basic["pbr"] is None and metrics.get("pbr"):
+                basic["pbr"] = metrics["pbr"]
+            if basic["per"] is None and metrics.get("per"):
+                basic["per"] = metrics["per"]
         except Exception:
             pass
 
