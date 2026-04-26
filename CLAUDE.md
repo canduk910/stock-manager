@@ -235,33 +235,45 @@ scripts/            ec2-deploy.sh (수동 배포 스크립트)
 
 ---
 
-## AI 에이전트 팀 (하네스)
+## 하네스: TDD 애자일 투자 자동화
 
-**시스템 개발 + 도메인 자문** 전용 하네스. 투자 파이프라인은 대화형 에이전트가 아닌 FastAPI 백엔드 서비스(`pipeline_service.py` + APScheduler)로 자동 실행된다.
+**목표:** 도메인 전문가 팀 토론 → 요건 수립 → TDD(RED-GREEN-VERIFY) 사이클로 투자 자동화 시스템을 개발한다.
+
+**트리거:** 시스템 개발, 기능 추가, 파이프라인, 대시보드 등 개발 요청 시 `asset-dev` 스킬을 사용하라. 단순 질문은 직접 응답 가능.
 
 ### 에이전트 8명 (`.claude/agents/`)
 
-#### 개발 에이전트 (4명)
+#### TDD 개발 에이전트 (5명)
+| 에이전트 | 파일 | TDD 역할 |
+|---------|------|----------|
+| TestEngineer | `test-engineer.md` | **RED**: 요건 수용 기준 → pytest 테스트 선행 작성 |
+| BackendDev | `backend-dev.md` | **BACKEND GREEN**: FastAPI+SQLAlchemy 백엔드 구현 |
+| FrontendDev | `frontend-dev.md` | **FRONTEND**: React+Tailwind 프론트엔드 구현 |
+| QA Inspector | `qa-inspector.md` | **VERIFY**: 각 GREEN 직후 경계면 교차 비교 검증 |
+| RefactorEngineer | `refactor-engineer.md` | 도메인 인지 리팩토링 (별도 스킬) |
+
+#### 도메인 전문가 에이전트 (4명) — 요건 정의 팀 참여 + 자문
 | 에이전트 | 파일 | 역할 |
 |---------|------|------|
-| DevArchitect | `dev-architect.md` | 투자 자동화 시스템 풀스택 개발 |
-| TestEngineer | `test-engineer.md` | pytest 자동화 테스트 작성/실행 |
-| QA Inspector | `qa-inspector.md` | 경계면 교차 비교 검증 (수동 체크리스트) |
-| RefactorEngineer | `refactor-engineer.md` | 도메인 인지 리팩토링 |
+| MacroSentinel | `macro-sentinel.md` | 체제 판단 요건 수립 + 임계값 자문 |
+| ValueScreener | `value-screener.md` | 스크리닝 요건 수립 + 점수/필터 자문 |
+| MarginAnalyst | `margin-analyst.md` | 등급/안전마진 요건 수립 + 공식 자문 |
+| OrderAdvisor | `order-advisor.md` | 주문/포지션 요건 수립 + 안전 규칙 자문 |
 
-#### 도메인 자문 에이전트 (4명) — API 호출 안 함, 자문만 제공
-| 에이전트 | 파일 | 자문 영역 |
-|---------|------|----------|
-| MacroSentinel | `macro-sentinel.md` | 체제 판단 기준, VIX/버핏지수 임계값 |
-| ValueScreener | `value-screener.md` | 스크리닝 필터, 복합 점수, value trap |
-| MarginAnalyst | `margin-analyst.md` | Graham Number, 7점 등급, 재무건전성 |
-| OrderAdvisor | `order-advisor.md` | 포지션 사이징, 손절/익절, Write-Ahead |
+### TDD 워크플로우
+
+```
+Phase 1: 도메인 전문가 팀 (TeamCreate) → 토론 → 구조화된 요건서
+Phase 2: TDD 개발 팀 (TeamCreate) → 요건 항목별:
+  TestEngineer RED → BackendDev GREEN → FrontendDev 구현 → QA VERIFY
+Phase 3: 전체 테스트 + 빌드 + 종합 보고
+```
 
 ### 스킬 4개 (`.claude/skills/`)
 
 | 스킬 | 트리거 | 용도 |
 |------|--------|------|
-| `asset-dev/` | "시스템 개발", "파이프라인", "대시보드" | 개발 파이프라인: 자문→설계→구현→QA→보고 |
+| `asset-dev/` | "시스템 개발", "기능 추가", "파이프라인", "대시보드" | TDD 애자일: 요건→RED→GREEN→VERIFY |
 | `qa-verify/` | "QA", "정합성 검사" | 교차 비교 검증 + 파이프라인 로직 검증 |
 | `refactor-audit/` | "리팩토링", "코드 감사" | 감사→자문→실행→QA |
 | `doc-commit/` | "커밋", "문서 반영" | 문서 반영(CLAUDE.md+CHANGELOG) + 커밋 |
@@ -274,3 +286,11 @@ pytest tests/unit/ -v         # 단위 테스트만
 pytest tests/integration/ -v  # DB 통합 테스트
 pytest tests/api/ -v          # API 엔드포인트 테스트
 ```
+
+**변경 이력:**
+| 날짜 | 변경 내용 | 대상 | 사유 |
+|------|----------|------|------|
+| 2026-04-13 | 초기 구성 | 전체 | - |
+| 2026-04-25 | 멀티유저 인증 추가 | 전체 | JWT+역할기반접근 |
+| 2026-04-26 | TDD 애자일 재구성 | 에이전트 7개 + asset-dev 스킬 | 도메인 전문가 팀 토론→요건 수립, RED-GREEN-VERIFY TDD 사이클 도입 |
+| 2026-04-26 | DevArchitect → BackendDev + FrontendDev 분리 | agents/ + asset-dev 스킬 | 백엔드(FastAPI)/프론트(React) 전문성 분리, API shape 명세 기반 협업 |

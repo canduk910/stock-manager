@@ -1,5 +1,17 @@
 # 변경 이력
 
+## 2026-04-26 — 하네스 TDD 애자일 재구성 + 개발자 분리
+
+### 하네스 재구성
+- 도메인 전문가 4명: 수동적 자문 → **능동적 요건 정의 참여** + 팀 통신 프로토콜 추가
+- TestEngineer: 구현 후 테스트 → **TDD RED phase** (테스트 선행 작성)
+- DevArchitect → **BackendDev + FrontendDev 분리** (백엔드/프론트 전담)
+- QA Inspector: 파이프라인 끝 검증 → **각 GREEN 직후 즉시 경계면 검증**
+- asset-dev 오케스트레이터: Phase 1(도메인 전문가 팀 토론→요건서) + Phase 2(TDD RED-GREEN-VERIFY 사이클)
+- CLAUDE.md 하네스 포인터 + 변경 이력 테이블 추가
+
+---
+
 ## 2026-04-25 — 인프라 개선 + CI/CD 백테스터 연동
 
 ### 인프라 개선
