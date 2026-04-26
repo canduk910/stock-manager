@@ -83,6 +83,7 @@ def _enrich_guru(stock: dict) -> dict:
     from stock.dart_fin import fetch_bs_cf_annual, fetch_income_detail_annual
     from services.guru_formulas import (
         calc_greenblatt, calc_neff, calc_seo_expected_return,
+        calc_graham_ncav, calc_fisher_psr, calc_piotroski_fscore,
         calc_guru_panel, check_value_trap,
     )
     from services.safety_grade import _count_fcf_years_positive, _calc_revenue_cagr
@@ -119,7 +120,22 @@ def _enrich_guru(stock: dict) -> dict:
             per=stock.get("per"), dividend_yield=stock.get("dividend_yield"),
         )
 
-        enriched["guru_scores"] = calc_guru_panel(greenblatt, neff, seo)
+        ncav = calc_graham_ncav(
+            current_assets=latest_bs.get("current_assets"),
+            total_liabilities=latest_bs.get("total_liabilities"),
+            mktcap=stock.get("mktcap"),
+        )
+
+        fisher = calc_fisher_psr(
+            mktcap=stock.get("mktcap"),
+            revenue=is_detail[-1].get("revenue") if is_detail else None,
+        )
+
+        piotroski = calc_piotroski_fscore(bs_list, cf_list, is_detail)
+
+        enriched["guru_scores"] = calc_guru_panel(
+            greenblatt, neff, seo, ncav, fisher, piotroski,
+        )
 
         fcf_years = _count_fcf_years_positive(cf_list)
         revenue_cagr = _calc_revenue_cagr(
@@ -129,6 +145,8 @@ def _enrich_guru(stock: dict) -> dict:
             per=stock.get("per"), pbr=stock.get("pbr"), roe=stock.get("roe"),
             revenue_cagr=revenue_cagr, fcf_years_positive=fcf_years,
             debt_ratio=latest_bs.get("debt_ratio"),
+            fscore=piotroski.get("fscore") if piotroski else None,
+            psr=fisher.get("psr") if fisher else None,
         )
     except Exception:
         logger.warning("guru enrichment failed: %s", code, exc_info=True)
@@ -151,7 +169,7 @@ def get_stocks(
     include_negative: bool = Query(False, description="적자기업(PER 음수) 포함 여부"),
     earnings_only: bool = Query(False, description="당일 실적발표 종목만 대상"),
     drop_from_high: float | None = Query(None, description="52주 고점 대비 최대 하락률 (%, 예: -30)"),
-    preset: str | None = Query(None, description="구루 프리셋: greenblatt | neff | seo"),
+    preset: str | None = Query(None, description="구루 프리셋: greenblatt|neff|seo|ncav|fisher|piotroski"),
     regime_aware: bool = Query(False, description="체제 연계 (응답에 regime 포함)"),
     include_guru: bool = Query(False, description="구루 점수 포함 (DART enrichment 실행)"),
     guru_top: int | None = Query(None, description="DART enrichment 대상 종목 수"),
@@ -171,13 +189,15 @@ def get_stocks(
             logger.warning("체제 조회 실패, graceful degradation", exc_info=True)
 
     # 프리셋별 기본 필터
-    if preset and preset in ("greenblatt", "neff", "seo"):
-        regime_name = regime_data["regime"] if regime_data else None
-        pf = get_preset_filters(preset, regime_name)
+    _valid_presets = {"greenblatt", "neff", "seo", "ncav", "fisher", "piotroski"}
+    if preset and preset in _valid_presets:
+        pf = get_preset_filters(preset)
         per_min = per_min if per_min is not None else pf.get("per_min")
         per_max = per_max if per_max is not None else pf.get("per_max")
         pbr_max = pbr_max if pbr_max is not None else pf.get("pbr_max")
         roe_min = roe_min if roe_min is not None else pf.get("roe_min")
+        if pf.get("include_negative"):
+            include_negative = True
 
     # ── 날짜 정규화 ──
     try:
@@ -243,15 +263,12 @@ def get_stocks(
         ]
 
     # ── 3단계: DART guru enrichment ──
-    guru_enabled = include_guru or (preset and preset in ("greenblatt", "neff"))
+    _dart_presets = {"greenblatt", "neff", "ncav", "fisher", "piotroski"}
+    guru_enabled = include_guru or (preset and preset in _dart_presets)
     if guru_enabled and stocks:
-        enrich_count = guru_top or len(stocks)
-        target_stocks = stocks[:enrich_count]
-        rest_stocks = stocks[enrich_count:]
-
-        guru_enriched: list[dict | None] = [None] * len(target_stocks)
-        with ThreadPoolExecutor(max_workers=min(10, len(target_stocks))) as ex:
-            futures = {ex.submit(_enrich_guru, s): i for i, s in enumerate(target_stocks)}
+        guru_enriched: list[dict | None] = [None] * len(stocks)
+        with ThreadPoolExecutor(max_workers=min(10, len(stocks))) as ex:
+            futures = {ex.submit(_enrich_guru, s): i for i, s in enumerate(stocks)}
             for fut in as_completed(futures):
                 guru_enriched[futures[fut]] = fut.result()
 
@@ -262,10 +279,22 @@ def get_stocks(
                 key=lambda s: (s.get("guru_scores") or {}).get("neff", {}).get("neff_ratio") or -999,
                 reverse=True,
             )
+        elif preset == "ncav":
+            guru_enriched.sort(
+                key=lambda s: (s.get("guru_scores") or {}).get("ncav", {}).get("ncav_ratio") or -999,
+                reverse=True,
+            )
+        elif preset == "fisher":
+            guru_enriched.sort(
+                key=lambda s: (s.get("guru_scores") or {}).get("fisher", {}).get("psr") or 999,
+            )
+        elif preset == "piotroski":
+            guru_enriched.sort(
+                key=lambda s: (s.get("guru_scores") or {}).get("piotroski", {}).get("fscore") or -999,
+                reverse=True,
+            )
 
-        stocks = guru_enriched + [
-            {**s, "guru_scores": None, "value_trap_warnings": []} for s in rest_stocks
-        ]
+        stocks = guru_enriched
 
     # ── 4단계: 응답 조립 ──
     response = {

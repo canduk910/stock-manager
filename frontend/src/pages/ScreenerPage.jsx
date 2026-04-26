@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useScreener } from '../hooks/useScreener'
 import FilterPanel from '../components/screener/FilterPanel'
 import StockTable from '../components/screener/StockTable'
@@ -27,6 +28,7 @@ const REGIME_MSG = {
 
 export default function ScreenerPage() {
   const { data, loading, error, search } = useScreener()
+  const [filterOpen, setFilterOpen] = useState(true)
 
   const regime = data?.regime
   const rs = regime ? REGIME_STYLES[regime.regime] || {} : null
@@ -38,7 +40,16 @@ export default function ScreenerPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold text-gray-900">종목 스크리너</h1>
+      <div className="flex items-center gap-3">
+        <h1 className="text-2xl font-bold text-gray-900">종목 스크리너</h1>
+        <button
+          onClick={() => setFilterOpen(v => !v)}
+          className="px-2.5 py-1 text-xs font-medium rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-100 transition-colors"
+          title={filterOpen ? '필터 접기' : '필터 펼치기'}
+        >
+          {filterOpen ? '필터 접기' : '필터 펼치기'}
+        </button>
+      </div>
 
       {/* 체제 배너 */}
       {regime && rs && (
@@ -63,10 +74,10 @@ export default function ScreenerPage() {
         </div>
       )}
 
-      <div className="grid grid-cols-[300px_1fr] gap-6 items-start">
-        <FilterPanel onSearch={search} loading={loading} />
+      <div className={filterOpen ? 'grid grid-cols-[300px_1fr] gap-6 items-start' : ''}>
+        {filterOpen && <FilterPanel onSearch={search} loading={loading} />}
 
-        <div className="space-y-3">
+        <div className="min-w-0 space-y-3">
           {loading && <LoadingSpinner message={loadingMsg} />}
           <ErrorAlert message={error} />
 

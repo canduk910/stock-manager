@@ -221,21 +221,210 @@ def _score_seo(er: Optional[float]) -> int:
     return 1
 
 
+# ── Graham NCAV ──────────────────────────────────────────────────
+
+def calc_graham_ncav(
+    current_assets: Optional[int],
+    total_liabilities: Optional[int],
+    mktcap: Optional[int],
+) -> dict:
+    """Graham NCAV (순유동자산가치).
+
+    NCAV = 유동자산 - 총부채
+    ncav_ratio = NCAV / 시총 (>= 1.5이면 Graham 원서 매수조건 충족)
+
+    Returns:
+        {ncav, ncav_ratio, ncav_score(1~4), calculable}
+    """
+    result = {"ncav": None, "ncav_ratio": None, "ncav_score": 1, "calculable": False}
+
+    if current_assets is None or total_liabilities is None:
+        return result
+    if not mktcap or mktcap <= 0:
+        return result
+
+    ncav = current_assets - total_liabilities
+    result["ncav"] = ncav
+
+    if ncav <= 0:
+        return result
+
+    ratio = round(ncav / mktcap, 3)
+    result["ncav_ratio"] = ratio
+    result["ncav_score"] = _score_ncav(ratio)
+    result["calculable"] = True
+    return result
+
+
+def _score_ncav(ratio: Optional[float]) -> int:
+    if ratio is None:
+        return 1
+    if ratio >= 1.5:
+        return 4
+    if ratio >= 1.0:
+        return 3
+    if ratio >= 0.5:
+        return 2
+    return 1
+
+
+# ── Fisher PSR ───────────────────────────────────────────────────
+
+def calc_fisher_psr(
+    mktcap: Optional[int],
+    revenue: Optional[int],
+) -> dict:
+    """Ken Fisher PSR (주가매출비율).
+
+    PSR = 시총 / 매출액
+    < 0.75 강력매수, 0.75~1.5 관찰, > 1.5 기준초과.
+
+    Returns:
+        {psr, psr_score(1~4), calculable}
+    """
+    result = {"psr": None, "psr_score": 1, "calculable": False}
+
+    if not mktcap or mktcap <= 0 or not revenue or revenue <= 0:
+        return result
+
+    psr = round(mktcap / revenue, 3)
+    return {
+        "psr": psr,
+        "psr_score": _score_psr(psr),
+        "calculable": True,
+    }
+
+
+def _score_psr(psr: Optional[float]) -> int:
+    if psr is None:
+        return 1
+    if psr < 0.75:
+        return 4
+    if psr < 1.0:
+        return 3
+    if psr < 1.5:
+        return 2
+    return 1
+
+
+# ── Piotroski F-Score ────────────────────────────────────────────
+
+def calc_piotroski_fscore(
+    bs_list: list[dict],
+    cf_list: list[dict],
+    is_list: list[dict],
+) -> dict:
+    """Piotroski F-Score (8점 만점, 신주발행 F7 제외).
+
+    수익성(4): ROA>0, 영업CF>0, ROA증가, Accrual(CF>NI)
+    재무구조(2): 부채비율감소, 유동비율증가
+    영업효율(2): 매출총이익률증가, 총자산회전율증가
+
+    Args:
+        bs_list: balance_sheet 연도 배열 (과거→최신, 최소 2개년)
+        cf_list: cashflow 연도 배열
+        is_list: income_detail 연도 배열
+
+    Returns:
+        {fscore(0~8), details(dict), fscore_score(1~4), calculable}
+    """
+    result = {"fscore": None, "details": {}, "fscore_score": 1, "calculable": False}
+
+    if len(bs_list) < 2 or len(is_list) < 2:
+        return result
+
+    cur_bs, prev_bs = bs_list[-1], bs_list[-2]
+    cur_is, prev_is = is_list[-1], is_list[-2]
+    cur_cf = cf_list[-1] if cf_list else {}
+
+    cur_ta = cur_bs.get("total_assets") or 0
+    prev_ta = prev_bs.get("total_assets") or 0
+    cur_ni = cur_is.get("net_income") or 0
+    prev_ni = prev_is.get("net_income") or 0
+    cur_cf_val = cur_cf.get("operating_cf") or 0
+
+    details = {}
+
+    # F1: ROA > 0
+    cur_roa = cur_ni / cur_ta if cur_ta > 0 else 0
+    details["f1_roa_positive"] = 1 if cur_roa > 0 else 0
+
+    # F2: 영업CF > 0
+    details["f2_cfo_positive"] = 1 if cur_cf_val > 0 else 0
+
+    # F3: ROA 증가
+    prev_roa = prev_ni / prev_ta if prev_ta > 0 else 0
+    details["f3_roa_increasing"] = 1 if cur_roa > prev_roa else 0
+
+    # F4: Accrual (영업CF > 순이익)
+    details["f4_accrual"] = 1 if cur_cf_val > cur_ni else 0
+
+    # F5: 부채비율 감소
+    cur_dr = cur_bs.get("debt_ratio")
+    prev_dr = prev_bs.get("debt_ratio")
+    details["f5_leverage_decreasing"] = 1 if (cur_dr is not None and prev_dr is not None and cur_dr < prev_dr) else 0
+
+    # F6: 유동비율 증가
+    cur_cr = cur_bs.get("current_ratio")
+    prev_cr = prev_bs.get("current_ratio")
+    details["f6_liquidity_increasing"] = 1 if (cur_cr is not None and prev_cr is not None and cur_cr > prev_cr) else 0
+
+    # F7: 신주발행 없음 — DART 미제공, 제외
+
+    # F8: 매출총이익률 증가
+    cur_rev = cur_is.get("revenue") or 0
+    prev_rev = prev_is.get("revenue") or 0
+    cur_gp = cur_is.get("gross_profit") or 0
+    prev_gp = prev_is.get("gross_profit") or 0
+    cur_gm = cur_gp / cur_rev if cur_rev > 0 else 0
+    prev_gm = prev_gp / prev_rev if prev_rev > 0 else 0
+    details["f8_margin_increasing"] = 1 if cur_gm > prev_gm else 0
+
+    # F9: 총자산회전율 증가
+    cur_turnover = cur_rev / cur_ta if cur_ta > 0 else 0
+    prev_turnover = prev_rev / prev_ta if prev_ta > 0 else 0
+    details["f9_turnover_increasing"] = 1 if cur_turnover > prev_turnover else 0
+
+    fscore = sum(details.values())
+
+    return {
+        "fscore": fscore,
+        "details": details,
+        "fscore_score": _score_fscore(fscore),
+        "calculable": True,
+    }
+
+
+def _score_fscore(fscore: Optional[int]) -> int:
+    if fscore is None:
+        return 1
+    if fscore >= 7:
+        return 4
+    if fscore >= 5:
+        return 3
+    if fscore >= 4:
+        return 2
+    return 1
+
+
 # ── 구루 패널 통합 점수 ──────────────────────────────────────────
 
 def calc_guru_panel(
     greenblatt: Optional[dict],
     neff: Optional[dict],
     seo: Optional[dict],
+    ncav: Optional[dict] = None,
+    fisher: Optional[dict] = None,
+    piotroski: Optional[dict] = None,
 ) -> dict:
-    """3개 구루 공식 통합 패널 (12점 만점).
+    """6개 구루 공식 통합 패널 (24점 만점).
 
     Greenblatt total_score(2~8)를 4점으로 정규화: min(4, round(score/2)).
     가용 공식만으로 비율 환산.
 
     Returns:
-        {total_score(0~12), max_possible, normalized_score(0~100),
-         formulas_available(0~3), greenblatt, neff, seo}
+        {total_score(0~24), max_possible, normalized_score(0~100),
+         formulas_available(0~6), greenblatt, neff, seo, ncav, fisher, piotroski}
     """
     total = 0
     max_possible = 0
@@ -257,6 +446,21 @@ def calc_guru_panel(
         max_possible += 4
         available += 1
 
+    if ncav and ncav.get("calculable"):
+        total += ncav["ncav_score"]
+        max_possible += 4
+        available += 1
+
+    if fisher and fisher.get("calculable"):
+        total += fisher["psr_score"]
+        max_possible += 4
+        available += 1
+
+    if piotroski and piotroski.get("calculable"):
+        total += piotroski["fscore_score"]
+        max_possible += 4
+        available += 1
+
     normalized = round(total / max_possible * 100, 1) if max_possible > 0 else 0
 
     return {
@@ -267,6 +471,9 @@ def calc_guru_panel(
         "greenblatt": greenblatt,
         "neff": neff,
         "seo": seo,
+        "ncav": ncav,
+        "fisher": fisher,
+        "piotroski": piotroski,
     }
 
 
@@ -279,8 +486,10 @@ def check_value_trap(
     revenue_cagr: Optional[float],
     fcf_years_positive: Optional[int],
     debt_ratio: Optional[float],
+    fscore: Optional[int] = None,
+    psr: Optional[float] = None,
 ) -> list[str]:
-    """Value Trap 경고 규칙 5개. 해당 시 경고 문자열 리스트 반환."""
+    """Value Trap 경고 규칙 7개. 해당 시 경고 문자열 리스트 반환."""
     warnings = []
     if pbr is not None and pbr < 0.5 and roe is not None and roe < 3:
         warnings.append("저PBR+저ROE: 자산 가치 함정 가능")
@@ -292,6 +501,10 @@ def check_value_trap(
         warnings.append("부채비율 200%+: 재무 위험")
     if pbr is not None and pbr < 0.7 and debt_ratio is not None and debt_ratio > 150:
         warnings.append("저PBR+고부채: 부실 기업 가능")
+    if fscore is not None and fscore <= 2:
+        warnings.append("F-Score 극저: 재무건전성 심각 취약")
+    if psr is not None and psr < 0.5 and revenue_cagr is not None and revenue_cagr < -10:
+        warnings.append("극저PSR+매출급감: 시장이 매출 소멸 반영 중")
     return warnings
 
 
@@ -299,31 +512,27 @@ def check_value_trap(
 
 REGIME_GURU_PARAMS: dict[str, dict] = {
     "accumulation": {
-        "greenblatt_roic_min": 8,
-        "greenblatt_ey_min": 5,
-        "neff_ratio_min": 0.5,
-        "seo_return_min": 5,
+        "greenblatt_roic_min": 8, "greenblatt_ey_min": 5,
+        "neff_ratio_min": 0.5, "seo_return_min": 5,
+        "ncav_ratio_min": 0.5, "psr_max": 1.5, "fscore_min": 4,
         "description": "관대한 기준 — 축적기 적극 매수",
     },
     "selective": {
-        "greenblatt_roic_min": 12,
-        "greenblatt_ey_min": 8,
-        "neff_ratio_min": 0.8,
-        "seo_return_min": 8,
+        "greenblatt_roic_min": 12, "greenblatt_ey_min": 8,
+        "neff_ratio_min": 0.8, "seo_return_min": 8,
+        "ncav_ratio_min": 0.8, "psr_max": 1.0, "fscore_min": 5,
         "description": "표준 기준 — 선별적 매수",
     },
     "cautious": {
-        "greenblatt_roic_min": 18,
-        "greenblatt_ey_min": 12,
-        "neff_ratio_min": 1.5,
-        "seo_return_min": 10,
+        "greenblatt_roic_min": 18, "greenblatt_ey_min": 12,
+        "neff_ratio_min": 1.5, "seo_return_min": 10,
+        "ncav_ratio_min": 1.0, "psr_max": 0.75, "fscore_min": 7,
         "description": "엄격한 기준 — 최우량주만 편입",
     },
     "defensive": {
-        "greenblatt_roic_min": 999,
-        "greenblatt_ey_min": 999,
-        "neff_ratio_min": 999,
-        "seo_return_min": 999,
+        "greenblatt_roic_min": 999, "greenblatt_ey_min": 999,
+        "neff_ratio_min": 999, "seo_return_min": 999,
+        "ncav_ratio_min": 999, "psr_max": 0, "fscore_min": 999,
         "description": "진입 금지 — 현금 보존",
     },
 }

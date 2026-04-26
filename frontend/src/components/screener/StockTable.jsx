@@ -45,7 +45,7 @@ function GuruScoreBadge({ scores }) {
     : 'bg-red-100 text-red-700'
   return (
     <span className={`px-2 py-0.5 rounded text-xs font-bold ${color}`}>
-      {Math.round(normalized_score)} ({formulas_available}/3)
+      {Math.round(normalized_score)} ({formulas_available}/{scores.max_possible / 4})
     </span>
   )
 }
@@ -78,29 +78,28 @@ function makeColumns(watchlistSet, hasGuru) {
     { key: '_watchlist', label: '', align: 'center', sortable: false,
       render: (_, row) => <WatchlistButton code={row.code} alreadyAdded={watchlistSet.has(row.code)} /> },
     { key: '_rank', label: '#', align: 'right' },
-    { key: 'code', label: '코드', align: 'center' },
     { key: 'name', label: '종목명', align: 'left',
-      render: (v, row) => <Link to={`/detail/${row.code}`} className="hover:text-blue-600">{v}</Link> },
-    { key: 'market', label: '시장', align: 'center',
-      render: (v) => (
-        <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${v === 'KOSPI' ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700'}`}>{v}</span>
+      render: (v, row) => (
+        <Link to={`/detail/${row.code}`} className="hover:text-blue-600">
+          <span>{v}</span>
+          <span className="text-gray-400 text-xs ml-1">{row.code}</span>
+        </Link>
       )},
     { key: 'current_price', label: '현재가', align: 'right', render: fmtPrice },
-    { key: 'change_pct', label: '당일(%)', align: 'right', render: fmtPct },
-    { key: 'return_3m', label: '3M(%)', align: 'right', render: fmtPct },
-    { key: 'return_1y', label: '1Y(%)', align: 'right', render: fmtPct },
-    { key: 'dividend_yield', label: '배당', align: 'right', render: fmtDivYield },
+    { key: 'change_pct', label: '당일', align: 'right', render: fmtPct },
+    { key: 'return_1y', label: '1Y', align: 'right', render: fmtPct },
     { key: 'per', label: 'PER', align: 'right', render: fmtFloat },
     { key: 'pbr', label: 'PBR', align: 'right', render: fmtFloat },
-    { key: 'roe', label: 'ROE(%)', align: 'right', render: fmtFloat },
+    { key: 'roe', label: 'ROE', align: 'right', render: fmtFloat },
+    { key: 'dividend_yield', label: '배당', align: 'right', render: fmtDivYield },
     { key: 'seo_return', label: '기대수익률', align: 'right',
       render: (v) => v != null ? `${fmtFloat(v)}%` : '-' },
-    { key: 'mktcap', label: '시가총액', align: 'right', render: fmtMktcap },
+    { key: 'mktcap', label: '시총', align: 'right', render: fmtMktcap },
   ]
 
   if (hasGuru) {
     cols.push(
-      { key: '_guru', label: '구루점수', align: 'center', sortable: false,
+      { key: '_guru', label: '구루', align: 'center', sortable: false,
         render: (_, row) => <GuruScoreBadge scores={row.guru_scores} /> },
       { key: '_gb', label: 'GB', align: 'center', sortable: false,
         render: (_, row) => {

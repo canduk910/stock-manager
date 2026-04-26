@@ -58,7 +58,7 @@ def parse_sort_spec(sort_str: str, order: str | None = None) -> list[tuple[str, 
         ScreenerValidationError: 유효하지 않은 필드명이나 정렬 방향.
     """
     valid_fields = {"per", "pbr", "roe", "mktcap", "seo_return", "guru_score",
-                     "greenblatt_rank", "neff_ratio"}
+                     "greenblatt_rank", "neff_ratio", "ncav_ratio", "psr", "fscore"}
     specs = []
 
     for part in sort_str.split(","):
@@ -217,12 +217,9 @@ def sort_by_greenblatt_rank(stocks: list[dict]) -> list[dict]:
 def get_preset_filters(preset: str, regime: Optional[str] = None) -> dict:
     """구루 프리셋별 권장 필터 반환.
 
-    Args:
-        preset: "greenblatt" | "neff" | "seo"
-        regime: 체제명 (None이면 selective 기본값)
+    기본 필터(PER/PBR/ROE)는 고정값 사용.
+    체제별 구루 임계값(REGIME_GURU_PARAMS)은 구루 점수 사후 필터에서 별도 적용.
     """
-    rgp = REGIME_GURU_PARAMS.get(regime or "selective", REGIME_GURU_PARAMS["selective"])
-
     if preset == "greenblatt":
         return {
             "per_min": 0,
@@ -241,9 +238,33 @@ def get_preset_filters(preset: str, regime: Optional[str] = None) -> dict:
         }
     elif preset == "seo":
         return {
-            "per_min": 0,
+            "per_min": None,
             "per_max": None,
-            "roe_min": max(5, rgp.get("seo_return_min", 5)),
+            "roe_min": 5,
+            "pbr_max": 3.0,
+            "include_negative": False,
+        }
+    elif preset == "ncav":
+        return {
+            "per_min": None,
+            "per_max": None,
+            "roe_min": None,
+            "pbr_max": 1.5,
+            "include_negative": True,
+        }
+    elif preset == "fisher":
+        return {
+            "per_min": None,
+            "per_max": None,
+            "roe_min": None,
+            "pbr_max": None,
+            "include_negative": True,
+        }
+    elif preset == "piotroski":
+        return {
+            "per_min": 0,
+            "per_max": 30,
+            "roe_min": 3,
             "pbr_max": 3.0,
             "include_negative": False,
         }
