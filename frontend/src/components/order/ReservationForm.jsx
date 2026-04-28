@@ -44,7 +44,7 @@ export default function ReservationForm({ onSubmit }) {
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       {/* 시장/방향 */}
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div>
           <label className="block text-xs font-medium text-gray-600 mb-1">시장</label>
           <select
@@ -80,7 +80,7 @@ export default function ReservationForm({ onSubmit }) {
       </div>
 
       {/* 종목 */}
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div>
           <label className="block text-xs font-medium text-gray-600 mb-1">종목코드</label>
           <input
@@ -145,7 +145,7 @@ export default function ReservationForm({ onSubmit }) {
       </div>
 
       {/* 조건 */}
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div>
           <label className="block text-xs font-medium text-gray-600 mb-1">발동 조건</label>
           <select

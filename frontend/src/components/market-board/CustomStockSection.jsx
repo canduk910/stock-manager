@@ -71,7 +71,7 @@ function SortableCardWrapper({ id, stock, prices, sparklines, ohlc, onRemove }) 
         <button
           onClick={(e) => { e.stopPropagation(); onRemove(stock.code, stock.market) }}
           onPointerDown={(e) => e.stopPropagation()}
-          className="absolute top-1 right-1 w-4 h-4 rounded-full bg-gray-700 text-gray-400 hover:bg-red-700 hover:text-white text-[10px] leading-none hidden group-hover:flex items-center justify-center"
+          className="absolute top-1 right-1 w-6 h-6 sm:w-4 sm:h-4 rounded-full bg-gray-700 text-gray-400 hover:bg-red-700 hover:text-white text-xs sm:text-[10px] leading-none flex sm:hidden sm:group-hover:flex items-center justify-center"
         >
           ×
         </button>

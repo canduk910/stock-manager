@@ -53,9 +53,9 @@ export default function ScreenerPage() {
 
       {/* 체제 배너 */}
       {regime && rs && (
-        <div className={`rounded-xl border px-5 py-3 flex items-center justify-between ${rs.bg} ${rs.border}`}>
+        <div className={`rounded-xl border px-4 sm:px-5 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 ${rs.bg} ${rs.border}`}>
           <div className="flex items-center gap-3">
-            <span className={`px-3 py-1 rounded-full text-xs font-bold ${rs.badge}`}>
+            <span className={`px-3 py-1 rounded-full text-xs font-bold shrink-0 ${rs.badge}`}>
               {regime.regime}
             </span>
             <span className="text-sm text-gray-600">{REGIME_MSG[regime.regime]}</span>
@@ -74,7 +74,7 @@ export default function ScreenerPage() {
         </div>
       )}
 
-      <div className={filterOpen ? 'grid grid-cols-[300px_1fr] gap-6 items-start' : ''}>
+      <div className={filterOpen ? 'grid grid-cols-1 md:grid-cols-[300px_1fr] gap-6 items-start' : ''}>
         {filterOpen && <FilterPanel onSearch={search} loading={loading} />}
 
         <div className="min-w-0 space-y-3">

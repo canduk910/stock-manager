@@ -37,7 +37,7 @@ export default function PortfolioSummary({ data }) {
   const hasOverseasDeposit = Number(data.deposit_overseas_krw) !== 0
 
   return (
-    <div className="grid grid-cols-3 gap-4">
+    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
       <SummaryCard label="총 평가금액" value={fmtKRW(data.total_evaluation)} />
 
       <SummaryCard

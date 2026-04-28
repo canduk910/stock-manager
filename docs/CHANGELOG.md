@@ -1,5 +1,23 @@
 # 변경 이력
 
+## 2026-04-28 — 모바일 호환성 전면 점검
+
+### UI 개선
+- Header: 모바일 햄버거 메뉴 추가 (`md:hidden`), 세로 네비게이션 패널, 드롭다운 클릭 지원
+- ToastNotification: `w-80` → `w-[calc(100vw-1rem)] sm:w-80` (모바일 뷰포트 초과 방지)
+- ScreenerPage: 300px 고정 사이드바 → `grid-cols-1 md:grid-cols-[300px_1fr]` 반응형
+- ScreenerPage: 체제 배너 `flex-col sm:flex-row` 세로 스택
+- FilterPanel/ReservationForm/OrderForm: `grid-cols-2` → `grid-cols-1 sm:grid-cols-2` 반응형 (총 7곳)
+- PortfolioSummary: `grid-cols-3` → `grid-cols-1 sm:grid-cols-3`
+- BacktestResultPanel: 메트릭 카드 `grid-cols-1 sm:grid-cols-2 md:grid-cols-4`
+- BacktestPage: 설정 그리드 `grid-cols-1 sm:grid-cols-2 md:grid-cols-3`
+- FinancialTable: 추정치 그리드 반응형 추가
+- ReportDetailView: 체제/지수 그리드 반응형 추가
+- StockHeader: `gap-6` → `gap-3 md:gap-6` (모바일 간격 축소)
+- CustomStockSection: 삭제 버튼 터치 영역 확대 + 모바일 항상 표시
+
+---
+
 ## 2026-04-28 — 도메인 + HTTPS 설정 (dkstock.cloud)
 
 ### 인프라

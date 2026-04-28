@@ -69,7 +69,7 @@ export default function StockHeader({ symbol, name, basic, summary }) {
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 px-6 py-5">
-      <div className="flex flex-wrap items-start gap-6">
+      <div className="flex flex-wrap items-start gap-3 md:gap-6">
         {/* 종목 기본 */}
         <div className="flex-1 min-w-0">
           <div className="flex items-baseline gap-2 flex-wrap">

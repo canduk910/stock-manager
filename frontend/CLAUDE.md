@@ -54,7 +54,7 @@ frontend/
       useBacktest.js      백테스트 훅. useMcpStatus(MCP연결상태) / usePresets(전략목록) / useBacktest(실행+3초폴링+결과, MAX_POLLS=200=10분) / useBacktestHistory(이력조회).
       useTax.js           양도세 훅. useTaxSummary / useTaxTransactions(sync/add/remove) / useTaxCalculations(recalc) / useTaxSimulation(loadHoldings/simulate). FIFO 전용.
     components/
-      layout/Header.jsx   네비게이션 바 (5개 탑레벨: 시세판|관심종목|분석▼|포트폴리오|매매▼, 그룹 구분선, 드롭다운 hover)
+      layout/Header.jsx   네비게이션 바 (5개 탑레벨: 시세판|관심종목|분석▼|포트폴리오|매매▼, 그룹 구분선, 드롭다운 hover+click). 모바일: 햄버거 메뉴(md:hidden) + 세로 네비게이션 패널
       common/             LoadingSpinner, ErrorAlert, EmptyState, DataTable, ToastNotification
                           WatchlistButton (code/market/alreadyAdded props, ★/+ 버튼, StockTable·FilingsTable 공용)
                           CandlestickChart (ohlcv/indicators props, 캔들+MA5/20/60+BB+거래량, PriceChartPanel·TechnicalPanel 공용)

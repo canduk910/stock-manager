@@ -73,7 +73,7 @@ export default function ReportDetailView({ report, altReport, market, onMarketCh
           </span>
           <span className={`text-sm ${rc.text}`}>{regime.regime_desc}</span>
         </div>
-        <div className="grid grid-cols-3 gap-4 text-center">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-center">
           {regime.vix != null && (
             <div>
               <div className="text-xs text-gray-500">VIX</div>
@@ -95,7 +95,7 @@ export default function ReportDetailView({ report, altReport, market, onMarketCh
         </div>
 
         {(snapshot.indices || []).length > 0 && (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mt-3 pt-3 border-t border-gray-200/50">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2 mt-3 pt-3 border-t border-gray-200/50">
             {snapshot.indices.map((idx, i) => (
               <div key={i} className="text-center">
                 <div className="text-xs text-gray-500">{idx.name}</div>

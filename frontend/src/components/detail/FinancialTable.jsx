@@ -130,7 +130,7 @@ function ForwardSection({ forward, currency }) {
           <span className="text-xs text-indigo-400">{num_analysts}명 추정</span>
         )}
       </div>
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-0 divide-x divide-indigo-100">
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-0 divide-x divide-indigo-100">
         {forward_pe != null && (
           <div className="px-4 py-3">
             <div className="text-xs text-gray-500 mb-0.5">포워드 PER</div>

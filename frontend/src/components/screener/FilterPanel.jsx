@@ -126,7 +126,7 @@ export default function FilterPanel({ onSearch, loading }) {
       </label>
 
       {/* 날짜 & 시장 */}
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <label className="flex flex-col gap-1">
           <span className="text-xs font-medium text-gray-500">날짜</span>
           <input type="date" value={filters.date} onChange={(e) => set('date', e.target.value)} className={inputCls} />
@@ -154,7 +154,7 @@ export default function FilterPanel({ onSearch, loading }) {
       </div>
 
       {/* PBR & ROE */}
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <label className="flex flex-col gap-1">
           <span className="text-xs font-medium text-gray-500">PBR 최대</span>
           <input type="number" placeholder="1.5" value={filters.pbr_max}
@@ -175,7 +175,7 @@ export default function FilterPanel({ onSearch, loading }) {
       </label>
 
       {/* 정렬 */}
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <label className="flex flex-col gap-1">
           <span className="text-xs font-medium text-gray-500">정렬 기준</span>
           <select value={filters.sort_by} onChange={(e) => set('sort_by', e.target.value)} className={inputCls}>
