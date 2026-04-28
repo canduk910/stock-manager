@@ -80,7 +80,7 @@ export default function CommoditySection({ data, loading, error }) {
   return (
     <section>
       <h2 className="text-lg font-semibold text-gray-900 mb-3">원자재</h2>
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
         {data.commodities.map((item) => (
           <CommodityCard key={item.symbol} item={item} />
         ))}

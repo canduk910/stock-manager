@@ -33,7 +33,9 @@ export default function CreditSpreadSection({ data, loading, error }) {
   if (error) return <ErrorAlert message={error} />
   if (!data) return null
 
-  const { hyg_yield, lqd_yield, spread, spread_direction, history } = data
+  // API 응답: { credit_spread: {...}, updated_at, errors }
+  const cs = data.credit_spread || data
+  const { hyg_yield, lqd_yield, spread, spread_direction, history } = cs
   const dirStyle = DIRECTION_STYLE[spread_direction] || DIRECTION_STYLE.stable
 
   return (

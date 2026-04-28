@@ -157,17 +157,20 @@ export default function YieldCurveSection({ data, loading, error }) {
   if (error) return <ErrorAlert message={error} />
   if (!data) return null
 
+  // API 응답: { yield_curve: {...}, updated_at, errors }
+  const yc = data.yield_curve || data
+
   return (
     <section>
       <h2 className="text-lg font-semibold text-gray-900 mb-3">장단기 금리차</h2>
       <CurrentRatesCards
-        current={data.current}
-        spread={data.spread_10y_3m}
-        inverted={data.inverted}
+        current={yc.current}
+        spread={yc.spread_10y_3m}
+        inverted={yc.inverted}
       />
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <CurveShapeChart current={data.current} />
-        <SpreadHistoryChart history={data.history} />
+        <CurveShapeChart current={yc.current} />
+        <SpreadHistoryChart history={yc.history} />
       </div>
     </section>
   )

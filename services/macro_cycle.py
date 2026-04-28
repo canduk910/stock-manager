@@ -208,20 +208,51 @@ def determine_cycle_phase(inputs: dict) -> dict:
 
     phase_info = CYCLE_PHASES[top_phase]
 
+    # 지표별 한국어 신호 생성
+    _DIR_KO = {"steepening": "확대 중", "flattening": "축소 중", "stable": "안정"}
+    _CREDIT_KO = {"narrowing": "축소 중", "widening": "확대 중", "stable": "안정"}
+    _VIX_KO = {"low": "낮음", "normal": "보통", "high": "높음", "extreme": "극단"}
+    _SECTOR_KO = {"cyclical": "경기민감주 우위", "defensive": "방어주 우위", "mixed": "혼합"}
+    _DOLLAR_KO = {"weakening": "약세", "strengthening": "강세", "stable": "보합"}
+
+    ys = inputs.get("yield_spread")
+    ys_signal = f"스프레드 {ys:+.2f}%" if ys is not None else "-"
+    vx = inputs.get("vix_value")
+    vx_signal = f"{vx:.1f} ({_VIX_KO.get(inputs.get('vix_level', ''), '')})" if vx is not None else "-"
+
+    scores = {
+        "yield_curve": {
+            "score": round(s_yield.get(top_phase, 0) * weights["yield"], 3),
+            "weight": weights["yield"],
+            "signal": ys_signal,
+        },
+        "credit_spread": {
+            "score": round(s_credit.get(top_phase, 0) * weights["credit"], 3),
+            "weight": weights["credit"],
+            "signal": _CREDIT_KO.get(inputs.get("credit_direction", "stable"), "안정"),
+        },
+        "vix": {
+            "score": round(s_vix.get(top_phase, 0) * weights["vix"], 3),
+            "weight": weights["vix"],
+            "signal": vx_signal,
+        },
+        "sector_rotation": {
+            "score": round(s_sector.get(top_phase, 0) * weights["sector"], 3),
+            "weight": weights["sector"],
+            "signal": _SECTOR_KO.get(inputs.get("sector_rotation", "mixed"), "혼합"),
+        },
+        "dollar": {
+            "score": round(s_dollar.get(top_phase, 0) * weights["dollar"], 3),
+            "weight": weights["dollar"],
+            "signal": _DOLLAR_KO.get(inputs.get("dollar_strength", "stable"), "보합"),
+        },
+    }
+
     return {
         "phase": top_phase,
-        "label": phase_info["label"],
-        "description": phase_info["desc"],
+        "phase_label": phase_info["label"],
+        "phase_desc": phase_info["desc"],
         "confidence": confidence,
-        "scores": {p: round(s, 3) for p, s in final_scores.items()},
+        "scores": scores,
         "leader_sectors": LEADER_SECTORS[top_phase],
-        "inputs_summary": {
-            "yield_spread": inputs.get("yield_spread"),
-            "yield_direction": inputs.get("yield_direction"),
-            "credit_direction": inputs.get("credit_direction"),
-            "vix_value": inputs.get("vix_value"),
-            "vix_level": inputs.get("vix_level"),
-            "sector_rotation": inputs.get("sector_rotation"),
-            "dollar_strength": inputs.get("dollar_strength"),
-        },
     }

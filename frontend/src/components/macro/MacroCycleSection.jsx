@@ -57,7 +57,9 @@ export default function MacroCycleSection({ data, loading, error }) {
   if (error) return <ErrorAlert message={error} />
   if (!data) return null
 
-  const { phase, phase_label, phase_desc, confidence, scores, leader_sectors } = data
+  // API 응답: { cycle: {...}, updated_at, errors }
+  const cycle = data.cycle || data
+  const { phase, phase_label, phase_desc, confidence, scores, leader_sectors } = cycle
 
   return (
     <section>
@@ -79,15 +81,16 @@ export default function MacroCycleSection({ data, loading, error }) {
 
         {/* 현재 국면 설명 */}
         {phase_label && (
-          <div className="text-center">
+          <div className="text-center bg-gray-50 rounded-lg p-4">
+            <div className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-2">현재 경기 국면</div>
             <span
-              className={`inline-block px-3 py-1 rounded-full text-sm font-semibold text-white ${
+              className={`inline-block px-5 py-2 rounded-full text-lg font-bold text-white ${
                 PHASE_COLORS[phase]?.active || 'bg-gray-500'
               }`}
             >
               {phase_label}
             </span>
-            {phase_desc && <p className="text-sm text-gray-500 mt-1">{phase_desc}</p>}
+            {phase_desc && <p className="text-sm text-gray-600 mt-2">{phase_desc}</p>}
           </div>
         )}
 

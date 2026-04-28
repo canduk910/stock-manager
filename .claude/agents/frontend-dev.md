@@ -79,9 +79,33 @@ export function use{Name}() {
 - 기존 컴포넌트 스타일 패턴 참조 (일관성)
 - 반응형: 모바일 우선 (`sm:`, `md:`, `lg:`, `xl:`)
 
+### 모바일 호환성 (필수)
+
+모든 컴포넌트 구현 시 아래 규칙을 반드시 준수한다. PC 레이아웃에 영향 없이 모바일 전용 breakpoint 클래스를 추가하는 방식.
+
+| 규칙 | 금지 패턴 | 올바른 패턴 |
+|------|----------|-----------|
+| 고정 컬럼 그리드 | `grid-cols-2` | `grid-cols-1 sm:grid-cols-2` |
+| 3컬럼 이상 | `grid-cols-3` | `grid-cols-1 sm:grid-cols-2 lg:grid-cols-3` |
+| 고정 px 사이드바 | `grid-cols-[300px_1fr]` | `grid-cols-1 md:grid-cols-[300px_1fr]` |
+| 가로 배치 | `flex gap-6` | `flex flex-col sm:flex-row gap-3 sm:gap-6` |
+| 토스트/모달 고정너비 | `w-80` | `w-[calc(100vw-1rem)] sm:w-80` |
+| 터치 타겟 | `w-4 h-4` 버튼 | `w-6 h-6 sm:w-4 sm:h-4` (최소 44×44px) |
+| hover 전용 UI | `hidden group-hover:flex` | `flex sm:hidden sm:group-hover:flex` |
+| 넓은 테이블 | 그대로 배치 | `overflow-x-auto` 래퍼 필수 |
+| 큰 간격 | `gap-8` | `gap-4 md:gap-8` |
+
+**자가 점검 체크리스트** (구현 완료 후):
+- [ ] 모바일(375px)에서 가로 스크롤 없는가?
+- [ ] 모든 grid가 모바일 1컬럼으로 접히는가?
+- [ ] 버튼 터치 영역 충분한가? (최소 `py-2 px-3`)
+- [ ] 모달/토스트가 뷰포트 초과하지 않는가?
+- [ ] `text-[10px]` 이하 폰트 없는가? (최소 `text-xs`)
+
 ### 차트
 - **Recharts** 사용 (프로젝트 기존 의존성)
 - LineChart, PieChart, BarChart 등
+- 반드시 `<ResponsiveContainer width="100%" height="100%">` 래핑
 
 ## API Shape 소비 규칙
 

@@ -22,6 +22,10 @@ INDICES = [
     {"symbol": "^KQ11", "name": "코스닥"},
     {"symbol": "^GSPC", "name": "S&P 500"},
     {"symbol": "^IXIC", "name": "나스닥"},
+    {"symbol": "^STOXX50E", "name": "유로스톡스 50"},
+    {"symbol": "^N225", "name": "닛케이 225"},
+    {"symbol": "000001.SS", "name": "상하이종합"},
+    {"symbol": "^BSESN", "name": "인도 SENSEX"},
 ]
 
 INVESTORS = [
@@ -428,7 +432,7 @@ _YIELD_SYMBOLS = [
 
 
 def fetch_yield_curve_data() -> dict:
-    """미국 국채 수익률곡선 — 현재값 + 6개월 시계열 + 역전 여부."""
+    """미국 국채 수익률곡선 — 현재값 + 장기 시계열(주봉, 최대 30년) + 역전 여부."""
     key = "macro:yield_curve"
     cached = get_cached(key)
     if cached is not None:
@@ -445,7 +449,7 @@ def fetch_yield_curve_data() -> dict:
                 t = yf.Ticker(sym)
                 fi = t.fast_info
                 val = _safe(fi.last_price) or _safe(fi.previous_close)
-                hist = t.history(period="6mo", interval="1d")
+                hist = t.history(period="max", interval="1wk")
                 ts_list = []
                 if not hist.empty:
                     for ts, row in hist.iterrows():
@@ -542,8 +546,8 @@ def fetch_credit_spread() -> dict:
         try:
             hyg_t = yf.Ticker("HYG")
             lqd_t = yf.Ticker("LQD")
-            hyg_hist = hyg_t.history(period="6mo", interval="1d")
-            lqd_hist = lqd_t.history(period="6mo", interval="1d")
+            hyg_hist = hyg_t.history(period="max", interval="1wk")
+            lqd_hist = lqd_t.history(period="max", interval="1wk")
 
             if not hyg_hist.empty and not lqd_hist.empty:
                 # 날짜 교차
@@ -670,6 +674,7 @@ def fetch_currency_quotes() -> list[dict]:
 
 _COMMODITY_SYMBOLS = [
     ("CL=F", "WTI 원유"),
+    ("URA", "우라늄 ETF"),
     ("GC=F", "금"),
     ("ZC=F", "옥수수"),
     ("ZW=F", "밀"),
