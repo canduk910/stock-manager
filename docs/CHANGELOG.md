@@ -1,5 +1,12 @@
 # 변경 이력
 
+## 2026-04-29 — 웹 보안 헤더 추가 (securityheaders.com F→A)
+
+### 보안 강화
+- nginx(HTTPS): 보안 헤더 6개 추가 (CSP, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy, HSTS)
+- nginx: `server_tokens off` + `proxy_hide_header Server` (서버 정보 숨김)
+- FastAPI 미들웨어: 보안 헤더 5개 추가 (IP 직접 접근 시에도 적용, HSTS 제외)
+
 ## 2026-04-29 — 경기국면+투자체제 통합 + 스크리너 한글화 + 전략빌더 UX 개선
 
 ### UI 개선

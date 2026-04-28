@@ -122,6 +122,24 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# 보안 헤더 (nginx 우회 시에도 적용, HSTS는 HTTPS 전용이므로 제외)
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Frame-Options"] = "SAMEORIGIN"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data: https:; "
+        "connect-src 'self' wss: ws:; "
+        "font-src 'self';"
+    )
+    return response
+
 # 라우터 등록
 from routers import auth, screener, earnings, balance, watchlist, detail, order, quote, advisory, search, market_board, macro, portfolio_advisor, report, pipeline, backtest, tax  # noqa: E402
 

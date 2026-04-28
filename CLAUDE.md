@@ -82,7 +82,7 @@ python test.py                      # 삼성전자 현재가 조회
 ```
 config.py           환경변수 중앙 관리 (os.getenv 단일 진입점, DATABASE_URL 포함)
 wrapper.py          KIS API 완전 래퍼 (standalone)
-main.py             FastAPI 서버 진입점 (라우터 등록 + SPA 정적 파일 서빙 + Alembic 마이그레이션 + /api/health)
+main.py             FastAPI 서버 진입점 (라우터 등록 + SPA 정적 파일 서빙 + Alembic 마이그레이션 + /api/health + 보안 헤더 미들웨어)
 db/                 SQLAlchemy ORM 패키지 (base, session, utils, models/13개, repositories/8개)
 alembic/            DB 스키마 마이그레이션 관리
 routers/            API 라우터 패키지 (16개, quote/market_board는 WebSocket 포함)
