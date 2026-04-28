@@ -202,18 +202,19 @@ Stage 2  python:3.11-slim → pip install + 앱 소스 + COPY --from Stage 1
 
 - `docker-compose.yml`: 로컬 개발용 (build + watchlist-data 볼륨)
 - `docker-compose.test.yml`: 테스트용 PostgreSQL 16 (tmpfs, 포트 5433)
-- `docker-compose.prod.yml`: AWS 프로덕션용 (ECR 이미지 pull, 포트 80, 로그 로테이션)
+- `docker-compose.prod.yml`: AWS 프로덕션용 (app + nginx + certbot, HTTPS)
 - `entrypoint.sh`: 환경변수 점검 + 경고 출력 (키 없어도 서버 시작). `cache.db` 초기화.
 - 로컬: `docker-compose up --build` → `http://localhost:8000`
-- AWS: `docker-compose -f docker-compose.prod.yml up -d` → `http://<EC2_IP>`
+- AWS: `docker-compose -f docker-compose.prod.yml up -d` → `https://dkstock.cloud`
 - 개발: `npm run dev` 별도 실행 (Vite 프록시로 백엔드 연결)
 
 ## AWS 배포
 
 ```
 infra/              Terraform IaC (VPC, EC2×2, RDS, ECR, SSM)
+infra/nginx/        nginx 리버스 프록시 설정 (app.conf)
 .github/workflows/  GitHub Actions CI/CD (ci.yml, deploy.yml)
-scripts/            ec2-deploy.sh (수동 배포 스크립트)
+scripts/            ec2-deploy.sh (수동 배포), init-ssl.sh (Let's Encrypt 초기 발급)
 ```
 
 - **컴퓨팅 (stock-manager)**: EC2 t3.small (2GB RAM, docker-compose). 2GB swap 자동 설정
@@ -224,7 +225,8 @@ scripts/            ec2-deploy.sh (수동 배포 스크립트)
 - **DB**: RDS PostgreSQL 16 (db.t3.micro, 프리티어). `DATABASE_URL` 환경변수로 전환
 - **이미지**: ECR `stock-manager` 리포. GitHub Actions에서 빌드+푸시
 - **시크릿**: SSM Parameter Store `/stock-manager/prod/*` (SecureString). `BACKTESTER_HOST` GitHub Secret
-- **CI/CD**: `main` push → pytest + frontend build → Docker 빌드 → ECR → **백테스터 MCP 확인** → EC2 자동 배포 (command_timeout: 5m)
+- **CI/CD**: `main` push → pytest + frontend build → Docker ���드 → ECR → **백테스터 MCP ��인** → EC2 자동 배포 (command_timeout: 5m)
+- **도메인/HTTPS**: `dkstock.cloud` (가비아 DNS → Elastic IP). nginx 리버스 프록시 + Let's Encrypt certbot 자동 갱신
 - **캐시 DB**: `cache.db`, `screener_cache.db`는 EC2 로컬 Docker 볼륨에 SQLite 유지
 
 ---
@@ -322,3 +324,4 @@ pytest tests/api/ -v          # API 엔드포인트 테스트
 | 2026-04-28 | AI자문 v3 전면 통합 | advisory_service, v3 스키마, research_collector, 프론트 | 1프롬프트+1데이터+1보고서. 6대 비판적 분석. 10년 재무+리서치 통합 수집 |
 | 2026-04-28 | 테스트 DB PostgreSQL 전환 | conftest.py, ci.yml, docker-compose.test.yml | 프��덕션 동일 DBMS. stock_info BigInteger 버그 발견+수정 |
 | 2026-04-26 | 계층형 하네스 재구성 | 부서장+도메인팀장+개발팀장 신규, asset-dev 스킬 | 부서장→팀장→팀원 계층으로 자동 라우팅. 단일 진입점(asset-dev)으로 통합 |
+| 2026-04-28 | 도메인+HTTPS 설정 | deploy.yml, docker-compose.prod.yml, nginx, init-ssl.sh | dkstock.cloud 도메인 연결 + Let's Encrypt SSL + nginx 리버스 프록시 |

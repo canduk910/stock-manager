@@ -1,5 +1,18 @@
 # 변경 이력
 
+## 2026-04-28 — 도메인 + HTTPS 설정 (dkstock.cloud)
+
+### 인프라
+- `dkstock.cloud` 도메인 연결 (가비아 DNS → EC2 Elastic IP `3.39.188.29`)
+- nginx 리버스 프록시 컨테이너 추가: SSL 종료 + HTTP→HTTPS 리다이렉트 + WebSocket 프록시
+- Let's Encrypt certbot 컨테이너: 12시간마다 자동 인증서 갱신
+- `infra/nginx/app.conf` 신규: nginx 설정 (dkstock.cloud + www, TLS 1.2/1.3)
+- `scripts/init-ssl.sh` 신규: EC2 초기 SSL 인증서 발급 스크립트
+- `docker-compose.prod.yml`: app `ports: 80:8000` → `expose: 8000` (내부 전용) + nginx/certbot 추가
+- `deploy.yml`: nginx 설정 인라인 배포 + 3컨테이너(app+nginx+certbot) 구성
+
+---
+
 ## 2026-04-28 — 테스트 환경 PostgreSQL 전환
 
 ### 테스트 인프라

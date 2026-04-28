@@ -142,6 +142,8 @@ git push origin main
 
 `main` 브랜치에 push하면 GitHub Actions가 자동으로: pytest → frontend build → Docker 빌드 → ECR 푸시 → 백테스터 MCP 확인 → EC2 배포를 수행합니다.
 
+**HTTPS**: `dkstock.cloud` 도메인에 nginx 리버스 프록시 + Let's Encrypt 자동 갱신. 초기 인증서 발급은 `scripts/init-ssl.sh dkstock.cloud` 1회 실행.
+
 상세: `infra/` (Terraform), `.github/workflows/` (CI/CD), `scripts/ec2-deploy.sh` (수동 배포)
 
 ---
@@ -581,10 +583,13 @@ stock-manager/
 │       └── api/           #   fetch 래퍼 (hooks에서만 사용)
 ├── Dockerfile             # 멀티스테이지 빌드 (Node → Python)
 ├── docker-compose.yml     # 로컬 개발/프로덕션 배포
-├── docker-compose.prod.yml# AWS 프로덕션 (ECR 이미지, 포트 80)
+├── docker-compose.prod.yml# AWS 프로덕션 (app + nginx + certbot, HTTPS)
 ├── infra/                 # Terraform IaC (VPC, EC2, RDS, ECR, SSM)
+│   └── nginx/app.conf     #   nginx 리버스 프록시 + SSL + WebSocket
 ├── .github/workflows/     # GitHub Actions CI/CD (ci.yml, deploy.yml)
-└── scripts/ec2-deploy.sh  # EC2 수동 배포 스크립트
+└── scripts/
+    ├── ec2-deploy.sh      #   EC2 수동 배포 스크립트
+    └── init-ssl.sh        #   Let's Encrypt 초기 인증서 발급
 ```
 
 **국내/해외/FNO 분기 기준**: `stock/utils.py`의 `is_domestic(code)` — 6자리 숫자이면 국내(KRX), `is_fno(code)` — 1/2/3xxx 형식이면 선물옵션, 나머지는 해외(US).
