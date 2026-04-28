@@ -92,7 +92,12 @@ frontend/
                           strategyBuilderConstants.js (지표/캔들패턴 카탈로그, 연산자, 프리셋),
                           useStrategyBuilder.js (빌더 상태 관리 훅)
       macro/              IndexSection (4지수+1년스파크라인+툴팁), SentimentSection (VIX+버핏+공포탐욕),
-                          NewsSection (한국+NYT 2컬럼), InvestorSection (4명 투자자 코멘트 카드)
+                          NewsSection (한국+NYT 2컬럼), InvestorSection (4명 투자자 코멘트 카드),
+                          MacroCycleSection (4단계 경기국면 다이어그램+confidence+지표breakdown),
+                          YieldCurveSection (수익률곡선 LineChart+스프레드 시계열 AreaChart),
+                          CreditSpreadSection (HYG/LQD 스프레드+비율 시계열),
+                          CurrencySection (4환율 카드+스파크라인), CommoditySection (5원자재 카드+스파크라인),
+                          SectorHeatmapSection (11섹터×4기간 히트맵, 초록~빨강 그라데이션)
       tax/                TaxSummaryCards (4카드: 양도차익/공제/과세표준/세액), TaxBySymbolChart (종목별 BarChart),
                           TaxTransactionsTable (매매내역+수동추가), TaxCalculationDetail (FIFO lots 상세), TaxDisclaimer (면책배너),
                           TaxSimulationPanel (가상매도 시뮬레이션: 보유종목 선택+매도가/수량 입력+예상 세액)

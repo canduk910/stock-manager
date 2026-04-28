@@ -1,5 +1,21 @@
 # 변경 이력
 
+## 2026-04-29 — 매크로 분석 대규모 개선 (6개 섹션 신규)
+
+### 매크로 분석 신규
+- **경기 사이클 국면** (`MacroCycleSection`): 4단계(회복/확장/과열/수축) 순환 다이어그램 + confidence + 5지표 breakdown + 주도 섹터 태그
+- **장단기 금리차** (`YieldCurveSection`): ^IRX/^FVX/^TNX/^TYX 수익률곡선 LineChart + 10Y-3M 스프레드 시계열 AreaChart + 역전 경고
+- **하이일드 스프레드** (`CreditSpreadSection`): HYG/LQD yield 카드 + 가격 비율 시계열 + widening/narrowing 배지
+- **환율** (`CurrencySection`): USD/KRW, USD/JPY, EUR/USD, DXY 4개 카드 + 1개월 스파크라인
+- **원자재** (`CommoditySection`): WTI, 금, 옥수수, 밀, 대두 5개 카드 + 1개월 스파크라인
+- **섹터 히트맵** (`SectorHeatmapSection`): 11개 S&P 섹터 ETF × 4기간(1M/3M/6M/1Y) 수익률 히트맵 (초록~빨강 그라데이션)
+- `services/macro_cycle.py` 신규: 5지표 가중합산 경기 국면 판단 (macro_regime.py와 독립)
+- `stock/macro_fetcher.py`: 6개 yfinance 수집 함수 추가 (금리, 신용, 환율, 원자재, 섹터, 국면입력)
+- `routers/macro.py`: 6개 GET 엔드포인트 추가 (총 11개)
+- MacroPage 10개 섹션 통합 (기존 4 + 신규 6)
+
+---
+
 ## 2026-04-28 — 모바일 호환성 전면 점검
 
 ### UI 개선

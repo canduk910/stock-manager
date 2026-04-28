@@ -1,6 +1,7 @@
 """매크로 분석 서비스 레이어.
 
 데이터 수집(macro_fetcher) + OpenAI 번역/추출 + 캐싱 오케스트레이션.
+수익률곡선, 신용스프레드, 환율, 원자재, 섹터 히트맵, 경기사이클 판단.
 """
 from __future__ import annotations
 
@@ -14,6 +15,7 @@ from config import OPENAI_API_KEY, OPENAI_MODEL
 from stock import macro_fetcher
 from stock.macro_store import get_today as get_macro_today, save_today as save_macro_today
 from services.exceptions import ExternalAPIError, PaymentRequiredError
+from services.macro_cycle import determine_cycle_phase
 
 logger = logging.getLogger(__name__)
 
@@ -172,6 +174,127 @@ def get_investor_quotes() -> dict:
     return {"investors": investors_result, "errors": errors}
 
 
+# ── 수익률곡선 ──────────────────────────────────────────────────────────────
+
+def get_yield_curve() -> dict:
+    """미국 국채 수익률곡선 — 현재값 + 시계열 + 역전 여부."""
+    errors = []
+    now = now_kst_iso()
+
+    data = None
+    try:
+        data = macro_fetcher.fetch_yield_curve_data()
+    except Exception as e:
+        errors.append(f"수익률곡선: {e}")
+
+    return {
+        "yield_curve": data,
+        "updated_at": now,
+        "errors": errors,
+    }
+
+
+# ── 신용스프레드 ────────────────────────────────────────────────────────────
+
+def get_credit_spread() -> dict:
+    """HYG/LQD 기반 하이일드 신용스프레드."""
+    errors = []
+    now = now_kst_iso()
+
+    data = None
+    try:
+        data = macro_fetcher.fetch_credit_spread()
+    except Exception as e:
+        errors.append(f"신용스프레드: {e}")
+
+    return {
+        "credit_spread": data,
+        "updated_at": now,
+        "errors": errors,
+    }
+
+
+# ── 환율 ────────────────────────────────────────────────────────────────────
+
+def get_currencies() -> dict:
+    """주요 환율 현재가 + 스파크라인. 병렬 수집."""
+    errors = []
+    now = now_kst_iso()
+
+    currencies = []
+    try:
+        currencies = macro_fetcher.fetch_currency_quotes()
+    except Exception as e:
+        errors.append(f"환율: {e}")
+
+    return {
+        "currencies": currencies,
+        "updated_at": now,
+        "errors": errors,
+    }
+
+
+# ── 원자재 ──────────────────────────────────────────────────────────────────
+
+def get_commodities() -> dict:
+    """주요 원자재 현재가 + 스파크라인. 병렬 수집."""
+    errors = []
+    now = now_kst_iso()
+
+    commodities = []
+    try:
+        commodities = macro_fetcher.fetch_commodity_quotes()
+    except Exception as e:
+        errors.append(f"원자재: {e}")
+
+    return {
+        "commodities": commodities,
+        "updated_at": now,
+        "errors": errors,
+    }
+
+
+# ── 섹터 히트맵 ─────────────────────────────────────────────────────────────
+
+def get_sector_heatmap() -> dict:
+    """11개 섹터 ETF 기간별 수익률 히트맵."""
+    errors = []
+    now = now_kst_iso()
+
+    sectors = []
+    try:
+        sectors = macro_fetcher.fetch_sector_returns()
+    except Exception as e:
+        errors.append(f"섹터 수익률: {e}")
+
+    return {
+        "sectors": sectors,
+        "updated_at": now,
+        "errors": errors,
+    }
+
+
+# ── 매크로 사이클 ───────────────────────────────────────────────────────────
+
+def get_macro_cycle() -> dict:
+    """경기 사이클 국면 판단 (5지표 가중합산)."""
+    errors = []
+    now = now_kst_iso()
+
+    cycle = None
+    try:
+        inputs = macro_fetcher.fetch_cycle_inputs()
+        cycle = determine_cycle_phase(inputs)
+    except Exception as e:
+        errors.append(f"경기사이클: {e}")
+
+    return {
+        "cycle": cycle,
+        "updated_at": now,
+        "errors": errors,
+    }
+
+
 # ── 통합 ─────────────────────────────────────────────────────────────────────
 
 def get_summary() -> dict:
@@ -181,6 +304,12 @@ def get_summary() -> dict:
         "news": None,
         "sentiment": None,
         "investors": None,
+        "yield_curve": None,
+        "credit_spread": None,
+        "currencies": None,
+        "commodities": None,
+        "sector_heatmap": None,
+        "macro_cycle": None,
         "errors": [],
     }
 
@@ -203,6 +332,36 @@ def get_summary() -> dict:
         result["investors"] = get_investor_quotes()
     except Exception as e:
         result["errors"].append({"section": "investors", "message": str(e)})
+
+    try:
+        result["yield_curve"] = get_yield_curve()
+    except Exception as e:
+        result["errors"].append({"section": "yield_curve", "message": str(e)})
+
+    try:
+        result["credit_spread"] = get_credit_spread()
+    except Exception as e:
+        result["errors"].append({"section": "credit_spread", "message": str(e)})
+
+    try:
+        result["currencies"] = get_currencies()
+    except Exception as e:
+        result["errors"].append({"section": "currencies", "message": str(e)})
+
+    try:
+        result["commodities"] = get_commodities()
+    except Exception as e:
+        result["errors"].append({"section": "commodities", "message": str(e)})
+
+    try:
+        result["sector_heatmap"] = get_sector_heatmap()
+    except Exception as e:
+        result["errors"].append({"section": "sector_heatmap", "message": str(e)})
+
+    try:
+        result["macro_cycle"] = get_macro_cycle()
+    except Exception as e:
+        result["errors"].append({"section": "macro_cycle", "message": str(e)})
 
     return result
 
