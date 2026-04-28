@@ -79,13 +79,13 @@ frontend/
                           **SectorRecommendationCard** (신규 섹터 진입 추천: 섹터명+목표비중+타이밍+대표종목→DetailPage 링크),
                           RebalanceCard (리밸런싱 제안), TradeTable (매매안+주문실행),
                           TradeConfirmModal (AI 추천 주문 확인 모달)
-      backtest/           StrategySelector (프리셋 드롭다운+상세 설명 카드(description/category/tags/**파라미터 슬라이더**(min/max→range, fallback=number input)) / 커스텀 YAML / **전략 빌더 탭**(세 번째 탭). CATEGORY_LABELS/CATEGORY_COLORS/PARAM_KR export. **PARAM_KR**: 80+개 파라미터 한글명+비유적 설명 매핑), MetricsCard (수익률/샤프/낙폭/승률),
+      backtest/           StrategySelector (탭 순서: **전략 빌더(기본)**→프리셋 전략→커스텀 YAML. 프리셋 드롭다운+상세 설명 카드(description/category/tags/**파라미터 슬라이더**(min/max→range, fallback=number input)). CATEGORY_LABELS/CATEGORY_COLORS/PARAM_KR export. **PARAM_KR**: 80+개 파라미터 한글명+비유적 설명 매핑), MetricsCard (수익률/샤프/낙폭/승률),
                           BacktestResultPanel (**캔들차트+수익률곡선 이중축 통합차트**(OHLCV advisory API 별도 조회, 좌축=주가캔들+MA5/MA20, 우축=순자산 녹색선) + **거래량 바차트** + **보유구간 ReferenceArea**(수익=빨강/손실=파랑/보유중=회색) + 사용 파라미터 한글 표시 + **포지션요약**(6카드: 보유기간/수익거래/손실거래/연승/연패/승패분포) + **연간수익률**(테이블) + **월별수익률히트맵**(6단계 색상) + 거래내역(Buy=빨강/Sell=파랑)+매도수익률 자동계산. **원화 금액 Math.floor() 절사**(가격/순자산/Y축/툴팁). OHLCV 미조회 시 수익률곡선 전용 fallback),
                           backtestUtils.js (순수 계산 유틸: computeAnnualReturns/computeMonthlyReturns/computePositionSummary),
                           AnnualReturnsTable, MonthlyReturnsHeatmap, PositionSummary (결과 상세 컴포넌트),
                           BatchCompareTable (전략 비교),
                           BacktestHistoryTable (이력 테이블: 일시/종목(**코드+이름**)/카테고리(**한글배지**)/전략(**MCP display name 우선**)/수익률/샤프/낙폭/상태/**파라미터 펼침**/삭제/보기. builder/custom 전략은 지표+파라미터 형식으로 표시)
-      strategy-builder/   StrategyBuilder (5단계 스테퍼 메인 컨테이너), StepMetadata/StepIndicators/StepConditions/StepRisk/StepPreview (각 단계 UI),
+      strategy-builder/   StrategyBuilder (5단계 스테퍼 메인 컨테이너, 리스크 최소1개 필수 검증, 전략완성→전략저장 하단 네비 통합), StepMetadata/StepIndicators/StepConditions/StepRisk/StepPreview (각 단계 UI, StepPreview는 요약+YAML+검증결과만 표시),
                           IndicatorCard/IndicatorPickerModal (지표 카드+모달, 83개 지표+66종 캔들패턴),
                           ConditionCard/ConditionGroupCard/OperandSelector (조건 빌더),
                           StrategyListPanel (저장된 전략 목록+프리셋 6개),
@@ -93,7 +93,7 @@ frontend/
                           useStrategyBuilder.js (빌더 상태 관리 훅)
       macro/              IndexSection (4지수+1년스파크라인+툴팁), SentimentSection (VIX+버핏+공포탐욕),
                           NewsSection (한국+NYT 2컬럼), InvestorSection (4명 투자자 코멘트 카드),
-                          MacroCycleSection (4단계 경기국면 다이어그램+confidence+지표breakdown),
+                          MacroCycleSection (4단계 경기국면 다이어그램+**투자체제 나란히 표시**+괴리설명+confidence+지표카드+hover 툴팁),
                           YieldCurveSection (수익률곡선 LineChart+스프레드 시계열 AreaChart),
                           CreditSpreadSection (HYG/LQD 스프레드+비율 시계열),
                           CurrencySection (4환율 카드+스파크라인), CommoditySection (5원자재 카드+스파크라인),
@@ -103,7 +103,7 @@ frontend/
                           TaxSimulationPanel (가상매도 시뮬레이션: 보유종목 선택+매도가/수량 입력+예상 세액)
     pages/
       DashboardPage.jsx   /         포트폴리오 요약(체제배너+자산현황+배분차트) + 오늘 공시
-      ScreenerPage.jsx    /screener   구루 프리셋(Greenblatt/Neff/서준식) + 체제 배너 + 프리셋 배지 + 구루 점수 테이블
+      ScreenerPage.jsx    /screener   구루 프리셋 6종(한글화) + 체제 배너 + 프리셋 배지 + 구루 점수 테이블(컬럼 툴팁) + DART 프리셋 시 항상 구루 컬럼 표시
       EarningsPage.jsx    /earnings  국내/미국 탭 선택 + 기간 조회
       BalancePage.jsx     /balance
       WatchlistPage.jsx   /watchlist
@@ -113,7 +113,7 @@ frontend/
       MacroPage.jsx       /macro         매크로 분석: 지수+심리+뉴스+투자자 코멘트. 4섹션 독립 로딩.
       PortfolioPage.jsx   /portfolio     포트폴리오 통합: 체제배너+자산배분+수익률+AI자문(진단+리밸런싱+매매안+이력). balance+macro+advisor 통합.
       ReportPage.jsx      /reports       투자 보고서: 페이지 진입 시 KR/US 파이프라인 자동실행(중복방지). 매크로 체제 카드(공유) + KR/US 토글 + 3컨셉 탑픽 섹터(모멘텀/역발상/3개월선점) + 종목추천+관심종목 버튼. 하단 이력 카드(클릭→전환).
-      BacktestPage.jsx    /backtest      KIS AI Extensions 백테스트: 프리셋/커스텀/**전략빌더** 3모드, 결과 차트/메트릭, 전략 비교. **국내 KRX만 지원**(markets={['KR']}). **거래비용 입력**(수수료0.015%/세금0.23%/슬리피지0.05%). 진행 현황+백그라운드 안내. **이력 테이블**(마운트 시 로드, 완료 시 새로고침, 과거 결과 "보기" 클릭 → 결과패널). MCP 비활성화 시 안내 표시. **빌더 YAML→runCustom 연결**, 저장 전략 직접 실행.
+      BacktestPage.jsx    /backtest      KIS AI Extensions 백테스트: **전략빌더(기본탭)**/프리셋/커스텀 3모드, 빌더에서 바로 실행 가능. 결과 차트/메트릭, 전략 비교. **국내 KRX만 지원**(markets={['KR']}). **거래비용 입력**(수수료0.015%/세금0.23%/슬리피지0.05%). 진행 현황+백그라운드 안내. **이력 테이블**(마운트 시 로드, 완료 시 새로고침, 과거 결과 "보기" 클릭 → 결과패널). MCP 비활성화 시 안내 표시. 저장 전략 직접 실행.
       TaxPage.jsx         /tax           해외주식 양도소득세: 4탭(요약/매매내역/계산상세/시뮬레이션). FIFO 전용, 연도 선택, KIS 적응적 동기화+자동 재계산.
 ```
 

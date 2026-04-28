@@ -144,6 +144,16 @@ export default function StrategySelector({ presets, selectedPreset, customParams
       {/* 모드 선택 탭 */}
       <div className="flex gap-2">
         <button
+          onClick={() => onModeChange('builder')}
+          className={`px-4 py-1.5 text-sm rounded font-medium transition-colors ${
+            mode === 'builder'
+              ? 'bg-blue-600 text-white'
+              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+          }`}
+        >
+          전략 빌더
+        </button>
+        <button
           onClick={() => onModeChange('preset')}
           className={`px-4 py-1.5 text-sm rounded font-medium transition-colors ${
             mode === 'preset'
@@ -162,16 +172,6 @@ export default function StrategySelector({ presets, selectedPreset, customParams
           }`}
         >
           커스텀 YAML
-        </button>
-        <button
-          onClick={() => onModeChange('builder')}
-          className={`px-4 py-1.5 text-sm rounded font-medium transition-colors ${
-            mode === 'builder'
-              ? 'bg-blue-600 text-white'
-              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-          }`}
-        >
-          전략 빌더
         </button>
       </div>
 

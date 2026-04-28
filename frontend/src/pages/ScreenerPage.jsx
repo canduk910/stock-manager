@@ -7,9 +7,9 @@ import ErrorAlert from '../components/common/ErrorAlert'
 import EmptyState from '../components/common/EmptyState'
 
 const PRESET_LABELS = {
-  greenblatt: 'Greenblatt Magic Formula',
-  neff: 'Neff Total Return',
-  seo: '서준식 기대수익률',
+  greenblatt: '마법공식 (조엘 그린블라트)',
+  neff: '저PER 총수익 (존 네프)',
+  seo: '기대수익률 (서준식)',
 }
 
 const REGIME_STYLES = {
@@ -32,7 +32,9 @@ export default function ScreenerPage() {
 
   const regime = data?.regime
   const rs = regime ? REGIME_STYLES[regime.regime] || {} : null
+  const DART_PRESETS = ['greenblatt', 'neff', 'ncav', 'fisher', 'piotroski']
   const hasGuru = data?.stocks?.some(s => s.guru_scores != null)
+    || DART_PRESETS.includes(data?.preset)
 
   const loadingMsg = data?.preset === 'greenblatt' || data?.preset === 'neff'
     ? 'DART 재무데이터 수집 중... (30개 종목 기준 1~2분)'
@@ -45,7 +47,6 @@ export default function ScreenerPage() {
         <button
           onClick={() => setFilterOpen(v => !v)}
           className="px-2.5 py-1 text-xs font-medium rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-100 transition-colors"
-          title={filterOpen ? '필터 접기' : '필터 펼치기'}
         >
           {filterOpen ? '필터 접기' : '필터 펼치기'}
         </button>

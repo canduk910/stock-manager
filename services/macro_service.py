@@ -16,6 +16,7 @@ from stock import macro_fetcher
 from stock.macro_store import get_today as get_macro_today, save_today as save_macro_today
 from services.exceptions import ExternalAPIError, PaymentRequiredError
 from services.macro_cycle import determine_cycle_phase
+from services.macro_regime import determine_regime
 
 logger = logging.getLogger(__name__)
 
@@ -277,7 +278,7 @@ def get_sector_heatmap() -> dict:
 # ── 매크로 사이클 ───────────────────────────────────────────────────────────
 
 def get_macro_cycle() -> dict:
-    """경기 사이클 국면 판단 (5지표 가중합산)."""
+    """경기 사이클 국면 판단 (5지표 가중합산) + 투자 체제 판단."""
     errors = []
     now = now_kst_iso()
 
@@ -288,8 +289,16 @@ def get_macro_cycle() -> dict:
     except Exception as e:
         errors.append(f"경기사이클: {e}")
 
+    regime = None
+    try:
+        sentiment = get_sentiment()
+        regime = determine_regime(sentiment)
+    except Exception as e:
+        errors.append(f"투자체제: {e}")
+
     return {
         "cycle": cycle,
+        "regime": regime,
         "updated_at": now,
         "errors": errors,
     }

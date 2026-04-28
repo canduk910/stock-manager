@@ -4,7 +4,7 @@
  * 5단계 스테퍼 + Step 컴포넌트 + StrategyListPanel 사이드바 + 하단 네비게이션.
  * useStrategyBuilder 훅으로 전체 상태를 관리한다.
  */
-import { useCallback } from 'react'
+import { useCallback, useState } from 'react'
 import { useStrategyBuilder } from './useStrategyBuilder'
 import StepMetadata from './StepMetadata'
 import StepIndicators from './StepIndicators'
@@ -100,8 +100,30 @@ export default function StrategyBuilder({ onYamlGenerated, onRunSavedStrategy })
     resetBuilder,
   } = useStrategyBuilder()
 
-  // Step 5 "백테스트 실행": YAML 미변환 시 먼저 변환 후 부모에게 전달
-  const handleRunBacktest = useCallback(async () => {
+  // 리스크 항목 하나라도 활성화되었는지 검사
+  const hasRisk = state.risk && Object.values(state.risk).some(r => r?.enabled)
+
+  // 저장 UI 상태
+  const [riskError, setRiskError] = useState(false)
+  const [showSaveInput, setShowSaveInput] = useState(false)
+  const [saveName, setSaveName] = useState('')
+  const [saveDesc, setSaveDesc] = useState('')
+
+  const handleSave = useCallback(async () => {
+    if (!saveName.trim()) return
+    try {
+      await save(saveName.trim(), saveDesc.trim())
+      setShowSaveInput(false)
+    } catch {
+      // error handled by parent
+    }
+  }, [saveName, saveDesc, save])
+  const handleConvertYaml = useCallback(async () => {
+    if (!hasRisk) {
+      setRiskError(true)
+      return
+    }
+    setRiskError(false)
     let yaml = yamlPreview
     if (!yaml) {
       try {
@@ -113,8 +135,10 @@ export default function StrategyBuilder({ onYamlGenerated, onRunSavedStrategy })
     }
     if (yaml && onYamlGenerated) {
       onYamlGenerated(yaml, state)
+      setSaveName(state.metadata?.name || '')
+      setSaveDesc(state.metadata?.description || '')
     }
-  }, [yamlPreview, convertToYaml, onYamlGenerated, state])
+  }, [yamlPreview, convertToYaml, onYamlGenerated, state, hasRisk])
 
   // 현재 Step 렌더
   const renderStep = () => {
@@ -168,16 +192,17 @@ export default function StrategyBuilder({ onYamlGenerated, onRunSavedStrategy })
           <div className="space-y-4">
             <StepRisk
               risk={state.risk}
-              onUpdate={updateRisk}
+              onUpdate={(key, val) => { setRiskError(false); updateRisk(key, val) }}
             />
+            {riskError && (
+              <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700">
+                손절, 익절, 추적손절 중 최소 1개는 활성화해야 합니다.
+              </div>
+            )}
             <StepPreview
               state={state}
               yamlPreview={yamlPreview}
               validationResult={validationResult}
-              converting={converting}
-              onConvert={() => convertToYaml(true)}
-              onSave={save}
-              saving={saving}
             />
           </div>
         )
@@ -238,16 +263,62 @@ export default function StrategyBuilder({ onYamlGenerated, onRunSavedStrategy })
               다음
             </button>
           ) : (
-            <button
-              onClick={handleRunBacktest}
-              disabled={converting}
-              className="px-4 py-2 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
-            >
-              백테스트 실행
-            </button>
+            <>
+              <button
+                onClick={handleConvertYaml}
+                disabled={converting}
+                className="px-4 py-2 text-sm font-medium rounded-lg bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 transition-colors"
+              >
+                {converting ? '변환 중...' : '전략 완성'}
+              </button>
+              {yamlPreview && (
+                <button
+                  onClick={() => setShowSaveInput(v => !v)}
+                  disabled={saving}
+                  className="px-4 py-2 text-sm font-medium rounded-lg bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-50 transition-colors"
+                >
+                  {saving ? '저장 중...' : '전략 저장'}
+                </button>
+              )}
+            </>
           )}
         </div>
       </div>
+
+      {/* 전략 저장 인라인 입력 */}
+      {showSaveInput && (
+        <div className="border border-gray-200 rounded-lg p-3 bg-gray-50 space-y-2">
+          <input
+            type="text"
+            value={saveName}
+            onChange={(e) => setSaveName(e.target.value)}
+            placeholder="전략명"
+            className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+          />
+          <input
+            type="text"
+            value={saveDesc}
+            onChange={(e) => setSaveDesc(e.target.value)}
+            placeholder="설명 (선택)"
+            className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+          />
+          <div className="flex gap-2">
+            <button
+              onClick={handleSave}
+              disabled={!saveName.trim() || saving}
+              className="px-4 py-2 text-sm font-medium rounded-lg bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-50 transition-colors"
+            >
+              저장
+            </button>
+            <button
+              onClick={() => setShowSaveInput(false)}
+              className="px-4 py-2 text-sm font-medium rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors"
+            >
+              취소
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

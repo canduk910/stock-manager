@@ -29,7 +29,7 @@ export default function BacktestPage() {
   const [market, setMarket] = useState('KR')
   const [symbol, setSymbol] = useState('')
   const [symbolName, setSymbolName] = useState('')
-  const [strategyMode, setStrategyMode] = useState('preset')
+  const [strategyMode, setStrategyMode] = useState('builder')
   const [selectedPreset, setSelectedPreset] = useState('')
   const [yamlContent, setYamlContent] = useState('')
   const [customParams, setCustomParams] = useState({})
@@ -108,7 +108,7 @@ export default function BacktestPage() {
       Object.assign(fullParams, customParams)
       const costParams = { commission_rate: commissionRate / 100, tax_rate: taxRate / 100, slippage: slippage / 100 }
       runPreset(selectedPreset, symbol, market, startDate, endDate, initialCash, fullParams, presetName, costParams)
-    } else if (strategyMode === 'custom' && yamlContent.trim()) {
+    } else if ((strategyMode === 'custom' || strategyMode === 'builder') && yamlContent.trim()) {
       const costParams = { commission_rate: commissionRate / 100, tax_rate: taxRate / 100, slippage: slippage / 100 }
       runCustom(yamlContent, symbol, market, startDate, endDate, initialCash, costParams, undefined, builderYamlState)
     }
@@ -213,7 +213,6 @@ export default function BacktestPage() {
             onBuilderYaml={(yaml, builderState) => {
               setYamlContent(yaml)
               setBuilderYamlState(builderState || null)
-              setStrategyMode('custom')
             }}
             onRunSavedStrategy={(strategy) => {
               if (strategy.yaml_content) {

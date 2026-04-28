@@ -45,7 +45,7 @@ function GuruScoreBadge({ scores }) {
     : 'bg-red-100 text-red-700'
   return (
     <span className={`px-2 py-0.5 rounded text-xs font-bold ${color}`}>
-      {Math.round(normalized_score)} ({formulas_available}/{scores.max_possible / 4})
+      {Math.round(normalized_score)} ({formulas_available}/6)
     </span>
   )
 }
@@ -68,6 +68,18 @@ function ValueTrapIcon({ warnings }) {
       <span className="text-amber-500 text-base">!</span>
       <div className="absolute z-50 hidden group-hover:block bg-gray-900 text-white text-xs rounded-lg p-2 w-48 -left-20 top-6 shadow-lg">
         {warnings.map((w, i) => <p key={i} className="mb-1 last:mb-0">{w}</p>)}
+      </div>
+    </span>
+  )
+}
+
+function HeaderWithTooltip({ label, tooltip }) {
+  return (
+    <span className="relative group cursor-help">
+      <span className="border-b border-dashed border-gray-400">{label}</span>
+      <div className="absolute z-50 hidden group-hover:block bg-gray-900 text-white text-xs font-normal leading-relaxed rounded-lg p-3 w-56 left-1/2 -translate-x-1/2 top-full mt-1.5 shadow-xl text-left whitespace-normal">
+        <div className="absolute -top-1.5 left-1/2 -translate-x-1/2 w-3 h-3 bg-gray-900 rotate-45" />
+        {tooltip}
       </div>
     </span>
   )
@@ -102,20 +114,20 @@ function makeColumns(watchlistSet, hasGuru) {
 
   if (hasGuru) {
     cols.push(
-      { key: '_guru', label: '구루', align: 'center', sortable: false,
+      { key: '_guru', label: <HeaderWithTooltip label="구루" tooltip="6개 구루 공식의 종합 점수 (0~100). 괄호 안은 계산 가능한 공식 수 / 전체 6개. 75점 이상 우수, 50점 이상 보통." />, align: 'center', sortable: false,
         render: (_, row) => <GuruScoreBadge scores={row.guru_scores} /> },
-      { key: '_gb', label: 'GB', align: 'center', sortable: false,
+      { key: '_gb', label: <HeaderWithTooltip label="GB" tooltip={<><span className="font-semibold">그린블라트 마법공식</span><br/>ROIC(투하자본수익률)와 EY(이익수익률) 순위를 합산. 점 4개가 만점. 두 지표 모두 높은 종목이 상위.</>} />, align: 'center', sortable: false,
         render: (_, row) => {
           const gb = row.guru_scores?.greenblatt
           if (!gb?.calculable) return <span className="text-gray-300">-</span>
           return <FormulaScore score={Math.min(4, Math.round(gb.total_score / 2))} />
         }},
-      { key: '_nf', label: 'NF', align: 'center', sortable: false,
+      { key: '_nf', label: <HeaderWithTooltip label="NF" tooltip={<><span className="font-semibold">존 네프 총수익</span><br/>(EPS 성장률 + 배당수익률) / PER. 점 4개가 만점. 성장+배당 대비 PER이 낮을수록 매력적.</>} />, align: 'center', sortable: false,
         render: (_, row) => {
           const nf = row.guru_scores?.neff
           return <FormulaScore score={nf?.calculable ? nf.neff_score : null} />
         }},
-      { key: '_vt', label: '', align: 'center', sortable: false,
+      { key: '_vt', label: <HeaderWithTooltip label="주의" tooltip={<><span className="font-semibold">가치 함정(Value Trap) 경고</span><br/>숫자가 싸 보이지만 실제로는 위험한 종목을 식별합니다. ! 표시가 있으면 마우스를 올려 구체적 경고 내용을 확인하세요.</>} />, align: 'center', sortable: false,
         render: (_, row) => <ValueTrapIcon warnings={row.value_trap_warnings} /> },
     )
   }
