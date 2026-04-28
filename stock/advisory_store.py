@@ -38,11 +38,18 @@ def get_stock(user_id: int, code: str, market: str) -> Optional[dict]:
 # ── 캐시 CRUD ─────────────────────────────────────────────────────────────────
 
 def save_cache(user_id: int, code: str, market: str, fundamental: dict, technical: dict,
-               strategy_signals: dict = None) -> None:
+               strategy_signals: dict = None, research_data: dict = None) -> None:
     """분석 데이터 캐시 저장 (upsert)."""
     with get_session() as db:
         AdvisoryRepository(db).save_cache(user_id, code, market, fundamental, technical,
-                                          strategy_signals=strategy_signals)
+                                          strategy_signals=strategy_signals,
+                                          research_data=research_data)
+
+
+def save_research_data(user_id: int, code: str, market: str, research_data: dict) -> None:
+    """리서치 데이터만 별도 저장 (기존 fundamental/technical 유지)."""
+    with get_session() as db:
+        AdvisoryRepository(db).save_research_data(user_id, code, market, research_data)
 
 
 def get_cache(user_id: int, code: str, market: str) -> Optional[dict]:

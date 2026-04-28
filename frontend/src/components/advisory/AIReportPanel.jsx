@@ -3,20 +3,21 @@
  *
  * DetailPage > 종합리포트 > AI자문 서브탭에서 렌더링된다.
  *
- * 구조 (위→아래):
- *   1) v2 등급 카드 (hasV2=true일 때만 표시):
- *      - SafetyGradeBadge: A(진녹)/B+(연녹)/B(황)/C(주)/D(적) 대형 배지
- *      - ScoreBar 3개: 등급점수(28점)/복합점수(100점)/체제정합성(100점)
- *      - Value Trap 경고 배너 (value_trap_warning=true 시 적색)
- *      - recommendation 배지: ENTER(빨강)/HOLD(황)/SKIP(회)
+ * 구조 (위→아래) — v3 통합 보고서:
+ *   1) 등급 카드: SafetyGradeBadge + ScoreBar 3개 + Value Trap 경고
  *   2) 종합투자의견: 등급 배지(매수/중립/매도) + 요약 + 근거
- *   3) 전략별 평가: 변동성돌파/안전마진/추세추종 3컬럼 카드
- *      - 안전마진: Graham Number + 할인율 표시
- *   4) 기술적 시그널: MACD/RSI/Stoch 해석 + 거래량/BB
- *   5) 포지션 가이드: 진입가/손절가/익절가/리스크보상비율/분할매수
- *   6) 리스크 요인 + 투자 포인트
+ *   3) 재무건전성분석: risk_level 배지 + OCF/부채/이자보상
+ *   4) 밸류에이션분석: 적정가치 + PER/PBR 밴드 + 업종대비 + PEG + 밸류에이션판단
+ *   5) 매크로및산업분석: 시장체제해석 + 금리 + 섹터전망 + peak_out + 산업사이클
+ *   6) 경영진트랙레코드: 자본배분 + M&A + 배당 + 지배구조
+ *   7) 가치함정분석: 하락유형 + 근거 + 안전마진판단
+ *   8) 최종매매전략: action + 진입가/손절가/적정가치/R:R/분할매수/업다운/worst_scenario
+ *   9) 전략별 정량 평가: 변동성돌파/안전마진/추세추종
+ *  10) 기술적시그널: MACD/RSI/Stoch
+ *  11) 시나리오분석: 낙관/기본/비관
+ *  12) 리스크요인 + 투자포인트
  *
- * v1 하위호환: schema_version !== 'v2' 또는 grade 부재 시 v2 카드 전체 숨김
+ * v1/v2 하위호환: grade 부재 시 등급 카드 숨김, v3 섹션은 null 체크로 자연스럽게 숨김
  */
 
 function GradeBadge({ grade }) {
@@ -54,6 +55,35 @@ function PosGuideCard({ label, value, sub, color = 'gray' }) {
       <p className="text-lg font-bold">{value}</p>
       {sub && <p className="text-xs mt-1 opacity-70 leading-relaxed">{sub}</p>}
     </div>
+  )
+}
+
+function RiskBadge({ level }) {
+  const colors = {
+    '안전': 'bg-green-100 text-green-700',
+    '주의': 'bg-yellow-100 text-yellow-700',
+    '위험': 'bg-orange-100 text-orange-700',
+    '심각': 'bg-red-100 text-red-700',
+  }
+  return (
+    <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${colors[level] || 'bg-gray-100 text-gray-700'}`}>
+      리스크: {level}
+    </span>
+  )
+}
+
+function CycleBadge({ phase }) {
+  const colors = {
+    '도입': 'bg-purple-100 text-purple-700',
+    '성장': 'bg-green-100 text-green-700',
+    '성숙': 'bg-blue-100 text-blue-700',
+    '쇠퇴': 'bg-red-100 text-red-700',
+    '불명': 'bg-gray-100 text-gray-700',
+  }
+  return (
+    <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${colors[phase] || 'bg-gray-100 text-gray-700'}`}>
+      산업사이클: {phase}
+    </span>
   )
 }
 
@@ -112,21 +142,25 @@ export default function AIReportPanel({ report, history = [], loading, error, on
   const technical = reportData['기술적시그널'] || reportData.technical_signal || {}
   const risks = reportData['리스크요인'] || reportData.risk_factors || []
   const points = reportData['투자포인트'] || reportData.investment_points || []
-  const posGuide = reportData['포지션가이드'] || {}
-  const macroAnalysis = reportData['매크로환경분석'] || null
-  const valuationDeep = reportData['밸류에이션심화'] || null
   const scenarioAnalysis = reportData['시나리오분석'] || null
   const alternatives = reportData['관련투자대안'] || []
 
-  // Phase 3 v2 필드 (부재 시 null → 카드 숨김)
+  // 등급 카드 필드 (부재 시 null → 카드 숨김)
   const safetyGrade = report?.grade || reportData['종목등급']
   const gradeScore = report?.grade_score ?? reportData['등급점수']
   const compositeScore = report?.composite_score ?? reportData['복합점수']
   const regimeAlignment = report?.regime_alignment ?? reportData['체제정합성점수']
   const valueTrapWarning = report?.value_trap_warning ?? reportData['Value_Trap_경고']
   const valueTrapReasons = reportData['Value_Trap_근거'] || []
-  const schemaVersion = report?.schema_version || reportData['schema_version']
-  const hasV2 = !!safetyGrade && schemaVersion === 'v2'
+  const hasV2 = !!safetyGrade
+
+  // 통합 스키마 6대 분석 섹션 (각 섹션은 null 체크로 렌더 여부 결정)
+  const financialHealth = reportData['재무건전성분석'] || null
+  const valuationAnalysis = reportData['밸류에이션분석'] || null
+  const macroIndustry = reportData['매크로및산업분석'] || null
+  const managementTrack = reportData['경영진트랙레코드'] || null
+  const valueTrapDeep = reportData['가치함정분석'] || null
+  const tradingStrategy = reportData['최종매매전략'] || null
 
   // 원문 fallback
   const rawText = reportData.raw
@@ -200,17 +234,14 @@ export default function AIReportPanel({ report, history = [], loading, error, on
             </div>
           </div>
 
-          {/* 등급팩터 + recommendation */}
-          {posGuide['등급팩터'] != null && (
+          {/* recommendation */}
+          {tradingStrategy?.recommendation && (
             <div className="flex gap-2 text-xs">
-              <span className="px-2 py-0.5 bg-gray-100 rounded">등급팩터: {posGuide['등급팩터']}</span>
-              {posGuide.recommendation && (
-                <span className={`px-2 py-0.5 rounded font-semibold ${
-                  posGuide.recommendation === 'ENTER' ? 'bg-green-100 text-green-700' :
-                  posGuide.recommendation === 'SKIP' ? 'bg-red-100 text-red-700' :
-                  'bg-yellow-100 text-yellow-700'
-                }`}>{posGuide.recommendation}</span>
-              )}
+              <span className={`px-2 py-0.5 rounded font-semibold ${
+                tradingStrategy.recommendation === 'ENTER' ? 'bg-green-100 text-green-700' :
+                tradingStrategy.recommendation === 'SKIP' ? 'bg-red-100 text-red-700' :
+                'bg-yellow-100 text-yellow-700'
+              }`}>{tradingStrategy.recommendation}</span>
             </div>
           )}
         </div>
@@ -232,7 +263,7 @@ export default function AIReportPanel({ report, history = [], loading, error, on
 
       {/* 종합 투자 의견 */}
       {!loading && !rawText && opinion.등급 && (
-        <Section title="종합 투자 의견" icon="📊">
+        <Section title="종합 투자 의견" icon="">
           <div className="flex items-center gap-3 mb-3">
             <GradeBadge grade={opinion.등급} />
             <p className="text-sm text-gray-700">{opinion.요약}</p>
@@ -250,9 +281,242 @@ export default function AIReportPanel({ report, history = [], loading, error, on
         </Section>
       )}
 
+      {/* 재무 건전성 분석 */}
+      {!loading && !rawText && financialHealth && (
+        <Section title="재무 건전성 분석" icon="">
+          {financialHealth.risk_level && (
+            <RiskBadge level={financialHealth.risk_level} />
+          )}
+          {financialHealth.ocf_vs_net_income && (
+            <div className="mt-2">
+              <p className="text-xs font-medium text-gray-600 mb-1">OCF vs 순이익 괴리</p>
+              <p className="text-sm text-gray-700">{financialHealth.ocf_vs_net_income}</p>
+            </div>
+          )}
+          {financialHealth.debt_ratio_analysis && (
+            <div className="mt-2">
+              <p className="text-xs font-medium text-gray-600 mb-1">부채비율 분석</p>
+              <p className="text-sm text-gray-700">{financialHealth.debt_ratio_analysis}</p>
+            </div>
+          )}
+          {financialHealth.interest_coverage_analysis && (
+            <div className="mt-2">
+              <p className="text-xs font-medium text-gray-600 mb-1">이자보상배율</p>
+              <p className="text-sm text-gray-700">{financialHealth.interest_coverage_analysis}</p>
+            </div>
+          )}
+          {financialHealth.summary && (
+            <p className="mt-2 text-sm text-gray-800 font-medium bg-gray-50 p-2 rounded">{financialHealth.summary}</p>
+          )}
+        </Section>
+      )}
+
+      {/* 밸류에이션 분석 */}
+      {!loading && !rawText && valuationAnalysis && (
+        <Section title="밸류에이션 분석" icon="">
+          {valuationAnalysis.적정가치 != null && (
+            <div className="flex items-center gap-4 mb-2">
+              <span className="text-lg font-bold text-gray-800">{fmtPrice(valuationAnalysis.적정가치)}</span>
+              {valuationAnalysis.산출방법 && <span className="text-xs text-gray-500">({valuationAnalysis.산출방법})</span>}
+            </div>
+          )}
+          {valuationAnalysis.per_band_position && (
+            <div className="mt-2">
+              <p className="text-xs font-medium text-gray-600 mb-1">PER 밴드 위치</p>
+              <p className="text-sm text-gray-700">{valuationAnalysis.per_band_position}</p>
+            </div>
+          )}
+          {valuationAnalysis.pbr_band_position && (
+            <div className="mt-2">
+              <p className="text-xs font-medium text-gray-600 mb-1">PBR 밴드 위치</p>
+              <p className="text-sm text-gray-700">{valuationAnalysis.pbr_band_position}</p>
+            </div>
+          )}
+          {valuationAnalysis.earnings_price_correlation && (
+            <div className="mt-2">
+              <p className="text-xs font-medium text-gray-600 mb-1">실적-주가 상관관계</p>
+              <p className="text-sm text-gray-700">{valuationAnalysis.earnings_price_correlation}</p>
+            </div>
+          )}
+          {valuationAnalysis.업종대비 && (
+            <div className="mt-2">
+              <p className="text-xs font-medium text-gray-600 mb-1">업종 대비</p>
+              <p className="text-sm text-gray-700">{valuationAnalysis.업종대비}</p>
+            </div>
+          )}
+          {valuationAnalysis.PEG분석 && (
+            <div className="mt-2">
+              <p className="text-xs font-medium text-gray-600 mb-1">PEG 분석</p>
+              <p className="text-sm text-gray-700">{valuationAnalysis.PEG분석}</p>
+            </div>
+          )}
+          {valuationAnalysis.밸류에이션판단 && (
+            <p className="mt-2 text-sm font-medium bg-gray-50 p-2 rounded">{valuationAnalysis.밸류에이션판단}</p>
+          )}
+          {valuationAnalysis.historical_judgment && (
+            <p className="mt-2 text-sm text-gray-800 font-medium bg-gray-50 p-2 rounded">{valuationAnalysis.historical_judgment}</p>
+          )}
+        </Section>
+      )}
+
+      {/* 매크로 및 산업 분석 */}
+      {!loading && !rawText && macroIndustry && (
+        <Section title="매크로 및 산업 분석" icon="">
+          <div className="flex gap-2 mb-2">
+            {macroIndustry.industry_cycle_phase && <CycleBadge phase={macroIndustry.industry_cycle_phase} />}
+          </div>
+          {macroIndustry.시장체제해석 && <p className="text-sm text-gray-700 mb-2">{macroIndustry.시장체제해석}</p>}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-2">
+            {macroIndustry.금리영향 && (
+              <div className="bg-blue-50 rounded-lg p-3">
+                <p className="text-xs font-semibold text-blue-700 mb-1">금리 영향</p>
+                <p className="text-xs text-gray-700">{macroIndustry.금리영향}</p>
+              </div>
+            )}
+            {macroIndustry.섹터전망 && (
+              <div className="bg-green-50 rounded-lg p-3">
+                <p className="text-xs font-semibold text-green-700 mb-1">섹터 전망</p>
+                <p className="text-xs text-gray-700">{macroIndustry.섹터전망}</p>
+              </div>
+            )}
+            {macroIndustry.매크로리스크 && (
+              <div className="bg-red-50 rounded-lg p-3">
+                <p className="text-xs font-semibold text-red-700 mb-1">매크로 리스크</p>
+                <p className="text-xs text-gray-700">{macroIndustry.매크로리스크}</p>
+              </div>
+            )}
+          </div>
+          {macroIndustry.peak_out_assessment && (
+            <div className="mt-2">
+              <p className="text-xs font-medium text-gray-600 mb-1">Peak-out 검증</p>
+              <p className="text-sm text-gray-700">{macroIndustry.peak_out_assessment}</p>
+            </div>
+          )}
+          {macroIndustry.macro_risk_factors?.length > 0 && (
+            <div className="mt-2">
+              <p className="text-xs font-medium text-gray-600 mb-1">매크로 리스크 요인</p>
+              <ul className="list-disc list-inside text-sm text-gray-700">
+                {macroIndustry.macro_risk_factors.map((f, i) => <li key={i}>{f}</li>)}
+              </ul>
+            </div>
+          )}
+          {macroIndustry.outlook && (
+            <p className="mt-2 text-sm text-gray-800 font-medium bg-gray-50 p-2 rounded">{macroIndustry.outlook}</p>
+          )}
+        </Section>
+      )}
+
+      {/* 경영진 트랙 레코드 */}
+      {!loading && !rawText && managementTrack && (
+        <Section title="경영진 트랙 레코드" icon="">
+          {managementTrack.capital_allocation_grade && (
+            <div className="mb-2">
+              <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${
+                managementTrack.capital_allocation_grade === '우수' ? 'bg-green-100 text-green-700' :
+                managementTrack.capital_allocation_grade === '양호' ? 'bg-blue-100 text-blue-700' :
+                managementTrack.capital_allocation_grade === '보통' ? 'bg-yellow-100 text-yellow-700' :
+                'bg-red-100 text-red-700'
+              }`}>
+                자본배분: {managementTrack.capital_allocation_grade}
+              </span>
+            </div>
+          )}
+          {managementTrack.ma_track_record && (
+            <div>
+              <p className="text-xs font-medium text-gray-600 mb-1">M&A 이력</p>
+              <p className="text-sm text-gray-700">{managementTrack.ma_track_record}</p>
+            </div>
+          )}
+          {managementTrack.dividend_policy && (
+            <div className="mt-2">
+              <p className="text-xs font-medium text-gray-600 mb-1">배당 정책</p>
+              <p className="text-sm text-gray-700">{managementTrack.dividend_policy}</p>
+            </div>
+          )}
+          {managementTrack.governance_assessment && (
+            <p className="mt-2 text-sm text-gray-800 font-medium bg-gray-50 p-2 rounded">{managementTrack.governance_assessment}</p>
+          )}
+        </Section>
+      )}
+
+      {/* 가치함정 분석 */}
+      {!loading && !rawText && valueTrapDeep && (
+        <Section title="가치함정 분석" icon="">
+          {valueTrapDeep.decline_type && (
+            <div className="mb-2">
+              <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${
+                valueTrapDeep.decline_type === '구조적_쇠퇴' ? 'bg-red-100 text-red-700' :
+                valueTrapDeep.decline_type === '일시적_악재' ? 'bg-yellow-100 text-yellow-700' :
+                'bg-gray-100 text-gray-700'
+              }`}>
+                {valueTrapDeep.decline_type.replace('_', ' ')}
+              </span>
+            </div>
+          )}
+          {valueTrapDeep.evidence?.length > 0 && (
+            <ul className="list-disc list-inside text-sm text-gray-700 mb-2">
+              {valueTrapDeep.evidence.map((e, i) => <li key={i}>{e}</li>)}
+            </ul>
+          )}
+          {valueTrapDeep.safety_margin_assessment && (
+            <p className="text-sm text-gray-800 font-medium bg-gray-50 p-2 rounded">{valueTrapDeep.safety_margin_assessment}</p>
+          )}
+        </Section>
+      )}
+
+      {/* 최종 매매 전략 */}
+      {!loading && !rawText && tradingStrategy && (
+        <Section title="최종 매매 전략" icon="">
+          {tradingStrategy.action && (
+            <div className="mb-3">
+              <span className={`inline-block px-3 py-1 rounded-full text-sm font-bold ${
+                tradingStrategy.action.includes('매수') ? 'bg-red-100 text-red-700' :
+                tradingStrategy.action === '관망' ? 'bg-yellow-100 text-yellow-700' :
+                'bg-blue-100 text-blue-700'
+              }`}>{tradingStrategy.action}</span>
+              {tradingStrategy.recommendation && (
+                <span className={`ml-2 px-2 py-0.5 rounded text-xs font-medium ${
+                  tradingStrategy.recommendation === 'ENTER' ? 'bg-green-100 text-green-700' :
+                  tradingStrategy.recommendation === 'HOLD' ? 'bg-yellow-100 text-yellow-700' :
+                  'bg-red-100 text-red-700'
+                }`}>{tradingStrategy.recommendation}</span>
+              )}
+            </div>
+          )}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <PosGuideCard label="추천 진입가" value={fmtPrice(tradingStrategy.추천진입가 ?? tradingStrategy.entry_price)} sub={tradingStrategy.진입가근거} />
+            <PosGuideCard label="손절가" value={fmtPrice(tradingStrategy.손절가 ?? tradingStrategy.stop_loss)} sub={tradingStrategy.손절근거} color="blue" />
+            <PosGuideCard label="적정가치" value={fmtPrice(tradingStrategy.적정가치 ?? tradingStrategy.fair_value)} sub={tradingStrategy.적정가치산출 ?? tradingStrategy.fair_value_method} color="green" />
+            {tradingStrategy.리스크보상비율 != null && (
+              <PosGuideCard label="R:R 비율" value={Number(tradingStrategy.리스크보상비율).toFixed(1)}
+                sub={tradingStrategy.리스크보상비율 >= 2 ? '양호 (2.0↑)' : '주의 (2.0↓)'}
+                color={tradingStrategy.리스크보상비율 >= 2 ? 'green' : 'yellow'} />
+            )}
+          </div>
+          {(tradingStrategy.upside_pct != null || tradingStrategy.downside_pct != null) && (
+            <div className="flex gap-4 mt-3 text-sm">
+              {tradingStrategy.upside_pct != null && <span className="text-red-600 font-medium">Upside: +{tradingStrategy.upside_pct}%</span>}
+              {tradingStrategy.downside_pct != null && <span className="text-blue-600 font-medium">Downside: -{tradingStrategy.downside_pct}%</span>}
+            </div>
+          )}
+          {tradingStrategy.worst_scenario && (
+            <div className="bg-red-50 border border-red-100 rounded p-2 mt-3">
+              <p className="text-xs font-medium text-red-600 mb-1">최악 시나리오</p>
+              <p className="text-sm text-red-700">{tradingStrategy.worst_scenario}</p>
+            </div>
+          )}
+          {tradingStrategy.분할매수제안 && (
+            <p className="text-xs text-gray-600 mt-2 p-2 bg-gray-50 rounded">분할매수: {tradingStrategy.분할매수제안}</p>
+          )}
+          {tradingStrategy.position_sizing && (
+            <p className="text-xs text-gray-600 mt-2 p-2 bg-gray-50 rounded">포지션: {tradingStrategy.position_sizing}</p>
+          )}
+        </Section>
+      )}
+
       {/* 전략별 평가 */}
       {!loading && !rawText && Object.keys(strategies).length > 0 && (
-        <Section title="전략별 평가" icon="🎯">
+        <Section title="전략별 평가" icon="">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
 
             {/* 변동성 돌파 */}
@@ -327,73 +591,29 @@ export default function AIReportPanel({ report, history = [], loading, error, on
         </Section>
       )}
 
-      {/* 매크로 환경 분석 */}
-      {!loading && !rawText && macroAnalysis && (
-        <Section title="매크로 환경 분석" icon="🌍">
-          <div className="space-y-3">
-            <div>
-              <p className="text-sm text-gray-700 leading-relaxed">{macroAnalysis['시장체제해석']}</p>
-            </div>
-            {(macroAnalysis['금리영향'] || macroAnalysis['섹터전망'] || macroAnalysis['매크로리스크']) && (
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                {macroAnalysis['금리영향'] && (
-                  <div className="bg-blue-50 rounded-lg p-3">
-                    <p className="text-xs font-semibold text-blue-700 mb-1">금리 영향</p>
-                    <p className="text-xs text-gray-700 leading-relaxed">{macroAnalysis['금리영향']}</p>
-                  </div>
-                )}
-                {macroAnalysis['섹터전망'] && (
-                  <div className="bg-green-50 rounded-lg p-3">
-                    <p className="text-xs font-semibold text-green-700 mb-1">섹터 전망</p>
-                    <p className="text-xs text-gray-700 leading-relaxed">{macroAnalysis['섹터전망']}</p>
-                  </div>
-                )}
-                {macroAnalysis['매크로리스크'] && (
-                  <div className="bg-orange-50 rounded-lg p-3">
-                    <p className="text-xs font-semibold text-orange-700 mb-1">매크로 리스크</p>
-                    <p className="text-xs text-gray-700 leading-relaxed">{macroAnalysis['매크로리스크']}</p>
-                  </div>
-                )}
-              </div>
-            )}
+      {/* 기술적 시그널 */}
+      {!loading && !rawText && technical.신호 && (
+        <Section title="기술적 시그널" icon="">
+          <div className="flex items-center gap-3 mb-3">
+            <GradeBadge grade={technical.신호} />
+            <p className="text-sm text-gray-700">{technical.해석}</p>
           </div>
-        </Section>
-      )}
-
-      {/* 밸류에이션 심화 분석 */}
-      {!loading && !rawText && valuationDeep && (
-        <Section title="밸류에이션 심화" icon="💰">
-          <div className="space-y-3">
-            <p className="text-sm text-gray-700 font-medium">{valuationDeep['밸류에이션판단']}</p>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              {valuationDeep['적정가치'] != null && (
-                <PosGuideCard
-                  label="적정가치"
-                  value={fmtPrice(valuationDeep['적정가치'])}
-                  sub={valuationDeep['산출방법']}
-                  color="green"
-                />
-              )}
-              {valuationDeep['업종대비'] && (
-                <div className="border rounded-lg p-3 bg-gray-50 border-gray-200 col-span-1">
-                  <p className="text-xs font-medium text-gray-500 mb-1">업종 대비</p>
-                  <p className="text-xs text-gray-700 leading-relaxed">{valuationDeep['업종대비']}</p>
+          {technical.지표별 && (
+            <div className="grid grid-cols-3 gap-2 mt-2">
+              {Object.entries(technical.지표별).map(([k, v]) => (
+                <div key={k} className="bg-gray-50 rounded p-2 text-xs">
+                  <span className="font-semibold text-gray-600 uppercase">{k}</span>
+                  <p className="text-gray-700 mt-0.5">{v}</p>
                 </div>
-              )}
-              {valuationDeep['PEG분석'] && (
-                <div className="border rounded-lg p-3 bg-gray-50 border-gray-200 col-span-1 md:col-span-2">
-                  <p className="text-xs font-medium text-gray-500 mb-1">PEG 분석</p>
-                  <p className="text-xs text-gray-700 leading-relaxed">{valuationDeep['PEG분석']}</p>
-                </div>
-              )}
+              ))}
             </div>
-          </div>
+          )}
         </Section>
       )}
 
       {/* 시나리오 분석 */}
       {!loading && !rawText && scenarioAnalysis && (
-        <Section title="시나리오 분석 (12개월)" icon="🎲">
+        <Section title="시나리오 분석 (12개월)" icon="">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             {['낙관', '기본', '비관'].map(key => {
               const s = scenarioAnalysis[key]
@@ -423,9 +643,51 @@ export default function AIReportPanel({ report, history = [], loading, error, on
         </Section>
       )}
 
+      {/* 리스크 요인 */}
+      {!loading && !rawText && Array.isArray(risks) && risks.length > 0 && (
+        <Section title="리스크 요인" icon="">
+          <ul className="space-y-2">
+            {risks.map((r, i) => (
+              <li key={i} className="flex gap-3 text-sm">
+                <span className="shrink-0 w-5 h-5 rounded-full bg-orange-100 text-orange-700 text-xs flex items-center justify-center font-bold">
+                  {i + 1}
+                </span>
+                <div>
+                  <span className="font-semibold text-gray-700">{r.요인 || r.factor}</span>
+                  {(r.설명 || r.description) && (
+                    <p className="text-gray-500 text-xs mt-0.5">{r.설명 || r.description}</p>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </Section>
+      )}
+
+      {/* 투자 포인트 */}
+      {!loading && !rawText && Array.isArray(points) && points.length > 0 && (
+        <Section title="투자 포인트" icon="">
+          <ul className="space-y-2">
+            {points.map((p, i) => (
+              <li key={i} className="flex gap-3 text-sm">
+                <span className="shrink-0 w-5 h-5 rounded-full bg-green-100 text-green-700 text-xs flex items-center justify-center font-bold">
+                  {i + 1}
+                </span>
+                <div>
+                  <span className="font-semibold text-gray-700">{p.포인트 || p.point}</span>
+                  {(p.설명 || p.description) && (
+                    <p className="text-gray-500 text-xs mt-0.5">{p.설명 || p.description}</p>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </Section>
+      )}
+
       {/* 관련 투자 대안 */}
       {!loading && !rawText && Array.isArray(alternatives) && alternatives.length > 0 && (
-        <Section title="관련 투자 대안" icon="🔄">
+        <Section title="관련 투자 대안" icon="">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {alternatives.map((alt, i) => (
               <div key={i} className="flex gap-3 border border-gray-200 rounded-lg p-3">
@@ -449,113 +711,12 @@ export default function AIReportPanel({ report, history = [], loading, error, on
         </Section>
       )}
 
-      {/* 기술적 시그널 */}
-      {!loading && !rawText && technical.신호 && (
-        <Section title="기술적 시그널" icon="📈">
-          <div className="flex items-center gap-3 mb-3">
-            <GradeBadge grade={technical.신호} />
-            <p className="text-sm text-gray-700">{technical.해석}</p>
-          </div>
-          {technical.지표별 && (
-            <div className="grid grid-cols-3 gap-2 mt-2">
-              {Object.entries(technical.지표별).map(([k, v]) => (
-                <div key={k} className="bg-gray-50 rounded p-2 text-xs">
-                  <span className="font-semibold text-gray-600 uppercase">{k}</span>
-                  <p className="text-gray-700 mt-0.5">{v}</p>
-                </div>
-              ))}
-            </div>
-          )}
-        </Section>
-      )}
-
-      {/* 리스크 요인 */}
-      {!loading && !rawText && Array.isArray(risks) && risks.length > 0 && (
-        <Section title="리스크 요인" icon="⚠️">
-          <ul className="space-y-2">
-            {risks.map((r, i) => (
-              <li key={i} className="flex gap-3 text-sm">
-                <span className="shrink-0 w-5 h-5 rounded-full bg-orange-100 text-orange-700 text-xs flex items-center justify-center font-bold">
-                  {i + 1}
-                </span>
-                <div>
-                  <span className="font-semibold text-gray-700">{r.요인 || r.factor}</span>
-                  {(r.설명 || r.description) && (
-                    <p className="text-gray-500 text-xs mt-0.5">{r.설명 || r.description}</p>
-                  )}
-                </div>
-              </li>
-            ))}
-          </ul>
-        </Section>
-      )}
-
-      {/* 투자 포인트 */}
-      {!loading && !rawText && Array.isArray(points) && points.length > 0 && (
-        <Section title="투자 포인트" icon="💡">
-          <ul className="space-y-2">
-            {points.map((p, i) => (
-              <li key={i} className="flex gap-3 text-sm">
-                <span className="shrink-0 w-5 h-5 rounded-full bg-green-100 text-green-700 text-xs flex items-center justify-center font-bold">
-                  {i + 1}
-                </span>
-                <div>
-                  <span className="font-semibold text-gray-700">{p.포인트 || p.point}</span>
-                  {(p.설명 || p.description) && (
-                    <p className="text-gray-500 text-xs mt-0.5">{p.설명 || p.description}</p>
-                  )}
-                </div>
-              </li>
-            ))}
-          </ul>
-        </Section>
-      )}
-
-      {/* 포지션 가이드 */}
-      {!loading && !rawText && posGuide['추천진입가'] != null && (() => {
-        const rr = posGuide['리스크보상비율']
-        return (
-          <Section title="포지션 가이드" icon="🎯">
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              <PosGuideCard
-                label="추천 진입가"
-                value={fmtPrice(posGuide['추천진입가'])}
-                sub={posGuide['진입가근거']}
-              />
-              <PosGuideCard
-                label="손절가"
-                value={fmtPrice(posGuide['손절가'])}
-                sub={posGuide['손절근거']}
-                color="blue"
-              />
-              <PosGuideCard
-                label="1차 익절가"
-                value={fmtPrice(posGuide['1차익절가'])}
-                sub={posGuide['익절근거']}
-                color="red"
-              />
-              <PosGuideCard
-                label="R:R 비율"
-                value={rr != null ? Number(rr).toFixed(1) : '-'}
-                sub={rr != null ? (rr >= 2 ? '양호 (2.0 이상)' : '주의 (2.0 미만)') : ''}
-                color={rr != null ? (rr >= 2 ? 'green' : 'yellow') : 'gray'}
-              />
-            </div>
-            {posGuide['분할매수제안'] && (
-              <p className="text-xs text-gray-600 mt-3 p-2 bg-gray-50 rounded">
-                분할매수: {posGuide['분할매수제안']}
-              </p>
-            )}
-          </Section>
-        )
-      })()}
-
       {/* 리포트 없음 안내 */}
       {!loading && !rawText && !opinion.등급 && !error && (
         <div className="text-center py-8 text-gray-400 text-sm">
           <p className="text-2xl mb-2">🤖</p>
           <p>아직 생성된 AI 리포트가 없습니다.</p>
-          <p className="text-xs mt-1">데이터를 새로고침한 후 "AI 분석 생성" 버튼을 클릭하세요.</p>
+          <p className="text-xs mt-1">"새로고침" 후 "AI분석 생성" 버튼을 클릭하세요.</p>
         </div>
       )}
     </div>

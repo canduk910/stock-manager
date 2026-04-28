@@ -9,6 +9,7 @@ import ReportSummary from '../components/detail/ReportSummary'
 import FundamentalPanel from '../components/advisory/FundamentalPanel'
 import TechnicalPanel from '../components/advisory/TechnicalPanel'
 import AIReportPanel from '../components/advisory/AIReportPanel'
+import ResearchDataPanel from '../components/advisory/ResearchDataPanel'
 
 const TABS = [
   { id: 'financials', label: '재무분석' },
@@ -60,7 +61,6 @@ export default function DetailPage() {
 
   const { data: advData, loading: advLoading, error: advError, load: loadAdvData, refresh: refreshAdvData } = useAdvisoryData()
   const { report, history: reportHistory, loading: reportLoading, error: reportError, load: loadReport, generate, loadById: loadReportById } = useAdvisoryReport()
-
   // advisory 데이터 lazy load: 종합리포트 탭 + cagr 외 서브탭 최초 진입 시
   const advLoadedRef = useState(false)
 
@@ -235,14 +235,23 @@ export default function DetailPage() {
                   </div>
                 )}
                 {subTab === 'ai' && (
-                  <AIReportPanel
-                    report={report}
-                    history={reportHistory}
-                    loading={reportLoading}
-                    error={reportError}
-                    onGenerate={handleGenerate}
-                    onSelectHistory={(id) => loadReportById(symbol, id, market)}
-                  />
+                  <div className="space-y-4">
+                    {/* AI분석 입력 데이터 미리보기 */}
+                    <ResearchDataPanel
+                      data={advData?.research_data}
+                      advData={advData}
+                      market={market}
+                    />
+                    {/* AI 리포트 */}
+                    <AIReportPanel
+                      report={report}
+                      history={reportHistory}
+                      loading={reportLoading}
+                      error={reportError}
+                      onGenerate={handleGenerate}
+                      onSelectHistory={(id) => loadReportById(symbol, id, market)}
+                    />
+                  </div>
                 )}
               </div>
             )}

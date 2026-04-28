@@ -4,7 +4,7 @@
 
 | 파일 | 엔드포인트 | 설명 |
 |------|-----------|------|
-| `screener.py` | `GET /api/screener/stocks` | 멀티팩터 스크리닝 + yfinance enrichment + **구루 공식**(preset=greenblatt/neff/seo, DART guru enrichment) + **체제 연계**(regime_aware, 응답에 regime 포함) + 52주 하락률 필터 + Value Trap 경고 |
+| `screener.py` | `GET /api/screener/stocks` | 멀티팩터 스크리닝 + yfinance enrichment(**섹터** 포함) + **구루 공식**(preset=greenblatt/neff/seo, DART guru enrichment) + **체제 연계**(regime_aware, 응답에 regime 포함) + 52주 하락률 필터 + Value Trap 경고 |
 | `earnings.py` | `GET /api/earnings/filings` | 정기보고서 (국내 DART / 미국 SEC EDGAR) |
 | `balance.py` | `GET /api/balance` | KIS 실전계좌 잔고 (국내+해외+선물옵션) |
 | `watchlist.py` | `/api/watchlist/*` | 관심종목 CRUD + 대시보드 + 종목정보 + 순서 관리 (국내/해외). `GET/PUT /api/watchlist/order` (/{code} 라우트보다 앞에 등록) |
@@ -12,7 +12,7 @@
 | `_kis_auth.py` | (내부 모듈) | KIS 인증 공통 (토큰 관리, hashkey 발급). `balance.py`·`order.py` 공용 |
 | `order.py` | `/api/order/*` | 주문 발송/정정/취소/미체결/체결/이력/예약주문 |
 | `quote.py` | `WS /ws/quote/{symbol}`, `WS /ws/execution-notice` | 실시간 호가 WebSocket (KR/FNO/US) + 체결통보 WS |
-| `advisory.py` | `/api/advisory/*` | AI자문 종목 관리 + 데이터 수집/조회 + AI 리포트 생성 |
+| `advisory.py` | `/api/advisory/*` | AI자문 종목 관리 + 데이터 수집(+리서치)/조회 + AI 리포트 생성(v3 통합). `POST /research` 수동 리서치 수집 |
 | `search.py` | `GET /api/search` | 종목 검색 (KR=자동완성, US=티커 검증, FNO=마스터 검색) |
 | `market_board.py` | `/api/market-board/*`, `WS /ws/market-board` | 신고가/신저가 + sparkline + 당일 OHLC + 시세판 종목 CRUD + 순서 관리(`GET/PUT /api/market-board/order`) + 실시간 WS(시가/고가/저가 포함) |
 | `macro.py` | `/api/macro/*` | 매크로 분석: 지수(4대)/뉴스(네이버+NYT)/심리지표(VIX+버핏+공포탐욕)/투자자 코멘트. 5개 GET 엔드포인트 |

@@ -47,6 +47,14 @@ export const fetchReportById = (code, reportId, market = 'KR') =>
 export const fetchReport = (code, market = 'KR') =>
   apiFetch(`/api/advisory/${encodeURIComponent(code)}/report?market=${market}`)
 
+// ── 리서치 데이터 수집 (입력정보 획득) ──────────────────────────────────────
+export const collectResearchData = (code, market = 'KR', name = null) => {
+  const q = name ? `&name=${encodeURIComponent(name)}` : ''
+  return apiFetch(`/api/advisory/${encodeURIComponent(code)}/research?market=${market}${q}`, {
+    method: 'POST',
+  })
+}
+
 // ── OHLCV 타임프레임별 조회 ────────────────────────────────────────────────
 export const fetchAdvisoryOhlcv = (code, market = 'KR', interval = '15m', period = '60d') =>
   apiFetch(`/api/advisory/${encodeURIComponent(code)}/ohlcv?market=${market}&interval=${interval}&period=${period}`)

@@ -63,10 +63,22 @@ def refresh_stock_data(code: str, market: str, name: str, user_id: int = 1) -> d
     fundamental = _collect_fundamental(code, market, name)
     technical = _collect_technical(code, market)
     strategy_signals = _collect_strategy_signals(code, market)
+    research_data = _collect_research(code, market, name)
 
     advisory_store.save_cache(user_id, code, market, fundamental, technical,
-                              strategy_signals=strategy_signals)
+                              strategy_signals=strategy_signals,
+                              research_data=research_data)
     return advisory_store.get_cache(user_id, code, market) or {}
+
+
+def _collect_research(code: str, market: str, name: str) -> dict:
+    """리서치 데이터 수집 (실패 시 빈 dict)."""
+    try:
+        from stock.research_collector import collect_all_research
+        return collect_all_research(code, market, name)
+    except Exception as e:
+        logger.warning("리서치 데이터 수집 실패 %s: %s", code, e)
+        return {}
 
 
 def generate_ai_report(code: str, market: str, name: str, user_id: int = 1) -> dict:
@@ -86,6 +98,7 @@ def generate_ai_report(code: str, market: str, name: str, user_id: int = 1) -> d
     fundamental = cache.get("fundamental") or {}
     technical = cache.get("technical") or {}
     strategy_signals = cache.get("strategy_signals")  # MCP 전략 신호 (없으면 None)
+    research_data = cache.get("research_data") or {}
 
     model = OPENAI_MODEL
     graham_data = _calc_graham_number(fundamental, market)
@@ -94,8 +107,11 @@ def generate_ai_report(code: str, market: str, name: str, user_id: int = 1) -> d
     macro_ctx = _get_macro_context()
     regime, regime_desc = _determine_regime(macro_ctx)
 
-    prompt = _build_prompt(code, market, name, fundamental, technical, graham_data, macro_ctx, regime, regime_desc, strategy_signals)
+    # 항상 통합 프롬프트 (v2/v3 분기 없음)
     system_prompt = _build_system_prompt(regime, regime_desc)
+    prompt = _build_prompt(code, market, name, fundamental, technical,
+                           graham_data, macro_ctx, regime, regime_desc,
+                           strategy_signals, research_data)
 
     def _call_openai(max_tokens: int, extra_user_msg: str = "") -> tuple[str, str]:
         """OpenAI 호출. (content, finish_reason) 반환."""
@@ -118,29 +134,34 @@ def generate_ai_report(code: str, market: str, name: str, user_id: int = 1) -> d
     try:
         import time as _time
 
-        # 1차 호출 (max_completion_tokens=14000, 4개 신규 섹션 대응)
-        content, finish_reason = _call_openai(14000)
+        # 통합 v3: 16000 기본, 20000 재시도
+        base_tokens = 16000
+        retry_tokens = 20000
 
-        # 토큰 잘림 1차 재시도 (18000)
+        content, finish_reason = _call_openai(base_tokens)
+
+        # 토큰 잘림 1차 재시도
         if finish_reason == "length":
-            logger.warning("종목 자문 응답 토큰 잘림 1차 (%s), 18000으로 재시도", code)
+            logger.warning("종목 자문 응답 토큰 잘림 1차 (%s), %d로 재시도", code, retry_tokens)
             _time.sleep(1)
-            content, finish_reason = _call_openai(18000)
+            content, finish_reason = _call_openai(retry_tokens)
             if finish_reason == "length":
                 logger.error("종목 자문 응답 토큰 잘림 2차 (%s), 저장 거부", code)
                 raise ExternalAPIError("응답이 토큰 제한으로 잘렸습니다. 다시 시도해주세요.")
 
         report = _parse_report(content)
 
-        # Pydantic v2 검증 (Phase 3-3)
-        from services.schemas.advisory_report_v2 import validate_v2_report
-        v2_ok, _, v2_err = validate_v2_report(report)
-        if not v2_ok:
-            logger.warning("v2 검증 실패 (%s): %s — 1회 재시도", code, v2_err[:200])
+        # Pydantic v3 검증
+        from services.schemas.advisory_report_v3 import validate_v3_report
+        ok, _, err = validate_v3_report(report)
+
+        if not ok:
+            logger.warning("v3 검증 실패 (%s): %s — 1회 재시도", code, err[:200] if err else "")
             _time.sleep(1)
-            content2, finish2 = _call_openai(14000, "\n\n응답을 반드시 유효한 JSON으로 작성하세요. schema_version='v2' 필수 필드를 누락하지 마세요.")
+            retry_msg = "\n\n응답을 반드시 유효한 JSON으로 작성하세요. schema_version='v3' 필수 필드를 누락하지 마세요."
+            content2, finish2 = _call_openai(base_tokens, retry_msg)
             if finish2 == "length":
-                logger.warning("v2 재시도도 토큰 잘림 (%s)", code)
+                logger.warning("v3 재시도도 토큰 잘림 (%s)", code)
             report = _parse_report(content2)
 
     except (ConfigError, NotFoundError, PaymentRequiredError, ExternalAPIError):
@@ -161,9 +182,9 @@ def generate_ai_report(code: str, market: str, name: str, user_id: int = 1) -> d
         except Exception as e2:
             raise ExternalAPIError(f"OpenAI 호출 실패: {str(e2)}")
 
-    # v2 정량 필드 추출 → DB 저장
-    from services.schemas.advisory_report_v2 import extract_v2_fields
-    v2_fields = extract_v2_fields(report)
+    # 정량 필드 추출 → DB 저장 (항상 v3)
+    from services.schemas.advisory_report_v3 import extract_v3_fields
+    v2_fields = extract_v3_fields(report)
 
     report_id = advisory_store.save_report(
         user_id, code, market, model, report,
@@ -200,13 +221,13 @@ def _collect_fundamental_kr(code: str, name: str) -> dict:
     ThreadPoolExecutor 7개 task 매핑표:
     | Task         | 함수                                | 데이터               | 소스      |
     |--------------|-------------------------------------|---------------------|-----------|
-    | f_income     | dart_fin.fetch_income_detail_annual  | 손익계산서 (5년)      | DART      |
-    | f_bs_cf      | dart_fin.fetch_bs_cf_annual          | 대차대조표+현금흐름(5년)| DART     |
+    | f_income     | dart_fin.fetch_income_detail_annual  | 손익계산서 (10년)     | DART      |
+    | f_bs_cf      | dart_fin.fetch_bs_cf_annual          | 대차대조표+현금흐름(10년)| DART    |
     | f_metrics    | fetch_market_metrics                 | PER/PBR/ROE/시총    | yfinance  |
     | f_segments   | advisory_fetcher.fetch_segments_kr   | 사업 개요+키워드      | DART+GPT  |
     | f_forward    | fetch_forward_estimates_yf           | Forward PE/EPS      | yfinance  |
     | f_val_stats  | advisory_fetcher.fetch_valuation_stats| PER/PBR 5년 통계   | yfinance  |
-    | f_quarterly  | dart_fin.fetch_quarterly_financials  | 분기 실적 (4분기)    | DART      |
+    | f_quarterly  | dart_fin.fetch_quarterly_financials  | 분기 실적 (8분기)    | DART      |
     """
     from concurrent.futures import ThreadPoolExecutor
     from stock import dart_fin
@@ -214,13 +235,13 @@ def _collect_fundamental_kr(code: str, name: str) -> dict:
     from stock.yf_client import fetch_forward_estimates_yf
 
     with ThreadPoolExecutor(max_workers=7) as pool:
-        f_income = pool.submit(dart_fin.fetch_income_detail_annual, code, 5)
-        f_bs_cf = pool.submit(dart_fin.fetch_bs_cf_annual, code, 5)
+        f_income = pool.submit(dart_fin.fetch_income_detail_annual, code, 10)
+        f_bs_cf = pool.submit(dart_fin.fetch_bs_cf_annual, code, 10)
         f_metrics = pool.submit(fetch_market_metrics, code)
         f_segments = pool.submit(advisory_fetcher.fetch_segments_kr, code, name)
         f_forward = pool.submit(fetch_forward_estimates_yf, code, True)
         f_val_stats = pool.submit(advisory_fetcher.fetch_valuation_stats, code, "KR")
-        f_quarterly = pool.submit(dart_fin.fetch_quarterly_financials, code, 4)
+        f_quarterly = pool.submit(dart_fin.fetch_quarterly_financials, code, 8)
 
         income_stmt = f_income.result()
         bs_cf = f_bs_cf.result()
@@ -276,14 +297,14 @@ def _collect_fundamental_us(code: str) -> dict:
     )
 
     with ThreadPoolExecutor(max_workers=8) as pool:
-        f_income = pool.submit(fetch_income_detail_yf, code, 5)
-        f_bs = pool.submit(fetch_balance_sheet_yf, code, 5)
-        f_cf = pool.submit(fetch_cashflow_yf, code, 5)
+        f_income = pool.submit(fetch_income_detail_yf, code, 10)
+        f_bs = pool.submit(fetch_balance_sheet_yf, code, 10)
+        f_cf = pool.submit(fetch_cashflow_yf, code, 10)
         f_metrics = pool.submit(fetch_metrics_yf, code)
         f_segments = pool.submit(fetch_segments_yf, code)
         f_forward = pool.submit(fetch_forward_estimates_yf, code, False)
         f_val_stats = pool.submit(advisory_fetcher.fetch_valuation_stats, code, "US")
-        f_quarterly = pool.submit(fetch_quarterly_financials_yf, code, 4)
+        f_quarterly = pool.submit(fetch_quarterly_financials_yf, code, 8)
 
         income_stmt = f_income.result()
         balance_sheet = f_bs.result()
@@ -609,110 +630,48 @@ _REGIME_RULES = {
 
 
 def _build_system_prompt(regime: str, regime_desc: str) -> str:
-    """체제별 투자 원칙 + 도메인 에이전트 규칙을 구조화한 시스템 프롬프트.
-
-    시스템 프롬프트에 포함되는 주요 섹션과 그 근거:
-    - 4전략 프레임워크: 변동성 돌파(래리 윌리엄스) + 안전마진(그레이엄) + 추세추종 + KIS 퀀트
-      → 서로 다른 투자 철학을 교차 검증하여 단일 전략의 편향을 방지
-    - 7점 등급 체계 (MarginAnalyst): 7개 지표 × 4점 = 28점 → A/B+/B/C/D 등급
-      → 정량적 기준으로 GPT의 자의적 판단을 제약
-    - MacroSentinel 매트릭스: 버핏지수 4구간 × 공포탐욕 5구간 = 20셀 체제 표
-      → VIX>35 오버라이드로 극단 상황 대응
-    - OrderAdvisor 손절/포지션: 등급별 손절폭(A=-8%, B+=-10%, B=-12%)
-      → 리스크 관리를 시스템적으로 강제
-    - ValueScreener 5규칙: Value Trap 판별 — 2개 이상 해당 시 경고
-      → 저PER 함정 방지
-    """
+    """통합 시스템 프롬프트 — 6대 비판적 분석 + 정량 프레임워크."""
     regime_rule = _REGIME_RULES.get(regime, _REGIME_RULES["selective"])
     return (
-        "당신은 전문 주식 애널리스트입니다. "
-        "다음 세 가지 전략 프레임워크를 반드시 평가하여 종합 투자 의견을 JSON 형식으로 작성해주세요.\n\n"
-        "【전략 1: 변동성 돌파 전략 (래리 윌리엄스)】\n"
-        "당일 시가 + (전일 고저 범위 × K값) 돌파 시 매수 진입. K=0.5 표준. ATR 기반 변동성 수준 판단.\n\n"
-        "【전략 2: 안전마진 전략 (벤자민 그레이엄)】\n"
-        "Graham Number = sqrt(22.5 × EPS × BPS). "
-        "할인율 >30%: 강한 매수, 10~30%: 매수, 0~10%: 중립, 음수: 고평가.\n"
-        "- 적자 기업(EPS≤0): 3년 이상 연속 적자면 '구조적 적자'로 안전마진 전략 평가 불가. "
-        "일시적 적자(과거 흑자 이력)면 '조건부 관망'까지만 허용.\n"
-        "- BPS가 PBR 역산인 경우 '시장가 기반 참고치'임을 명시.\n\n"
-        "【전략 3: 추세추종 전략】\n"
-        "MA5>MA20>MA60 정배열 + MACD 방향 + RSI 모멘텀. "
-        "정배열+골든크로스+RSI 55↑: 강한 추세. 역배열: 하락추세.\n\n"
-        "【7점 등급 체계 (MarginAnalyst, 28점 만점)】\n"
-        "아래 7개 지표를 각 4점 만점으로 평가하고 합산 점수 → 등급 부여:\n"
-        "| # | 지표             | 4점     | 3점        | 2점        | 1점    |\n"
-        "| 1 | Graham 할인율    | >40%    | 20-40%     | 0-20%      | <0%    |\n"
-        "| 2 | PER vs 5년평균   | <-30%   | -30~-10%   | -10~+10%   | >+10%  |\n"
-        "| 3 | PBR 절대값       | <0.7    | 0.7-1.0    | 1.0-1.5    | >1.5   |\n"
-        "| 4 | 부채비율         | <50%    | 50-100%    | 100-200%   | >200%  |\n"
-        "| 5 | 유동비율         | >2.0    | 1.5-2.0    | 1.0-1.5    | <1.0   |\n"
-        "| 6 | FCF 양수 연수    | 3년     | 2년        | 1년        | 0년    |\n"
-        "| 7 | 매출 CAGR(3년)   | >10%    | 5-10%      | 0-5%       | <0%    |\n"
-        "등급 컷오프: A=24-28점(강력매수), B+=20-23점(매수), B=16-19점(조건부), C=12-15점(비추천), D=<12점(부적격).\n"
-        "PER/PBR/매출 CAGR 등 데이터 없는 지표는 2점(중립)으로 처리.\n\n"
-        "【MacroSentinel 체제 매트릭스 요약】\n"
-        "버핏지수(low<0.8 / normal<1.2 / high<1.6 / extreme>=1.6) × 공포탐욕(extreme_fear<20 / fear<40 / neutral<60 / greed<80 / extreme_greed>=80):\n"
-        "- low+공포 → accumulation(적극매수), low+탐욕 → cautious(신중)\n"
-        "- normal+공포 → selective(선별), normal+극단탐욕 → defensive(방어)\n"
-        "- high+공포 → selective, high+탐욕 → defensive\n"
-        "- extreme(모든구간) → cautious/defensive 위주\n"
-        "VIX > 35: 공포탐욕 수치 무시하고 extreme_fear로 강제 오버라이드.\n\n"
-        "【OrderAdvisor 등급별 손절폭 및 포지션】\n"
-        "- 손절폭: A=-8%, B+=-10%, B=-12%, C/D=진입 금지.\n"
-        "- grade_factor (수량 조절): A=1.0, B+=0.75, B=0.50, C/D=0.\n"
-        "- 최종 포지션% = 체제 종목당 한도% × grade_factor (예: selective+B+ = 4% × 0.75 = 3.0%).\n"
-        "- 분할매수: 1차 50%(진입) → 2차 30%(지지선-3%) → 3차 20%(전저점).\n"
-        "- 익절가: Graham Number. risk_reward = (익절-진입)/(진입-손절) >= 2.0 아니면 매수 보류.\n"
-        "- 모든 주문은 지정가(시장가 금지).\n"
-        "- 매수 불가 조건 (하나라도 해당 시 '관망' 이하):\n"
-        "  a) 7점 등급 B 미만(score<16) / b) 할인율 < 체제 안전마진 임계값\n"
-        "  c) RSI > 80 극단적 과매수 / d) 동일 종목 미체결 매수 주문 존재\n"
-        "  e) 포지션 한도 초과 / f) Value Trap 경고 발동 (근거 2개 이상)\n\n"
-        "【재무 건전성 체크리스트】\n"
-        "부채비율 >200% 위험, 유동비율 <100% 위험, FCF 3년 연속 음수 위험. "
-        "2개 이상 '위험'이면 안전마진 전략 매수 판정 금지 + '가치 함정 주의' 경고.\n\n"
-        "【ValueScreener Value Trap 5규칙】\n"
-        "아래 5개 중 2개 이상 해당하면 응답 근거에 '⚠ Value Trap 경고' 명시:\n"
-        "1. 매출 CAGR < 0% 이면서 PER < 5\n"
-        "2. 영업이익률 3년 연속 하락\n"
-        "3. FCF 3년 연속 음수\n"
-        "4. 부채비율 전년 대비 30%p 이상 급증\n"
-        "5. 배당 중단 (과거 지급 이력 있으나 최근 중단)\n\n"
-        "【전략 4: KIS 퀀트 전략 신호 (보조 지표)】\n"
-        "SMA Crossover / Momentum / Trend Filter 3개 전략의 BUY/SELL/HOLD 신호와 강도(0~1).\n"
-        "전략 합의(consensus)가 BUY이면서 강도>0.6이면 추세추종 전략의 보조 확인 신호로 활용.\n"
-        "백테스트 메트릭이 있으면 샤프>1.0이고 승률>50%인 전략만 신뢰.\n"
-        "단, 전략 신호는 보조 지표이며, 기존 3전략(변동성돌파/안전마진/추세추종)의 판단을 뒤집지 않는다.\n\n"
-        "【업종 상대평가】\n"
-        "종목의 섹터/업종을 감안하여 동종 업종 평균 PER/PBR 대비 상대적 위치를 평가하세요 (참고용).\n\n"
+        "당신은 20년 경력의 베테랑 수석 에퀴티 리서치 애널리스트이다. "
+        "'안전마진'과 '전통적 가치'를 중시하는 투자자의 관점에서, 비판적 투자 보고서를 JSON으로 작성한다. "
+        "예스맨의 태도를 버리고 냉철하게 분석하라. 모든 결론은 데이터에 근거해야 하며, "
+        "낙관적 전망보다 리스크 관리에 우선순위를 둔다.\n\n"
+
+        "【보고서 핵심 구조 — 6대 분석 항목 (JSON에 반드시 포함)】\n\n"
+
+        "1. 재무건전성분석: OCF vs 순이익 괴리(분식 가능성), 부채비율 추세, 이자보상배율 → risk_level(안전/주의/위험/심각)\n"
+        "2. 밸류에이션분석: PER/PBR 밴드 내 현재 위치, 적정가치 산출, 업종대비, PEG → 밸류에이션판단\n"
+        "3. 매크로및산업분석: 시장체제 해석, 금리/환율 영향, Peak-out 여부, 산업사이클(도입/성장/성숙/쇠퇴/불명)\n"
+        "4. 경영진트랙레코드: M&A 성패, 자본배분 일관성(우수/양호/보통/미흡), 배당정책, 거버넌스\n"
+        "5. 가치함정분석: 구조적 쇠퇴 vs 일시적 악재 판별 → decline_type + evidence 배열\n"
+        "6. 최종매매전략: 적정가치/추천진입가/손절가/upside·downside %/worst_scenario/포지션사이징/action(적극매수~전량매도)\n\n"
+
+        "【정량 분석 프레임워크】\n\n"
+        "전략 1: 변동성 돌파 (래리 윌리엄스) — 당일 시가+(전일 범위×K) 돌파 시 매수. K=0.5 표준.\n"
+        "전략 2: 안전마진 (벤자민 그레이엄) — Graham Number=sqrt(22.5×EPS×BPS). 할인율 >30%: 강매수, 10~30%: 매수, <0%: 고평가. 적자 3년↑: 평가불가.\n"
+        "전략 3: 추세추종 — MA5>MA20>MA60 정배열+MACD+RSI55↑: 강세.\n\n"
+
+        "【7점 등급 체계 (28점 만점)】\n"
+        "| 지표 | 4점 | 3점 | 2점 | 1점 |\n"
+        "| Graham 할인율 | >40% | 20-40% | 0-20% | <0% |\n"
+        "| PER vs 5Y평균 | <-30% | -30~-10% | ±10% | >+10% |\n"
+        "| PBR 절대 | <0.7 | 0.7-1.0 | 1.0-1.5 | >1.5 |\n"
+        "| 부채비율 | <50% | 50-100% | 100-200% | >200% |\n"
+        "| 유동비율 | >2.0 | 1.5-2.0 | 1.0-1.5 | <1.0 |\n"
+        "| FCF 양수연수 | 3년 | 2년 | 1년 | 0 |\n"
+        "| 매출CAGR(3Y) | >10% | 5-10% | 0-5% | <0% |\n"
+        "등급: A=24-28, B+=20-23, B=16-19, C=12-15, D=<12. 데이터 없으면 2점.\n\n"
+
+        "MacroSentinel: 버핏지수×공포탐욕 매트릭스. VIX>35→extreme_fear 강제.\n"
+        "OrderAdvisor: 손절 A=-8%/B+=-10%/B=-12%/C·D=진입금지. grade_factor A=1.0/B+=0.75/B=0.50/C·D=0. 분할매수 50-30-20%. R:R≥2.0.\n"
+        "ValueScreener Value Trap 5규칙 (2개↑ 시 경고): 1)매출CAGR<0%+PER<5, 2)영업이익률 3년↓, 3)FCF 3년음수, 4)부채비율 30%p↑, 5)배당중단.\n"
+        "KIS 퀀트 (보조): SMA/Momentum/Trend 3전략. consensus=BUY+강도>0.6이면 확인.\n\n"
+
         f"【현재 매크로 환경】\n{regime_rule}\n\n"
-        "【매크로 환경 분석 (신규 섹션)】\n"
-        "현재 시장 체제가 이 종목에 미치는 구체적 영향을 분석하세요:\n"
-        "- 시장체제해석: 현재 체제(accumulation/selective/cautious/defensive)가 이 종목/업종에 어떤 의미인지\n"
-        "- 금리영향: 금리 환경이 이 업종/종목의 밸류에이션과 실적에 미치는 영향\n"
-        "- 섹터전망: 이 종목이 속한 섹터의 향후 3~6개월 전망과 섹터 로테이션 관점\n"
-        "- 매크로리스크: 환율, 원자재 가격, 지정학적 리스크 등 매크로 차원의 위험 요소\n\n"
-        "【밸류에이션 심화 분석 (신규 섹션)】\n"
-        "Graham Number 외에 다각적 밸류에이션 분석을 수행하세요:\n"
-        "- 적정가치: 수익가치(PER×EPS) 또는 자산가치(BPS) 기반 적정주가 산출. 산출 방법 명시\n"
-        "- 업종대비: 동종 업종 평균 PER/PBR 대비 할인/프리미엄 수준 평가\n"
-        "- PEG분석: Forward EPS 성장률 대비 PER 적정성 (PEG<1 저평가, >2 고평가)\n"
-        "- 밸류에이션판단: 위 분석을 종합한 1~2문장 판단 (저평가/적정/고평가 + 근거)\n\n"
-        "【시나리오 분석 (신규 섹션)】\n"
-        "향후 12개월 기준 3가지 시나리오를 제시하세요:\n"
-        "- 낙관(Bull): 긍정 촉매(실적 서프라이즈, 업황 호전 등) 발생 시 목표가 + 확률(%)\n"
-        "- 기본(Base): 현재 추세 유지 시 목표가 + 확률(%)\n"
-        "- 비관(Bear): 부정 촉매(실적 미달, 매크로 악화 등) 발생 시 목표가 + 확률(%)\n"
-        "3개 확률 합계는 100%로 맞추세요. 각 시나리오의 핵심 전제와 근거를 명시.\n\n"
-        "【관련 투자 대안 (신규 섹션)】\n"
-        "이 종목 대신 또는 보완으로 고려할 수 있는 투자 대안을 2~4개 제시하세요:\n"
-        "- 유형: ETF, 지수, 원자재, 채권, 동종업종 대체주 등\n"
-        "- 동일 섹터 ETF, 관련 원자재(해당 시), 방어적 대안(채권 ETF 등)\n"
-        "- 각 대안의 현재 종목 대비 장단점을 사유에 포함\n"
-        "코드(티커)를 알면 포함하고, 모르면 null.\n\n"
-        "각 전략 신호를 독립적으로 평가하고, 전략 간 일치/불일치도 종합 의견에 반영하세요.\n"
-        "매크로 체제가 defensive이면 어떤 경우에도 '매수' 등급을 부여하지 마세요.\n"
-        "7점 등급 계산 시 C/D 등급은 매수 추천 금지(최대 '관망'). 손절가는 등급별 기준에 정확히 맞추세요."
+
+        "defensive 체제에서는 어떤 경우에도 '매수' 등급을 부여하지 마라.\n"
+        "C/D 등급은 매수 추천 금지 (최대 '관망'). 모든 논리적 허점은 가차 없이 비판하라."
     )
 
 
@@ -720,35 +679,38 @@ def _build_prompt(code: str, market: str, name: str, fundamental: dict, technica
                   graham_data: Optional[dict] = None,
                   macro_ctx: Optional[dict] = None,
                   regime: str = "selective",
-                  regime_desc: str = "중립 (적극적)",
-                  strategy_signals: Optional[dict] = None) -> str:
-    """GPT 유저 프롬프트 구성.
+                  regime_desc: str = "중립",
+                  strategy_signals: Optional[dict] = None,
+                  research_data: Optional[dict] = None) -> str:
+    """GPT 유저 프롬프트 구성 (통합 v3).
 
     프롬프트 구조 (위→아래 순서):
-    1) 손익계산서 3년 요약
-    2) 대차대조표 3년 요약
-    3) 현금흐름표 3년 요약
-    4) 계량지표 (PER/PBR/ROE/PSR/EV-EBITDA)
-    5) 기술적 시그널 (MACD/RSI/Stochastic/MA20)
-    6) 변동성 돌파 전략 데이터 (ATR, K=0.3/0.5/0.7 목표가)
-    7) 안전마진 분석 (Graham Number + 할인율)
-    8) 추세추종 전략 데이터 (MA 정배열, MACD 크로스)
-    9) 포워드 가이던스 (Forward PE/EPS, 애널리스트 컨센서스)
-    10) PER/PBR 5년 히스토리 비교
-    11) 분기 실적 추세 (최근 4분기)
-    12) 거래량·볼린저밴드 신호
-    13) 7점 등급 사전 계산값 (safety_grade.py 결과 — GPT 참고용)
-    14) 매크로 환경 섹션 (체제 + VIX + 버핏지수 + 공포탐욕)
-    15) KIS 전략 신호 (MCP 백테스트 결과)
-    16) JSON 응답 스키마 명세
+    1) 손익계산서 (전체)
+    2) 이자보상배율 추세
+    3) 대차대조표 (전체)
+    4) 현금흐름표 (전체)
+    5) 계량지표 (PER/PBR/ROE/PSR/EV-EBITDA)
+    6) 기술적 시그널 (MACD/RSI/Stochastic/MA20)
+    7) 변동성 돌파 전략 데이터 (ATR, K=0.3/0.5/0.7 목표가)
+    8) 안전마진 분석 (Graham Number + 할인율)
+    9) 추세추종 전략 데이터 (MA 정배열, MACD 크로스)
+    10) 포워드 가이던스 (Forward PE/EPS, 애널리스트 컨센서스)
+    11) PER/PBR 5년 히스토리 비교
+    12) 분기 실적 추세 (최근 4분기)
+    13) 거래량·볼린저밴드 신호
+    14) 7점 등급 사전 계산값 (safety_grade.py 결과 — GPT 참고용)
+    15) 매크로 환경 섹션 (체제 + VIX + 버핏지수 + 공포탐욕)
+    16) KIS 전략 신호 (MCP 백테스트 결과)
+    17) 리서치 데이터 (거시지표/실적일/경영진/공시/뉴스)
+    18) JSON 응답 스키마 명세 (v3 통합)
     """
     currency = "KRW(억원)" if market == "KR" else "USD(백만달러)"
 
-    # 최근 3년 손익 요약
+    # 손익 요약 (전체)
     income = fundamental.get("income_stmt") or []
-    income_3y = income[-3:] if len(income) >= 3 else income
+    income_all = income
     income_summary = []
-    for row in income_3y:
+    for row in income_all:
         rev = row.get("revenue")
         oi = row.get("operating_income")
         ni = row.get("net_income")
@@ -760,11 +722,20 @@ def _build_prompt(code: str, market: str, name: str, fundamental: dict, technica
             f"순이익={_fmt(ni, market)}({net_m}%)"
         )
 
-    # 최근 3년 대차대조표 요약
+    # 이자보상배율 추세
+    ic_summary = []
+    for row in income:
+        oi = row.get("operating_income")
+        ie = row.get("interest_expense")
+        if oi is not None and ie is not None and ie != 0:
+            cov = round(oi / abs(ie), 2)
+            ic_summary.append(f"  {row['year']}년: 이자보상배율={cov}x")
+
+    # 대차대조표 요약 (전체)
     bs = fundamental.get("balance_sheet") or []
-    bs_3y = bs[-3:] if len(bs) >= 3 else bs
+    bs_all = bs
     bs_summary = []
-    for row in bs_3y:
+    for row in bs_all:
         ta = row.get("total_assets")
         te = row.get("total_equity")
         dr = row.get("debt_ratio")
@@ -774,11 +745,11 @@ def _build_prompt(code: str, market: str, name: str, fundamental: dict, technica
             f"자본={_fmt(te, market)}, 부채비율={dr}%, 유동비율={cr}%"
         )
 
-    # 최근 3년 현금흐름 요약
+    # 현금흐름 요약 (전체)
     cf = fundamental.get("cashflow") or []
-    cf_3y = cf[-3:] if len(cf) >= 3 else cf
+    cf_all = cf
     cf_summary = []
-    for row in cf_3y:
+    for row in cf_all:
         op = row.get("operating_cf")
         fc = row.get("free_cf")
         cf_summary.append(
@@ -900,13 +871,16 @@ def _build_prompt(code: str, market: str, name: str, fundamental: dict, technica
 
     prompt = f"""다음은 {name}({code}, {market}) 종목의 분석 데이터입니다. 통화단위: {currency}
 
-## 손익계산서 (최근 3년)
+## 손익계산서 (전체)
 {chr(10).join(income_summary) or '데이터 없음'}
 
-## 대차대조표 (최근 3년)
+## 이자보상배율 추세
+{chr(10).join(ic_summary) or '  데이터 없음 (이자비용 미공시)'}
+
+## 대차대조표 (전체)
 {chr(10).join(bs_summary) or '데이터 없음'}
 
-## 현금흐름표 (최근 3년)
+## 현금흐름표 (전체)
 {chr(10).join(cf_summary) or '데이터 없음'}
 
 ## 계량지표
@@ -973,93 +947,109 @@ def _build_prompt(code: str, market: str, name: str, fundamental: dict, technica
 
 {_build_strategy_signal_section(strategy_signals)}
 
-위 데이터를 세 가지 전략 프레임워크(변동성 돌파/안전마진/추세추종)로 종합 분석하여 다음 JSON 형식으로 투자 의견을 작성해주세요:
+"""
+
+    # ── 리서치 데이터 섹션 (있으면 추가) ──
+    research = research_data or {}
+    research_sections = []
+
+    # 거시 지표
+    bm = research.get("basic_macro") or {}
+    macro_ind = bm.get("macro") or {}
+    if macro_ind:
+        lines = ["\n## 8. 거시 경제 지표"]
+        if macro_ind.get("us_10y_yield") is not None: lines.append(f"  미국 10Y 국채: {macro_ind['us_10y_yield']}%")
+        if macro_ind.get("gold") is not None: lines.append(f"  금(Gold): ${macro_ind['gold']}/oz")
+        if macro_ind.get("oil_wti") is not None: lines.append(f"  WTI 원유: ${macro_ind['oil_wti']}/bbl")
+        if macro_ind.get("usd_krw") is not None: lines.append(f"  원/달러: {macro_ind['usd_krw']}원")
+        if macro_ind.get("dollar_index") is not None: lines.append(f"  달러인덱스: {macro_ind['dollar_index']}")
+        research_sections.append("\n".join(lines))
+
+    # 밸류에이션 밴드 + 실적일
+    vb = research.get("valuation_band") or {}
+    ed = vb.get("earnings_dates") or []
+    if ed:
+        lines = ["\n## 실적 발표일 및 서프라이즈"]
+        for e in ed[:8]:
+            surprise = f"{e.get('surprise_pct')}%" if e.get("surprise_pct") is not None else "N/A"
+            lines.append(f"  {e.get('date','?')}: 예상={e.get('eps_estimate','N/A')}, 실제={e.get('eps_actual','N/A')}, 서프라이즈={surprise}")
+        research_sections.append("\n".join(lines))
+
+    # 경영진
+    mgmt = research.get("management") or {}
+    officers = mgmt.get("officers") or []
+    if officers:
+        lines = ["\n## 9. 경영진 정보"]
+        for o in officers[:5]:
+            pay = f", 보수=${o['total_pay']:,.0f}" if o.get("total_pay") else ""
+            lines.append(f"  - {o.get('name','')} ({o.get('title','')}{pay})")
+        research_sections.append("\n".join(lines))
+
+    holders = mgmt.get("major_holders") or {}
+    inst = holders.get("institutional") or []
+    if inst:
+        lines = ["\n## 주요 기관투자자"]
+        for h in inst[:5]:
+            pct = f"{h.get('pct_held',0)*100:.1f}%" if h.get("pct_held") else "N/A"
+            lines.append(f"  - {h.get('holder','')}: {pct}")
+        research_sections.append("\n".join(lines))
+
+    # 공시
+    ca = research.get("capital_actions") or {}
+    filings = ca.get("filings") or []
+    if filings:
+        lines = ["\n## 10. 최근 1년 주요 공시"]
+        for f in filings[:10]:
+            lines.append(f"  {f.get('rcept_dt','')}: {f.get('report_name', f.get('report_type',''))}")
+        research_sections.append("\n".join(lines))
+
+    # 뉴스/경쟁사
+    ip = research.get("industry_peers") or {}
+    news = ip.get("news") or []
+    if news:
+        lines = ["\n## 11. 업황 뉴스"]
+        for n in news[:8]:
+            lines.append(f"  - [{n.get('source','')}] {n.get('title','')}")
+        research_sections.append("\n".join(lines))
+    sector = ip.get("sector", "")
+    industry = ip.get("industry", "")
+    if sector or industry:
+        research_sections.append(f"\n  섹터: {sector}, 산업: {industry}")
+
+    if research_sections:
+        prompt += "\n".join(research_sections)
+
+    # ── v3 통합 JSON 스키마 ──
+    prompt += """
+
+위 데이터를 기반으로 다음 JSON 형식의 통합 투자 보고서를 작성하세요:
 {{
-  "schema_version": "v2",
-  "종목등급": "A 또는 B+ 또는 B 또는 C 또는 D (MarginAnalyst 7점 등급, 사전 계산값 참고)",
-  "등급점수": 0-28 범위 정수 (7점 지표 합산),
-  "복합점수": 0-100 범위 실수 (ValueScreener 공식, 사전계산 참고),
-  "체제정합성점수": 0-100 범위 실수 (현재 시장 체제 대비 종목 적합도),
-  "종합투자의견": {{
-    "등급": "매수 또는 중립 또는 매도",
-    "요약": "2-3문장 요약",
-    "근거": ["근거1", "근거2", "근거3"]
-  }},
-  "전략별평가": {{
-    "변동성돌파": {{
-      "신호": "매수 또는 관망",
-      "목표가": K=0.5 목표가 숫자 또는 null,
-      "근거": "돌파 여부와 ATR 기반 변동성 수준 설명"
-    }},
-    "안전마진": {{
-      "신호": "매수 또는 중립 또는 매도",
-      "graham_number": Graham Number 숫자 또는 null,
-      "할인율": 할인율 숫자(%) 또는 null,
-      "근거": "Graham Number 해석 및 안전마진 수준 설명"
-    }},
-    "추세추종": {{
-      "신호": "매수 또는 관망 또는 매도",
-      "추세강도": "강 또는 중 또는 약",
-      "근거": "MA 정배열/RSI/MACD 조합 해석"
-    }}
-  }},
-  "기술적시그널": {{
-    "신호": "매수 또는 관망 또는 매도",
-    "해석": "기술적 분석 해석 2-3문장 (거래량 신호와 BB 위치 포함)",
-    "지표별": {{
-      "macd": "해석",
-      "rsi": "해석",
-      "stoch": "해석",
-      "volume": "거래량 신호 해석 (volume_signal 기준 급증/정상/감소)",
-      "bb": "BB 위치 해석 (0~30 하단지지 / 70~100 상단저항)"
-    }}
-  }},
-  "포지션가이드": {{
-    "등급팩터": 종목등급에 따른 소수 (A=1.0 / B+=0.75 / B=0.50 / C·D=0),
-    "추천진입가": 현재가 또는 기술적 지지선 기반 정수,
-    "진입가근거": "진입가 산정 근거",
-    "손절가": System Prompt 7점등급 손절폭 규칙(A=-8%/B+=-10%/B=-12%)에 따른 정수,
-    "손절근거": "손절가 산정 근거",
-    "1차익절가": Graham Number 또는 목표가 정수,
-    "익절근거": "익절가 산정 근거",
-    "리스크보상비율": (익절가-진입가)/(진입가-손절가) 소수점1자리 (<2.0이면 매수 보류),
-    "분할매수제안": "1차 50%(진입가) - 2차 30%(1차-3%) - 3차 20%(1차-6%)",
-    "recommendation": "ENTER 또는 HOLD 또는 SKIP (C·D등급 또는 Value_Trap_경고=true 또는 risk_reward<2.0 시 SKIP)"
-  }},
-  "리스크요인": [
-    {{"요인": "리스크명", "설명": "설명"}},
-    ...
-  ],
-  "투자포인트": [
-    {{"포인트": "포인트명", "설명": "설명"}},
-    ...
-  ],
-  "매크로환경분석": {{
-    "시장체제해석": "현재 체제가 이 종목/업종에 미치는 구체적 영향 해석 (2~3문장)",
-    "금리영향": "금리 환경이 밸류에이션/실적에 미치는 영향 (1~2문장, 없으면 null)",
-    "섹터전망": "해당 섹터 향후 3~6개월 전망 + 로테이션 관점 (2~3문장)",
-    "매크로리스크": "환율/원자재/지정학적 리스크 등 핵심 매크로 위험 요소 (1~2문장)"
-  }},
-  "밸류에이션심화": {{
-    "적정가치": 수익가치 또는 자산가치 기반 적정주가 숫자 (null 가능),
-    "산출방법": "PER×EPS, BPS×배수, DCF근사 등 산출 방법 설명",
-    "업종대비": "동종 업종 평균 PER/PBR 대비 할인/프리미엄 평가 (1~2문장)",
-    "PEG분석": "PEG 비율 기반 성장 대비 밸류에이션 적정성 (Forward EPS 있을 때, 없으면 null)",
-    "밸류에이션판단": "종합 밸류에이션 판단 1~2문장 (저평가/적정/고평가 + 핵심 근거)"
-  }},
-  "시나리오분석": {{
-    "낙관": {{ "목표가": 숫자, "확률": 0~100 %, "근거": "긍정 촉매 + 핵심 전제" }},
-    "기본": {{ "목표가": 숫자, "확률": 0~100 %, "근거": "현재 추세 유지 전제" }},
-    "비관": {{ "목표가": 숫자, "확률": 0~100 %, "근거": "부정 촉매 + 핵심 전제" }}
-  }},
-  "관련투자대안": [
-    {{ "유형": "ETF 또는 지수 또는 원자재 또는 채권 또는 대체주", "종목명": "이름", "코드": "티커 또는 null", "사유": "이 종목 대비 장단점" }},
-    ...2~4개
-  ],
-  "Value_Trap_경고": true 또는 false (ValueScreener 5규칙 중 2개 이상 해당 시 true),
-  "Value_Trap_근거": ["근거1", "근거2"] (경고=true일 때 해당 규칙 번호와 근거 명시, 경고=false면 빈 배열)
+  "schema_version": "v3",
+  "종목등급": "A|B+|B|C|D",
+  "등급점수": 0-28,
+  "복합점수": 0-100,
+  "체제정합성점수": 0-100,
+  "종합투자의견": {{"등급":"매수|중립|매도", "요약":"2-3문장", "근거":["...", "..."]}},
+
+  "재무건전성분석": {{"ocf_vs_net_income":"OCF vs 순이익 괴리 분석", "debt_ratio_analysis":"부채비율 분석", "interest_coverage_analysis":"이자보상배율 분석", "risk_level":"안전|주의|위험|심각", "summary":"종합 요약"}},
+  "밸류에이션분석": {{"적정가치":숫자|null, "산출방법":"...", "per_band_position":"PER 밴드 내 위치", "pbr_band_position":"PBR 밴드 내 위치", "업종대비":"...", "PEG분석":"...", "밸류에이션판단":"저평가|적정|고평가 + 근거"}},
+  "매크로및산업분석": {{"시장체제해석":"...", "금리영향":"...", "섹터전망":"...", "매크로리스크":"...", "peak_out_assessment":"Peak-out 검증", "industry_cycle_phase":"도입|성장|성숙|쇠퇴|불명"}},
+  "경영진트랙레코드": {{"ma_track_record":"M&A 성패", "capital_allocation_grade":"우수|양호|보통|미흡", "dividend_policy":"배당 정책", "governance_assessment":"거버넌스 평가"}},
+  "가치함정분석": {{"is_structural_decline":true|false, "decline_type":"구조적_쇠퇴|일시적_악재|판단불가", "evidence":["근거1","근거2"], "safety_margin_assessment":"안전마진 평가"}},
+  "최종매매전략": {{"등급팩터":0-1, "추천진입가":정수|null, "진입가근거":"...", "손절가":정수|null, "손절근거":"...", "리스크보상비율":소수|null, "분할매수제안":"50-30-20%", "recommendation":"ENTER|HOLD|SKIP", "적정가치":정수|null, "적정가치산출":"...", "upside_pct":숫자|null, "downside_pct":숫자|null, "worst_scenario":"최악 시나리오", "action":"적극매수|분할매수|관망|분할매도|전량매도"}},
+
+  "전략별평가": {{"변동성돌파":{{"신호":"...", "목표가":숫자|null, "근거":"..."}}, "안전마진":{{"신호":"...", "graham_number":숫자|null, "할인율":숫자|null, "근거":"..."}}, "추세추종":{{"신호":"...", "추세강도":"강|중|약", "근거":"..."}}}},
+  "기술적시그널": {{"신호":"...", "해석":"...", "지표별":{{"macd":"...", "rsi":"...", "stoch":"...", "volume":"...", "bb":"..."}}}},
+  "시나리오분석": {{"낙관":{{"목표가":숫자, "확률":0-100, "근거":"..."}}, "기본":{{"목표가":숫자, "확률":0-100, "근거":"..."}}, "비관":{{"목표가":숫자, "확률":0-100, "근거":"..."}}}},
+  "리스크요인": [{{"요인":"...", "설명":"..."}}],
+  "투자포인트": [{{"포인트":"...", "설명":"..."}}],
+  "관련투자대안": [{{"유형":"ETF|지수|원자재|채권|대체주", "종목명":"...", "코드":"...|null", "사유":"..."}}],
+  "Value_Trap_경고": true|false,
+  "Value_Trap_근거": ["근거1"]
 }}"""
+
     return prompt
+
 
 
 def _fmt(val, market: str) -> str:
@@ -1086,3 +1076,4 @@ def _parse_report(content: str) -> dict:
         return json.loads(content)
     except Exception:
         return {"raw": content}
+

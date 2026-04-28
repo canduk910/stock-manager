@@ -66,7 +66,7 @@ class AdvisoryRepository:
     # ── Cache CRUD ──────────────────────────────────────────────
 
     def save_cache(self, user_id: int, code: str, market: str, fundamental: dict, technical: dict,
-                   strategy_signals: dict = None) -> None:
+                   strategy_signals: dict = None, research_data: dict = None) -> None:
         code_u, market_u = code.upper(), market.upper()
         row = (
             self.db.query(AdvisoryCache)
@@ -81,6 +81,24 @@ class AdvisoryRepository:
         row.technical = technical
         if hasattr(row, 'strategy_signals'):
             row.strategy_signals = strategy_signals
+        if hasattr(row, 'research_data') and research_data is not None:
+            row.research_data = research_data
+
+    def save_research_data(self, user_id: int, code: str, market: str,
+                           research_data: dict) -> None:
+        """리서치 데이터만 별도 저장 (기존 fundamental/technical 유지)."""
+        code_u, market_u = code.upper(), market.upper()
+        row = (
+            self.db.query(AdvisoryCache)
+            .filter_by(user_id=user_id, code=code_u, market=market_u)
+            .first()
+        )
+        if not row:
+            row = AdvisoryCache(user_id=user_id, code=code_u, market=market_u,
+                                updated_at=now_kst_iso(),
+                                fundamental={}, technical={})
+            self.db.add(row)
+        row.research_data = research_data
 
     def get_cache(self, user_id: int, code: str, market: str) -> Optional[dict]:
         row = (

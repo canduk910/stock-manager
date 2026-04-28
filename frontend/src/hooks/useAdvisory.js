@@ -11,6 +11,7 @@ import {
   fetchReportHistory,
   fetchReportById,
   fetchAdvisoryOhlcv,
+  collectResearchData,
 } from '../api/advisory'
 
 /** 자문종목 목록 + CRUD */
@@ -113,6 +114,16 @@ export function useAdvisoryReport() {
   }, [])
 
   return { report, history, loading, error, load, generate, loadById }
+}
+
+/** 리서치 데이터 수집 (입력정보 획득) */
+export function useResearchData() {
+  const { data, loading, error, run } = useAsyncState()
+  const collect = useCallback(
+    (code, market, name) => run(() => collectResearchData(code, market, name)).catch(() => {}),
+    [run]
+  )
+  return { data, loading, error, collect }
 }
 
 /** OHLCV 타임프레임별 데이터 조회 */

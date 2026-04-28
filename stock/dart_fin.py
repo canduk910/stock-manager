@@ -868,3 +868,28 @@ def fetch_quarterly_financials(stock_code: str, quarters: int = 4) -> list[dict]
     result = quarterly_rows[-quarters:] if len(quarterly_rows) > quarters else quarterly_rows
     set_cached(cache_key, result, ttl_hours=24 * 7)
     return result
+
+
+# ── 리��치 데이터 헬퍼 ───────────────────���──────────────────────────────────────
+
+
+def calc_interest_coverage(income_detail: list[dict]) -> list[dict]:
+    """이자보상배율 계산 (영업이익 / 이자비용). income_detail_annual 결과를 입력.
+
+    반환: [{year, operating_income, interest_expense, interest_coverage}]
+    이자비용 0이면 None (무부채), 이자비용 없으면 None.
+    """
+    result = []
+    for row in income_detail:
+        oi = row.get("operating_income")
+        ie = row.get("interest_expense")
+        coverage = None
+        if oi is not None and ie is not None and ie != 0:
+            coverage = round(oi / abs(ie), 2)
+        result.append({
+            "year": row.get("year"),
+            "operating_income": oi,
+            "interest_expense": ie,
+            "interest_coverage": coverage,
+        })
+    return result

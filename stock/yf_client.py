@@ -1014,3 +1014,167 @@ def fetch_quarterly_financials_yf(code: str, quarters: int = 4) -> list[dict]:
     except Exception:
         set_cached(key, [], ttl_hours=1)
         return []
+
+
+# ── 리서치 데이터 수집 (research_collector용) ──────────────────────────────────
+
+
+def fetch_company_officers(code: str) -> list[dict]:
+    """경영진 목록 (이름/직위/보수). yfinance info의 companyOfficers 활용."""
+    key = f"yf:officers:{code.upper()}"
+    cached = get_cached(key)
+    if cached is not None:
+        return cached
+    try:
+        info = _ticker(code).info or {}
+        officers_raw = info.get("companyOfficers", [])
+        officers = []
+        for o in officers_raw[:10]:
+            officers.append({
+                "name": o.get("name", ""),
+                "title": o.get("title", ""),
+                "total_pay": _safe(o.get("totalPay")),
+                "year_born": o.get("yearBorn"),
+            })
+        set_cached(key, officers, ttl_hours=24 * 7)
+        return officers
+    except Exception:
+        set_cached(key, [], ttl_hours=6)
+        return []
+
+
+def fetch_major_holders(code: str) -> dict:
+    """최대주주/기관 보유 현황."""
+    key = f"yf:major_holders:{code.upper()}"
+    cached = get_cached(key)
+    if cached is not None:
+        return cached
+    try:
+        import pandas as pd
+
+        t = _ticker(code)
+        result = {"summary": [], "institutional": []}
+
+        # major_holders: 요약 (% 내부자, % 기관 등)
+        mh = getattr(t, "major_holders", None)
+        if mh is not None and isinstance(mh, pd.DataFrame) and not mh.empty:
+            for _, row in mh.iterrows():
+                vals = row.tolist()
+                if len(vals) >= 2:
+                    result["summary"].append({
+                        "value": str(vals[0]),
+                        "description": str(vals[1]),
+                    })
+
+        # institutional_holders: 기관 투자자 상위 10
+        ih = getattr(t, "institutional_holders", None)
+        if ih is not None and isinstance(ih, pd.DataFrame) and not ih.empty:
+            for _, row in ih.head(10).iterrows():
+                holder = {
+                    "holder": str(row.get("Holder", "")),
+                    "shares": _safe_int(row.get("Shares")),
+                    "pct_held": _safe(row.get("% Out") if "% Out" in row.index
+                                      else row.get("pctHeld")),
+                    "date_reported": str(row.get("Date Reported", ""))
+                    if not pd.isna(row.get("Date Reported", "")) else None,
+                }
+                result["institutional"].append(holder)
+
+        set_cached(key, result, ttl_hours=24 * 7)
+        return result
+    except Exception:
+        set_cached(key, {"summary": [], "institutional": []}, ttl_hours=6)
+        return {"summary": [], "institutional": []}
+
+
+def fetch_earnings_dates(code: str, limit: int = 12) -> list[dict]:
+    """실적 발표일 + EPS actual/estimate. 최근 limit개."""
+    key = f"yf:earnings_dates:{code.upper()}:{limit}"
+    cached = get_cached(key)
+    if cached is not None:
+        return cached
+    try:
+        import pandas as pd
+
+        t = _ticker(code)
+        ed = getattr(t, "earnings_dates", None)
+        if ed is None or ed.empty:
+            set_cached(key, [], ttl_hours=24)
+            return []
+
+        result = []
+        for idx, row in ed.head(limit).iterrows():
+            date_str = str(idx.date()) if hasattr(idx, "date") else str(idx)
+            eps_est = _safe(row.get("EPS Estimate"))
+            eps_act = _safe(row.get("Reported EPS"))
+            surprise = _safe(row.get("Surprise(%)"))
+            result.append({
+                "date": date_str,
+                "eps_estimate": eps_est,
+                "eps_actual": eps_act,
+                "surprise_pct": surprise,
+            })
+
+        set_cached(key, result, ttl_hours=24)
+        return result
+    except Exception:
+        set_cached(key, [], ttl_hours=6)
+        return []
+
+
+def fetch_macro_indicators() -> dict:
+    """거시지표 수집: 국채/금/유가/환율/달러인덱스. 캐시 1시간."""
+    key = "yf:macro_indicators"
+    cached = get_cached(key)
+    if cached is not None:
+        return cached
+
+    symbols = {
+        "us_10y_yield": "^TNX",
+        "gold": "GC=F",
+        "oil_wti": "CL=F",
+        "usd_krw": "USDKRW=X",
+        "usd_jpy": "USDJPY=X",
+        "dollar_index": "DX-Y.NYB",
+        "vix": "^VIX",
+    }
+
+    result = {}
+    for name, sym in symbols.items():
+        try:
+            t = _ticker(sym)
+            fi = t.fast_info
+            price = getattr(fi, "last_price", None) or getattr(fi, "previous_close", None)
+            result[name] = _safe(price)
+        except Exception:
+            result[name] = None
+
+    set_cached(key, result, ttl_hours=1)
+    return result
+
+
+def fetch_sector_peers(code: str, max_peers: int = 5) -> list[dict]:
+    """동일 섹터 경쟁사 목록 + 기본 밸류에이션. yfinance info 활용."""
+    key = f"yf:sector_peers:{code.upper()}"
+    cached = get_cached(key)
+    if cached is not None:
+        return cached
+    try:
+        info = _ticker(code).info or {}
+        sector = info.get("sector", "")
+        industry = info.get("industry", "")
+
+        # yfinance에 직접적인 peer list API 없음
+        # industry_key 기반 screener도 불안정하므로 빈 리스트 반환
+        # research_collector에서 별도 peer lookup 로직 구현
+        result = {
+            "sector": sector,
+            "industry": industry,
+            "peers": [],  # 추후 peer lookup으로 채워짐
+        }
+
+        set_cached(key, result, ttl_hours=24)
+        return result
+    except Exception:
+        set_cached(key, {"sector": "", "industry": "", "peers": []}, ttl_hours=6)
+        return {"sector": "", "industry": "", "peers": []}

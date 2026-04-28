@@ -1,5 +1,52 @@
 # 변경 이력
 
+## 2026-04-28 — AI자문 v3 전면 통합 (프롬프트+입력데이터+보고서 일원화)
+
+### 프롬프트 통합
+- v2/v3 이중 프롬프트 구조를 **단일 통합 프롬프트**로 전면 재작성
+- 시스템 프롬프트: "20년 경력 수석 애널리스트 비판적 검증 모드" + 6대 분석 항목 + 정량 프레임워크
+- 유저 프롬프트: 10년 재무(이자보상배율 포함) + 기술지표 + 리서치 데이터를 하나의 맥락으로 구성
+- 중복 제거: 포지션가이드+최종매매전략→최종매매전략, 밸류에이션심화+밴드→밸류에이션분석, 매크로환경+사이클→매크로및산업분석
+
+### 입력 데이터 통합
+- `refresh_stock_data()` 1회 호출로 기본분석+리서치 데이터 전체 수집 ("입력정보 획득" 버튼 제거)
+- 재무 데이터 수집 범위 5년→10년 확장 (dart_fin/yf_client years=10), 분기 실적 4분기→8분기
+- `stock/research_collector.py` 신규: 거시지표/밸류에이션밴드/경영진/공시/뉴스 5카테고리 병렬 수집 (LLM 비용 0)
+- `advisory_cache` 테이블에 `research_data` JSON 컬럼 추가 (Alembic 마이그레이션)
+
+### v3 통합 스키마
+- `advisory_report_v3.py` 전면 재작성: v2 상속 제거, 독립 통합 스키마
+- 6대 분석 섹션: 재무건전성분석/밸류에이션분석/매크로및산업분석/경영진트랙레코드/가치함정분석/최종매매전략
+- `generate_ai_report()` v2/v3 분기 완전 제거, 항상 v3 검증
+
+### 프론트엔드
+- `ResearchDataPanel.jsx` 신규: 프롬프트 전체 입력 데이터 미리보기 (기본분석 10항목 + 리서치 5항목)
+- `AIReportPanel.jsx` 중복 섹션 제거: 포지션가이드/밸류에이션심화/매크로환경분석 카드 삭제
+- 통합 보고서 구조: 등급→의견→6대분석→전략→시그널→시나리오→리스크/포인트
+
+### 백엔드 확장
+- `yf_client.py`: `fetch_company_officers()`/`fetch_major_holders()`/`fetch_earnings_dates()`/`fetch_macro_indicators()`/`fetch_sector_peers()` 5개 함수 추가
+- `dart_fin.py`: `calc_interest_coverage()` 이자보상배율 계산 헬퍼
+- `advisory_repo.py`: `save_research_data()` 리서치 전용 저장 함수
+- `routers/advisory.py`: `POST /{code}/research` 수동 리서치 수집 엔드포인트
+
+## 2026-04-27 — CI segfault 수정 + 섹터 컬럼 + 계층형 하네스
+
+### 버그 수정
+- CI pytest segfault 해결: `main.py` lifespan 백그라운드 서비스(prewarm/WS/스케줄러)를 `TESTING` 환경변수로 테스트 시 스킵
+- conftest `engine.dispose()` 제거: daemon 스레드(pipeline 등)가 DB 접근 중 dispose되면 segfault 발생하는 문제 해소
+
+### 섹터 컬럼 추가
+- `fetch_market_metrics()` 반환값에 `sector` 필드 추가 (yfinance `info.get("sector")`)
+- 관심종목 대시보드: 종목명 우측에 섹터 컬럼 추가
+- 스크리너 테이블: 종목명 우측에 섹터 컬럼 + 52주 고점 대비 하락률(`drop_from_high`) 컬럼 추가
+
+### 계층형 하네스 재구성
+- 부서장(`department-head.md`) 신규: 모든 개발 요청의 단일 진입점, 유형 A/B/C/D 자동 라우팅
+- 도메인팀장(`domain-lead.md`) 신규: 도메인 전문가 4명 팀 관리
+- 개발팀장(`dev-lead.md`) 신규: 개발/QA/리팩토링 5명 팀 관리
+- `asset-dev` 스킬을 부서장 오케스트레이터로 재작성 (코드 변경 수반 모든 요청의 단일 트리거)
+
 ## 2026-04-26 — 스크리너 구루 프리셋 확장 + UI 개선
 
 ### 구루 프리셋 3종 추가

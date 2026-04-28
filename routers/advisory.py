@@ -140,6 +140,27 @@ def analyze(code: str, market: str = Query("KR"), user: dict = Depends(get_curre
     return result
 
 
+@router.post("/{code}/research")
+def collect_research(code: str, market: str = Query("KR"), name: str = Query(None),
+                     user: dict = Depends(get_current_user)):
+    """입력정보 획득 — 6카테고리 리서치 데이터 수집. LLM 비용 없음.
+
+    AI분석 전에 거시지표, 10년 재무, 밸류에이션 밴드, 경영진, 공시, 경쟁사 데이터를 수집한다.
+    수집 결과는 advisory_cache.research_data에 저장되며, 프론트에서 미리보기 가능.
+    """
+    from stock.research_collector import collect_all_research
+
+    code = code.upper()
+    market = market.upper()
+
+    stock = advisory_store.get_stock(user["id"], code, market)
+    stock_name = stock["name"] if stock else (name or code)
+
+    research_data = collect_all_research(code, market, stock_name)
+    advisory_store.save_research_data(user["id"], code, market, research_data)
+    return research_data
+
+
 @router.get("/{code}/ohlcv")
 def get_ohlcv(
     code: str,

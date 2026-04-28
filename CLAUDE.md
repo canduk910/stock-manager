@@ -311,4 +311,5 @@ pytest tests/api/ -v          # API 엔드포인트 테스트
 | 2026-04-25 | 멀티유저 인증 추가 | 전체 | JWT+역할기반접근 |
 | 2026-04-26 | TDD 애자일 재구성 | 에이전트 7개 + asset-dev 스킬 | 도메인 전문가 팀 토론→요건 수립, RED-GREEN-VERIFY TDD 사이클 도입 |
 | 2026-04-26 | DevArchitect → BackendDev + FrontendDev 분리 | agents/ + asset-dev 스킬 | 백엔드(FastAPI)/프론트(React) 전문성 분리, API shape 명세 기반 협업 |
+| 2026-04-28 | AI자문 v3 전면 통합 | advisory_service, v3 스키��, research_collector, 프론트 | 1프롬���트+1데이터+1보고서. 6대 비판적 분석. 10년 재무+리서치 통합 수집 |
 | 2026-04-26 | 계층형 하네스 재구성 | 부서장+도메인팀장+개발팀장 신규, asset-dev 스킬 | 부서장→팀장→팀원 계층으로 자동 라우팅. 단일 진입점(asset-dev)으로 통합 |
