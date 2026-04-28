@@ -1,6 +1,6 @@
 """StockInfo model — persistent stock info cache (survives Docker restart)."""
 
-from sqlalchemy import Column, Float, Index, Integer, String
+from sqlalchemy import BigInteger, Column, Float, Index, Integer, String
 
 from db.base import Base
 
@@ -14,7 +14,7 @@ class StockInfo(Base):
     change_val = Column(Float)
     change_pct = Column(Float)
     mktcap = Column(Float)
-    shares = Column(Integer)
+    shares = Column(BigInteger)
     high_52 = Column(Float)
     low_52 = Column(Float)
     price_updated_at = Column(String)
@@ -26,9 +26,9 @@ class StockInfo(Base):
     market_type = Column(String)
     sector = Column(String)
     metrics_updated_at = Column(String)
-    revenue = Column(Integer)
-    operating_income = Column(Integer)
-    net_income = Column(Integer)
+    revenue = Column(BigInteger)
+    operating_income = Column(BigInteger)
+    net_income = Column(BigInteger)
     bsns_year = Column(Integer)
     fin_updated_at = Column(String)
     return_3m = Column(Float)

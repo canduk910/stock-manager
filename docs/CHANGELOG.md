@@ -1,5 +1,19 @@
 # 변경 이력
 
+## 2026-04-28 — 테스트 환경 PostgreSQL 전환
+
+### 테스트 인프라
+- 테스트 DB를 인메모리 SQLite → **PostgreSQL 16**으로 전환 (프로덕션 동일 DBMS)
+- `docker-compose.test.yml` 신규: 테스트용 PostgreSQL 컨테이너 (tmpfs 메모리 기반, 포트 5433)
+- `tests/conftest.py`: session scope 엔진 + 함수별 TRUNCATE 격리 패턴
+- CI(`ci.yml`): PostgreSQL service container 추가, `TEST_DATABASE_URL` 환경변수
+
+### 버그 수정 (PostgreSQL 전환으로 발견)
+- `stock_info` 모델 `shares`/`revenue`/`operating_income`/`net_income` 컬럼: `Integer` → `BigInteger` (삼성전자 발행주식수 59.7억 등 32bit 오버플로우)
+- Alembic 마이그레이션 추가 (`de1f3d32fb96`)
+
+---
+
 ## 2026-04-28 — AI자문 v3 전면 통합 (프롬프트+입력데이터+보고서 일원화)
 
 ### 프롬프트 통합

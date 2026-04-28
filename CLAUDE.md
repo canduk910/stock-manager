@@ -134,6 +134,7 @@ frontend/           React SPA (Vite + Tailwind + Recharts)
 | `DATABASE_URL` | 선택 | SQLAlchemy DB URL. 기본값: `sqlite:///~/stock-watchlist/app.db`. PostgreSQL/Oracle 전환 시 변경. |
 | `KIS_MCP_URL` | 선택 | KIS AI Extensions MCP 서버 URL. 기본값: `http://127.0.0.1:3846/mcp`. |
 | `KIS_MCP_ENABLED` | 선택 | MCP 백테스트 연동 활성화. 기본값: `false`. `true` 설정 시 백테스트 기능 활성화. |
+| `TEST_DATABASE_URL` | 선택 | 테스트 DB URL. 기본값: `postgresql://stocktest:stocktest@localhost:5433/stocktest` |
 | `TEST_KIS_*` | 선택 | 모의계좌용 (`test.py`에서 사용) |
 
 모의투자 BASE_URL: `https://openapivts.koreainvestment.com:29443`
@@ -200,6 +201,7 @@ Stage 2  python:3.11-slim → pip install + 앱 소스 + COPY --from Stage 1
 ```
 
 - `docker-compose.yml`: 로컬 개발용 (build + watchlist-data 볼륨)
+- `docker-compose.test.yml`: 테스트용 PostgreSQL 16 (tmpfs, 포트 5433)
 - `docker-compose.prod.yml`: AWS 프로덕션용 (ECR 이미지 pull, 포트 80, 로그 로테이션)
 - `entrypoint.sh`: 환경변수 점검 + 경고 출력 (키 없어도 서버 시작). `cache.db` 초기화.
 - 로컬: `docker-compose up --build` → `http://localhost:8000`
@@ -297,7 +299,13 @@ scripts/            ec2-deploy.sh (수동 배포 스크립트)
 
 ### 테스트 (`tests/`)
 
+테스트 DB: **PostgreSQL** (프로덕션과 동일 DBMS). `docker-compose.test.yml`로 테스트 컨테이너 기동.
+
 ```bash
+# 테스트 DB 기동 (최초 1회)
+docker compose -f docker-compose.test.yml up -d
+
+# 테스트 실행 (TEST_DATABASE_URL 기본값: localhost:5433)
 pytest tests/ -v              # 전체 (단위+통합+API)
 pytest tests/unit/ -v         # 단위 테스트만
 pytest tests/integration/ -v  # DB 통합 테스트
@@ -311,5 +319,6 @@ pytest tests/api/ -v          # API 엔드포인트 테스트
 | 2026-04-25 | 멀티유저 인증 추가 | 전체 | JWT+역할기반접근 |
 | 2026-04-26 | TDD 애자일 재구성 | 에이전트 7개 + asset-dev 스킬 | 도메인 전문가 팀 토론→요건 수립, RED-GREEN-VERIFY TDD 사이클 도입 |
 | 2026-04-26 | DevArchitect → BackendDev + FrontendDev 분리 | agents/ + asset-dev 스킬 | 백엔드(FastAPI)/프론트(React) 전문성 분리, API shape 명세 기반 협업 |
-| 2026-04-28 | AI자문 v3 전면 통합 | advisory_service, v3 스키��, research_collector, 프론트 | 1프롬���트+1데이터+1보고서. 6대 비판적 분석. 10년 재무+리서치 통합 수집 |
+| 2026-04-28 | AI자문 v3 전면 통합 | advisory_service, v3 스키마, research_collector, 프론트 | 1프롬프트+1데이터+1보고서. 6대 비판적 분석. 10년 재무+리서치 통합 수집 |
+| 2026-04-28 | 테스트 DB PostgreSQL 전환 | conftest.py, ci.yml, docker-compose.test.yml | 프��덕션 동일 DBMS. stock_info BigInteger 버그 발견+수정 |
 | 2026-04-26 | 계층형 하네스 재구성 | 부서장+도메인팀장+개발팀장 신규, asset-dev 스킬 | 부서장→팀장→팀원 계층으로 자동 라우팅. 단일 진입점(asset-dev)으로 통합 |

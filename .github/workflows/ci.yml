@@ -11,6 +11,22 @@ jobs:
   test:
     name: Backend Tests
     runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: stocktest
+          POSTGRES_PASSWORD: stocktest
+          POSTGRES_DB: stocktest
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U stocktest"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - uses: actions/checkout@v4
 
@@ -25,6 +41,7 @@ jobs:
       - name: Run tests
         env:
           TESTING: "1"
+          TEST_DATABASE_URL: postgresql://stocktest:stocktest@localhost:5433/stocktest
         run: pytest tests/ -v -m "not slow" --tb=short
 
   build-frontend:
