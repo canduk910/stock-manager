@@ -10,6 +10,7 @@ import FundamentalPanel from '../components/advisory/FundamentalPanel'
 import TechnicalPanel from '../components/advisory/TechnicalPanel'
 import AIReportPanel from '../components/advisory/AIReportPanel'
 import ResearchDataPanel from '../components/advisory/ResearchDataPanel'
+import ValuationChart from '../components/detail/ValuationChart'
 
 const TABS = [
   { id: 'financials', label: '재무분석' },
@@ -17,7 +18,7 @@ const TABS = [
 ]
 
 const REPORT_SUB_TABS = [
-  { id: 'cagr',        label: 'CAGR 요약' },
+  { id: 'cagr',        label: '요약' },
   { id: 'fundamental', label: '기본적 분석' },
   { id: 'technical',   label: '기술적 분석' },
   { id: 'ai',          label: 'AI 자문' },
@@ -190,7 +191,14 @@ export default function DetailPage() {
 
                 {/* 서브탭 콘텐츠 */}
                 {subTab === 'cagr' && (
-                  <ReportSummary data={data} />
+                  <>
+                    <ReportSummary data={data} />
+                    {data?.valuation?.history?.length > 0 && (
+                      <div className="mt-6">
+                        <ValuationChart data={data.valuation} />
+                      </div>
+                    )}
+                  </>
                 )}
                 {subTab === 'fundamental' && (
                   <div className="bg-white rounded-xl border border-gray-200 p-5">
@@ -230,7 +238,7 @@ export default function DetailPage() {
                       </p>
                     )}
                     {!advLoading && advData && (
-                      <TechnicalPanel data={advData} symbol={symbol} market={market} valuationData={data?.valuation} />
+                      <TechnicalPanel data={advData} symbol={symbol} market={market} />
                     )}
                   </div>
                 )}

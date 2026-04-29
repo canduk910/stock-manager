@@ -31,7 +31,7 @@ const REGIME_COLORS = {
 
 // ── 툴팁 컴포넌트 ─────────────────────────────────────────────
 
-function InfoTooltip({ children, content }) {
+function InfoTooltip({ children, content, wide }) {
   const [show, setShow] = useState(false)
   return (
     <div
@@ -41,7 +41,7 @@ function InfoTooltip({ children, content }) {
     >
       {children}
       {show && (
-        <div className="absolute z-50 left-1/2 -translate-x-1/2 top-full mt-2 w-72 sm:w-80 rounded-lg bg-gray-900 text-white text-xs leading-relaxed p-4 shadow-xl pointer-events-none">
+        <div className={`absolute z-50 left-1/2 -translate-x-1/2 top-full mt-2 rounded-lg bg-gray-900 text-white text-xs leading-relaxed p-4 shadow-xl pointer-events-none text-left ${wide ? 'w-[22rem] sm:w-[26rem]' : 'w-72 sm:w-80'}`}>
           <div className="absolute -top-1.5 left-1/2 -translate-x-1/2 w-3 h-3 bg-gray-900 rotate-45" />
           {content}
         </div>
@@ -150,9 +150,14 @@ function RegimeDetail({ regime }) {
 
   return (
     <div className="flex-1 rounded-lg border bg-white p-4 shadow-sm">
-      <div className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-2 text-center">
-        <InfoTooltip content={REGIME_TOOLTIP}>
-          <span className="cursor-help border-b border-dashed border-gray-400">현재 투자 체제</span>
+      <div className="text-sm font-medium text-gray-600 mb-2 text-center">
+        <InfoTooltip content={REGIME_TOOLTIP} wide>
+          <span className="cursor-help border-b border-dashed border-gray-400 inline-flex items-center gap-1">
+            현재 투자 체제
+            <svg className="w-3.5 h-3.5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <circle cx="12" cy="12" r="10" /><path d="M12 16v-4m0-4h.01" />
+            </svg>
+          </span>
         </InfoTooltip>
       </div>
       <div className="text-center mb-3">
@@ -256,9 +261,14 @@ export default function MacroCycleSection({ data, loading, error }) {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           {/* 경기 국면 */}
           <div className="flex-1 rounded-lg border bg-white p-4 shadow-sm">
-            <div className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-2 text-center">
+            <div className="text-sm font-medium text-gray-600 mb-2 text-center">
               <InfoTooltip content={CYCLE_TOOLTIP}>
-                <span className="cursor-help border-b border-dashed border-gray-400">현재 경기 국면</span>
+                <span className="cursor-help border-b border-dashed border-gray-400 inline-flex items-center gap-1">
+                  현재 경기 국면
+                  <svg className="w-3.5 h-3.5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <circle cx="12" cy="12" r="10" /><path d="M12 16v-4m0-4h.01" />
+                  </svg>
+                </span>
               </InfoTooltip>
             </div>
             <div className="text-center mb-3">

@@ -1,9 +1,14 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { addToWatchlist } from '../../api/watchlist'
 
 export default function WatchlistButton({ code, market = 'KR', alreadyAdded = false }) {
   const [status, setStatus] = useState(alreadyAdded ? 'exists' : 'idle')
   // idle | loading | done | error | exists
+
+  // code/market/alreadyAdded 변경 시 상태 리셋
+  useEffect(() => {
+    setStatus(alreadyAdded ? 'exists' : 'idle')
+  }, [code, market, alreadyAdded])
 
   const handleAdd = async () => {
     if ((status !== 'idle' && status !== 'error') || !code) return

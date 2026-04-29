@@ -5,7 +5,7 @@
 OpenDart 연동 구조:
   1. corpCode.xml ZIP → stock_code → corp_code 매핑 (30일 캐시)
   2. fnlttSinglAcntAll.json API → 재무제표 원시 데이터
-  3. 계정명 매핑 (_ACCOUNT_KEYS 등) → 표준 필드 추출
+  3. 계정명 정규식 매핑 (_ACCOUNT_REGEX 등) → 표준 필드 추출
   4. 3년 단위 배치 호출로 최대 10년치 효율적 수집
 
 캐시 전략:
@@ -13,16 +13,18 @@ OpenDart 연동 구조:
   - 재무 데이터: 7일(168시간) — 사업보고서 공시 주기 고려
   - 빈 결과: 6시간 — 신규상장 등 일시적 미공시 대응
 
-계정명 매핑 체계:
-  - _ACCOUNT_KEYS: IS/CIS 매출/영업이익/순이익 (적자기업 변형 포함)
-  - _BS_KEYS: BS/CBS 대차대조표 항목
-  - _CF_KEYS: CF/CCF 현금흐름표 항목
-  - _IS_DETAIL_KEYS: IS/CIS 세부 손익계산서 항목
+계정명 매핑 체계 (전체 정규식 기반):
+  - _ACCOUNT_REGEX: IS/CIS 매출/영업이익/순이익 (적자기업 변형 포함)
+  - _BS_REGEX: BS/CBS 대차대조표 항목
+  - _CF_REGEX: CF/CCF 현금흐름��� 항목
+  - _IS_DETAIL_REGEX: IS/CIS 세부 손익계산서 항목 (EPS 포함)
+  - _match_account(): 공백 제거 + 정규식 매칭 공용 함수
 
 OPENDART_API_KEY 환경변수 필수. https://opendart.fss.or.kr 에서 발급.
 """
 
 import os
+import re
 import time
 from datetime import date
 from typing import Optional
@@ -196,70 +198,74 @@ def _parse_amount(s) -> Optional[int]:
         return None
 
 
-# IS/CIS 핵심 계정명 매핑.
-# 적자 기업은 계정명이 변형되므로 (영업이익 → 영업손실, 당기순이익 → 당기순손실) 모두 포함.
-# "연결당기순이익": 골프존(215000) 등 CIS(포괄손익계산서) 방식 기업이 사용하는 계정명.
-# 첫 번째로 매칭되는 계정명을 사용하므로, 순서가 중요할 수 있다 (일반적 이름 우선).
-_ACCOUNT_KEYS = {
-    "revenue": ("매출액", "수익(매출액)", "영업수익", "매출"),
-    "operating_income": ("영업이익", "영업이익(손실)", "영업손실"),
-    "net_income": (
-        "당기순이익", "당기순이익(손실)", "당기순손익", "당기순손실",
-        "연결당기순이익",  # 골프존 등 CIS 방식 기업
-    ),
+# ── 계정명 정규식 매핑 ────────────────────────────────────────────────────────
+#
+# DART 계정명은 기업마다 공백, 조사, 접미사가 다르다.
+#   예: "영업활동현금흐름" vs "영업활동으로 인한 현금흐름"
+#       "유형자산의취득" vs "유형자산의 취득" vs "유형자산 취득"
+#       "기본주당이익" vs "기본주당손익" vs "기본주당이익(손실)"
+#
+# 모든 매칭은 _match_account() 함수를 통해 수행:
+#   1) 공백 제거 후 정규식 매칭
+#   2) 첫 번째 매칭 결과 사용
+#
+# 정규식 작성 규칙:
+#   - 공백 제거 후 비교하므로 패턴에 \s* 불필요 (단, 원본에 괄호가 있는 경우 대비)
+#   - ^...$ 앵커로 부분 일치 방지 (하위 계정 오매칭 차단)
+
+def _match_account(nm: str, pattern: re.Pattern) -> bool:
+    """계정명 공백 제거 후 정규식 매칭."""
+    return bool(pattern.search(nm.replace(" ", "")))
+
+# IS/CIS 핵심 계정 (매출/영업이익/순이익 요약)
+_ACCOUNT_REGEX = {
+    "revenue":          re.compile(r"^(매출액|수익\(매출액\)|영업수익|매출)$"),
+    "operating_income": re.compile(r"^영업(이익|손실)(\(손실\))?$"),
+    "net_income":       re.compile(r"^(연결)?(당기순)(이익|손익|손실)(\(손실\))?$"),
 }
 
-# ── 대차대조표 계정 매핑 ──────────────────────────────────────────────────────
-
-_BS_KEYS = {
-    "total_assets":               ("자산총계",),
-    "current_assets":             ("유동자산",),
-    "non_current_assets":         ("비유동자산",),
-    "cash_and_equiv":             ("현금및현금성자산",),
-    "receivables":                ("매출채권및기타채권", "매출채권", "단기매출채권"),
-    "inventories":                ("재고자산",),
-    "ppe":                        ("유형자산",),
-    "intangibles":                ("무형자산",),
-    "total_liabilities":          ("부채총계",),
-    "current_liabilities":        ("유동부채",),
-    "non_current_liabilities":    ("비유동부채",),
-    "short_term_debt":            ("단기차입금",),
-    "long_term_debt":             ("장기차입금", "장기차입금및사채"),
-    "total_equity":               ("자본총계",),
-    "retained_earnings":          ("이익잉여금", "결손금"),
+# BS/CBS 대차대조표
+_BS_REGEX = {
+    "total_assets":            re.compile(r"^자산총계$"),
+    "current_assets":          re.compile(r"^유동자산$"),
+    "non_current_assets":      re.compile(r"^비유동자산$"),
+    "cash_and_equiv":          re.compile(r"^현금및현금성자산$"),
+    "receivables":             re.compile(r"^(매출채권(및기타채권)?|단기매출채권)$"),
+    "inventories":             re.compile(r"^재고자산$"),
+    "ppe":                     re.compile(r"^유형자산$"),
+    "intangibles":             re.compile(r"^무형자산$"),
+    "total_liabilities":       re.compile(r"^부채총계$"),
+    "current_liabilities":     re.compile(r"^유동부채$"),
+    "non_current_liabilities": re.compile(r"^비유동부채$"),
+    "short_term_debt":         re.compile(r"^단기차입금$"),
+    "long_term_debt":          re.compile(r"^장기차입금(및사채)?$"),
+    "total_equity":            re.compile(r"^자본총계$"),
+    "retained_earnings":       re.compile(r"^(이익잉여금|결손금)$"),
 }
 
-# ── 현금흐름표 계정 매핑 ──────────────────────────────────────────────────────
-
-_CF_KEYS = {
-    "operating_cf":  ("영업활동현금흐름", "영업활동 현금흐름"),
-    "investing_cf":  ("투자활동현금흐름", "투자활동 현금흐름"),
-    "financing_cf":  ("재무활동현금흐름", "재무활동 현금흐름"),
-    "capex":         ("유형자산의취득", "유형자산 취득"),
-    "depreciation":  ("감가상각비",),
-    "cash_change":   ("현금및현금성자산의증가", "현금및현금성자산 증가감소"),
+# CF/CCF 현금흐름표
+_CF_REGEX = {
+    "operating_cf":  re.compile(r"^영업활동(으로인한)?현금흐름$"),
+    "investing_cf":  re.compile(r"^투자활동(으로인한)?현금흐름$"),
+    "financing_cf":  re.compile(r"^재무활동(으로인한)?현금흐름$"),
+    "capex":         re.compile(r"^유형자산(의)?취득$"),
+    "depreciation":  re.compile(r"^감가상각비(에대한조정)?$"),
+    "cash_change":   re.compile(r"^현금및현금성자산(의)?(순)?(증가|증감|증가\(?감소\)?)$"),
 }
 
-# ── 손익계산서 세부 계정 매핑 ─────────────────────────────────────────────────
-# IS detail은 _ACCOUNT_KEYS보다 세분화된 항목 (매출원가, 매출총이익, SGA 등 포함).
-# fetch_income_detail_annual()에서 사용. _ACCOUNT_KEYS와 중복 계정명이 있지만
-# 용도가 다르므로(detail vs summary) 별도 관리.
-# "기본주당이익": DART에서 EPS 계정명이 기업마다 상이 (기본주당이익(손실)/기본주당순이익/기본주당이익)
-_IS_DETAIL_KEYS = {
-    "revenue":          ("매출액", "수익(매출액)", "영업수익", "매출"),
-    "cogs":             ("매출원가",),
-    "gross_profit":     ("매출총이익",),
-    "sga":              ("판매비와관리비", "판매비및관리비"),
-    "operating_income": ("영업이익", "영업이익(손실)", "영업손실"),
-    "interest_income":  ("이자수익",),
-    "interest_expense": ("이자비용",),
-    "pretax_income":    ("법인세비용차감전순이익", "세전이익"),
-    "tax_expense":      ("법인세비용",),
-    "net_income":       (
-        "당기순이익", "당기순이익(손실)", "당기순손익", "당기순손실",
-        "연결당기순이익",  # 골프존 등 CIS 방식 기업
-    ),
-    "eps":              ("기본주당이익(손실)", "기본주당순이익", "기본주당이익"),
+# IS/CIS 세부 손익계산서 (매출원가, SGA, EPS 등 포함)
+_IS_DETAIL_REGEX = {
+    "revenue":          re.compile(r"^(매출액|수익\(매출액\)|영업수익|매출)$"),
+    "cogs":             re.compile(r"^매출원가$"),
+    "gross_profit":     re.compile(r"^매출총이익$"),
+    "sga":              re.compile(r"^판매비(와|및)관리비$"),
+    "operating_income": re.compile(r"^영업(이익|손실)(\(손실\))?$"),
+    "interest_income":  re.compile(r"^이자(수익|수입)$"),
+    "interest_expense": re.compile(r"^이자비용$"),
+    "pretax_income":    re.compile(r"^(법인세비용차감전(계속영업)?순이익|세전(계속영업)?이익|법인세비용차감전순이익\(손실\))$"),
+    "tax_expense":      re.compile(r"^법인세비용(\(수익\))?$"),
+    "net_income":       re.compile(r"^(연결)?(당기순)(이익|손익|손실)(\(손실\))?$"),
+    "eps":              re.compile(r"^(기본주당)(이익|손익|순이익|순손익)(\(손실\))?$"),
 }
 
 
@@ -271,14 +277,13 @@ def _extract_accounts(items: list[dict]) -> dict:
     ]
 
     result: dict[str, Optional[int]] = {}
-    for field, keywords in _ACCOUNT_KEYS.items():
+    for field, pattern in _ACCOUNT_REGEX.items():
         for item in is_items:
             nm = item.get("account_nm", "").strip()
-            if nm in keywords:
+            if _match_account(nm, pattern):
                 result[f"{field}"] = _parse_amount(item.get("thstrm_amount"))
                 result[f"{field}_prev"] = _parse_amount(item.get("frmtrm_amount"))
                 result[f"{field}_prev2"] = _parse_amount(item.get("bfefrmtrm_amount"))
-                # 기간 레이블 (당기명, 전기명)
                 if "period" not in result:
                     result["period_cur"] = item.get("thstrm_nm", "")
                     result["period_prev"] = item.get("frmtrm_nm", "")
@@ -301,11 +306,11 @@ def _extract_period_accounts(is_items: list[dict], period_key: str) -> dict:
     """
     amount_key = f"{period_key}_amount"
     result: dict[str, Optional[int]] = {}
-    for field, keywords in _ACCOUNT_KEYS.items():
+    for field, pattern in _ACCOUNT_REGEX.items():
         result[field] = None
         for item in is_items:
             nm = item.get("account_nm", "").strip()
-            if nm in keywords:
+            if _match_account(nm, pattern):
                 result[field] = _parse_amount(item.get(amount_key))
                 break
     return result
@@ -496,21 +501,21 @@ def fetch_financials_multi_year(
 
 # ── BS/CF 공용 헬퍼 ───────────────────────────────────────────────────────────
 
-def _extract_sheet_period(items: list[dict], sj_divs: tuple, keys: dict, period_key: str) -> dict:
+def _extract_sheet_period(items: list[dict], sj_divs: tuple, regex_keys: dict, period_key: str) -> dict:
     """특정 재무제표(BS/CF)의 특정 기간 계정 금액 추출.
 
     sj_divs: 필터할 sj_div 값 목록 (예: ('BS', 'CBS') or ('CF', 'CCF'))
-    keys: {field_name: (계정명1, 계정명2, ...)} 매핑
+    regex_keys: {field_name: re.Pattern} 정규식 매핑
     period_key: 'thstrm' | 'frmtrm' | 'bfefrmtrm'
     """
     filtered = [i for i in items if i.get("sj_div") in sj_divs]
     amount_key = f"{period_key}_amount"
     result: dict = {}
-    for field, keywords in keys.items():
+    for field, pattern in regex_keys.items():
         result[field] = None
         for item in filtered:
             nm = item.get("account_nm", "").strip()
-            if nm in keywords:
+            if _match_account(nm, pattern):
                 result[field] = _parse_amount(item.get(amount_key))
                 break
     return result
@@ -521,11 +526,11 @@ def _extract_is_detail_period(items: list[dict], period_key: str) -> dict:
     is_items = [i for i in items if i.get("sj_div") in ("IS", "CIS")]
     amount_key = f"{period_key}_amount"
     result: dict = {}
-    for field, keywords in _IS_DETAIL_KEYS.items():
+    for field, pattern in _IS_DETAIL_REGEX.items():
         result[field] = None
         for item in is_items:
             nm = item.get("account_nm", "").strip()
-            if nm in keywords:
+            if _match_account(nm, pattern):
                 result[field] = _parse_amount(item.get(amount_key))
                 break
     return result
@@ -607,7 +612,7 @@ def fetch_bs_cf_annual(stock_code: str, years: int = 5) -> dict:
             target_year = effective_anchor + year_offset
 
             if target_year not in bs_collected and has_bs:
-                bs_data = _extract_sheet_period(items, ("BS", "CBS"), _BS_KEYS, period_key)
+                bs_data = _extract_sheet_period(items, ("BS", "CBS"), _BS_REGEX, period_key)
                 if bs_data.get("total_assets") is not None:
                     # 부채비율, 유동비율 계산
                     equity = bs_data.get("total_equity") or 0
@@ -619,7 +624,7 @@ def fetch_bs_cf_annual(stock_code: str, years: int = 5) -> dict:
                     bs_collected[target_year] = {"year": target_year, **bs_data}
 
             if target_year not in cf_collected and has_cf:
-                cf_data = _extract_sheet_period(items, ("CF", "CCF"), _CF_KEYS, period_key)
+                cf_data = _extract_sheet_period(items, ("CF", "CCF"), _CF_REGEX, period_key)
                 if cf_data.get("operating_cf") is not None:
                     op_cf = cf_data.get("operating_cf") or 0
                     capex = cf_data.get("capex") or 0
@@ -772,9 +777,8 @@ def _extract_quarterly_accumulated(items: list[dict]) -> dict:
         if it.get("sj_div") not in ("IS", "CIS"):
             continue
         nm = (it.get("account_nm") or "").strip()
-        for key, aliases in _ACCOUNT_KEYS.items():
-            if nm in aliases:
-                # thstrm_amount = 당기(해당 분기/반기/누계)
+        for key, pattern in _ACCOUNT_REGEX.items():
+            if _match_account(nm, pattern):
                 amt = _parse_amount(it.get("thstrm_amount"))
                 if amt is not None and data[key] is None:
                     data[key] = amt

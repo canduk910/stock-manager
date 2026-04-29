@@ -9,8 +9,8 @@
  *   5) MACD(12,26,9) 라인 차트 + 시그널 라인 + 히스토그램
  *   6) RSI(14) 라인 차트 + 70/30 기준선
  *   7) Stochastic(14,3) %K/%D 라인 + 80/20 기준선
- *   8) PER/PBR 밸류에이션 — 1d/1wk 인터벌에서만 표시 (ValuationChart compact)
- *   9) KIS 전략 신호 카드 — MCP 활성화 시만 표시 (StrategySignalCard)
+ *   8) KIS 전략 신호 카드 — MCP 활성화 시만 표시 (StrategySignalCard)
+ *   (PER/PBR 밸류에이션은 '요약' 서브탭으로 이동)
  *
  * 데이터 소스: GET /api/advisory/{code}/ohlcv?interval=&period=
  * yfinance 제한: 15m=max60d, 60m=max2y, 1d/1wk=max10y
@@ -21,8 +21,6 @@ import {
   ResponsiveContainer, ReferenceLine, LineChart,
 } from 'recharts'
 import { useAdvisoryOhlcv } from '../../hooks/useAdvisory'
-import { fetchDetailValuation } from '../../api/detail'
-import ValuationChart from '../detail/ValuationChart'
 import CandlestickChart, {
   INTERVAL_OPTS,
   PERIOD_OPTIONS,
@@ -56,15 +54,11 @@ function SignalBadge({ label, value, type }) {
 }
 
 // ── 메인 컴포넌트 ─────────────────────────────────────────────────────────
-export default function TechnicalPanel({ data, symbol, market, valuationData }) {
+export default function TechnicalPanel({ data, symbol, market }) {
   const [activeInterval, setActiveInterval] = useState('15m')
   const [activePeriod,   setActivePeriod]   = useState('60d')
 
   const { result: fetchedResult, loading: ohlcvLoading, load: loadOhlcv } = useAdvisoryOhlcv()
-
-  // PER/PBR 밸류에이션 상태
-  const [valData, setValData] = useState(valuationData || null)
-  const [valLoading, setValLoading] = useState(false)
 
   // interval/period 변경 시 API 호출
   useEffect(() => {
@@ -72,28 +66,6 @@ export default function TechnicalPanel({ data, symbol, market, valuationData }) 
       loadOhlcv(symbol, market, activeInterval, activePeriod)
     }
   }, [symbol, market, activeInterval, activePeriod]) // eslint-disable-line
-
-  // 1d/1wk 전환 시 밸류에이션 데이터 fetch
-  useEffect(() => {
-    const isEligible = activeInterval === '1d' || activeInterval === '1wk'
-    if (!isEligible || !symbol) return
-
-    const years = PERIOD_TO_YEARS[activePeriod] || 5
-
-    // prop에서 받은 기본 데이터 사용 (최초 로드)
-    if (valuationData && years >= 10) {
-      setValData(valuationData)
-      return
-    }
-
-    let cancelled = false
-    setValLoading(true)
-    fetchDetailValuation(symbol, years)
-      .then(result => { if (!cancelled) setValData(result) })
-      .catch(() => { if (!cancelled) setValData(null) })
-      .finally(() => { if (!cancelled) setValLoading(false) })
-    return () => { cancelled = true }
-  }, [symbol, activeInterval, activePeriod]) // eslint-disable-line
 
   const handleIntervalChange = (newInterval) => {
     setActiveInterval(newInterval)
@@ -350,21 +322,6 @@ export default function TechnicalPanel({ data, symbol, market, valuationData }) 
           </LineChart>
         </ResponsiveContainer>
       </div>
-
-      {/* ── PER/PBR 밸류에이션 (1d/1wk만) ────────────────────────────────── */}
-      {(activeInterval === '1d' || activeInterval === '1wk') && (
-        <div className="mt-4">
-          <p className="text-xs font-semibold text-gray-600 mb-2">PER / PBR 밸류에이션</p>
-          {valLoading ? (
-            <div className="flex items-center gap-1.5 text-xs text-gray-400 py-4 justify-center">
-              <div className="w-3.5 h-3.5 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin" />
-              로딩 중...
-            </div>
-          ) : (
-            <ValuationChart data={valData} compact />
-          )}
-        </div>
-      )}
 
       {/* ── KIS 전략 신호 (MCP 연동) ────────────────────────────────── */}
       <StrategySignalCard strategySignals={data?.strategy_signals} symbol={symbol} />

@@ -68,6 +68,12 @@ export default function App() {
                 <Route path="/tax" element={<ProtectedRoute adminOnly><TaxPage /></ProtectedRoute>} />
               </Routes>
             </main>
+            <footer className="border-t border-gray-200 bg-gray-50 py-4 mt-8">
+              <p className="text-center text-xs text-gray-400 leading-relaxed px-4">
+                AI가 생성한 자료로, 투자 참고용으로만 제공됩니다.
+                정보의 정확성이나 완전성을 보장하지 않으며, 투자 결과에 대한 법적 책임은 이용자 본인에게 있습니다.
+              </p>
+            </footer>
             <ToastNotification toasts={toasts} removeToast={removeToast} />
           </>
         } />

@@ -95,7 +95,7 @@ CLI와 API 라우터 양쪽에서 공용으로 사용한다. 비즈니스 데이
 ### dart_fin.py
 - **`latest_year = today.year - 1`** (월 경계 제거) — 3월에도 전년도 보고서 조회.
 - **첫 배치 fallback**: 빈 결과 시 `anchor-1`로 재시도 (최신연도 미공시 기업 대응).
-- `_ACCOUNT_KEYS`에 적자 기업 변형 계정명 포함 (`영업손실`, `당기순손실`, `연결당기순이익` 등).
+- **전체 정규식 매칭**: `_ACCOUNT_REGEX`/`_BS_REGEX`/`_CF_REGEX`/`_IS_DETAIL_REGEX` 4개 딕셔너리 + `_match_account()` 공용 함수. 공백·조사·접미사 변형 자동 대응.
 
 ### yf_client.py
 - **제약**: 시세 15분 지연, 재무 최대 4년, 종목 검색 불가.

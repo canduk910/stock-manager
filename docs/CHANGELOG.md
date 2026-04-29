@@ -1,5 +1,18 @@
 # 변경 이력
 
+## 2026-04-29 — DART 계정명 정규식 전환 + 밸류에이션 차트 이동 + UI 개선
+
+### 리팩토링
+- `dart_fin.py`: DART 계정명 매칭 전면 정규식 전환 — `_ACCOUNT_KEYS`/`_BS_KEYS`/`_IS_DETAIL_KEYS` tuple → `_ACCOUNT_REGEX`/`_BS_REGEX`/`_IS_DETAIL_REGEX` re.Pattern
+- `dart_fin.py`: 공용 `_match_account()` 함수 (공백 제거 + 정��식 매칭) — 5개 추출 함수 통합
+- `dart_fin.py`: EPS 계정명 `"기본주당손익"` 변형 정규식 대응 (한국가스공사 EPS=None 해결)
+
+### UI 개선
+- DetailPage: "CAGR 요약" → "요약" 서브탭 이름 변경 + 하단에 PER/PBR/시총/주식수 밸류에이션 차트 배치
+- TechnicalPanel: 밸류에이션 차트 제거 (요약 탭으로 이동)
+- WatchlistButton: code/market 변경 시 상태 리셋 (탭 전환 후 "추가됨" 고착 버그 수정)
+- App.jsx: 사이트 하단 투자 면책 문구 footer 추가
+
 ## 2026-04-29 — 웹 보안 헤더 추가 (securityheaders.com F→A)
 
 ### 보안 강화

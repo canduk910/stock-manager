@@ -107,7 +107,7 @@ frontend/
       EarningsPage.jsx    /earnings  국내/미국 탭 선택 + 기간 조회
       BalancePage.jsx     /balance
       WatchlistPage.jsx   /watchlist
-      DetailPage.jsx      /detail/:symbol  탭 UI (재무분석/종합 리포트[서브탭: CAGR요약/기본적분석/기술적분석(+PER·PBR)/AI자문])
+      DetailPage.jsx      /detail/:symbol  탭 UI (재무분석/종합 리포트[서브탭: 요약(CAGR+PER·PBR밸류에이션)/기본적분석/기술적분석/AI자문])
       OrderPage.jsx       /order     탭 UI (주문발송/미체결/체결내역/주문이력/예약주문)
       MarketBoardPage.jsx /market-board  시세판: 신고가/신저가 Top10 + 사용자 선택 종목. 실시간 WS. 당일 OHLC+미니캔들+전일대비가격+고저가.
       MacroPage.jsx       /macro         매크로 분석: 지수+심리+뉴스+투자자 코멘트. 4섹션 독립 로딩.
