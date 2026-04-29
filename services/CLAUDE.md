@@ -34,6 +34,7 @@
 | `backtest_service.py` | 백테스트 오케스트레이션: **비동기 2단계**(run_tool→job_id→get_backtest_result_tool(wait=true)). MCP 파라미터: `strategy_id`/`symbols`(배열)/`initial_capital`/`commission_rate`/`tax_rate`/`slippage`. `_extract_metrics()` 중첩 메트릭(basic/risk/trading) 플래트닝. 실패 시 `update_job_status("failed")`. `get_strategy_signals()` — 대표 3전략 신호 + 합의. MCP 비활성화 시 None. |
 | `strategy_builder_service.py` | 전략빌더 BuilderState→.kis.yaml 변환(`convert_builder_to_yaml`) + 검증(`validate_builder_state`) + YAML 요약 추출(`extract_strategy_summary`: 지표/조건/리스크 메타데이터). 프론트 5단계 빌더 UI의 JSON을 MCP가 이해하는 YAML로 변환. |
 | `tax_service.py` | 해외주식 양도소득세: CTOS4001R+TTTS3035R 병합 동기화(연속조회 `tr_cont:N` 헤더) + 잔고 기반 적응적 소급(2015년까지) + 시간순 FIFO 재생(매도 시점 이전 매수만 소진) + `tax_fifo_lots` 매도→매수 매핑 + 잔고 `avg_price` fallback + 가상 매도 시뮬레이션 + 동기화 후 자동 재계산. `stock/tax_store.py` 래퍼 경유. 도메인 규칙: `docs/TAX_DOMAIN.md`. |
+| `ai_gateway.py` | **모든 OpenAI API 호출의 단일 진입점** (신규). `call_openai_chat()` — 유저별 일일 쿼터 체크 + OpenAI 호출 + 사용량 기록. `user_id=None`이면 시스템 호출(한도 검사 건너뜀). `check_quota=False`로 재시도 시 중복 검사 방지. `AiQuotaExceededError`(429) 예외. |
 
 ---
 

@@ -358,7 +358,7 @@ def fetch_ohlcv_by_interval(code: str, market: str, interval: str = "15m", perio
 
 # ── 사업별 매출비중 + 사업 설명 + 테마 키워드 (KR — OpenAI 추론) ──────────────
 
-def fetch_segments_kr(code: str, name: str) -> dict:
+def fetch_segments_kr(code: str, name: str, user_id=None) -> dict:
     """KR: OpenAI GPT에게 사업부문 매출비중 + 사업 설명 + 투자 테마 키워드를 1회 호출로 통합 추론.
 
     GPT 1회 호출로 3가지(segments/description/keywords)를 JSON response_format으로 요청.
@@ -368,6 +368,7 @@ def fetch_segments_kr(code: str, name: str) -> dict:
     Args:
         code: 종목코드 (6자리)
         name: 종목명 (GPT 프롬프트에 사용)
+        user_id: AI 게이트웨이 쿼터 추적용 사용자 ID (None이면 시스템 호출)
 
     Returns:
         {"segments": [{segment, revenue_pct, note}], "description": str, "keywords": [str]}
@@ -378,8 +379,7 @@ def fetch_segments_kr(code: str, name: str) -> dict:
         return empty
 
     try:
-        from openai import OpenAI
-        client = OpenAI(api_key=OPENAI_API_KEY)
+        from services.ai_gateway import call_openai_chat
 
         prompt = (
             f"{name}(종목코드: {code})에 대해 다음 3가지를 JSON으로 알려주세요.\n"
@@ -389,9 +389,10 @@ def fetch_segments_kr(code: str, name: str) -> dict:
             f"불확실해도 최선의 추정값을 주세요."
         )
 
-        resp = client.chat.completions.create(
-            model=OPENAI_MODEL,
+        resp = call_openai_chat(
             messages=[{"role": "user", "content": prompt}],
+            user_id=user_id,
+            service_name="segments_kr",
             max_completion_tokens=600,
             response_format={"type": "json_object"},
         )

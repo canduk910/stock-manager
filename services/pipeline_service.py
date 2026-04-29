@@ -459,12 +459,15 @@ def run_pipeline(market: str = "KR") -> dict:
         ]
 
         from services.sector_recommendation_service import generate_sector_recommendations
+        from stock.macro_fetcher import fetch_sector_returns, fetch_sector_returns_kr
         # regime_data에 regime_desc 추가 (공용 모듈에서 가져옴)
         from services.macro_regime import REGIME_DESC
         regime_data_with_desc = dict(regime_data)
         regime_data_with_desc["regime_desc"] = REGIME_DESC.get(regime_data["regime"], regime_data["regime"])
+        # 실제 섹터 ETF 수익률 수집
+        sector_returns = fetch_sector_returns_kr() if market == "KR" else fetch_sector_returns()
         sector_recs = generate_sector_recommendations(
-            regime_data_with_desc, indices_data, news_data, market
+            regime_data_with_desc, indices_data, news_data, market, sector_returns
         )
         logger.info(f"섹터 추천: {len(sector_recs.get('concepts', []))}개 컨셉")
     except Exception as e:

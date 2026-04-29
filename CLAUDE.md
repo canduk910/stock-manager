@@ -83,10 +83,11 @@ python test.py                      # 삼성전자 현재가 조회
 config.py           환경변수 중앙 관리 (os.getenv 단일 진입점, DATABASE_URL 포함)
 wrapper.py          KIS API 완전 래퍼 (standalone)
 main.py             FastAPI 서버 진입점 (라우터 등록 + SPA 정적 파일 서빙 + Alembic 마이그레이션 + /api/health + 보안 헤더 미들웨어)
-db/                 SQLAlchemy ORM 패키지 (base, session, utils, models/13개, repositories/8개)
+db/                 SQLAlchemy ORM 패키지 (base, session, utils, models/14개, repositories/9개)
 alembic/            DB 스키마 마이그레이션 관리
-routers/            API 라우터 패키지 (16개, quote/market_board는 WebSocket 포함)
-services/           서비스 레이어 (watchlist_service, detail_service, order_service, advisory_service, macro_service, macro_cycle, portfolio_advisor_service, quote_kis/quote_overseas, order_kr/order_us/order_fno, macro_regime, safety_grade, schemas/, mcp_client, backtest_service, strategy_builder_service, tax_service)
+routers/            API 라우터 패키지 (17개, quote/market_board는 WebSocket 포함)
+services/           서비스 레이어 (watchlist_service, detail_service, order_service, advisory_service, macro_service, macro_cycle, portfolio_advisor_service, quote_kis/quote_overseas, order_kr/order_us/order_fno, macro_regime, safety_grade, schemas/, mcp_client, backtest_service, strategy_builder_service, tax_service, ai_gateway)
+services/ai_gateway.py  모든 OpenAI API 호출의 단일 진입점 (쿼터 체크 + 사용량 기록 + 호출). AiQuotaExceededError(429).
 services/exceptions.py  서비스 레이어 공용 예외 계층 (ServiceError / NotFoundError / ExternalAPIError / ConfigError / PaymentRequiredError / ConflictError)
 services/macro_regime.py  공용 체제 판단 (REGIME_MATRIX 20셀 + VIX 오버라이드 + 하이스테리시스). 3개 서비스 공유.
 services/safety_grade.py  7점 등급/복합점수/체제정합성/포지션사이징 공유 모듈. advisory_service + pipeline_service 공유.
@@ -109,7 +110,7 @@ frontend/           React SPA (Vite + Tailwind + Recharts)
 
 ### 예외 계층
 
-`ServiceError`(400) → `NotFoundError`(404) / `ExternalAPIError`(502) / `ConfigError`(503) / `PaymentRequiredError`(402) / `ConflictError`(409). `main.py`에서 일괄 HTTP 변환. 모든 서비스/라우터에서 `HTTPException` 직접 raise 금지.
+`ServiceError`(400) → `NotFoundError`(404) / `ExternalAPIError`(502) / `ConfigError`(503) / `PaymentRequiredError`(402) / `ConflictError`(409) / `AiQuotaExceededError`(429). `main.py`에서 일괄 HTTP 변환. 모든 서비스/라우터에서 `HTTPException` 직접 raise 금지.
 
 ---
 
@@ -174,6 +175,9 @@ frontend/           React SPA (Vite + Tailwind + Recharts)
 | daily_reports | DailyReport | ReportRepository | 일일 투자 보고서 |
 | tax_transactions, tax_calculations, tax_fifo_lots | TaxTransaction, TaxCalculation, TaxFifoLot | TaxRepository | 해외주식 양도세 |
 | strategies (builder_state_json 컬럼) | Strategy | BacktestRepository | 전략빌더 저장/CRUD |
+| ai_usage_log | AiUsageLog | AdminRepository | AI API 호출 일별 사용량 기록 |
+| ai_limits | AiLimit | AdminRepository | AI 일별 호출 한도 설정 (기본+유저별) |
+| audit_log | AuditLog | AdminRepository | 관리자 작업 감사 로그 |
 
 - **Adapter 패턴**: `stock/store.py` 등 7개 파일은 Repository 위임 래퍼 (기존 함수 시그니처 100% 유지)
 - **Session**: `get_session()` = Store 래퍼 전용 contextmanager, `get_db()` = FastAPI Depends 전용
@@ -325,3 +329,7 @@ pytest tests/api/ -v          # API 엔드포인트 테스트
 | 2026-04-28 | 테스트 DB PostgreSQL 전환 | conftest.py, ci.yml, docker-compose.test.yml | 프��덕션 동일 DBMS. stock_info BigInteger 버그 발견+수정 |
 | 2026-04-26 | 계층형 하네스 재구성 | 부서장+도메인팀장+개발팀장 신규, asset-dev 스킬 | 부서장→팀장→팀원 계층으로 자동 라우팅. 단일 진입점(asset-dev)으로 통합 |
 | 2026-04-28 | 도메인+HTTPS 설정 | deploy.yml, docker-compose.prod.yml, nginx, init-ssl.sh | dkstock.cloud 도메인 연결 + Let's Encrypt SSL + nginx 리버스 프록시 |
+| 2026-04-29 | AI 게이트웨이 + 사용량 관리 | ai_gateway, admin 라우터/페이지, 6개 서비스 전환 | 모든 OpenAI 호출 단일 진입점. 유저별 일일 한도. Admin 관리 페이지(사용량/한도/감사로그) |
+| 2026-04-29 | 섹터 추천 데이터 기반 개선 | macro_fetcher, sector_recommendation_service, pipeline_service | 한국 섹터 ETF 13종 수익률 수집. 실제 가격 데이터를 GPT 프롬프트에 전달. defensive 하드코딩 규칙 제거 |
+| 2026-04-29 | PER fallback 직접 계산 | stock/market.py | yfinance forwardPE 부정확 → 시총/TTM순이익 직접 계산 (PBR/ROE fallback과 동일 패턴) |
+| 2026-04-29 | 보고서 비admin 접근 수정 | ReportPage.jsx | 일반 유저는 파이프라인 대신 fetchReportByDate로 기존 보고서 조회 |

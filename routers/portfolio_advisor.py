@@ -23,7 +23,7 @@ class AnalyzeBody(BaseModel):
 def analyze(body: AnalyzeBody, _user: dict = Depends(require_admin)):
     """포트폴리오 AI 자문 분석. 캐시 히트 시 즉시 반환."""
     return portfolio_advisor_service.analyze_portfolio(
-        body.balance_data, body.force_refresh
+        body.balance_data, body.force_refresh, user_id=_user.get("id")
     )
 
 

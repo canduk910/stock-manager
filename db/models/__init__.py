@@ -10,6 +10,7 @@ from .macro import MacroGptCache
 from .report import DailyReport, MacroRegimeHistory, RecommendationHistory
 from .backtest import BacktestJob, Strategy
 from .tax import TaxCalculation, TaxFifoLot, TaxTransaction
+from .admin import AiUsageLog, AiLimit, AuditLog
 
 __all__ = [
     "User",
@@ -33,4 +34,7 @@ __all__ = [
     "TaxTransaction",
     "TaxCalculation",
     "TaxFifoLot",
+    "AiUsageLog",
+    "AiLimit",
+    "AuditLog",
 ]

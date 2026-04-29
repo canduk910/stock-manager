@@ -113,17 +113,19 @@ def generate_ai_report(code: str, market: str, name: str, user_id: int = 1) -> d
                            graham_data, macro_ctx, regime, regime_desc,
                            strategy_signals, research_data)
 
-    def _call_openai(max_tokens: int, extra_user_msg: str = "") -> tuple[str, str]:
-        """OpenAI 호출. (content, finish_reason) 반환."""
-        from openai import OpenAI
-        client = OpenAI(api_key=OPENAI_API_KEY)
+    def _call_openai(max_tokens: int, extra_user_msg: str = "", check_quota: bool = True) -> tuple[str, str]:
+        """AI Gateway를 통한 OpenAI 호출. (content, finish_reason) 반환."""
+        from services.ai_gateway import call_openai_chat
         user_content = prompt + extra_user_msg
-        resp = client.chat.completions.create(
-            model=model,
+        resp = call_openai_chat(
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_content},
             ],
+            user_id=user_id,
+            service_name="advisory_report",
+            check_quota=check_quota,
+            model=model,
             max_completion_tokens=max_tokens,
             response_format={"type": "json_object"},
         )
@@ -133,6 +135,7 @@ def generate_ai_report(code: str, market: str, name: str, user_id: int = 1) -> d
 
     try:
         import time as _time
+        from services.ai_gateway import AiQuotaExceededError
 
         # 통합 v3: 16000 기본, 20000 재시도
         base_tokens = 16000
@@ -144,7 +147,7 @@ def generate_ai_report(code: str, market: str, name: str, user_id: int = 1) -> d
         if finish_reason == "length":
             logger.warning("종목 자문 응답 토큰 잘림 1차 (%s), %d로 재시도", code, retry_tokens)
             _time.sleep(1)
-            content, finish_reason = _call_openai(retry_tokens)
+            content, finish_reason = _call_openai(retry_tokens, check_quota=False)
             if finish_reason == "length":
                 logger.error("종목 자문 응답 토큰 잘림 2차 (%s), 저장 거부", code)
                 raise ExternalAPIError("응답이 토큰 제한으로 잘렸습니다. 다시 시도해주세요.")
@@ -159,12 +162,12 @@ def generate_ai_report(code: str, market: str, name: str, user_id: int = 1) -> d
             logger.warning("v3 검증 실패 (%s): %s — 1회 재시도", code, err[:200] if err else "")
             _time.sleep(1)
             retry_msg = "\n\n응답을 반드시 유효한 JSON으로 작성하세요. schema_version='v3' 필수 필드를 누락하지 마세요."
-            content2, finish2 = _call_openai(base_tokens, retry_msg)
+            content2, finish2 = _call_openai(base_tokens, retry_msg, check_quota=False)
             if finish2 == "length":
                 logger.warning("v3 재시도도 토큰 잘림 (%s)", code)
             report = _parse_report(content2)
 
-    except (ConfigError, NotFoundError, PaymentRequiredError, ExternalAPIError):
+    except (ConfigError, NotFoundError, PaymentRequiredError, ExternalAPIError, AiQuotaExceededError):
         raise
     except Exception as e:
         err_str = str(e)
@@ -177,7 +180,7 @@ def generate_ai_report(code: str, market: str, name: str, user_id: int = 1) -> d
         logger.warning("OpenAI 1차 호출 실패 (%s): %s — 2초 후 재시도", code, err_str[:200])
         _time.sleep(2)
         try:
-            content, finish_reason = _call_openai(14000)
+            content, finish_reason = _call_openai(14000, check_quota=False)
             report = _parse_report(content)
         except Exception as e2:
             raise ExternalAPIError(f"OpenAI 호출 실패: {str(e2)}")
@@ -238,7 +241,7 @@ def _collect_fundamental_kr(code: str, name: str) -> dict:
         f_income = pool.submit(dart_fin.fetch_income_detail_annual, code, 10)
         f_bs_cf = pool.submit(dart_fin.fetch_bs_cf_annual, code, 10)
         f_metrics = pool.submit(fetch_market_metrics, code)
-        f_segments = pool.submit(advisory_fetcher.fetch_segments_kr, code, name)
+        f_segments = pool.submit(advisory_fetcher.fetch_segments_kr, code, name, user_id)
         f_forward = pool.submit(fetch_forward_estimates_yf, code, True)
         f_val_stats = pool.submit(advisory_fetcher.fetch_valuation_stats, code, "KR")
         f_quarterly = pool.submit(dart_fin.fetch_quarterly_financials, code, 8)

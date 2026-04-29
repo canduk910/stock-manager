@@ -18,6 +18,7 @@ import PortfolioPage from './pages/PortfolioPage'
 import ReportPage from './pages/ReportPage'
 import BacktestPage from './pages/BacktestPage'
 import TaxPage from './pages/TaxPage'
+import AdminPage from './pages/AdminPage'
 import ToastNotification from './components/common/ToastNotification'
 import { useNotification } from './hooks/useNotification'
 
@@ -66,6 +67,7 @@ export default function App() {
                 <Route path="/order" element={<ProtectedRoute adminOnly><OrderPage notify={notify} /></ProtectedRoute>} />
                 <Route path="/portfolio" element={<ProtectedRoute adminOnly><PortfolioPage notify={notify} /></ProtectedRoute>} />
                 <Route path="/tax" element={<ProtectedRoute adminOnly><TaxPage /></ProtectedRoute>} />
+                <Route path="/admin" element={<ProtectedRoute adminOnly><AdminPage /></ProtectedRoute>} />
               </Routes>
             </main>
             <footer className="border-t border-gray-200 bg-gray-50 py-4 mt-8">

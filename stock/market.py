@@ -403,6 +403,22 @@ def fetch_market_metrics(code: str) -> dict:
 
         div_per_share_raw = info.get("dividendRate")  # 연간 주당배당금 (원)
         result["per"] = round(per_raw, 2) if per_raw else None
+        # PER fallback: yfinance PER 미제공·부정확 시 시총/TTM순이익 직접 계산
+        if fi.market_cap and fi.market_cap > 0:
+            try:
+                qi = t.quarterly_income_stmt
+                if qi is not None and not qi.empty:
+                    ni_row = None
+                    for name in ("Net Income", "Net Income Common Stockholders"):
+                        if name in qi.index:
+                            ni_row = qi.loc[name].dropna()
+                            break
+                    if ni_row is not None and len(ni_row) >= 4:
+                        ttm_ni = float(ni_row.iloc[:4].sum())
+                        if ttm_ni > 0:
+                            result["per"] = round(fi.market_cap / ttm_ni, 2)
+            except Exception:
+                pass
         result["pbr"] = round(pbr_raw, 2) if pbr_raw else None
         # PBR fallback: priceToBook이 None이면 자본총계/주식수로 직접 계산
         if result["pbr"] is None and fi.last_price and fi.shares:

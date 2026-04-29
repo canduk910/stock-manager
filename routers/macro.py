@@ -17,7 +17,7 @@ def get_indices(_user: dict = Depends(get_current_user)):
 @router.get("/news")
 def get_news(_user: dict = Depends(get_current_user)):
     """한국 + 국제 뉴스 (NYT 한글 번역 포함)."""
-    return macro_service.get_news()
+    return macro_service.get_news(user_id=_user.get("id"))
 
 
 @router.get("/sentiment")
@@ -29,7 +29,7 @@ def get_sentiment(_user: dict = Depends(get_current_user)):
 @router.get("/investor-quotes")
 def get_investor_quotes(_user: dict = Depends(get_current_user)):
     """투자 대가 최근 코멘트."""
-    return macro_service.get_investor_quotes()
+    return macro_service.get_investor_quotes(user_id=_user.get("id"))
 
 
 @router.get("/yield-curve")

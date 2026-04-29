@@ -33,6 +33,7 @@ frontend/
       backtest.js         fetchMcpStatus / fetchPresets / runPresetBacktest / runCustomBacktest / runBatchBacktest / fetchBacktestResult / fetchBacktestHistory → /api/backtest/*
       strategyBuilder.js  convertBuilderToYaml / validateBuilderState / saveStrategy / loadStrategies / loadStrategy / deleteStrategy → /api/backtest/strategy/*
       tax.js              fetchTaxSummary(year) / fetchTaxTransactions / syncTax / recalculateTax(year) / fetchTaxCalculations(year,symbol) / addTaxTransaction / deleteTaxTransaction / fetchSimulationHoldings / simulateTax → /api/tax/* (FIFO 전용, 시뮬레이션 포함)
+      admin.js            fetchAiUsage / fetchMyAiUsage / fetchAiLimits / setAiLimit / deleteAiLimit / fetchAuditLog → /api/admin/* (AI 사용량 관리)
     hooks/
       useAsyncState.js    useAsyncState(initialData) — 비동기 data/loading/error 상태 관리 공통 훅. run(asyncFn)으로 자동 관리.
       useScreener.js      { data, loading, error, search }
@@ -115,6 +116,7 @@ frontend/
       ReportPage.jsx      /reports       투자 보고서: 페이지 진입 시 KR/US 파이프라인 자동실행(중복방지). 매크로 체제 카드(공유) + KR/US 토글 + 3컨셉 탑픽 섹터(모멘텀/역발상/3개월선점) + 종목추천+관심종목 버튼. 하단 이력 카드(클릭→전환).
       BacktestPage.jsx    /backtest      KIS AI Extensions 백테스트: **전략빌더(기본탭)**/프리셋/커스텀 3모드, 빌더에서 바로 실행 가능. 결과 차트/메트릭, 전략 비교. **국내 KRX만 지원**(markets={['KR']}). **거래비용 입력**(수수료0.015%/세금0.23%/슬리피지0.05%). 진행 현황+백그라운드 안내. **이력 테이블**(마운트 시 로드, 완료 시 새로고침, 과거 결과 "보기" 클릭 → 결과패널). MCP 비활성화 시 안내 표시. 저장 전략 직접 실행.
       TaxPage.jsx         /tax           해외주식 양도소득세: 4탭(요약/매매내역/계산상세/시뮬레이션). FIFO 전용, 연도 선택, KIS 적응적 동기화+자동 재계산.
+      AdminPage.jsx       /admin         AI 관리 (admin only): 3탭(사용량 현황/한도 설정/감사 로그). 유저별 일별 사용량+서비스별 상세. 기본/개별 한도 CRUD. 변경 이력 audit trail.
 ```
 
 ---

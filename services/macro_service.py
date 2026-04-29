@@ -74,7 +74,7 @@ def get_indices() -> dict:
 
 # ── 뉴스 ─────────────────────────────────────────────────────────────────────
 
-def get_news() -> dict:
+def get_news(user_id=None) -> dict:
     """네이버 + NYT 뉴스. NYT는 GPT 번역 (키 있을 때)."""
     errors = []
 
@@ -97,6 +97,7 @@ def get_news() -> dict:
         translated_map = _translate_headlines(
             [a["title"] for a in nyt_raw],
             [a.get("summary", "") for a in nyt_raw],
+            user_id=user_id,
         )
         for i, article in enumerate(nyt_raw):
             tr = translated_map.get(i, {})
@@ -149,7 +150,7 @@ def get_sentiment() -> dict:
 
 # ── 투자자 코멘트 ────────────────────────────────────────────────────────────
 
-def get_investor_quotes() -> dict:
+def get_investor_quotes(user_id=None) -> dict:
     """투자 대가 뉴스 검색 + GPT 추출/번역."""
     investors_result = []
     errors = []
@@ -157,7 +158,7 @@ def get_investor_quotes() -> dict:
     for inv in macro_fetcher.INVESTORS:
         try:
             articles = macro_fetcher.fetch_investor_news(inv["query"])
-            quotes = _extract_investor_opinions(inv["name"], inv["name_ko"], articles)
+            quotes = _extract_investor_opinions(inv["name"], inv["name_ko"], articles, user_id=user_id)
             investors_result.append({
                 "name": inv["name"],
                 "name_ko": inv["name_ko"],
@@ -380,6 +381,7 @@ def get_summary() -> dict:
 def _translate_headlines(
     titles: list[str],
     summaries: list[str] | None = None,
+    user_id=None,
 ) -> dict[int, dict]:
     """영문 헤드라인 배치 한국어 번역. 반환: {index: {title, summary}}."""
     if not titles:
@@ -407,14 +409,14 @@ def _translate_headlines(
     )
 
     try:
-        from openai import OpenAI
-        client = OpenAI(api_key=OPENAI_API_KEY)
-        resp = client.chat.completions.create(
-            model=OPENAI_MODEL,
+        from services.ai_gateway import call_openai_chat
+        resp = call_openai_chat(
             messages=[
                 {"role": "system", "content": "뉴스 헤드라인 한국어 번역기. JSON으로만 응답."},
                 {"role": "user", "content": prompt},
             ],
+            user_id=user_id,
+            service_name="macro_translate",
             max_completion_tokens=800,
             response_format={"type": "json_object"},
         )
@@ -429,7 +431,7 @@ def _translate_headlines(
 
 
 def _extract_investor_opinions(
-    name: str, name_ko: str, articles: list[dict],
+    name: str, name_ko: str, articles: list[dict], user_id=None,
 ) -> list[dict]:
     """GPT로 투자자 코멘트 추출 + 한국어 번역."""
     if not articles:
@@ -470,14 +472,14 @@ def _extract_investor_opinions(
     )
 
     try:
-        from openai import OpenAI
-        client = OpenAI(api_key=OPENAI_API_KEY)
-        resp = client.chat.completions.create(
-            model=OPENAI_MODEL,
+        from services.ai_gateway import call_openai_chat
+        resp = call_openai_chat(
             messages=[
                 {"role": "system", "content": "투자 전문가 발언 추출/번역기. JSON으로만 응답."},
                 {"role": "user", "content": prompt},
             ],
+            user_id=user_id,
+            service_name="macro_investor",
             max_completion_tokens=1000,
             response_format={"type": "json_object"},
         )

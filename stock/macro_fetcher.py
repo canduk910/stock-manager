@@ -824,6 +824,78 @@ def fetch_sector_returns() -> list[dict]:
     return results
 
 
+# ── 한국 섹터 ETF 수익률 ──────────────────────────────────────────────────────
+
+_KR_SECTOR_ETFS = [
+    ("091160.KS", "Semiconductor", "반도체"),
+    ("305720.KS", "Secondary Battery", "2차전지"),
+    ("117700.KS", "Construction", "건설"),
+    ("244580.KS", "Bio/Healthcare", "바이오/헬스케어"),
+    ("091170.KS", "Banking", "은행/금융"),
+    ("117680.KS", "Steel", "철강/소재"),
+    ("091180.KS", "Automobile", "자동차"),
+    ("117460.KS", "Energy/Chemical", "에너지/화학"),
+    ("266390.KS", "Media/Entertainment", "미디어/엔터"),
+    ("266410.KS", "Consumer Staples", "필수소비재"),
+    ("266420.KS", "Consumer Discretionary", "경기소비재"),
+    ("140710.KS", "Transportation", "운송/물류"),
+    ("227550.KS", "Utilities", "유틸리티"),
+]
+
+
+def fetch_sector_returns_kr() -> list[dict]:
+    """13개 한국 섹터 ETF(KODEX/TIGER) 1M/3M/6M/1Y 수익률."""
+    key = "macro:sector_returns_kr"
+    cached = get_cached(key)
+    if cached is not None:
+        return cached
+
+    def _fetch_one_kr(sym: str, name: str, name_ko: str) -> Optional[dict]:
+        try:
+            import yfinance as yf
+            t = yf.Ticker(sym)
+            hist = t.history(period="1y", interval="1d")
+            if hist.empty:
+                return None
+
+            closes = [_safe(v) for v in hist["Close"].tolist()]
+            closes = [c for c in closes if c is not None]
+            if not closes:
+                return None
+
+            return {
+                "symbol": sym,
+                "name": name,
+                "name_ko": name_ko,
+                "return_1m": _calc_return(closes, 21),
+                "return_3m": _calc_return(closes, 63),
+                "return_6m": _calc_return(closes, 126),
+                "return_1y": _calc_return(closes, 252),
+                "price": round(closes[-1], 2),
+            }
+        except Exception as e:
+            logger.warning("한국 섹터 수익률 조회 실패 (%s): %s", sym, e)
+            return None
+
+    results = []
+    with ThreadPoolExecutor(max_workers=13) as pool:
+        futs = {pool.submit(_fetch_one_kr, sym, name, name_ko): sym for sym, name, name_ko in _KR_SECTOR_ETFS}
+        for fut in as_completed(futs):
+            try:
+                r = fut.result()
+                if r:
+                    results.append(r)
+            except Exception:
+                pass
+
+    order_map = {sym: i for i, (sym, _, _) in enumerate(_KR_SECTOR_ETFS)}
+    results.sort(key=lambda x: order_map.get(x["symbol"], 99))
+
+    if results:
+        set_cached(key, results, ttl_hours=1)
+    return results
+
+
 # ── 경기사이클 입력 ─────────────────────────────────────────────────────────
 
 def fetch_cycle_inputs() -> dict:

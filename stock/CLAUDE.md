@@ -23,7 +23,7 @@ CLI와 API 라우터 양쪽에서 공용으로 사용한다. 비즈니스 데이
 | `yf_client.py` | yfinance 기반 해외주식 데이터. EPS/Graham Number 지표 제공. 매출추정 3단계 fallback. **`fetch_quarterly_financials_yf()`**(분기 실적). **리서치용**: `fetch_company_officers()`/`fetch_major_holders()`/`fetch_earnings_dates()`/`fetch_macro_indicators()`/`fetch_sector_peers()`. |
 | `fno_master.py` | KIS 선물옵션 마스터파일 다운로드/파싱/검색. 인메모리 캐시(24h) → cache.db(7일) → ZIP 3단계. main.py에서 pre-warm. |
 | `sec_filings.py` | SEC EDGAR 미국 10-K/10-Q 공시 조회. |
-| `macro_fetcher.py` | 매크로 분석 데이터 수집: yfinance 지수/VIX/버핏/공포탐욕 + **금리곡선(^IRX/^FVX/^TNX/^TYX)/신용스프레드(HYG/LQD)/환율(4쌍)/원자재(5종)/섹터ETF(11종)/국면입력**. feedparser RSS(다중 피드+중복제거). 캐시 키 `macro:*` |
+| `macro_fetcher.py` | 매크로 분석 데이터 수집: yfinance 지수/VIX/버핏/공포탐욕 + **금리곡선(^IRX/^FVX/^TNX/^TYX)/신용스프레드(HYG/LQD)/환율(4쌍)/원자재(5종)/섹터ETF(US 11종+**KR 13종**)/국면입력**. feedparser RSS(다중 피드+중복제거). 캐시 키 `macro:*`. `fetch_sector_returns_kr()`: 한국 섹터 ETF(KODEX/TIGER) 13종 1M/3M/6M/1Y 수익률 수집. |
 | `report_store.py` | 보고서 CRUD (추천 이력/체제 이력/일일 보고서). `db/repositories/report_repo.py` 위임 래퍼. 다른 6개 store와 동일 패턴. |
 | `macro_store.py` | 매크로 GPT 결과 일일 캐시. `db/repositories/macro_repo.py` 위임 래퍼. `get_today()`/`save_today()`/`cleanup_old()`. |
 | `strategy_store.py` | 백테스트/전략 CRUD. `db/repositories/backtest_repo.py` 위임 래퍼. Job: `save_backtest_job()`/`save_backtest_result()`/`update_job_status()`/`delete_job()`/`get_latest_backtest_metrics()`/`get_job_history()`. Strategy: `save_strategy()`/`list_strategies()`/`get_strategy()`/`delete_strategy()` (전략빌더 저장/로드/삭제, builder_state_json 포함). |

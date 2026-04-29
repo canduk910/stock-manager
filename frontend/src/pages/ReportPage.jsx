@@ -7,14 +7,21 @@
  */
 import { useEffect, useState, useRef, useCallback } from 'react'
 import { useReports, useReportDetail } from '../hooks/useReport'
-import { fetchReport } from '../api/report'
+import { fetchReport, fetchReportByDate } from '../api/report'
 import { runPipelineSync } from '../api/pipeline'
+import { useAuth } from '../hooks/useAuth'
 import LoadingSpinner from '../components/common/LoadingSpinner'
 import ErrorAlert from '../components/common/ErrorAlert'
 import ReportDetailView from '../components/report/ReportDetailView'
 import ReportHistoryList from '../components/report/ReportHistoryList'
 
+function _todayKST() {
+  const d = new Date(Date.now() + 9 * 3600_000)
+  return d.toISOString().slice(0, 10)
+}
+
 export default function ReportPage() {
+  const { isAdmin } = useAuth()
   const reports = useReports()
   const [market, setMarket] = useState('KR')
   const [generating, setGenerating] = useState(false)
@@ -31,7 +38,7 @@ export default function ReportPage() {
   const [historyAlt, setHistoryAlt] = useState(null)
   const [activeHistoryId, setActiveHistoryId] = useState(null)
 
-  // 마운트 시 KR/US 파이프라인 병렬 자동 실행
+  // 마운트 시: admin → 파이프라인 실행, 일반 유저 → 기존 보고서 조회
   useEffect(() => {
     if (didRun.current) return
     didRun.current = true
@@ -39,25 +46,38 @@ export default function ReportPage() {
     setGenerating(true)
     setGenError(null)
 
-    Promise.allSettled([
-      runPipelineSync('KR'),
-      runPipelineSync('US'),
-    ]).then(async ([krResult, usResult]) => {
-      const krId = krResult.status === 'fulfilled' ? krResult.value.report_id : null
-      const usId = usResult.status === 'fulfilled' ? usResult.value.report_id : null
+    if (isAdmin) {
+      // admin: 파이프라인 실행 (Step 0 중복방지 내장)
+      Promise.allSettled([
+        runPipelineSync('KR'),
+        runPipelineSync('US'),
+      ]).then(async ([krResult, usResult]) => {
+        const krId = krResult.status === 'fulfilled' ? krResult.value.report_id : null
+        const usId = usResult.status === 'fulfilled' ? usResult.value.report_id : null
 
-      // 보고서 상세 병렬 로드
-      const loads = []
-      if (krId) loads.push(fetchReport(krId).then(r => setKrReport(r)).catch(() => {}))
-      if (usId) loads.push(fetchReport(usId).then(r => setUsReport(r)).catch(() => {}))
-      await Promise.allSettled(loads)
+        const loads = []
+        if (krId) loads.push(fetchReport(krId).then(r => setKrReport(r)).catch(() => {}))
+        if (usId) loads.push(fetchReport(usId).then(r => setUsReport(r)).catch(() => {}))
+        await Promise.allSettled(loads)
 
-      if (krResult.status === 'rejected' && usResult.status === 'rejected') {
-        setGenError('보고서 생성에 실패했습니다.')
-      }
+        if (krResult.status === 'rejected' && usResult.status === 'rejected') {
+          setGenError('보고서 생성에 실패했습니다.')
+        }
 
-      reports.load(undefined, 30)
-    }).finally(() => setGenerating(false))
+        reports.load(undefined, 30)
+      }).finally(() => setGenerating(false))
+    } else {
+      // 일반 유저: 오늘 날짜 보고서 조회
+      const today = _todayKST()
+      Promise.allSettled([
+        fetchReportByDate(today, 'KR'),
+        fetchReportByDate(today, 'US'),
+      ]).then(([krResult, usResult]) => {
+        if (krResult.status === 'fulfilled') setKrReport(krResult.value)
+        if (usResult.status === 'fulfilled') setUsReport(usResult.value)
+        reports.load(undefined, 30)
+      }).finally(() => setGenerating(false))
+    }
   }, [])
 
   // 이력에서 보고서 선택
@@ -149,8 +169,10 @@ export default function ReportPage() {
       {!displayLoading && !currentReport && !genError && (
         <div className="text-center py-12 text-gray-400">
           <p className="text-3xl mb-3">📊</p>
-          <p className="text-sm">보고서가 아직 없습니다.</p>
-          <p className="text-xs mt-1">잠시 후 자동으로 생성됩니다.</p>
+          <p className="text-sm">오늘의 보고서가 아직 없습니다.</p>
+          <p className="text-xs mt-1">
+            {isAdmin ? '잠시 후 자동으로 생성됩니다.' : '관리자가 보고서를 생성하면 여기에 표시됩니다.'}
+          </p>
         </div>
       )}
 

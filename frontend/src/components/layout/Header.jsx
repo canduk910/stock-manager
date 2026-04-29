@@ -31,6 +31,7 @@ const NAV_GROUPS = [
         { to: '/tax', label: '양도세' },
       ],
     },
+    { to: '/admin', label: 'AI관리' },
   ],
 ]
 

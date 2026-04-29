@@ -1,5 +1,26 @@
 # 변경 이력
 
+## 2026-04-29 — AI 게이트웨이 + 섹터 추천 개선 + PER 수정 + 보고서 접근 수정
+
+### AI 게이트웨이 + 사용량 관리 신규
+- `services/ai_gateway.py`: 모든 OpenAI API 호출의 단일 진입점 (`call_openai_chat()`). 유저별 일일 쿼터 체크 + 사용량 기록. `AiQuotaExceededError`(429)
+- 기존 6개 서비스의 OpenAI 직접 호출을 게이트웨이로 전환 (advisory_service, sector_recommendation_service, portfolio_advisor_service, macro_service×2, advisory_fetcher)
+- `db/models/admin.py`: 3개 테이블 (ai_usage_log, ai_limits, audit_log)
+- `db/repositories/admin_repo.py`: 사용량/한도/감사로그 CRUD
+- `routers/admin.py`: Admin API 6개 엔드포인트 (사용량 조회, 한도 설정, 감사 로그)
+- `AdminPage.jsx`: Admin 관리 페이지 3탭 (사용량/한도/감사로그)
+
+### 섹터 추천 데이터 기반 개선
+- `stock/macro_fetcher.py`: 한국 섹터 ETF 13종 수익률 수집 (`fetch_sector_returns_kr()`) — KODEX 반도체/2차전지/건설/바이오 등
+- `services/sector_recommendation_service.py`: GPT 프롬프트에 실제 섹터 ETF 수익률 테이블 전달. defensive 하드코딩 규칙 제거 → 실제 가격 추세 기반 모멘텀/역발상 분류
+- `services/pipeline_service.py`: 파이프라인에서 시장별 섹터 수익률 수집 후 전달
+
+### 버그 수정
+- `stock/market.py`: PER fallback — yfinance forwardPE 부정확(골프존 4.61→12.06) → 시총/TTM순이익 직접 계산 (PBR/ROE fallback과 동일 패턴)
+- `ReportPage.jsx`: 비admin 유저 접근 시 "보고서 생성 실패" 에러 → fetchReportByDate로 기존 보고서 조회. 보고서 없을 때 안내 메시지 분기
+
+---
+
 ## 2026-04-29 — DART 계정명 정규식 전환 + 밸류에이션 차트 이동 + UI 개선
 
 ### 리팩토링

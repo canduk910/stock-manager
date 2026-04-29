@@ -616,7 +616,7 @@ def _parse_response(content: str) -> dict:
 
 # ── 오케스트레이션 ───────────────────────────────────────────────────────────
 
-def analyze_portfolio(balance_data: dict, force_refresh: bool = False) -> dict:
+def analyze_portfolio(balance_data: dict, force_refresh: bool = False, user_id=None) -> dict:
     """포트폴리오 AI 자문 전체 파이프라인.
 
     1. OPENAI_API_KEY 확인
@@ -666,15 +666,16 @@ def analyze_portfolio(balance_data: dict, force_refresh: bool = False) -> dict:
     system_prompt, user_prompt = _build_prompt(context, macro_ctx, regime, regime_desc)
 
     # OpenAI 호출 (Phase 3: 재시도 로직)
-    def _call_portfolio_openai(max_tokens: int) -> tuple[str, str]:
-        from openai import OpenAI
-        client = OpenAI(api_key=OPENAI_API_KEY)
-        resp = client.chat.completions.create(
-            model=OPENAI_MODEL,
+    def _call_portfolio_openai(max_tokens: int, check_quota: bool = True) -> tuple[str, str]:
+        from services.ai_gateway import call_openai_chat
+        resp = call_openai_chat(
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
+            user_id=user_id,
+            service_name="portfolio_advisor",
+            check_quota=check_quota,
             max_completion_tokens=max_tokens,
             response_format={"type": "json_object"},
         )
@@ -682,6 +683,7 @@ def analyze_portfolio(balance_data: dict, force_refresh: bool = False) -> dict:
 
     try:
         import time as _time
+        from services.ai_gateway import AiQuotaExceededError
 
         content, finish_reason = _call_portfolio_openai(10000)
 
@@ -689,7 +691,7 @@ def analyze_portfolio(balance_data: dict, force_refresh: bool = False) -> dict:
         if finish_reason == "length":
             logger.warning("포트폴리오 자문 토큰 잘림 1차 — 12000으로 재시도")
             _time.sleep(1)
-            content, finish_reason = _call_portfolio_openai(12000)
+            content, finish_reason = _call_portfolio_openai(12000, check_quota=False)
             if finish_reason == "length":
                 raise ExternalAPIError("포트폴리오 자문 응답이 토큰 제한으로 잘렸습니다.")
 
@@ -699,7 +701,7 @@ def analyze_portfolio(balance_data: dict, force_refresh: bool = False) -> dict:
         if "raw" in analysis and "diagnosis" not in analysis:
             logger.error("GPT 응답 JSON 파싱 실패. 원문 길이: %d", len(content))
             raise ExternalAPIError("AI 응답을 파싱할 수 없습니다. 다시 시도해주세요.")
-    except (ConfigError, PaymentRequiredError, ExternalAPIError):
+    except (ConfigError, PaymentRequiredError, ExternalAPIError, AiQuotaExceededError):
         raise
     except Exception as e:
         err_str = str(e)
@@ -712,7 +714,7 @@ def analyze_portfolio(balance_data: dict, force_refresh: bool = False) -> dict:
         logger.warning("포트폴리오 OpenAI 1차 실패: %s — 2초 후 재시도", err_str[:200])
         _time.sleep(2)
         try:
-            content, _ = _call_portfolio_openai(10000)
+            content, _ = _call_portfolio_openai(10000, check_quota=False)
             analysis = _parse_response(content)
             if "raw" in analysis and "diagnosis" not in analysis:
                 raise ExternalAPIError("AI 응답을 파싱할 수 없습니다.")
