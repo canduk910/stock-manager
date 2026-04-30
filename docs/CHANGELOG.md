@@ -1,5 +1,43 @@
 # 변경 이력
 
+## 2026-05-01 — 애널리스트 보고서 본문 → 종목 AI 자문 통합
+
+### 애널리스트 컨센서스 신규
+- `stock/analyst_pdf.py`: 증권사 PDF 본문 추출+요약 신규. `pdfplumber` 첫 5페이지 → `gpt-4o-mini` JSON 응답으로 6항목 강제 추출(catalyst 2 / risk 2 / TP 산정 근거 1 / EPS 추정 변경 1) → 300자 결합 텍스트
+- 환각 방지: 시스템 프롬프트에 "본문에 명시된 숫자만 인용. 추정·외삽·외부 지식 금지" 명시
+- PDF 다운로드 보안: 10MB 한도, Content-Type 검증, 모든 예외 흡수, 짧은 본문(100자 미만) 시 요약 생략
+- 영구 캐시: `cache.db`에 `analyst:summary:{md5(pdf_url)}` 키. 동일 PDF 재요청 시 OpenAI 호출 0회
+- `services/ai_gateway`: `service_name="analyst_summary"`, `user_id=None`(시스템 호출, 유저 일일 쿼터 미차감, `ai_usage_log`엔 기록)
+
+### research_collector 6번째 카테고리
+- `stock/research_collector.py`: `analyst_consensus` 카테고리 추가 (5→6 카테고리). `ThreadPoolExecutor` 병렬 슬롯에 합류
+- KR/US 의견 매핑 31개 (`Strong Buy`/`강력매수`/`Buy`/`매수`/`Outperform`/`Overweight`/`Hold`/`Neutral`/`보유`/`Sector Perform`/`Sell`/`Underperform`/`매도`/`Strong Sell`/`강력매도` 등) → 5단계 정규화 → 3단계 재집계
+- 컨센서스 통계: 중앙값(평균 대비 극단치 강건) + 평균 + 표준편차 + dispersion(stdev/median) + upside_pct_median. `target_price=None` 행은 분모 제외, count는 전체
+- 시간축 추이: 동일 broker 6개월 변화율 평균 → 5단계 라벨(`strong_up`/`up`/`flat`/`down`/`strong_down`). 30%+ 동시 상향 broker 50% 초과 → `consensus_overheated=True`
+- 영속: `AnalystRepository.upsert_report` 호출로 `analyst_reports` 테이블에 저장 → `get_target_price_history(180일)` 조회
+
+### 신규 DB 테이블
+- `db/models/analyst.py` `AnalystReport`: `id, code, market, broker, target_price(BigInteger), opinion, title, pdf_url, summary(Text), published_at, fetched_at`. 유니크 `(code, market, broker, published_at, title)` + 인덱스 `(code, market, published_at)`
+- `db/repositories/analyst_repo.py` `AnalystRepository`: `upsert_report` (UPSERT — 동일 키 시 summary/target_price/opinion/fetched_at만 갱신) / `list_reports(since=, limit=)` / `get_target_price_history(days=180)`. 미래 날짜·`YY.MM.DD` 형식 자동 보정
+- `alembic/versions/b3d4e5f6a7c8_add_analyst_reports_table.py`: 단일 head 유지 (parent: `9cda1c3787e5`)
+
+### advisory_service 12번 섹션
+- `services/advisory_service.py`: `_build_consensus_section()` 헬퍼 추가 + `_build_prompt()` 끝에 합류
+- 체제별 차등 표시: defensive → 빈 문자열(섹션 자체 미표시) / cautious → 정상 표시 + "50% 가중 감산" 경고 라인 / accumulation·selective → 정상
+- KR 출력: 중앙 목표가 + 현재가 대비 upside% + 표준편차 + dispersion + 매수/보유/매도 분포 + momentum_signal + 과열 시 경고 + 최근 3건(증권사·날짜·의견·TP·요약 100자) + 6개월 추이
+- US 출력: 등급 변경 이력 형식 (Goldman: Buy → Sell 등)
+- 시스템 프롬프트 강화: "증권사 컨센서스를 무비판적으로 수용하지 말 것 — 합의도(dispersion)/과열(consensus_overheated)/체제 신뢰도를 종합 판단"
+- Value Trap 5규칙 → 6규칙: 6) 증권사 컨센서스 과열(consensus_overheated=True 시 가산 1점)
+- 사전 계산값(grade/score/진입가/손절가) 불변 — 컨센서스는 GPT reasoning input일 뿐 (`compute_grade_7point`/`compute_position_size` 시그니처 변경 없음)
+
+### 테스트
+- `tests/unit/test_analyst_imports.py` (17 LOC), `test_analyst_pdf.py` (299 LOC)
+- `tests/integration/test_analyst_repo.py` (173 LOC), `test_research_collector_analyst.py` (343 LOC), `test_advisory_prompt_analyst.py` (317 LOC)
+- 부서장 직접 검증: 의견 정규화 / 컨센서스 산출 / momentum 계산 / `_build_consensus_section` 6/6 시나리오 / SQLite 마이그레이션 + Repository CRUD 모두 PASS
+
+### 의존성
+- `requirements.txt`: `pdfplumber>=0.11` 추가
+
 ## 2026-04-30 — 스크리너 안정화 + 관심종목 UX + 섹터히트맵 3Y + Advisory 버그수정 + PER/DART 개선
 
 ### 버그 수정

@@ -25,6 +25,9 @@
 | `display.py` | Rich 테이블 렌더링 + CSV 내보내기 |
 | `cache.py` | SQLite 캐시 (TTL 지원) |
 | `cli.py` | Click CLI (`python -m stock watch ...`) |
+| `naver_research.py` | 네이버 증권 리서치 스크래핑. `fetch_analyst_reports(code, limit=20)` — 증권사별 최신 목표가+의견+제목+PDF 링크. cache.db 6시간. |
+| `analyst_pdf.py` | 증권사 PDF 본문 추출+요약. `summarize_one(pdf_url)` — pdfplumber 첫 5페이지 → gpt-4o-mini JSON 6항목(catalyst 2/risk 2/TP 근거/EPS 변경) → 300자. cache.db 영구. ai_gateway 시스템 호출(`user_id=None`, `service_name="analyst_summary"`). 실패 시 빈 문자열. |
+| `research_collector.py` | 리서치 데이터 6카테고리 병렬 수집. `collect_all_research(code, market, name)` — basic_macro/valuation_band/management/capital_actions/industry_peers/**analyst_consensus**. KR 컨센서스: `_compute_consensus()`(중앙값/평균/stdev/dispersion/upside), `_compute_momentum()`(5단계 + consensus_overheated). KR/US 의견 매핑 31개. `AnalystRepository.upsert_report` 호출로 영속. |
 
 ---
 

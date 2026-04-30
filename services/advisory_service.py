@@ -639,7 +639,8 @@ def _build_system_prompt(regime: str, regime_desc: str) -> str:
         "당신은 20년 경력의 베테랑 수석 에퀴티 리서치 애널리스트이다. "
         "'안전마진'과 '전통적 가치'를 중시하는 투자자의 관점에서, 비판적 투자 보고서를 JSON으로 작성한다. "
         "예스맨의 태도를 버리고 냉철하게 분석하라. 모든 결론은 데이터에 근거해야 하며, "
-        "낙관적 전망보다 리스크 관리에 우선순위를 둔다.\n\n"
+        "낙관적 전망보다 리스크 관리에 우선순위를 둔다. "
+        "증권사 컨센서스를 무비판적으로 수용하지 말 것 — 합의도(dispersion)/과열(consensus_overheated)/체제 신뢰도를 종합 판단할 것.\n\n"
 
         "【보고서 핵심 구조 — 6대 분석 항목 (JSON에 반드시 포함)】\n\n"
 
@@ -668,7 +669,7 @@ def _build_system_prompt(regime: str, regime_desc: str) -> str:
 
         "MacroSentinel: 버핏지수×공포탐욕 매트릭스. VIX>35→extreme_fear 강제.\n"
         "OrderAdvisor: 손절 A=-8%/B+=-10%/B=-12%/C·D=진입금지. grade_factor A=1.0/B+=0.75/B=0.50/C·D=0. 분할매수 50-30-20%. R:R≥2.0.\n"
-        "ValueScreener Value Trap 5규칙 (2개↑ 시 경고): 1)매출CAGR<0%+PER<5, 2)영업이익률 3년↓, 3)FCF 3년음수, 4)부채비율 30%p↑, 5)배당중단.\n"
+        "ValueScreener Value Trap 6규칙 (2개↑ 시 경고): 1)매출CAGR<0%+PER<5, 2)영업이익률 3년↓, 3)FCF 3년음수, 4)부채비율 30%p↑, 5)배당중단, 6)증권사 컨센서스 과열(consensus_overheated=True 시 가산 1점).\n"
         "KIS 퀀트 (보조): SMA/Momentum/Trend 3전략. consensus=BUY+강도>0.6이면 확인.\n\n"
 
         f"【현재 매크로 환경】\n{regime_rule}\n\n"
@@ -676,6 +677,138 @@ def _build_system_prompt(regime: str, regime_desc: str) -> str:
         "defensive 체제에서는 어떤 경우에도 '매수' 등급을 부여하지 마라.\n"
         "C/D 등급은 매수 추천 금지 (최대 '관망'). 모든 논리적 허점은 가차 없이 비판하라."
     )
+
+
+def _format_money(value, market: str) -> str:
+    """금액 표기 — KR: 천원 단위 콤마, US: $."""
+    if value is None:
+        return "N/A"
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+    if (market or "").upper() == "KR":
+        return f"{int(round(v)):,}원"
+    return f"${v:,.2f}"
+
+
+def _build_consensus_section(
+    consensus_data: Optional[dict],
+    market: str,
+    regime: str,
+) -> str:
+    """REQ-ANALYST-08: 증권사 컨센서스 12번 섹션 빌더.
+
+    체제별 차등:
+      - defensive → 빈 문자열 (섹션 자체 미표시)
+      - cautious → 50% 감산 경고 라인 포함
+      - accumulation/selective → 정상
+
+    데이터 0건(data_source='empty') → 빈 문자열.
+    US (target_price 부재) → 등급 변경 이력 형식.
+    """
+    # defensive 체제 가드 (REQ-ANALYST-08)
+    if (regime or "").lower() == "defensive":
+        return ""
+
+    if not consensus_data or not isinstance(consensus_data, dict):
+        return ""
+
+    data_source = consensus_data.get("data_source") or "empty"
+    if data_source == "empty":
+        return ""
+
+    reports = consensus_data.get("reports") or []
+    if not reports:
+        return ""
+
+    consensus = consensus_data.get("consensus") or {}
+    momentum_signal = consensus_data.get("momentum_signal") or "flat"
+    overheated = bool(consensus_data.get("consensus_overheated"))
+    history_line = consensus_data.get("history_line") or ""
+    is_us_grades = data_source == "yfinance_upgrades" or (
+        consensus.get("target_median") is None
+    )
+
+    lines: list[str] = []
+
+    if is_us_grades:
+        # ── US: 등급 변경 이력 형식 ──
+        lines.append("\n## 12. 증권사 등급 변경 이력")
+        lines.append("  최근 3건:")
+        for r in reports[:3]:
+            broker = r.get("broker", "?")
+            date_s = r.get("date", "")
+            title = r.get("title", "")
+            lines.append(f"    - {broker} ({date_s}): {title}")
+        lines.append(f"  momentum_signal: {momentum_signal}")
+    else:
+        # ── KR: 컨센서스 통계 형식 ──
+        lines.append("\n## 12. 증권사 컨센서스")
+        target_median = consensus.get("target_median")
+        upside = consensus.get("upside_pct_median")
+        if target_median is not None:
+            up_str = (
+                f" (현재가 대비 {upside:+.1f}%)" if upside is not None else ""
+            )
+            lines.append(
+                f"  중앙 목표가: {_format_money(target_median, market)}{up_str}"
+            )
+
+        target_mean = consensus.get("target_mean")
+        target_stdev = consensus.get("target_stdev")
+        if target_mean is not None and target_stdev is not None:
+            lines.append(
+                f"  평균: {_format_money(target_mean, market)}, "
+                f"표준편차: {_format_money(target_stdev, market)}"
+            )
+
+        dispersion = consensus.get("target_dispersion")
+        if dispersion is not None:
+            lines.append(f"  합의도(dispersion): {dispersion} (0.2 미만=강합의)")
+
+        d3 = consensus.get("opinion_dist_3") or {}
+        count = consensus.get("count", 0)
+        lines.append(
+            f"  매수 {d3.get('buy', 0)} / 보유 {d3.get('hold', 0)} / "
+            f"매도 {d3.get('sell', 0)} (3단계 정규화, 총 {count}건)"
+        )
+        lines.append(f"  momentum_signal: {momentum_signal}")
+
+        if overheated:
+            lines.append(
+                "  ⚠ 과열 시그널: 6개월 내 동일 증권사들이 평균 30% 이상 상향. "
+                "Value Trap 평가 시 가중 반영."
+            )
+
+        if (regime or "").lower() == "cautious":
+            lines.append(
+                "  ⚠ 하락 추세장에서는 증권사 컨센서스가 늦은 하향 경향. "
+                "신뢰도 50% 가중 감산 필요."
+            )
+
+        # 최근 3건 요약
+        lines.append("")
+        lines.append("  최근 3건 요약:")
+        for r in reports[:3]:
+            broker = r.get("broker", "?")
+            date_s = r.get("date", "")
+            opinion = r.get("opinion", "")
+            tp = r.get("target_price")
+            tp_str = (
+                f", TP {_format_money(tp, market)}" if tp is not None else ""
+            )
+            summary = (r.get("summary") or "").strip()
+            summary_disp = summary[:100] if summary else "(본문 요약 없음)"
+            lines.append(
+                f"    - {broker} ({date_s}, {opinion}{tp_str}): {summary_disp}"
+            )
+
+        if history_line:
+            lines.append("")
+            lines.append(f"  6개월 목표가 추이: {history_line}")
+
+    return "\n".join(lines)
 
 
 def _build_prompt(code: str, market: str, name: str, fundamental: dict, technical: dict,
@@ -1018,6 +1151,13 @@ def _build_prompt(code: str, market: str, name: str, fundamental: dict, technica
     industry = ip.get("industry", "")
     if sector or industry:
         research_sections.append(f"\n  섹터: {sector}, 산업: {industry}")
+
+    # ── 12번 섹션: 증권사 컨센서스 (REQ-ANALYST-08) ──
+    consensus_block = _build_consensus_section(
+        research.get("analyst_consensus"), market, regime,
+    )
+    if consensus_block:
+        research_sections.append(consensus_block)
 
     if research_sections:
         prompt += "\n".join(research_sections)

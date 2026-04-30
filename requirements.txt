@@ -9,6 +9,7 @@ pykrx
 yfinance
 websockets
 openai
+pdfplumber>=0.11
 feedparser
 sqlalchemy
 alembic

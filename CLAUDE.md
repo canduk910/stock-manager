@@ -178,6 +178,7 @@ frontend/           React SPA (Vite + Tailwind + Recharts)
 | ai_usage_log | AiUsageLog | AdminRepository | AI API 호출 일별 사용량 기록 |
 | ai_limits | AiLimit | AdminRepository | AI 일별 호출 한도 설정 (기본+유저별) |
 | audit_log | AuditLog | AdminRepository | 관리자 작업 감사 로그 |
+| analyst_reports | AnalystReport | AnalystRepository | 증권사 리포트 메타데이터 + PDF 요약 + 목표가 시간축 추이 |
 
 - **Adapter 패턴**: `stock/store.py` 등 7개 파일은 Repository 위임 래퍼 (기존 함수 시그니처 100% 유지)
 - **Session**: `get_session()` = Store 래퍼 전용 contextmanager, `get_db()` = FastAPI Depends 전용
@@ -343,3 +344,4 @@ pytest tests/api/ -v          # API 엔드포인트 테스트
 | 2026-04-30 | 증권사 목표가 팝업 | naver_research, advisory, AnalystReportsModal | 목표주가 클릭→증권사별 목표가+리포트+PDF 링크 모달 |
 | 2026-04-30 | HY OAS 하워드 막스 시계추 | macro_fetcher, CreditSpreadSection | FRED OAS 5년 시계열+시계추 게이지(탐욕/정상/공포)+임계선 |
 | 2026-04-30 | 코드 품질 개선 | DetailPage, OrderPage, cache.py, order_fno.py | useRef 수정, setTimeout cleanup, 캐시 로깅, hashkey 로깅 |
+| 2026-05-01 | 애널리스트 보고서 → AI 자문 통합 | stock/analyst_pdf, db/models/analyst, db/repositories/analyst_repo, alembic, stock/research_collector(6번째 카테고리), services/advisory_service(12번 섹션), 5개 신규 테스트 | PDF 본문(catalyst 2/risk 2/TP 근거/EPS 변경 6항목) gpt-4o-mini 요약 + 영구 캐시 + analyst_reports 테이블 영속. 컨센서스 통계(중앙값/dispersion/momentum 5단계/consensus_overheated). 체제별 차등 표시(defensive 미표시, cautious 50% 감산). Value Trap 6번째 규칙. |

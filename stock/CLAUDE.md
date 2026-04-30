@@ -10,7 +10,7 @@ CLI와 API 라우터 양쪽에서 공용으로 사용한다. 비즈니스 데이
 | `store.py` | 관심종목 CRUD + 순서 관리. `db/repositories/watchlist_repo.py` 위임 래퍼. 기존 함수 시그니처 100% 유지. |
 | `order_store.py` | 주문 이력 + 예약주문 CRUD. `db/repositories/order_repo.py` 위임 래퍼. 기존 함수 시그니처 100% 유지. |
 | `advisory_store.py` | AI자문 CRUD. `db/repositories/advisory_repo.py` 위임 래퍼. `save_cache(research_data=)` + `save_research_data()` 추가. |
-| `research_collector.py` | **리서치 데이터 5카테고리 수집** (신규). LLM 비용 없음. 거시지표/밸류에이션밴드/경영진/공시/뉴스를 ThreadPoolExecutor 병렬 수집. `collect_all_research()`. |
+| `research_collector.py` | **리서치 데이터 6카테고리 수집**. 거시지표/밸류에이션밴드/경영진/공시/뉴스/**증권사 컨센서스** ThreadPoolExecutor 병렬. `collect_all_research()`. 컨센서스: KR=`naver_research`+`analyst_pdf` 요약+`AnalystRepository` 영속 + 중앙값/dispersion/upside/momentum_signal/consensus_overheated 산출. US=`fetch_upgrades_downgrades` 메타데이터만. |
 | `advisory_fetcher.py` | AI자문 OHLCV 수집 + 사업부문 추론 + **`fetch_valuation_stats()`**(PER/PBR 5년 통계). 기술지표 계산은 indicators.py 위임. KIS 1분봉 4시간대 병렬 수집(ThreadPoolExecutor). |
 | `stock_info_store.py` | 종목 정보 영속 캐시. `db/repositories/stock_info_repo.py` 위임 래퍼. 시세/지표/재무/수익률 영역별 TTL. write-through 패턴. |
 | `indicators.py` | 기술적 지표 순수 계산 (MACD/RSI/Stochastic/BB/MA/ATR/**volume_signal**/**bb_position**). 외부 의존 없음. |
@@ -22,6 +22,7 @@ CLI와 API 라우터 양쪽에서 공용으로 사용한다. 비즈니스 데이
 | `dart_fin.py` | OpenDart 재무제표 조회 (최대 10년) + **`fetch_quarterly_financials()`**(DART 누계→분기 환산). **`calc_interest_coverage()`** 이자보상배율 계산 헬퍼. `fetch_financials_multi_year()`: 연도별 API 호출로 각 연도 고유 `rcept_no`(DART 보고서 링크) 보장. |
 | `yf_client.py` | yfinance 기반 해외주식 데이터. EPS/Graham Number 지표 제공. 매출추정 3단계 fallback. **`fetch_quarterly_financials_yf()`**(분기 실적). **`fetch_upgrades_downgrades()`**(증권사 등급 변경 이력). **리서치용**: `fetch_company_officers()`/`fetch_major_holders()`/`fetch_earnings_dates()`/`fetch_macro_indicators()`/`fetch_sector_peers()`. |
 | `naver_research.py` | 네이버 증권 리서치 스크래핑. 증권사별 최신 목표가+투자의견+리포트 제목+PDF 링크 수집. `fetch_analyst_reports()`. 캐시 6시간. |
+| `analyst_pdf.py` | 증권사 PDF 본문 추출+요약 (신규). `pdfplumber` 첫 5페이지 → gpt-4o-mini JSON 6항목(catalyst 2/risk 2/TP 근거/EPS 변경) → 300자 결합. 다운로드 10MB·15s 한도, Content-Type 검증, 모든 예외 흡수. 캐시 키 `analyst:summary:{md5(pdf_url)}` 영구. `summarize_one(pdf_url)`. `ai_gateway` 시스템 호출(`user_id=None`, `service_name="analyst_summary"`, 유저 쿼터 미차감). |
 | `fno_master.py` | KIS 선물옵션 마스터파일 다운로드/파싱/검색. 인메모리 캐시(24h) → cache.db(7일) → ZIP 3단계. main.py에서 pre-warm. |
 | `sec_filings.py` | SEC EDGAR 미국 10-K/10-Q 공시 조회. |
 | `macro_fetcher.py` | 매크로 분석 데이터 수집: yfinance 지수/VIX/버핏/공포탐욕 + **금리곡선(^IRX/^FVX/^TNX/^TYX)/신용스프레드(HYG/LQD+FRED OAS)/환율(4쌍)/원자재(5종)/섹터ETF(US 11종+**KR 13종**)/국면입력**. feedparser RSS(다중 피드+중복제거). 캐시 키 `macro:*`. `fetch_sector_returns()`/`fetch_sector_returns_kr()`: 3년 히스토리 기반 1M/3M/6M/1Y/**3Y** 수익률 수집. `_fetch_fred_oas()`: FRED HY OAS(BAMLH0A0HYM2) 5년 시계열+하워드 막스 시계추(탐욕/정상/공포). |
