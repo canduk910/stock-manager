@@ -340,3 +340,6 @@ pytest tests/api/ -v          # API 엔드포인트 테스트
 | 2026-04-30 | 섹터히트맵 3Y 추가 | macro_fetcher, SectorHeatmapSection | 3년 히스토리 조회 + 3Y 컬럼 추가. 현재가 컬럼 제거 |
 | 2026-04-30 | PER 산출 개선 | stock/market.py | forwardPE 제거 + fallback을 연간 income_stmt 기반으로 변경 + trailingPE 보존 |
 | 2026-04-30 | DART 보고서 링크 수정 | stock/dart_fin.py | 3년 배치→연도별 API 호출로 각 연도 고유 rcept_no 보장 |
+| 2026-04-30 | 증권사 목표가 팝업 | naver_research, advisory, AnalystReportsModal | 목표주가 클릭→증권사별 목표가+리포트+PDF 링크 모달 |
+| 2026-04-30 | HY OAS 하워드 막스 시계추 | macro_fetcher, CreditSpreadSection | FRED OAS 5년 시계열+시계추 게이지(탐욕/정상/공포)+임계선 |
+| 2026-04-30 | 코드 품질 개선 | DetailPage, OrderPage, cache.py, order_fno.py | useRef 수정, setTimeout cleanup, 캐시 로깅, hashkey 로깅 |

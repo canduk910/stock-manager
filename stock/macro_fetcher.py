@@ -511,12 +511,80 @@ def fetch_yield_curve_data() -> dict:
 
 # ── 신용스프레드 ────────────────────────────────────────────────────────────
 
+def _fetch_fred_oas() -> dict:
+    """FRED에서 HY OAS(BAMLH0A0HYM2) 공식 스프레드 수집 (API 키 불필요).
+
+    하워드 막스의 하이일드 스프레드 프레임워크:
+    - OAS < 3.5%: 탐욕(Greed) — 위험 둔감, 수비적 전환 필요
+    - OAS 3.5~7%: 정상(Normal) — 균형 유지
+    - OAS > 7%: 공포(Fear) — 공격적 매수 기회
+
+    Returns: {"oas_current", "oas_history", "sentiment", "percentile"} 또는 빈 dict
+    """
+    from datetime import date, timedelta
+    import requests as _requests
+
+    try:
+        start = (date.today() - timedelta(days=365 * 5)).strftime("%Y-%m-%d")
+        end = date.today().strftime("%Y-%m-%d")
+        url = (
+            f"https://fred.stlouisfed.org/graph/fredgraph.csv"
+            f"?id=BAMLH0A0HYM2&cosd={start}&coed={end}"
+        )
+        resp = _requests.get(url, timeout=15, headers={"User-Agent": "stock-manager/1.0"})
+        resp.raise_for_status()
+
+        rows = []
+        for line in resp.text.strip().split("\n")[1:]:  # skip header
+            parts = line.strip().split(",")
+            if len(parts) == 2 and parts[1] != ".":
+                try:
+                    rows.append({"date": parts[0], "oas": round(float(parts[1]), 2)})
+                except ValueError:
+                    continue
+
+        if not rows:
+            return {}
+
+        current = rows[-1]["oas"]
+
+        # 하워드 막스 시계추 해석
+        if current < 3.5:
+            sentiment = "greed"
+        elif current > 7.0:
+            sentiment = "fear"
+        else:
+            sentiment = "normal"
+
+        # 백분위수: 현재 OAS가 5년 히스토리에서 몇 %에 해당하는지
+        all_oas = [r["oas"] for r in rows]
+        below = sum(1 for v in all_oas if v <= current)
+        percentile = round(below / len(all_oas) * 100, 1)
+
+        return {
+            "oas_current": current,
+            "oas_history": rows,
+            "sentiment": sentiment,
+            "percentile": percentile,
+        }
+    except Exception as e:
+        logger.warning("FRED OAS 조회 실패: %s", e)
+        return {}
+
+
 def fetch_credit_spread() -> dict:
-    """HYG/LQD 기반 하이일드 신용스프레드 근사."""
-    key = "macro:credit_spread"
+    """HY OAS(FRED) + HYG/LQD 기반 신용스프레드.
+
+    1순위: FRED OAS 공식 데이터 (하워드 막스 프레임워크)
+    2순위: HYG/LQD ETF 수익률 차이 (yfinance)
+    """
+    key = "macro:credit_spread_v2"
     cached = get_cached(key)
     if cached is not None:
         return cached
+
+    # FRED OAS (API 키 불필요)
+    fred_data = _fetch_fred_oas()
 
     try:
         import yfinance as yf
@@ -527,7 +595,7 @@ def fetch_credit_spread() -> dict:
                 info = t.info
                 y = _safe(info.get("yield"))
                 if y is not None:
-                    return round(y * 100, 3)  # decimal → %
+                    return round(y * 100, 3)
                 tady = _safe(info.get("trailingAnnualDividendYield"))
                 if tady is not None:
                     return round(tady * 100, 3)
@@ -550,7 +618,6 @@ def fetch_credit_spread() -> dict:
             lqd_hist = lqd_t.history(period="max", interval="1wk")
 
             if not hyg_hist.empty and not lqd_hist.empty:
-                # 날짜 교차
                 hyg_map = {ts.strftime("%Y-%m-%d"): _safe(row["Close"]) for ts, row in hyg_hist.iterrows()}
                 lqd_map = {ts.strftime("%Y-%m-%d"): _safe(row["Close"]) for ts, row in lqd_hist.iterrows()}
                 common_dates = sorted(set(hyg_map.keys()) & set(lqd_map.keys()))
@@ -562,16 +629,14 @@ def fetch_credit_spread() -> dict:
                         ratio = round(hv / lv, 4)
                         history.append({"date": dt, "hyg": round(hv, 2), "lqd": round(lv, 2), "ratio": ratio})
 
-                # 방향 판단: 최근 20일 MA vs 현재 비율
                 if len(history) >= 20:
                     ratios = [h["ratio"] for h in history]
                     ma20 = sum(ratios[-20:]) / 20
-                    current_ratio = ratios[-1]
-                    diff = current_ratio - ma20
+                    diff = ratios[-1] - ma20
                     if diff < -0.002:
-                        direction = "widening"   # HYG 상대 하락 = 스프레드 확대
+                        direction = "widening"
                     elif diff > 0.002:
-                        direction = "narrowing"  # HYG 상대 상승 = 스프레드 축소
+                        direction = "narrowing"
                     else:
                         direction = "stable"
         except Exception as e:
@@ -583,6 +648,11 @@ def fetch_credit_spread() -> dict:
             "spread": spread,
             "spread_direction": direction,
             "history": history,
+            # FRED OAS 데이터 (하워드 막스 프레임워크)
+            "oas_current": fred_data.get("oas_current"),
+            "oas_history": fred_data.get("oas_history", []),
+            "oas_sentiment": fred_data.get("sentiment"),
+            "oas_percentile": fred_data.get("percentile"),
         }
         set_cached(key, result, ttl_hours=1)
         return result
@@ -594,6 +664,10 @@ def fetch_credit_spread() -> dict:
             "spread": None,
             "spread_direction": "stable",
             "history": [],
+            "oas_current": fred_data.get("oas_current"),
+            "oas_history": fred_data.get("oas_history", []),
+            "oas_sentiment": fred_data.get("sentiment"),
+            "oas_percentile": fred_data.get("percentile"),
         }
 
 

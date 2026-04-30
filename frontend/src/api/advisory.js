@@ -58,3 +58,7 @@ export const collectResearchData = (code, market = 'KR', name = null) => {
 // ── OHLCV 타임프레임별 조회 ────────────────────────────────────────────────
 export const fetchAdvisoryOhlcv = (code, market = 'KR', interval = '15m', period = '60d') =>
   apiFetch(`/api/advisory/${encodeURIComponent(code)}/ohlcv?market=${market}&interval=${interval}&period=${period}`)
+
+// ── 증권사별 목표가 + 리포트 ──────────────────────────────────────────────
+export const fetchAnalystReports = (code, market = 'KR') =>
+  apiFetch(`/api/advisory/${encodeURIComponent(code)}/analyst-reports?market=${market}`)

@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useDetailReport } from '../hooks/useDetail'
 import { useAdvisoryData, useAdvisoryReport } from '../hooks/useAdvisory'
@@ -63,16 +63,16 @@ export default function DetailPage() {
   const { data: advData, loading: advLoading, error: advError, load: loadAdvData, refresh: refreshAdvData } = useAdvisoryData()
   const { report, history: reportHistory, loading: reportLoading, error: reportError, load: loadReport, generate, loadById: loadReportById } = useAdvisoryReport()
   // advisory 데이터 lazy load: 종합리포트 탭 + cagr 외 서브탭 최초 진입 시
-  const advLoadedRef = useState(false)
+  const advLoadedRef = useRef(false)
 
   useEffect(() => {
     if (symbol) load(symbol)
   }, [symbol, load])
 
   useEffect(() => {
-    if (activeTab === 'report' && subTab !== 'cagr' && symbol && !advData && !advLoading && !advLoadedRef[0]) {
+    if (activeTab === 'report' && subTab !== 'cagr' && symbol && !advData && !advLoading && !advLoadedRef.current) {
       const market = /^\d{6}$/.test(symbol) ? 'KR' : 'US'
-      advLoadedRef[0] = true
+      advLoadedRef.current = true
       loadAdvData(symbol, market)
       loadReport(symbol, market)
     }
@@ -81,7 +81,7 @@ export default function DetailPage() {
   const market = /^\d{6}$/.test(symbol) ? 'KR' : 'US'
 
   const handleRefresh = useCallback(() => {
-    advLoadedRef[0] = true
+    advLoadedRef.current = true
     refreshAdvData(symbol, market, data?.basic?.name)
   }, [symbol, market, data, refreshAdvData]) // eslint-disable-line
 
@@ -217,7 +217,7 @@ export default function DetailPage() {
                       </p>
                     )}
                     {!advLoading && advData && (
-                      <FundamentalPanel data={advData} market={market} />
+                      <FundamentalPanel data={advData} market={market} code={symbol} />
                     )}
                   </div>
                 )}

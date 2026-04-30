@@ -103,6 +103,10 @@ export default function OrderPage({ notify }) {
 
   // 초기 마운트 여부 추적 (quoteSymbol 변경 useEffect 중복 호출 방지)
   const isMounted = useRef(false)
+  const orderTimerRef = useRef(null)
+
+  // 언마운트 시 타이머 정리
+  useEffect(() => () => { if (orderTimerRef.current) clearTimeout(orderTimerRef.current) }, [])
 
   // 탭 변경 시 해당 탭 데이터 로드
   useEffect(() => {
@@ -164,7 +168,8 @@ export default function OrderPage({ notify }) {
       setPendingOrder(null)
       notify?.(`주문 발송 완료: ${order.symbol_name || order.symbol} ${order.side === 'buy' ? '매수' : '매도'} ${order.quantity}주`, 'success')
       // 3초 뒤 미체결/체결 자동 갱신
-      setTimeout(() => {
+      if (orderTimerRef.current) clearTimeout(orderTimerRef.current)
+      orderTimerRef.current = setTimeout(() => {
         loadOpen(market)
         loadExec(market)
       }, 3000)

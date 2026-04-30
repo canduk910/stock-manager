@@ -68,7 +68,8 @@ def place_fno_order(
 
     try:
         hashkey = issue_hashkey(body)
-    except Exception:
+    except Exception as e:
+        logger.warning("선물옵션 hashkey 발급 실패, 미포함으로 진행: %s", e)
         hashkey = None
 
     headers = make_headers(token, app_key, app_secret, tr_id, hashkey=hashkey)
@@ -223,7 +224,8 @@ def modify_fno_order(
     }
     try:
         hashkey = issue_hashkey(body)
-    except Exception:
+    except Exception as e:
+        logger.warning("선물옵션 hashkey 발급 실패, 미포함으로 진행: %s", e)
         hashkey = None
     headers = make_headers(token, app_key, app_secret, tr_id, hashkey=hashkey)
     try:
@@ -260,7 +262,8 @@ def cancel_fno_order(
     }
     try:
         hashkey = issue_hashkey(body)
-    except Exception:
+    except Exception as e:
+        logger.warning("선물옵션 hashkey 발급 실패, 미포함으로 진행: %s", e)
         hashkey = None
     headers = make_headers(token, app_key, app_secret, tr_id, hashkey=hashkey)
     try:

@@ -69,7 +69,8 @@ frontend/
       order/              OrderForm, OrderConfirmModal, OpenOrdersTable, ModifyOrderModal,
                           ExecutionsTable, OrderHistoryTable, ReservationForm, ReservationsTable, SyncButton,
                           OrderbookPanel (실시간 호가창)
-      advisory/           FundamentalPanel, TechnicalPanel, AIReportPanel (v3 통합: 6대비판분석+전략+시나리오), ResearchDataPanel (입력데이터 미리보기)
+      advisory/           FundamentalPanel, TechnicalPanel, AIReportPanel (v3 통합: 6대비판분석+전략+시나리오), ResearchDataPanel (입력데이터 미리보기),
+                          AnalystReportsModal (증권사별 목표가+리포트 팝업, KR=네이버리서치/US=yfinance등급이력)
       report/             ReportDetailView (체제카드+지수+섹터추천+종목추천, v1 Markdown 폴백),
                           SectorConceptTabs (3컨셉 탭: 모멘텀/역발상/3개월선점, WatchlistButton+기등록 ★ 포함),
                           ReportHistoryList (과거 보고서 이력 카드, sector_summary 표시)
@@ -96,7 +97,7 @@ frontend/
                           NewsSection (한국+NYT 2컬럼), InvestorSection (4명 투자자 코멘트 카드),
                           MacroCycleSection (4단계 경기국면 다이어그램+**투자체제 나란히 표시**+괴리설명+confidence+지표카드+hover 툴팁),
                           YieldCurveSection (수익률곡선 LineChart+스프레드 시계열 AreaChart),
-                          CreditSpreadSection (HYG/LQD 스프레드+비율 시계열),
+                          CreditSpreadSection (FRED HY OAS 하워드 막스 시계추+게이지+5년차트 + HYG/LQD 스프레드+비율 시계열),
                           CurrencySection (4환율 카드+스파크라인), CommoditySection (5원자재 카드+스파크라인),
                           SectorHeatmapSection (11섹터×5기간(1M/3M/6M/1Y/3Y) 히트맵, 초록~빨강 그라데이션)
       tax/                TaxSummaryCards (4카드: 양도차익/공제/과세표준/세액), TaxBySymbolChart (종목별 BarChart),
@@ -162,7 +163,7 @@ frontend/
 
 ### Advisory 컴포넌트
 
-- **FundamentalPanel**: **사업 개요**(BusinessOverview: #키워드 + 사업설명 + 매출비중 파이차트) → 애널리스트 추정치(매출/순이익/EPS 현재E+차기E) → 계량지표(10개: +EPS+안전마진가격) → 손익계산서(+추정치 바 반투명) → 대차대조표 → 현금흐름표
+- **FundamentalPanel**: **사업 개요**(BusinessOverview: #키워드 + 사업설명 + 매출비중 파이차트) → 애널리스트 추정치(매출/순이익/EPS 현재E+차기E, **목표주가 클릭→AnalystReportsModal**) → 계량지표(10개: +EPS+안전마진가격) → 손익계산서(+추정치 바 반투명) → 대차대조표 → 현금흐름표
 - **TechnicalPanel**: 타임프레임(15m/60m/1d/1wk) + 기간 선택. 시그널 카드 + 캔들스틱+MA+BB → 거래량 → MACD → RSI → Stochastic → PER/PBR 밸류에이션(1d/1wk만, `valuationData` prop + `fetchDetailValuation` API)
 - **AIReportPanel**: **v2 등급 카드**(SafetyGradeBadge A/B+/B/C/D + ScoreBar 3개(등급28/복합100/정합성100) + Value Trap 배너 + recommendation 배지; v1 리포트 시 카드 숨김) → 종합투자의견 배지 → 전략별평가 3컬럼 카드(안전마진가격 표시) → 기술적시그널 → 리스크/투자포인트
 

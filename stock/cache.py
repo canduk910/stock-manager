@@ -1,12 +1,15 @@
 """24시간 TTL SQLite 캐시 (~/stock-watchlist/cache.db)."""
 
 import json
+import logging
 import math
 import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
 
 from stock.db_base import now_kst
+
+logger = logging.getLogger(__name__)
 
 
 def _sanitize(obj):
@@ -55,7 +58,8 @@ def get_cached(key: str):
         if now > exp:
             return None
         return _sanitize(json.loads(value))
-    except Exception:
+    except Exception as e:
+        logger.warning("캐시 읽기 실패 (%s): %s", key, e)
         return None
 
 
@@ -69,16 +73,16 @@ def set_cached(key: str, value, ttl_hours: float = 24) -> None:
                 "INSERT OR REPLACE INTO cache (key, value, expires) VALUES (?, ?, ?)",
                 (key, json.dumps(sanitized, ensure_ascii=False), expires),
             )
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("캐시 쓰기 실패 (%s): %s", key, e)
 
 
 def delete_cached(key: str) -> None:
     try:
         with _conn() as con:
             con.execute("DELETE FROM cache WHERE key = ?", (key,))
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("캐시 삭제 실패 (%s): %s", key, e)
 
 
 def delete_prefix(prefix: str) -> None:
@@ -86,5 +90,5 @@ def delete_prefix(prefix: str) -> None:
     try:
         with _conn() as con:
             con.execute("DELETE FROM cache WHERE key LIKE ?", (f"{prefix}%",))
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("캐시 접두사 삭제 실패 (%s): %s", prefix, e)

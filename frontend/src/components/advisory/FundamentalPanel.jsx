@@ -2,10 +2,12 @@
  * 기본적 분석 탭
  * 계량지표 카드 + 손익계산서 + 대차대조표 + 현금흐름표 + 사업별 매출비중
  */
+import { useState } from 'react'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer,
   PieChart, Pie, Cell,
 } from 'recharts'
+import AnalystReportsModal from './AnalystReportsModal'
 
 const PIE_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6']
 
@@ -407,7 +409,9 @@ const FW_REC_MAP = {
   strong_sell: { label: '적극매도', cls: 'bg-blue-100 text-blue-700 border-blue-300' },
 }
 
-function ForwardEstimatesSection({ forward, market }) {
+function ForwardEstimatesSection({ forward, market, code, currentPrice }) {
+  const [showAnalysts, setShowAnalysts] = useState(false)
+
   if (!forward) return null
   const {
     eps_current_year, eps_forward, forward_pe,
@@ -453,6 +457,7 @@ function ForwardEstimatesSection({ forward, market }) {
       label: '목표주가',
       value: fmtPrice(target_mean_price),
       sub: (target_low_price != null || target_high_price != null) ? `${fmtPrice(target_low_price)} ~ ${fmtPrice(target_high_price)}` : null,
+      clickable: true,
     },
   ].filter(Boolean)
 
@@ -470,20 +475,31 @@ function ForwardEstimatesSection({ forward, market }) {
         </div>
       </div>
       <div className={`grid gap-0 divide-x divide-indigo-100`} style={{ gridTemplateColumns: `repeat(${items.length}, 1fr)` }}>
-        {items.map(({ label, value, sub }) => (
+        {items.map(({ label, value, sub, clickable }) => (
           <div key={label} className="px-4 py-3">
             <div className="text-xs text-gray-500 mb-0.5">{label}</div>
-            <div className="text-sm font-semibold text-gray-800">{value}</div>
+            {clickable && code ? (
+              <button onClick={() => setShowAnalysts(true)}
+                className="text-sm font-semibold text-indigo-600 hover:text-indigo-800 underline decoration-dotted cursor-pointer">
+                {value}
+              </button>
+            ) : (
+              <div className="text-sm font-semibold text-gray-800">{value}</div>
+            )}
             {sub && <div className="text-xs text-gray-400 mt-0.5">{sub}</div>}
           </div>
         ))}
       </div>
+
+      {showAnalysts && code && (
+        <AnalystReportsModal code={code} market={market} currentPrice={currentPrice} onClose={() => setShowAnalysts(false)} />
+      )}
     </div>
   )
 }
 
 // ── 메인 컴포넌트 ─────────────────────────────────────────────────────────
-export default function FundamentalPanel({ data, market }) {
+export default function FundamentalPanel({ data, market, code }) {
   const fundamental = data?.fundamental || {}
   const metrics = fundamental.metrics || {}
   const incomeStmt = fundamental.income_stmt || []
@@ -505,7 +521,7 @@ export default function FundamentalPanel({ data, market }) {
       />
 
       {/* 포워드 가이던스 */}
-      <ForwardEstimatesSection forward={forwardEstimates} market={market} />
+      <ForwardEstimatesSection forward={forwardEstimates} market={market} code={code} currentPrice={metrics.price} />
 
       {/* 계량지표 */}
       <SectionTitle>계량지표</SectionTitle>

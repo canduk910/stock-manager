@@ -9,6 +9,23 @@
 - `stock/dart_fin.py`: DART 재무 연도 클릭 시 잘못된 보고서 열리는 버그 수정 — 3년 배치 호출(rcept_no 공유)에서 연도별 API 호출(고유 rcept_no)로 변경
 - `stock/market.py`: PER 산출 개선 — `forwardPE` 제거(한국 주식 비정상 값) + fallback을 `income_stmt` 연간 순이익 기반으로 변경 + `trailingPE` 존재 시 덮어쓰기 방지
 
+### 증권사 목표가 팝업 신규
+- `stock/naver_research.py`: 네이버 증권 리서치 스크래핑 — 증권사별 최신 목표가+투자의견+리포트 제목+PDF 링크. ThreadPoolExecutor 병렬 수집. 캐시 6시간
+- `stock/yf_client.py`: `fetch_upgrades_downgrades()` 추가 — 해외 종목 증권사 등급 변경 이력 (yfinance)
+- `routers/advisory.py`: `GET /{code}/analyst-reports` 엔드포인트 추가 (KR=네이버/US=yfinance)
+- `AnalystReportsModal.jsx`: 목표주가 클릭 시 증권사별 목표가 팝업 (KR: 증권사+목표가+의견+리포트+PDF / US: 등급이력)
+- `FundamentalPanel.jsx`: 목표주가 값을 클릭 가능한 링크로 변경 → 모달 연결
+
+### 하이일드 스프레드 하워드 막스 프레임워크
+- `stock/macro_fetcher.py`: FRED HY OAS(BAMLH0A0HYM2) 5년 시계열 무료 CSV 수집. 하워드 막스 시계추: OAS<3.5%=탐욕(수비), 3.5~7%=정상, >7%=공포(공격)
+- `CreditSpreadSection.jsx`: 시계추 카드(해석+전략) + 게이지 바(3구간) + OAS 5년 차트(3.5%/7% 기준선) + 기존 HYG/LQD 차트 유지
+
+### 코드 품질 개선
+- `DetailPage.jsx`: `useState(false)` → `useRef(false)` 버그 수정 (`advLoadedRef`)
+- `OrderPage.jsx`: setTimeout ref 관리 + 언마운트 시 clearTimeout (메모리 누수 방지)
+- `stock/cache.py`: 4곳 `except: pass` → `logger.warning()` 추가 (디버깅 가능)
+- `services/order_fno.py`: 3곳 hashkey 발급 실패 시 `logger.warning()` 추가
+
 ### UI 개선
 - `SectorConceptTabs.jsx`: 데일리 추천 페이지에서 관심종목 기등록 종목 `★ 관심종목` 표시 (watchlist 로드 + `alreadyAdded` prop)
 - `WatchlistButton.jsx`: 추가 완료 후 `✓ 추가됨` → `★ 관심종목`으로 통일

@@ -179,6 +179,23 @@ def get_ohlcv(
     return {**result, "interval": interval, "period": period}
 
 
+@router.get("/{code}/analyst-reports")
+def get_analyst_reports(
+    code: str,
+    market: str = Query("KR"),
+    _user: dict = Depends(get_current_user),
+):
+    """증권사별 최신 목표가 + 리포트 (KR: 네이버 리서치, US: yfinance 등급이력)."""
+    code = code.upper()
+    market = market.upper()
+    if market == "KR":
+        from stock.naver_research import fetch_analyst_reports
+        return {"reports": fetch_analyst_reports(code)}
+    else:
+        from stock.yf_client import fetch_upgrades_downgrades
+        return {"reports": fetch_upgrades_downgrades(code)}
+
+
 @router.get("/{code}/reports")
 def get_report_history(code: str, market: str = Query("KR"), limit: int = Query(20), user: dict = Depends(get_current_user)):
     """AI 리포트 히스토리 목록 (최신순, 본문 제외)."""

@@ -1178,3 +1178,52 @@ def fetch_sector_peers(code: str, max_peers: int = 5) -> list[dict]:
     except Exception:
         set_cached(key, {"sector": "", "industry": "", "peers": []}, ttl_hours=6)
         return {"sector": "", "industry": "", "peers": []}
+
+
+def fetch_upgrades_downgrades(code: str, limit: int = 20) -> list[dict]:
+    """yfinance에서 증권사 등급 변경 이력 수집 (해외 종목용).
+
+    Returns: [{
+        "broker": "Morgan Stanley",
+        "to_grade": "Overweight",
+        "from_grade": "Equal-Weight",
+        "action": "upgrade",
+        "date": "2026-04-15"
+    }, ...]
+    """
+    key = f"yf:upgrades:{code}"
+    cached = get_cached(key)
+    if cached is not None:
+        return cached
+
+    try:
+        import yfinance as yf
+        t = yf.Ticker(code)
+        df = t.upgrades_downgrades
+        if df is None or df.empty:
+            set_cached(key, [], ttl_hours=12)
+            return []
+
+        results = []
+        seen_brokers: set[str] = set()
+        for idx, row in df.iterrows():
+            broker = str(row.get("Firm", "")).strip()
+            if not broker or broker in seen_brokers:
+                continue
+            seen_brokers.add(broker)
+            results.append({
+                "broker": broker,
+                "to_grade": str(row.get("ToGrade", "")),
+                "from_grade": str(row.get("FromGrade", "")),
+                "action": str(row.get("Action", "")),
+                "date": idx.strftime("%Y-%m-%d") if hasattr(idx, "strftime") else str(idx)[:10],
+            })
+            if len(results) >= limit:
+                break
+
+        set_cached(key, results, ttl_hours=12)
+        return results
+    except Exception as e:
+        logger.warning("upgrades_downgrades 조회 실패 (%s): %s", code, e)
+        set_cached(key, [], ttl_hours=6)
+        return []
