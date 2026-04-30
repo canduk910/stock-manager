@@ -420,7 +420,7 @@ def _compute_momentum(history: list[dict]) -> tuple[str, bool]:
     Returns:
         (momentum_signal, consensus_overheated)
         signal: strong_up | up | flat | down | strong_down
-        overheated: 30%+ 상향한 broker가 전체의 50% 초과면 True
+        overheated: 20%+ 상향한 broker가 전체의 50% 초과면 True (strong_up 임계값과 정합)
     """
     # broker별로 그룹화
     by_broker: dict[str, list[dict]] = {}
@@ -465,9 +465,9 @@ def _compute_momentum(history: list[dict]) -> tuple[str, bool]:
     else:
         signal = "strong_down"
 
-    # 과열 시그널: 30%+ 상향한 broker가 전체의 50% 초과
-    up_30 = sum(1 for c in changes if c >= 0.30)
-    overheated = (up_30 / len(changes)) > 0.5
+    # 과열 시그널: 20%+ 상향한 broker가 전체의 50% 초과 (strong_up 경계와 정합)
+    up_20 = sum(1 for c in changes if c >= 0.20)
+    overheated = (up_20 / len(changes)) > 0.5
 
     return signal, overheated
 
