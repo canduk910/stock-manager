@@ -338,3 +338,5 @@ pytest tests/api/ -v          # API 엔드포인트 테스트
 | 2026-04-30 | 메뉴명 변경 | Header, ReportPage | 분석→보고서 → 분석→데일리 추천. 페이지 제목도 동일 변경 |
 | 2026-04-30 | Advisory 새로고침 500 수정 | advisory_service.py | user_id 미전달 NameError → 호출 체인에 user_id 파라미터 추가 |
 | 2026-04-30 | 섹터히트맵 3Y 추가 | macro_fetcher, SectorHeatmapSection | 3년 히스토리 조회 + 3Y 컬럼 추가. 현재가 컬럼 제거 |
+| 2026-04-30 | PER 산출 개선 | stock/market.py | forwardPE 제거 + fallback을 연간 income_stmt 기반으로 변경 + trailingPE 보존 |
+| 2026-04-30 | DART 보고서 링크 수정 | stock/dart_fin.py | 3년 배치→연도별 API 호출로 각 연도 고유 rcept_no 보장 |

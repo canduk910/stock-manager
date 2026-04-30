@@ -393,7 +393,7 @@ def fetch_financials_multi_year(
 ) -> list[dict]:
     """최대 years개 사업연도의 재무데이터 반환.
 
-    3년 단위 배치 호출(최대 4회)로 효율적으로 수집한다.
+    연도별 API 호출로 각 연도의 고유 rcept_no(DART 보고서 링크)를 보장한다.
     반환: [
         {
             "year": 2024,
@@ -406,7 +406,7 @@ def fetch_financials_multi_year(
         ...  # 과거 → 최신 순 정렬
     ]
     """
-    cache_key = f"dart:fin_multi:{stock_code}:{years}"
+    cache_key = f"dart:fin_multi_v2:{stock_code}:{years}"
     cached = get_cached(cache_key)
     if cached is not None:
         return cached
@@ -417,44 +417,33 @@ def fetch_financials_multi_year(
         return []
 
     # 최근 확정 사업연도 결정: 항상 year-1 사용 (월 경계 제거).
-    # 3월에도 전년도 사업보고서가 공시되므로 year-1이 안전한 시작점.
     today = date.today()
     latest_year = today.year - 1
-
-    # 3년 단위 배치 호출: DART API 1회 호출로 당기/전기/전전기(3년치) 추출 가능.
-    # 10년치 조회 시 ceil(10/3)=4회만 API 호출하면 된다.
-    num_batches = (years + 2) // 3
-    anchor_years = [latest_year - i * 3 for i in range(num_batches)]
 
     collected: dict[int, dict] = {}
     fs_div_used: Optional[str] = None  # 연결/별도 결정 후 고정
 
-    for batch_idx, anchor in enumerate(anchor_years):
+    # 연도별 API 호출 — 각 연도 사업보고서의 고유 rcept_no 확보
+    for year in range(latest_year, latest_year - years - 2, -1):
         if len(collected) >= years:
             break
 
-        # 첫 배치만 anchor-1 fallback: 최신연도 미공시 기업 대응 (IS 다년도)
-        effective_anchor = anchor
+        fs_divs = [fs_div_used] if fs_div_used else ["CFS", "OFS"]
         items: list = []
         found_fs: Optional[str] = None
 
-        for try_anchor in ([anchor, anchor - 1] if batch_idx == 0 else [anchor]):
-            fs_divs = [fs_div_used] if fs_div_used else ["CFS", "OFS"]
-            for fs_div in fs_divs:
-                try:
-                    candidate = _call_fin_api(corp_code, try_anchor, fs_div)
-                except Exception:
-                    continue
-                if not candidate:
-                    continue
-                if not any(i.get("sj_div") in ("IS", "CIS") for i in candidate):
-                    continue
-                items = candidate
-                found_fs = fs_div
-                effective_anchor = try_anchor
-                break
-            if items:
-                break
+        for fs_div in fs_divs:
+            try:
+                candidate = _call_fin_api(corp_code, year, fs_div)
+            except Exception:
+                continue
+            if not candidate:
+                continue
+            if not any(i.get("sj_div") in ("IS", "CIS") for i in candidate):
+                continue
+            items = candidate
+            found_fs = fs_div
+            break
 
         if not items:
             continue
@@ -467,29 +456,21 @@ def fetch_financials_multi_year(
             else ""
         )
 
-        # DART 사업보고서는 당기/전기/전전기 3개년을 한 번에 제공한다.
-        # thstrm=당기(anchor년), frmtrm=전기(anchor-1), bfefrmtrm=전전기(anchor-2)
-        for period_key, year_offset in [
-            ("thstrm", 0),
-            ("frmtrm", -1),
-            ("bfefrmtrm", -2),
-        ]:
-            target_year = effective_anchor + year_offset
-            if target_year in collected:
-                continue
-            period_data = _extract_period_accounts(is_items, period_key)
-            if period_data.get("revenue") is None:
-                continue
-            collected[target_year] = {
-                "year": target_year,
-                "revenue": period_data["revenue"],
-                "operating_income": period_data["operating_income"],
-                "net_income": period_data["net_income"],
-                "rcept_no": rcept_no,
-                "dart_url": dart_url,
-            }
+        # thstrm(당기)만 추출 — 해당 연도의 고유 데이터 + rcept_no
+        period_data = _extract_period_accounts(is_items, "thstrm")
+        if period_data.get("revenue") is None:
+            continue
 
-        if fs_div_used is None and collected:
+        collected[year] = {
+            "year": year,
+            "revenue": period_data["revenue"],
+            "operating_income": period_data["operating_income"],
+            "net_income": period_data["net_income"],
+            "rcept_no": rcept_no,
+            "dart_url": dart_url,
+        }
+
+        if fs_div_used is None:
             fs_div_used = found_fs
 
     # 과거 → 최신 정렬, 최대 years개

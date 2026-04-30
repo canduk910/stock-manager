@@ -194,7 +194,7 @@ def fetch_detail(code: str, refresh: bool = False) -> Optional[dict]:
         sector = info.get("sector")  # 영문
         high_52 = fi.year_high
         low_52 = fi.year_low
-        per_raw = info.get("trailingPE") or info.get("forwardPE")
+        per_raw = info.get("trailingPE")
         pbr_raw = info.get("priceToBook")
 
         result = {
@@ -381,7 +381,7 @@ def fetch_market_metrics(code: str) -> dict:
         result["high_52"] = int(fi.year_high) if fi.year_high else None
         result["low_52"] = int(fi.year_low) if fi.year_low else None
 
-        per_raw = info.get("trailingPE") or info.get("forwardPE")
+        per_raw = info.get("trailingPE")
         pbr_raw = info.get("priceToBook")
         roe_raw = info.get("returnOnEquity")
         # dividendYield: 이미 % 형태 (0.4, 1.3) → 우선 사용
@@ -403,20 +403,20 @@ def fetch_market_metrics(code: str) -> dict:
 
         div_per_share_raw = info.get("dividendRate")  # 연간 주당배당금 (원)
         result["per"] = round(per_raw, 2) if per_raw else None
-        # PER fallback: yfinance PER 미제공·부정확 시 시총/TTM순이익 직접 계산
-        if fi.market_cap and fi.market_cap > 0:
+        # PER fallback: trailingPE 미제공 시(한국 주식) 연간 순이익 기반 직접 계산
+        if result["per"] is None and fi.market_cap and fi.market_cap > 0:
             try:
-                qi = t.quarterly_income_stmt
-                if qi is not None and not qi.empty:
+                ann = t.income_stmt
+                if ann is not None and not ann.empty:
                     ni_row = None
                     for name in ("Net Income", "Net Income Common Stockholders"):
-                        if name in qi.index:
-                            ni_row = qi.loc[name].dropna()
+                        if name in ann.index:
+                            ni_row = ann.loc[name].dropna()
                             break
-                    if ni_row is not None and len(ni_row) >= 4:
-                        ttm_ni = float(ni_row.iloc[:4].sum())
-                        if ttm_ni > 0:
-                            result["per"] = round(fi.market_cap / ttm_ni, 2)
+                    if ni_row is not None and len(ni_row) >= 1:
+                        latest_ni = float(ni_row.iloc[0])
+                        if latest_ni > 0:
+                            result["per"] = round(fi.market_cap / latest_ni, 2)
             except Exception:
                 pass
         result["pbr"] = round(pbr_raw, 2) if pbr_raw else None

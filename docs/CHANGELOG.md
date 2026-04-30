@@ -1,11 +1,13 @@
 # 변경 이력
 
-## 2026-04-30 — 스크리너 안정화 + 관심종목 UX + 섹터히트맵 3Y + Advisory 버그수정
+## 2026-04-30 — 스크리너 안정화 + 관심종목 UX + 섹터히트맵 3Y + Advisory 버그수정 + PER/DART 개선
 
 ### 버그 수정
 - `screener/krx.py`: KRX 종목 목록 빈 응답 시 `force_relogin()` 후 1회 재시도 (세션 만료 자동 복구)
 - `screener/krx_auth.py`: `force_relogin()` 함수 추가 — 세션 강제 만료 + 재로그인
 - `services/advisory_service.py`: 기본적 분석 새로고침 HTTP 500 수정 — `_collect_fundamental_kr()`에 `user_id` 파라미터 미전달 `NameError` 해결
+- `stock/dart_fin.py`: DART 재무 연도 클릭 시 잘못된 보고서 열리는 버그 수정 — 3년 배치 호출(rcept_no 공유)에서 연도별 API 호출(고유 rcept_no)로 변경
+- `stock/market.py`: PER 산출 개선 — `forwardPE` 제거(한국 주식 비정상 값) + fallback을 `income_stmt` 연간 순이익 기반으로 변경 + `trailingPE` 존재 시 덮어쓰기 방지
 
 ### UI 개선
 - `SectorConceptTabs.jsx`: 데일리 추천 페이지에서 관심종목 기등록 종목 `★ 관심종목` 표시 (watchlist 로드 + `alreadyAdded` prop)
