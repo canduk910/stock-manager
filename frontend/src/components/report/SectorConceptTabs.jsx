@@ -4,8 +4,9 @@
  * Props: { concepts, market }
  * concepts: [{ concept, concept_label, description, sectors: [{ sector_name, rationale, stocks }] }]
  */
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
+import { fetchWatchlist } from '../../api/watchlist'
 import WatchlistButton from '../common/WatchlistButton'
 
 const CONCEPT_STYLES = {
@@ -16,6 +17,16 @@ const CONCEPT_STYLES = {
 
 export default function SectorConceptTabs({ concepts, market = 'KR' }) {
   const [activeIdx, setActiveIdx] = useState(0)
+  const [watchlistSet, setWatchlistSet] = useState(new Set())
+
+  useEffect(() => {
+    fetchWatchlist()
+      .then(data => {
+        const s = new Set((data.items || []).map(i => `${i.code}:${i.market}`))
+        setWatchlistSet(s)
+      })
+      .catch(() => {})
+  }, [])
 
   if (!concepts || concepts.length === 0) return null
 
@@ -77,7 +88,7 @@ export default function SectorConceptTabs({ concepts, market = 'KR' }) {
                     {stock.reason}
                   </p>
                   <div className="shrink-0">
-                    <WatchlistButton code={stock.code} market={market} />
+                    <WatchlistButton code={stock.code} market={market} alreadyAdded={watchlistSet.has(`${stock.code}:${market}`)} />
                   </div>
                 </div>
               ))}

@@ -71,7 +71,7 @@ frontend/
                           OrderbookPanel (실시간 호가창)
       advisory/           FundamentalPanel, TechnicalPanel, AIReportPanel (v3 통합: 6대비판분석+전략+시나리오), ResearchDataPanel (입력데이터 미리보기)
       report/             ReportDetailView (체제카드+지수+섹터추천+종목추천, v1 Markdown 폴백),
-                          SectorConceptTabs (3컨셉 탭: 모멘텀/역발상/3개월선점, WatchlistButton 포함),
+                          SectorConceptTabs (3컨셉 탭: 모멘텀/역발상/3개월선점, WatchlistButton+기등록 ★ 포함),
                           ReportHistoryList (과거 보고서 이력 카드, sector_summary 표시)
       portfolio/          RegimeBanner (매크로 체제 배너), AllocationChart (자산 배분 파이),
                           ProfitChart (종목별 수익률 바), HoldingsOverview (보유종목+안전마진 등급)
@@ -98,7 +98,7 @@ frontend/
                           YieldCurveSection (수익률곡선 LineChart+스프레드 시계열 AreaChart),
                           CreditSpreadSection (HYG/LQD 스프레드+비율 시계열),
                           CurrencySection (4환율 카드+스파크라인), CommoditySection (5원자재 카드+스파크라인),
-                          SectorHeatmapSection (11섹터×4기간 히트맵, 초록~빨강 그라데이션)
+                          SectorHeatmapSection (11섹터×5기간(1M/3M/6M/1Y/3Y) 히트맵, 초록~빨강 그라데이션)
       tax/                TaxSummaryCards (4카드: 양도차익/공제/과세표준/세액), TaxBySymbolChart (종목별 BarChart),
                           TaxTransactionsTable (매매내역+수동추가), TaxCalculationDetail (FIFO lots 상세), TaxDisclaimer (면책배너),
                           TaxSimulationPanel (가상매도 시뮬레이션: 보유종목 선택+매도가/수량 입력+예상 세액)
@@ -113,7 +113,7 @@ frontend/
       MarketBoardPage.jsx /market-board  시세판: 신고가/신저가 Top10 + 사용자 선택 종목. 실시간 WS. 당일 OHLC+미니캔들+전일대비가격+고저가.
       MacroPage.jsx       /macro         매크로 분석: 지수+심리+뉴스+투자자 코멘트. 4섹션 독립 로딩.
       PortfolioPage.jsx   /portfolio     포트폴리오 통합: 체제배너+자산배분+수익률+AI자문(진단+리밸런싱+매매안+이력). balance+macro+advisor 통합.
-      ReportPage.jsx      /reports       투자 보고서: 페이지 진입 시 KR/US 파이프라인 자동실행(중복방지). 매크로 체제 카드(공유) + KR/US 토글 + 3컨셉 탑픽 섹터(모멘텀/역발상/3개월선점) + 종목추천+관심종목 버튼. 하단 이력 카드(클릭→전환).
+      ReportPage.jsx      /reports       데일리 추천: 페이지 진입 시 KR/US 파이프라인 자동실행(중복방지). 매크로 체제 카드(공유) + KR/US 토글 + 3컨셉 탑픽 섹터(모멘텀/역발상/3개월선점) + 종목추천+관심종목 버튼(기등록 ★ 표시). 하단 이력 카드(클릭→전환).
       BacktestPage.jsx    /backtest      KIS AI Extensions 백테스트: **전략빌더(기본탭)**/프리셋/커스텀 3모드, 빌더에서 바로 실행 가능. 결과 차트/메트릭, 전략 비교. **국내 KRX만 지원**(markets={['KR']}). **거래비용 입력**(수수료0.015%/세금0.23%/슬리피지0.05%). 진행 현황+백그라운드 안내. **이력 테이블**(마운트 시 로드, 완료 시 새로고침, 과거 결과 "보기" 클릭 → 결과패널). MCP 비활성화 시 안내 표시. 저장 전략 직접 실행.
       TaxPage.jsx         /tax           해외주식 양도소득세: 4탭(요약/매매내역/계산상세/시뮬레이션). FIFO 전용, 연도 선택, KIS 적응적 동기화+자동 재계산.
       AdminPage.jsx       /admin         AI 관리 (admin only): 3탭(사용량 현황/한도 설정/감사 로그). 유저별 일별 사용량+서비스별 상세. 기본/개별 한도 CRUD. 변경 이력 audit trail.

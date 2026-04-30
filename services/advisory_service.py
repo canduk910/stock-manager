@@ -60,7 +60,7 @@ def refresh_stock_data(code: str, market: str, name: str, user_id: int = 1) -> d
     해외(US): yf_client + 15분봉 yfinance
     + KIS MCP 전략 신호 (활성화 시)
     """
-    fundamental = _collect_fundamental(code, market, name)
+    fundamental = _collect_fundamental(code, market, name, user_id)
     technical = _collect_technical(code, market)
     strategy_signals = _collect_strategy_signals(code, market)
     research_data = _collect_research(code, market, name)
@@ -211,14 +211,14 @@ def generate_ai_report(code: str, market: str, name: str, user_id: int = 1) -> d
 
 # ── 내부 헬퍼 ─────────────────────────────────────────────────────────────────
 
-def _collect_fundamental(code: str, market: str, name: str) -> dict:
+def _collect_fundamental(code: str, market: str, name: str, user_id: int = 1) -> dict:
     """기본적 분석 데이터 수집."""
     if market == "KR":
-        return _collect_fundamental_kr(code, name)
+        return _collect_fundamental_kr(code, name, user_id)
     return _collect_fundamental_us(code)
 
 
-def _collect_fundamental_kr(code: str, name: str) -> dict:
+def _collect_fundamental_kr(code: str, name: str, user_id: int = 1) -> dict:
     """국내 종목 기본적 분석 데이터 수집.
 
     ThreadPoolExecutor 7개 task 매핑표:

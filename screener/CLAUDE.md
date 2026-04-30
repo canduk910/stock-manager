@@ -15,9 +15,13 @@ CLI와 API 라우터 양쪽에서 공용으로 사용한다.
 
 ## 핵심 규칙
 
-### krx.py — 거래일 자동 소급
+### krx.py — 거래일 자동 소급 + 세션 재시도
 - `_find_latest_trading_day()`: Step1=weekday() 체크(API 없음), Step2=pykrx API로 공휴일 감지.
 - `get_all_stocks()` 반환타입: `tuple[list, str]` (실제 거래일 문자열 포함).
+- **세션 재시도**: 종목 목록 빈 응답 또는 예외 시 `force_relogin()` 후 1회 재시도 (세션 만료 자동 복구).
+
+### krx_auth.py — KRX 인증 세션
+- `force_relogin()`: 세션 강제 만료 + 재로그인. 빈 응답 복구용.
 
 ### dart.py — 캐시 주의
 - **`end_date < today`인 경우만 캐시 사용**. 오늘 이상 날짜 포함 범위는 항상 DART API 직접 호출.

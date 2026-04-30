@@ -772,8 +772,8 @@ def _calc_return(closes: list[float], n_days: int) -> Optional[float]:
 
 
 def fetch_sector_returns() -> list[dict]:
-    """11개 섹터 ETF 1M/3M/6M/1Y 수익률."""
-    key = "macro:sector_returns"
+    """11개 섹터 ETF 1M/3M/6M/1Y/3Y 수익률."""
+    key = "macro:sector_returns_v2"
     cached = get_cached(key)
     if cached is not None:
         return cached
@@ -782,7 +782,7 @@ def fetch_sector_returns() -> list[dict]:
         try:
             import yfinance as yf
             t = yf.Ticker(sym)
-            hist = t.history(period="1y", interval="1d")
+            hist = t.history(period="3y", interval="1d")
             if hist.empty:
                 return None
 
@@ -799,7 +799,7 @@ def fetch_sector_returns() -> list[dict]:
                 "return_3m": _calc_return(closes, 63),
                 "return_6m": _calc_return(closes, 126),
                 "return_1y": _calc_return(closes, 252),
-                "price": round(closes[-1], 2),
+                "return_3y": _calc_return(closes, 756),
             }
         except Exception as e:
             logger.warning("섹터 수익률 조회 실패 (%s): %s", sym, e)
@@ -844,8 +844,8 @@ _KR_SECTOR_ETFS = [
 
 
 def fetch_sector_returns_kr() -> list[dict]:
-    """13개 한국 섹터 ETF(KODEX/TIGER) 1M/3M/6M/1Y 수익률."""
-    key = "macro:sector_returns_kr"
+    """13개 한국 섹터 ETF(KODEX/TIGER) 1M/3M/6M/1Y/3Y 수익률."""
+    key = "macro:sector_returns_kr_v2"
     cached = get_cached(key)
     if cached is not None:
         return cached
@@ -854,7 +854,7 @@ def fetch_sector_returns_kr() -> list[dict]:
         try:
             import yfinance as yf
             t = yf.Ticker(sym)
-            hist = t.history(period="1y", interval="1d")
+            hist = t.history(period="3y", interval="1d")
             if hist.empty:
                 return None
 
@@ -871,7 +871,7 @@ def fetch_sector_returns_kr() -> list[dict]:
                 "return_3m": _calc_return(closes, 63),
                 "return_6m": _calc_return(closes, 126),
                 "return_1y": _calc_return(closes, 252),
-                "price": round(closes[-1], 2),
+                "return_3y": _calc_return(closes, 756),
             }
         except Exception as e:
             logger.warning("한국 섹터 수익률 조회 실패 (%s): %s", sym, e)

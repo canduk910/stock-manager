@@ -131,7 +131,7 @@ export default function ReportPage() {
     <div className="space-y-6">
       {/* 헤더 */}
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900">투자 보고서</h1>
+        <h1 className="text-2xl font-bold text-gray-900">데일리 추천</h1>
         {isHistory && (
           <button
             onClick={handleBackToToday}

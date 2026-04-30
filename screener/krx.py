@@ -14,7 +14,7 @@ from datetime import datetime, timedelta
 from pykrx import stock
 
 from .cache import get_cached, set_cached
-from .krx_auth import ensure_krx_session, is_krx_configured
+from .krx_auth import ensure_krx_session, force_relogin, is_krx_configured
 
 
 _KRX_NO_AUTH_MSG = (
@@ -93,15 +93,25 @@ def get_all_stocks(date_str: str) -> tuple[list[dict], str]:
     if cached is not None:
         return cached, trading_date
 
-    # 시장별 종목코드 집합
-    try:
-        kospi_tickers = set(stock.get_market_ticker_list(trading_date, market="KOSPI"))
-        kosdaq_tickers = set(stock.get_market_ticker_list(trading_date, market="KOSDAQ"))
-    except Exception as e:
-        raise RuntimeError(f"KRX 종목 목록 조회 실패: {e}") from e
+    # 시장별 종목코드 집합 (빈 응답 시 세션 갱신 후 1회 재시도)
+    for attempt in range(2):
+        try:
+            kospi_tickers = set(stock.get_market_ticker_list(trading_date, market="KOSPI"))
+            kosdaq_tickers = set(stock.get_market_ticker_list(trading_date, market="KOSDAQ"))
+        except Exception as e:
+            if attempt == 0 and force_relogin():
+                continue
+            raise RuntimeError(f"KRX 종목 목록 조회 실패: {e}") from e
 
-    if not kospi_tickers and not kosdaq_tickers:
-        raise RuntimeError("KRX에서 종목 목록을 가져올 수 없습니다. 로그인 세션을 확인해주세요.")
+        if kospi_tickers or kosdaq_tickers:
+            break
+
+        if attempt == 0:
+            # 빈 응답 → 세션 만료 가능성, 강제 재로그인 후 재시도
+            if not force_relogin():
+                raise RuntimeError("KRX에서 종목 목록을 가져올 수 없습니다. 로그인 세션을 확인해주세요.")
+    else:
+        raise RuntimeError("KRX에서 종목 목록을 가져올 수 없습니다. 재로그인 후에도 데이터가 없습니다.")
 
     # 펀더멘털 데이터 (PER, PBR, EPS, BPS)
     try:

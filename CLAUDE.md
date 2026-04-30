@@ -333,3 +333,8 @@ pytest tests/api/ -v          # API 엔드포인트 테스트
 | 2026-04-29 | 섹터 추천 데이터 기반 개선 | macro_fetcher, sector_recommendation_service, pipeline_service | 한국 섹터 ETF 13종 수익률 수집. 실제 가격 데이터를 GPT 프롬프트에 전달. defensive 하드코딩 규칙 제거 |
 | 2026-04-29 | PER fallback 직접 계산 | stock/market.py | yfinance forwardPE 부정확 → 시총/TTM순이익 직접 계산 (PBR/ROE fallback과 동일 패턴) |
 | 2026-04-29 | 보고서 비admin 접근 수정 | ReportPage.jsx | 일반 유저는 파이프라인 대신 fetchReportByDate로 기존 보고서 조회 |
+| 2026-04-30 | 스크리너 KRX 세션 재시도 | screener/krx.py, krx_auth.py | 빈 응답 시 force_relogin() 후 1회 재시도 |
+| 2026-04-30 | 관심종목 기등록 표시 | SectorConceptTabs, WatchlistButton | 데일리 추천 페이지에서 기등록 종목 ★ 표시 |
+| 2026-04-30 | 메뉴명 변경 | Header, ReportPage | 분석→보고서 → 분석→데일리 추천. 페이지 제목도 동일 변경 |
+| 2026-04-30 | Advisory 새로고침 500 수정 | advisory_service.py | user_id 미전달 NameError → 호출 체인에 user_id 파라미터 추가 |
+| 2026-04-30 | 섹터히트맵 3Y 추가 | macro_fetcher, SectorHeatmapSection | 3년 히스토리 조회 + 3Y 컬럼 추가. 현재가 컬럼 제거 |

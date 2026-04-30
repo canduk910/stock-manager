@@ -24,10 +24,8 @@ export default function WatchlistButton({ code, market = 'KR', alreadyAdded = fa
 
   if (!code) return null
 
-  if (status === 'exists')
+  if (status === 'exists' || status === 'done')
     return <span className="text-green-600 text-xs font-medium">★ 관심종목</span>
-  if (status === 'done')
-    return <span className="text-green-600 text-xs font-medium">✓ 추가됨</span>
   if (status === 'loading')
     return <span className="text-gray-400 text-xs">추가 중...</span>
 

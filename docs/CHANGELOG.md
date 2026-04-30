@@ -1,5 +1,21 @@
 # 변경 이력
 
+## 2026-04-30 — 스크리너 안정화 + 관심종목 UX + 섹터히트맵 3Y + Advisory 버그수정
+
+### 버그 수정
+- `screener/krx.py`: KRX 종목 목록 빈 응답 시 `force_relogin()` 후 1회 재시도 (세션 만료 자동 복구)
+- `screener/krx_auth.py`: `force_relogin()` 함수 추가 — 세션 강제 만료 + 재로그인
+- `services/advisory_service.py`: 기본적 분석 새로고침 HTTP 500 수정 — `_collect_fundamental_kr()`에 `user_id` 파라미터 미전달 `NameError` 해결
+
+### UI 개선
+- `SectorConceptTabs.jsx`: 데일리 추천 페이지에서 관심종목 기등록 종목 `★ 관심종목` 표시 (watchlist 로드 + `alreadyAdded` prop)
+- `WatchlistButton.jsx`: 추가 완료 후 `✓ 추가됨` → `★ 관심종목`으로 통일
+- `Header.jsx` + `ReportPage.jsx`: 메뉴명 "보고서" → "데일리 추천", 페이지 제목도 동일 변경
+- `SectorHeatmapSection.jsx`: "현재가" 컬럼 제거 + "3Y" 컬럼 추가 (5기간: 1M/3M/6M/1Y/3Y)
+- `stock/macro_fetcher.py`: 섹터 ETF 조회 기간 `1y` → `3y` 확장, `return_3y`(756거래일) 추가, `price` 필드 제거
+
+---
+
 ## 2026-04-29 — AI 게이트웨이 + 섹터 추천 개선 + PER 수정 + 보고서 접근 수정
 
 ### AI 게이트웨이 + 사용량 관리 신규

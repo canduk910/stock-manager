@@ -44,11 +44,11 @@ export default function SectorHeatmapSection({ data, loading, error }) {
           <thead>
             <tr className="border-b bg-gray-50">
               <th className="px-3 py-2 text-left font-medium text-gray-600">섹터</th>
-              <th className="px-3 py-2 text-right font-medium text-gray-600">현재가</th>
               <th className="px-3 py-2 text-center font-medium text-gray-600">1M</th>
               <th className="px-3 py-2 text-center font-medium text-gray-600">3M</th>
               <th className="px-3 py-2 text-center font-medium text-gray-600">6M</th>
               <th className="px-3 py-2 text-center font-medium text-gray-600">1Y</th>
+              <th className="px-3 py-2 text-center font-medium text-gray-600">3Y</th>
             </tr>
           </thead>
           <tbody>
@@ -57,13 +57,11 @@ export default function SectorHeatmapSection({ data, loading, error }) {
                 <td className="px-3 py-2 font-medium text-gray-900 whitespace-nowrap">
                   {s.name_ko || s.name}
                 </td>
-                <td className="px-3 py-2 text-right text-gray-700 whitespace-nowrap">
-                  {s.price != null ? fmt(s.price) : '-'}
-                </td>
                 <ReturnCell value={s.return_1m} />
                 <ReturnCell value={s.return_3m} />
                 <ReturnCell value={s.return_6m} />
                 <ReturnCell value={s.return_1y} />
+                <ReturnCell value={s.return_3y} />
               </tr>
             ))}
           </tbody>

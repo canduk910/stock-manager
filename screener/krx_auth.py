@@ -119,6 +119,15 @@ def ensure_krx_session() -> bool:
     return _session_ok
 
 
+def force_relogin() -> bool:
+    """세션을 강제 만료시키고 재로그인. 빈 응답 시 복구용."""
+    global _session_ok, _last_login_at
+    _session_ok = False
+    _last_login_at = 0.0
+    logger.info("KRX 세션 강제 재로그인 시도")
+    return ensure_krx_session()
+
+
 def is_krx_configured() -> bool:
     """KRX 환경변수가 설정되어 있는지 여부."""
     return bool(KRX_ID and KRX_PASSWORD)

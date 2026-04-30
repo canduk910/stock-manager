@@ -15,7 +15,7 @@ const NAV_GROUPS = [
         { to: '/macro', label: '매크로' },
         { to: '/screener', label: '스크리너' },
         { to: '/earnings', label: '공시' },
-        { to: '/reports', label: '보고서' },
+        { to: '/reports', label: '데일리 추천' },
         { to: '/backtest', label: '백테스트' },
       ],
     },
