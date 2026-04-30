@@ -551,6 +551,22 @@ def fetch_metrics_yf(code: str) -> dict:
             import math
             graham_number = round(math.sqrt(22.5 * eps * bps), 2)
 
+        # 배당수익률 3단계 fallback (fetch_detail_yf와 동일 우선순위)
+        div_yield_pct  = info.get("dividendYield")
+        trailing_yield = info.get("trailingAnnualDividendYield")
+        div_rate       = info.get("dividendRate")
+        price_now      = info.get("regularMarketPrice") or info.get("currentPrice")
+        if div_yield_pct is not None:
+            dividend_yield = _safe(round(float(div_yield_pct), 2))
+        elif trailing_yield is not None:
+            dividend_yield = _safe(round(trailing_yield * 100, 2))
+        elif div_rate and price_now and price_now > 0:
+            computed = float(div_rate) / float(price_now) * 100
+            dividend_yield = _safe(round(computed, 2)) if 0 < computed < 50 else None
+        else:
+            dividend_yield = None
+        dividend_per_share = _safe(round(float(div_rate), 4)) if div_rate else None
+
         result = {
             "per":             _safe(info.get("trailingPE") or info.get("forwardPE")),
             "pbr":             _safe(info.get("priceToBook")),
@@ -565,6 +581,8 @@ def fetch_metrics_yf(code: str) -> dict:
             "current_ratio":   _safe(info.get("currentRatio")),
             "eps":             eps,
             "graham_number":   graham_number,
+            "dividend_yield":  dividend_yield,
+            "dividend_per_share": dividend_per_share,
         }
         ttl = 0.5 if _is_us_trading_hours() else 6  # 장중 30분, 장외 6시간
         set_cached(key, result, ttl_hours=ttl)

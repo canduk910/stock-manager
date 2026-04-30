@@ -1,5 +1,34 @@
 # 변경 이력
 
+## 2026-05-01 — AI자문 프롬프트 누락 데이터 보강 + 미래지향/역발상 강화
+
+### 프롬프트 개선
+- 누락 데이터 6종을 `_build_prompt()`에 신규 섹션으로 추가:
+  - `## 사업 개요`: `business_description` + `business_keywords` + `segments` 매출 비중 (역발상·미래지향 분석의 출발점)
+  - `## 가격 위치`: 52주 고가/저가 대비 현재가 위치 (%)
+  - `## 자본행위 분류`: 1년 공시에서 유증/CB/BW/감자/자사주매입·소각/배당/M&A 자동 분류
+  - `## 장기(10년) 밸류에이션 사이클`: `valuation_history`로 PER/PBR 10년 범위·평균
+  - `## 경쟁사 비교`: `peers` PER/PBR/시총 표
+  - `## 계량지표`에 **배당수익률·주당배당금** 추가 (KR 골프존 등 배당 종목 미인지 버그 수정)
+- 시스템 프롬프트 미래지향/역발상 강화 (`_build_system_prompt`):
+  - "결정은 과거가 아닌 미래에 베팅" 원칙 명시
+  - 역발상 4대 시그널 가이드 (과매도+펀더멘털 강건 / 사이클 턴어라운드 / 컨센서스 합의도 반박 / 자사주·내부자 매수)
+  - catalyst 8종 식별 의무 (3개 이상 권장: 신규시장/제품/규제/M&A/자사주/배당정책/구조조정/사이클회복)
+  - peak-out 선행지표 검증 지침
+  - 6대 → **8대 분석 항목** 확장 (미래성장동력, 역발상관점 추가)
+
+### JSON 스키마 확장
+- `미래성장동력`: catalysts / turning_points / industry_tailwinds / peak_out_signals / growth_horizon / confidence
+- `역발상관점`: contrarian_thesis / market_misperception / edge / rebut_consensus / asymmetric_payoff
+- `services/schemas/advisory_report_v3.py`: `FutureGrowthDrivers`, `ContrarianView` Pydantic 모델 신규. 모두 Optional → 기존 응답 backward-compat
+
+### 버그 수정
+- `stock/yf_client.py:fetch_metrics_yf()`: `dividend_yield`/`dividend_per_share` 3단계 fallback 추가 (US 종목 배당 누락 보완)
+- `services/advisory_service.py:_build_metrics_kr()`: `dividend_yield`/`dividend_per_share` pass-through 추가 (KR 종목 배당 누락 수정)
+- `stock/research_collector.py:_compute_momentum()`: 컨센서스 과열 임계값 0.30 → 0.20 (strong_up 경계와 정합, CI 테스트 통과)
+
+---
+
 ## 2026-05-01 — 애널리스트 보고서 본문 → 종목 AI 자문 통합
 
 ### 애널리스트 컨센서스 신규

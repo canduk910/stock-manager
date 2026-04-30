@@ -377,7 +377,7 @@ yfinance 기반 해외주식 데이터 수집. 일부 함수는 국내주식(`.K
 | `fetch_income_detail_yf(code, years)` | 손익계산서 세부 (AI자문용) |
 | `fetch_balance_sheet_yf(code, years)` | 대차대조표 (AI자문용) |
 | `fetch_cashflow_yf(code, years)` | 현금흐름표 (AI자문용) |
-| `fetch_metrics_yf(code)` | PER/PBR/PSR/EV·EBITDA/ROE/ROA (AI자문 계량지표) |
+| `fetch_metrics_yf(code)` | PER/PBR/PSR/EV·EBITDA/ROE/ROA + **dividend_yield/dividend_per_share** (3단계 fallback) (AI자문 계량지표) |
 | `fetch_segments_yf(code)` | 사업부문+사업설명+키워드. 반환: `dict` (`{"segments": [...], "description": str, "keywords": [str]}`). 캐시키 `yf:segments_v2:` |
 | `fetch_forward_estimates_yf(code, is_kr=False)` | 애널리스트 컨센서스 추정치. `is_kr=True` 시 `.KS`/`.KQ` suffix 자동. TTL 6시간. |
 

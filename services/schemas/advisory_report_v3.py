@@ -129,6 +129,29 @@ class ValueTrapDeepAnalysis(BaseModel):
     class Config:
         extra = "allow"
 
+class FutureGrowthDrivers(BaseModel):
+    """7. 미래성장동력 — catalyst·턴어라운드·산업 순풍 (forward-looking)."""
+    catalysts: Optional[list[str]] = Field(default_factory=list)
+    turning_points: Optional[list[str]] = Field(default_factory=list)
+    industry_tailwinds: Optional[str] = None
+    peak_out_signals: Optional[list[str]] = Field(default_factory=list)
+    growth_horizon: Optional[str] = None  # 단기/중기/장기
+    confidence: Optional[str] = None      # 높음/보통/낮음
+    class Config:
+        extra = "allow"
+
+
+class ContrarianView(BaseModel):
+    """8. 역발상관점 — 시장 오해·차별화 인사이트·컨센서스 반박."""
+    contrarian_thesis: Optional[str] = None
+    market_misperception: Optional[str] = None
+    edge: Optional[str] = None
+    rebut_consensus: Optional[str] = None
+    asymmetric_payoff: Optional[str] = None
+    class Config:
+        extra = "allow"
+
+
 class TradingStrategy(BaseModel):
     """6. 최종 매매 전략 (v2 포지션가이드 + v3 최종매매전략 통합)."""
     # v2 포지션가이드 필드
@@ -173,6 +196,8 @@ class AdvisoryReportV3Schema(BaseModel):
     경영진트랙레코드: Optional[ManagementTrackRecord] = None
     가치함정분석: Optional[ValueTrapDeepAnalysis] = None
     최종매매전략: Optional[TradingStrategy] = None
+    미래성장동력: Optional[FutureGrowthDrivers] = None
+    역발상관점: Optional[ContrarianView] = None
 
     # 전략별 정량 평가
     전략별평가: StrategyEvaluation

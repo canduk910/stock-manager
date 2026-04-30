@@ -424,6 +424,8 @@ def _build_metrics_kr(
         "current_ratio": current_ratio,
         "eps": eps,
         "graham_number": graham_number,
+        "dividend_yield": base.get("dividend_yield"),
+        "dividend_per_share": base.get("dividend_per_share"),
     }
 
 
@@ -633,23 +635,38 @@ _REGIME_RULES = {
 
 
 def _build_system_prompt(regime: str, regime_desc: str) -> str:
-    """통합 시스템 프롬프트 — 6대 비판적 분석 + 정량 프레임워크."""
+    """통합 시스템 프롬프트 — 6대 비판적 분석 + 정량 프레임워크 + 미래지향/역발상."""
     regime_rule = _REGIME_RULES.get(regime, _REGIME_RULES["selective"])
     return (
         "당신은 20년 경력의 베테랑 수석 에퀴티 리서치 애널리스트이다. "
-        "'안전마진'과 '전통적 가치'를 중시하는 투자자의 관점에서, 비판적 투자 보고서를 JSON으로 작성한다. "
-        "예스맨의 태도를 버리고 냉철하게 분석하라. 모든 결론은 데이터에 근거해야 하며, "
-        "낙관적 전망보다 리스크 관리에 우선순위를 둔다. "
-        "증권사 컨센서스를 무비판적으로 수용하지 말 것 — 합의도(dispersion)/과열(consensus_overheated)/체제 신뢰도를 종합 판단할 것.\n\n"
+        "'안전마진'과 '전통적 가치'를 중시하되, **결정은 과거가 아닌 미래에 베팅한다**. "
+        "비판적 투자 보고서를 JSON으로 작성하며, 예스맨의 태도를 버리고 냉철하게 분석하라. "
+        "모든 결론은 데이터에 근거해야 하며, 낙관적 전망보다 리스크 관리에 우선순위를 둔다. "
+        "증권사 컨센서스를 무비판적으로 수용하지 말 것 — 합의도(dispersion)/과열(consensus_overheated)/체제 신뢰도를 종합 판단할 것. "
+        "컨센서스 과열 또는 일방적 매수 의견은 **반박 기회**(역발상)로 간주한다.\n\n"
 
-        "【보고서 핵심 구조 — 6대 분석 항목 (JSON에 반드시 포함)】\n\n"
+        "【핵심 분석 원칙】\n"
+        "1. 과거 재무는 '점검 도구'이고, 결정의 근거는 '미래의 변화'다. 과거 5년 ROE보다 향후 12개월 catalyst가 더 중요할 수 있다.\n"
+        "2. 역발상(Contrarian)을 적극 검토하라:\n"
+        "   - 과매도+펀더멘털 강건 → 매수 기회 (시장 오해 식별)\n"
+        "   - 산업 저점에서의 capex 회복 → 사이클 턴어라운드 신호\n"
+        "   - 컨센서스 일방적 매수+dispersion<0.1 → 과열 의심 (반박 근거 우선 탐색)\n"
+        "   - 컨센서스 일방적 매도+자사주 매입+내부자 매수 → 시장 오해 가능성\n"
+        "3. catalyst를 명시적으로 식별하라 (3개 이상 권장):\n"
+        "   - 신규 사업/제품/시장 진입, 규제 변경, M&A, 자사주 매입, 배당 정책 변경, 구조조정, 산업 사이클 회복, capex 변곡점\n"
+        "4. peak-out 검증: 매출/이익 성장률 둔화, capex 정점 통과, 산업 출하/가동률 하락은 미래 EPS 하향의 선행지표.\n"
+        "5. 산업 사이클 단계(industry_cycle_phase: 도입/성장/성숙/쇠퇴/불명)와 종목 위치를 일치시켜 판단하라.\n\n"
+
+        "【보고서 핵심 구조 — 8대 분석 항목 (JSON에 반드시 포함)】\n\n"
 
         "1. 재무건전성분석: OCF vs 순이익 괴리(분식 가능성), 부채비율 추세, 이자보상배율 → risk_level(안전/주의/위험/심각)\n"
         "2. 밸류에이션분석: PER/PBR 밴드 내 현재 위치, 적정가치 산출, 업종대비, PEG → 밸류에이션판단\n"
         "3. 매크로및산업분석: 시장체제 해석, 금리/환율 영향, Peak-out 여부, 산업사이클(도입/성장/성숙/쇠퇴/불명)\n"
         "4. 경영진트랙레코드: M&A 성패, 자본배분 일관성(우수/양호/보통/미흡), 배당정책, 거버넌스\n"
         "5. 가치함정분석: 구조적 쇠퇴 vs 일시적 악재 판별 → decline_type + evidence 배열\n"
-        "6. 최종매매전략: 적정가치/추천진입가/손절가/upside·downside %/worst_scenario/포지션사이징/action(적극매수~전량매도)\n\n"
+        "6. 최종매매전략: 적정가치/추천진입가/손절가/upside·downside %/worst_scenario/포지션사이징/action(적극매수~전량매도)\n"
+        "7. 미래성장동력 (FORWARD-LOOKING): catalysts(3개 이상), turning_points(변곡점 신호), industry_tailwinds(산업 순풍), peak_out_signals(피크아웃 신호 또는 빈 배열)\n"
+        "8. 역발상관점 (CONTRARIAN): contrarian_thesis(역발상 논제), market_misperception(시장 오해 포인트), edge(차별화된 인사이트), rebut_consensus(컨센서스 반박 또는 동조 근거)\n\n"
 
         "【정량 분석 프레임워크】\n\n"
         "전략 1: 변동성 돌파 (래리 윌리엄스) — 당일 시가+(전일 범위×K) 돌파 시 매수. K=0.5 표준.\n"
@@ -899,6 +916,13 @@ def _build_prompt(code: str, market: str, name: str, fundamental: dict, technica
     roe = metrics.get("roe", "N/A")
     psr = metrics.get("psr", "N/A")
     ev_ebitda = metrics.get("ev_ebitda", "N/A")
+    div_yield = metrics.get("dividend_yield")
+    div_per_share = metrics.get("dividend_per_share")
+    div_yield_str = f"{div_yield}%" if div_yield is not None else "N/A"
+    div_per_share_str = (
+        f"{div_per_share:,.0f}원" if (market or "").upper() == "KR" and div_per_share
+        else (f"${div_per_share}" if div_per_share else "N/A")
+    )
 
     # 기술적 시그널
     indicators = technical.get("indicators") or {}
@@ -987,6 +1011,99 @@ def _build_prompt(code: str, market: str, name: str, fundamental: dict, technica
     volume_20d = _fmt_na(signals.get("volume_20d_avg"))
     bb_position = _fmt_na(signals.get("bb_position"))
 
+    # 사업 개요 + 사업부문 (역발상/미래지향 분석 핵심)
+    biz_desc = fundamental.get("business_description") or ""
+    biz_keywords = fundamental.get("business_keywords") or []
+    segments = fundamental.get("segments") or []
+    segments_lines = []
+    for s in segments[:8]:
+        if isinstance(s, dict):
+            seg_name = s.get("name") or s.get("segment") or ""
+            seg_pct = s.get("ratio") or s.get("pct") or s.get("percentage")
+            seg_desc = s.get("description") or ""
+            if seg_pct is not None:
+                segments_lines.append(f"  - {seg_name} {seg_pct}%{(': ' + seg_desc) if seg_desc else ''}")
+            elif seg_name:
+                segments_lines.append(f"  - {seg_name}{(': ' + seg_desc) if seg_desc else ''}")
+        elif isinstance(s, str):
+            segments_lines.append(f"  - {s}")
+
+    # 52주 가격 위치 (research.basic_macro에서)
+    bm_quick = (research_data or {}).get("basic_macro") or {}
+    high_52 = bm_quick.get("high_52")
+    low_52 = bm_quick.get("low_52")
+    cur_for_pos = cur_price_sig or bm_quick.get("current_price")
+    pos_lines = []
+    if cur_for_pos and high_52:
+        try:
+            pct_to_high = (float(cur_for_pos) - float(high_52)) / float(high_52) * 100
+            pos_lines.append(f"  현재가 vs 52주 고가({_format_money(high_52, market)}): {pct_to_high:+.1f}%")
+        except Exception:
+            pass
+    if cur_for_pos and low_52:
+        try:
+            pct_from_low = (float(cur_for_pos) - float(low_52)) / float(low_52) * 100
+            pos_lines.append(f"  현재가 vs 52주 저가({_format_money(low_52, market)}): {pct_from_low:+.1f}%")
+        except Exception:
+            pass
+
+    # 자본행위 분류 (CB/BW/유증/감자/자사주/배당) — 미래 EPS 변화 신호
+    capital_keywords = {
+        "유상증자": ["유상증자", "주주배정", "제3자배정"],
+        "전환사채(CB)": ["전환사채", "CB"],
+        "신주인수권부사채(BW)": ["신주인수권", "BW"],
+        "감자": ["감자"],
+        "자사주매입": ["자기주식취득", "자사주취득", "자기주식매입"],
+        "자사주소각": ["자기주식소각", "자사주소각"],
+        "배당": ["배당"],
+        "M&A": ["합병", "분할", "양수도", "인수"],
+    }
+    ca_research = (research_data or {}).get("capital_actions") or {}
+    filings_all = ca_research.get("filings") or []
+    capital_events = []
+    for f_item in filings_all[:30]:
+        report_name = (f_item.get("report_name") or f_item.get("report_type") or "")
+        for label, keywords in capital_keywords.items():
+            if any(k in report_name for k in keywords):
+                rcept = f_item.get("rcept_dt", "")
+                capital_events.append(f"  - {rcept}: [{label}] {report_name}")
+                break
+
+    # 장기(10년) 밸류에이션 사이클 — 저점/평균/고점 + 현재 위치
+    val_history = ((research_data or {}).get("valuation_band") or {}).get("valuation_history") or []
+    val_cycle_line = ""
+    if val_history:
+        per_vals = [v.get("per") for v in val_history if v.get("per") is not None]
+        pbr_vals = [v.get("pbr") for v in val_history if v.get("pbr") is not None]
+        if per_vals:
+            per_lo = min(per_vals); per_hi = max(per_vals)
+            per_avg = sum(per_vals) / len(per_vals)
+            val_cycle_line = (
+                f"  PER 10년 범위: {per_lo:.1f}~{per_hi:.1f}배, 평균 {per_avg:.1f}배 (n={len(per_vals)})"
+            )
+            if pbr_vals:
+                pbr_lo = min(pbr_vals); pbr_hi = max(pbr_vals)
+                pbr_avg = sum(pbr_vals) / len(pbr_vals)
+                val_cycle_line += (
+                    f"\n  PBR 10년 범위: {pbr_lo:.2f}~{pbr_hi:.2f}배, 평균 {pbr_avg:.2f}배"
+                )
+
+    # 경쟁사 비교 (peers)
+    peers_data = ((research_data or {}).get("industry_peers") or {}).get("peers") or []
+    peers_lines = []
+    for p in peers_data[:6]:
+        if isinstance(p, dict):
+            ticker = p.get("ticker") or p.get("symbol") or ""
+            p_name = p.get("name") or ticker
+            p_per = p.get("per")
+            p_pbr = p.get("pbr")
+            p_mc = p.get("market_cap")
+            mc_str = _format_money(p_mc, market) if p_mc else "N/A"
+            peers_lines.append(
+                f"  - {p_name}({ticker}): PER={p_per if p_per is not None else 'N/A'}, "
+                f"PBR={p_pbr if p_pbr is not None else 'N/A'}, 시총={mc_str}"
+            )
+
     # Phase 2-4: 7점 등급 사전 계산 (참고용)
     from services.safety_grade import compute_grade_7point, compute_composite_score, compute_regime_alignment
     grade_pre = compute_grade_7point(
@@ -1021,6 +1138,25 @@ def _build_prompt(code: str, market: str, name: str, fundamental: dict, technica
 
 ## 계량지표
 - PER: {per}배, PBR: {pbr}배, ROE: {roe}%, PSR: {psr}배, EV/EBITDA: {ev_ebitda}배
+- 배당수익률: {div_yield_str}, 주당배당금: {div_per_share_str}
+
+## 사업 개요 (역발상·미래지향 분석의 출발점)
+- 설명: {biz_desc or '데이터 없음'}
+- 핵심 키워드: {', '.join(biz_keywords) if biz_keywords else 'N/A'}
+- 사업부문 매출 비중:
+{chr(10).join(segments_lines) or '  데이터 없음'}
+
+## 가격 위치 (52주 기준)
+{chr(10).join(pos_lines) or '  데이터 없음'}
+
+## 자본행위 분류 (최근 1년 — 미래 EPS·주주가치 변화 신호)
+{chr(10).join(capital_events) or '  유의미한 자본행위 공시 없음'}
+
+## 장기(10년) 밸류에이션 사이클
+{val_cycle_line or '  데이터 없음'}
+
+## 경쟁사 비교
+{chr(10).join(peers_lines) or '  데이터 없음'}
 
 ## 기술적 시그널 (15분봉 기준)
 - MACD: {macd_cross} ({macd_label})
@@ -1180,6 +1316,8 @@ def _build_prompt(code: str, market: str, name: str, fundamental: dict, technica
   "경영진트랙레코드": {{"ma_track_record":"M&A 성패", "capital_allocation_grade":"우수|양호|보통|미흡", "dividend_policy":"배당 정책", "governance_assessment":"거버넌스 평가"}},
   "가치함정분석": {{"is_structural_decline":true|false, "decline_type":"구조적_쇠퇴|일시적_악재|판단불가", "evidence":["근거1","근거2"], "safety_margin_assessment":"안전마진 평가"}},
   "최종매매전략": {{"등급팩터":0-1, "추천진입가":정수|null, "진입가근거":"...", "손절가":정수|null, "손절근거":"...", "리스크보상비율":소수|null, "분할매수제안":"50-30-20%", "recommendation":"ENTER|HOLD|SKIP", "적정가치":정수|null, "적정가치산출":"...", "upside_pct":숫자|null, "downside_pct":숫자|null, "worst_scenario":"최악 시나리오", "action":"적극매수|분할매수|관망|분할매도|전량매도"}},
+  "미래성장동력": {{"catalysts":["catalyst1","catalyst2","catalyst3"], "turning_points":["변곡점 신호1","변곡점 신호2"], "industry_tailwinds":"산업 순풍 (수요·정책·사이클)", "peak_out_signals":["피크아웃 신호 또는 빈 배열"], "growth_horizon":"단기(3개월)|중기(12개월)|장기(3년+)", "confidence":"높음|보통|낮음"}},
+  "역발상관점": {{"contrarian_thesis":"역발상 핵심 논제 (시장이 놓친 것)", "market_misperception":"시장의 오해·과잉 반응 포인트", "edge":"차별화된 인사이트", "rebut_consensus":"증권사 컨센서스 반박 또는 동조 근거", "asymmetric_payoff":"비대칭 보상 구조(상방/하방 비율)"}},
 
   "전략별평가": {{"변동성돌파":{{"신호":"...", "목표가":숫자|null, "근거":"..."}}, "안전마진":{{"신호":"...", "graham_number":숫자|null, "할인율":숫자|null, "근거":"..."}}, "추세추종":{{"신호":"...", "추세강도":"강|중|약", "근거":"..."}}}},
   "기술적시그널": {{"신호":"...", "해석":"...", "지표별":{{"macd":"...", "rsi":"...", "stoch":"...", "volume":"...", "bb":"..."}}}},
