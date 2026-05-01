@@ -69,7 +69,7 @@ frontend/
       order/              OrderForm, OrderConfirmModal, OpenOrdersTable, ModifyOrderModal,
                           ExecutionsTable, OrderHistoryTable, ReservationForm, ReservationsTable, SyncButton,
                           OrderbookPanel (실시간 호가창)
-      advisory/           FundamentalPanel, TechnicalPanel, AIReportPanel (v3 통합: 6대비판분석+전략+시나리오), ResearchDataPanel (입력데이터 미리보기),
+      advisory/           FundamentalPanel, TechnicalPanel, AIReportPanel (v3 통합: 6대비판분석+전략+시나리오), ResearchDataPanel (**입력데이터 통합 미리보기 16항목**: 기본/리서치 구분 제거. 사업개요/손익·BS·CF·분기/계량지표(PER·PBR·ROE·ROA·EPS·배당수익률·주당배당금·시총)/PER·PBR 5Y/10년 밴드/포워드추정/**증권사 컨센서스(목표가 중앙값·평균·dispersion·upside·매수보유매도 분포·5단계 모멘텀·과열 경고·6개월 추이·최근 5건 PDF 링크)**/기술시그널/KIS 퀀트/경영진/자본행위/업황/거시지표+**52주 위치(고가·저가·위치%·고점대비%)**),
                           AnalystReportsModal (증권사별 목표가+리포트 팝업, KR=네이버리서치/US=yfinance등급이력)
       report/             ReportDetailView (체제카드+지수+섹터추천+종목추천, v1 Markdown 폴백),
                           SectorConceptTabs (3컨셉 탭: 모멘텀/역발상/3개월선점, WatchlistButton+기등록 ★ 포함),

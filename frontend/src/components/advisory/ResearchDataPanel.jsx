@@ -2,12 +2,9 @@ import { useState } from 'react'
 
 /**
  * AI분석 입력 데이터 통합 미리보기 패널.
- * GPT 프롬프트에 들어가는 모든 데이터를 보여준다.
+ * GPT 프롬프트에 들어가는 모든 데이터를 한 목록으로 보여준다 (구분 없이 통합).
  *
- * A. 기존 분석 데이터 (새로고침): 손익/BS/CF, 계량지표, 기술지표, 전략, 매크로
- * B. 리서치 데이터 (입력정보 획득): 6카테고리
- *
- * @param {object} data - research_data (6카테고리)
+ * @param {object} data - research_data (6카테고리: basic_macro/valuation_band/management/capital_actions/industry_peers/analyst_consensus)
  * @param {object} advData - advisory cache (fundamental, technical, strategy_signals)
  * @param {string} market - 'KR' | 'US'
  */
@@ -17,79 +14,59 @@ export default function ResearchDataPanel({ data, advData, market = 'KR' }) {
 
   if (!hasAdv && !hasResearch) return null
 
-  // ── A. 기존 분석 데이터 카테고리 ──
   const fundamental = advData?.fundamental || {}
   const technical = advData?.technical || {}
   const strategySignals = advData?.strategy_signals
 
-  const advCategories = [
+  // ── 통합 카테고리 (16개) ──
+  const allCategories = [
+    // 기업 및 사업 개요
+    { key: 'segments', label: '사업 개요/부문', render: () => renderSegments(fundamental), hasData: !!fundamental.business_description || (fundamental.segments || []).length > 0 },
+    // 재무 3종 (3년)
     { key: 'income', label: '손익계산서 (3년)', render: () => renderIncomeStmt(fundamental, market), hasData: (fundamental.income_stmt || []).length > 0 },
     { key: 'bs', label: '대차대조표 (3년)', render: () => renderBalanceSheet(fundamental, market), hasData: (fundamental.balance_sheet || []).length > 0 },
     { key: 'cf', label: '현금흐름표 (3년)', render: () => renderCashflow(fundamental, market), hasData: (fundamental.cashflow || []).length > 0 },
-    { key: 'metrics', label: '계량지표 (PER/PBR/ROE 등)', render: () => renderMetrics(fundamental), hasData: !!fundamental.metrics },
     { key: 'quarterly', label: '분기 실적 (최근 4분기)', render: () => renderQuarterly(fundamental, market), hasData: (fundamental.quarterly || []).length > 0 },
-    { key: 'valstats', label: 'PER/PBR 5년 통계', render: () => renderValStats(fundamental), hasData: !!fundamental.valuation_stats },
+    // 계량 + 밸류에이션 사이클
+    { key: 'metrics', label: '계량지표 (PER/PBR/ROE/배당/52주위치 등)', render: () => renderMetrics(fundamental), hasData: !!fundamental.metrics },
+    { key: 'valstats', label: 'PER/PBR 5년 통계 (10년 사이클)', render: () => renderValStats(fundamental), hasData: !!fundamental.valuation_stats },
+    { key: 'valuation_band', label: '10년 밸류에이션 밴드 + 실적일', render: () => renderValuationBand(data?.valuation_band), hasData: !!data?.valuation_band?.valuation_stats || (data?.valuation_band?.earnings_dates || []).length > 0 },
     { key: 'forward', label: '포워드 추정 (애널리스트)', render: () => renderForward(fundamental), hasData: !!fundamental.forward_estimates },
-    { key: 'segments', label: '사업 개요/부문', render: () => renderSegments(fundamental), hasData: !!fundamental.business_description || (fundamental.segments || []).length > 0 },
+    // 증권사 컨센서스 (신규)
+    { key: 'analyst_consensus', label: '증권사 컨센서스 (목표가/의견/모멘텀)', render: () => renderAnalystConsensus(data?.analyst_consensus, market), hasData: !!data?.analyst_consensus?.consensus && (data?.analyst_consensus?.consensus?.count || 0) > 0 },
+    // 기술 + 퀀트
     { key: 'tech', label: '기술적 시그널 (15분봉)', render: () => renderTechnical(technical), hasData: !!technical.indicators },
     { key: 'strategy', label: 'KIS 퀀트 신호', render: () => renderStrategy(strategySignals), hasData: !!strategySignals },
-  ]
-
-  // ── B. 리서치 데이터 카테고리 ──
-  const researchCategories = [
-    { key: 'basic_macro', label: '거시 경제 지표', render: () => renderBasicMacro(data?.basic_macro), hasData: !!data?.basic_macro?.macro },
-    { key: 'valuation_band', label: '10년 밸류에이션 밴드 + 실적일', render: () => renderValuationBand(data?.valuation_band), hasData: !!data?.valuation_band?.valuation_stats || (data?.valuation_band?.earnings_dates || []).length > 0 },
+    // 거버넌스 + 자본행위 + 업황
     { key: 'management', label: '경영진 및 거버넌스', render: () => renderManagement(data?.management), hasData: (data?.management?.officers || []).length > 0 || (data?.management?.major_holders?.institutional || []).length > 0 },
     { key: 'capital_actions', label: '자본 변동 및 공시', render: () => renderCapitalActions(data?.capital_actions), hasData: (data?.capital_actions?.filings || []).length > 0 },
     { key: 'industry_peers', label: '업황 뉴스 및 경쟁 그룹', render: () => renderIndustryPeers(data?.industry_peers), hasData: (data?.industry_peers?.news || []).length > 0 },
+    // 매크로
+    { key: 'basic_macro', label: '거시 경제 지표 + 52주 가격 위치', render: () => renderBasicMacro(data?.basic_macro), hasData: !!data?.basic_macro?.macro || data?.basic_macro?.high_52 != null },
   ]
 
-  const advOkCount = advCategories.filter(c => c.hasData).length
-  const researchOkCount = researchCategories.filter(c => c.hasData).length
-  const totalOk = advOkCount + researchOkCount
-  const totalCats = advCategories.length + researchCategories.length
+  const okCount = allCategories.filter(c => c.hasData).length
+  const totalCats = allCategories.length
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-4">
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-sm font-semibold text-gray-700">AI분석 입력 데이터 (프롬프트 전체)</h3>
         <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">
-          {totalOk}/{totalCats} 항목 수집
+          {okCount}/{totalCats} 항목 수집
         </span>
       </div>
 
-      {/* A. 기존 분석 데이터 */}
-      {hasAdv && (
-        <div className="mb-3">
-          <div className="flex items-center gap-2 mb-2">
-            <span className="text-xs font-semibold text-indigo-600 uppercase tracking-wide">기본 분석 데이터</span>
-            <span className="text-[10px] text-gray-400">(새로고침으로 수집)</span>
-            <span className="text-[10px] bg-indigo-50 text-indigo-600 px-1.5 py-0.5 rounded">{advOkCount}/{advCategories.length}</span>
-          </div>
-          <div className="space-y-1">
-            {advCategories.map(cat => (
-              <CategoryAccordion key={cat.key} label={cat.label} hasData={cat.hasData} render={cat.render} />
-            ))}
-          </div>
-        </div>
+      {!hasResearch && (
+        <p className="text-[11px] text-gray-400 italic mb-2 pl-1">
+          ※ 일부 항목(증권사 컨센서스/경영진/공시/업황/매크로)은 [입력정보 획득]을 눌러 수집하세요.
+        </p>
       )}
 
-      {/* B. 리서치 데이터 */}
-      <div>
-        <div className="flex items-center gap-2 mb-2">
-          <span className="text-xs font-semibold text-emerald-600 uppercase tracking-wide">심화 리서치 데이터</span>
-          <span className="text-[10px] text-gray-400">(입력정보 획득으로 수집)</span>
-          {hasResearch && <span className="text-[10px] bg-emerald-50 text-emerald-600 px-1.5 py-0.5 rounded">{researchOkCount}/{researchCategories.length}</span>}
-        </div>
-        {!hasResearch ? (
-          <p className="text-xs text-gray-400 italic pl-2">[입력정보 획득] 버튼을 눌러 심화 데이터를 수집하세요 (v3 분석에 사용됨)</p>
-        ) : (
-          <div className="space-y-1">
-            {researchCategories.map(cat => (
-              <CategoryAccordion key={cat.key} label={cat.label} hasData={cat.hasData} render={cat.render} />
-            ))}
-          </div>
-        )}
+      <div className="space-y-1">
+        {allCategories.map(cat => (
+          <CategoryAccordion key={cat.key} label={cat.label} hasData={cat.hasData} render={cat.render} />
+        ))}
       </div>
 
       {/* 수집 시각 */}
@@ -222,6 +199,7 @@ function renderMetrics(fundamental) {
       <MiniStat label="PER" value={m.per != null ? Number(m.per).toFixed(1) : null} />
       <MiniStat label="PBR" value={m.pbr != null ? Number(m.pbr).toFixed(2) : null} />
       <MiniStat label="ROE" value={m.roe != null ? `${Number(m.roe).toFixed(1)}%` : null} />
+      <MiniStat label="ROA" value={m.roa != null ? `${Number(m.roa).toFixed(1)}%` : null} />
       <MiniStat label="PSR" value={m.psr != null ? Number(m.psr).toFixed(2) : null} />
       <MiniStat label="EV/EBITDA" value={m.ev_ebitda != null ? Number(m.ev_ebitda).toFixed(1) : null} />
       <MiniStat label="부채비율" value={m.debt_to_equity != null ? `${Number(m.debt_to_equity).toFixed(0)}%` : null} />
@@ -229,6 +207,8 @@ function renderMetrics(fundamental) {
       <MiniStat label="EPS" value={m.eps != null ? fmtNum(m.eps) : null} />
       <MiniStat label="Graham Number" value={m.graham_number != null ? fmtNum(m.graham_number) : null} />
       <MiniStat label="배당수익률" value={m.dividend_yield != null ? `${Number(m.dividend_yield).toFixed(2)}%` : null} />
+      <MiniStat label="주당배당금" value={m.dividend_per_share != null ? fmtNum(m.dividend_per_share) : null} />
+      <MiniStat label="시가총액" value={m.market_cap != null ? fmtCap(m.market_cap, m.market_type || 'KR') : null} />
     </div>
   )
 }
@@ -289,6 +269,97 @@ function renderForward(fundamental) {
       <MiniStat label="컨센서스" value={fwd.recommendation} />
       <MiniStat label="분석가 수" value={fwd.num_analysts} />
       <MiniStat label="현재 EPS" value={fwd.eps_current_year?.toFixed(2)} />
+    </div>
+  )
+}
+
+function renderAnalystConsensus(data, market) {
+  if (!data) return <p className="text-gray-400">데이터 없음</p>
+  const c = data.consensus
+  const reports = data.reports || []
+  if (!c || !c.count) return <p className="text-gray-400 italic">증권사 컨센서스 없음</p>
+
+  const dist3 = c.opinion_dist_3 || { buy: 0, hold: 0, sell: 0 }
+  const dist5 = c.opinion_dist_raw || {}
+  const momentumLabel = {
+    strong_up: '강한 상향', up: '상향', flat: '횡보', down: '하향', strong_down: '강한 하향',
+  }[data.momentum_signal] || data.momentum_signal || '-'
+  const momentumColor = {
+    strong_up: 'text-red-700 bg-red-50',
+    up: 'text-red-500 bg-red-50',
+    flat: 'text-gray-600 bg-gray-100',
+    down: 'text-blue-500 bg-blue-50',
+    strong_down: 'text-blue-700 bg-blue-50',
+  }[data.momentum_signal] || 'text-gray-600 bg-gray-100'
+
+  return (
+    <div className="space-y-3">
+      {/* 통계 카드 */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+        <MiniStat label="목표가 중앙값" value={c.target_median != null ? fmtNum(c.target_median) : null} />
+        <MiniStat label="목표가 평균" value={c.target_mean != null ? fmtNum(c.target_mean) : null} />
+        <MiniStat label="상승여력 (중앙값)" value={c.upside_pct_median != null ? `${c.upside_pct_median > 0 ? '+' : ''}${c.upside_pct_median}%` : null} />
+        <MiniStat label="dispersion" value={c.target_dispersion != null ? c.target_dispersion.toFixed(2) : null} />
+        <MiniStat label="컨센서스 수" value={c.count} />
+        <MiniStat label="목표가 std" value={c.target_stdev != null ? fmtNum(c.target_stdev) : null} />
+      </div>
+
+      {/* 의견 분포 + 모멘텀 */}
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="flex items-center gap-2">
+          <span className="text-gray-500 text-[10px]">3분류:</span>
+          <span className="bg-red-50 text-red-700 px-1.5 py-0.5 rounded text-[10px]">매수 {dist3.buy}</span>
+          <span className="bg-gray-100 text-gray-700 px-1.5 py-0.5 rounded text-[10px]">보유 {dist3.hold}</span>
+          <span className="bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded text-[10px]">매도 {dist3.sell}</span>
+        </div>
+        {(dist5.strong_buy || dist5.strong_sell) && (
+          <div className="flex items-center gap-1 text-[10px] text-gray-500">
+            <span>(강력매수 {dist5.strong_buy || 0} / 강력매도 {dist5.strong_sell || 0})</span>
+          </div>
+        )}
+        <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${momentumColor}`}>모멘텀: {momentumLabel}</span>
+        {data.consensus_overheated && (
+          <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-orange-100 text-orange-700">⚠ 과열</span>
+        )}
+      </div>
+
+      {/* 6개월 추이 */}
+      {data.history_line && (
+        <div className="border-l-2 border-emerald-200 pl-2">
+          <p className="text-gray-500 text-[10px] mb-0.5">6개월 목표가 추이</p>
+          <p className="text-gray-700 text-xs">{data.history_line}</p>
+        </div>
+      )}
+
+      {/* 최근 리포트 */}
+      {reports.length > 0 && (
+        <div>
+          <p className="font-medium text-gray-700 mb-1">최근 리포트 (최대 5건)</p>
+          <div className="space-y-1.5">
+            {reports.slice(0, 5).map((r, i) => (
+              <div key={i} className="border border-gray-100 rounded p-2 bg-gray-50">
+                <div className="flex flex-wrap items-center gap-2 text-[11px] mb-1">
+                  <span className="font-medium text-gray-700">{r.broker || '-'}</span>
+                  {r.date && <span className="text-gray-400">{r.date}</span>}
+                  {r.opinion && <span className="bg-white border border-gray-200 px-1.5 py-0.5 rounded">{r.opinion}</span>}
+                  {r.target_price != null && (
+                    <span className="text-red-600 font-medium">TP {fmtNum(r.target_price)}</span>
+                  )}
+                  {r.pdf_url && (
+                    <a href={r.pdf_url} target="_blank" rel="noopener noreferrer" className="text-blue-500 underline">PDF</a>
+                  )}
+                </div>
+                {r.title && <p className="text-gray-600 text-[11px] mb-0.5">{r.title}</p>}
+                {r.summary && <p className="text-gray-700 text-[11px] leading-relaxed">{r.summary}</p>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {data.data_source && (
+        <p className="text-[10px] text-gray-400">출처: {data.data_source}</p>
+      )}
     </div>
   )
 }
@@ -393,6 +464,11 @@ function renderStrategy(strategySignals) {
 function renderBasicMacro(data) {
   if (!data) return <p className="text-gray-400">데이터 없음</p>
   const macro = data.macro || {}
+  // 52주 위치(%): (현재 - 저) / (고 - 저) * 100
+  let pct52w = null
+  if (data.high_52 != null && data.low_52 != null && data.current_price != null && data.high_52 > data.low_52) {
+    pct52w = ((data.current_price - data.low_52) / (data.high_52 - data.low_52)) * 100
+  }
   return (
     <div className="space-y-2">
       {data.name && (
@@ -400,6 +476,19 @@ function renderBasicMacro(data) {
           <span>종목: <b>{data.name}</b> ({data.code})</span>
           {data.current_price != null && <span>현재가: <b>{fmtNum(data.current_price)}</b></span>}
           {data.market_cap != null && <span>시가총액: <b>{fmtCap(data.market_cap, data.market)}</b></span>}
+        </div>
+      )}
+      {(data.high_52 != null || data.low_52 != null) && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 pt-1">
+          <MiniStat label="52주 고가" value={data.high_52 != null ? fmtNum(data.high_52) : null} />
+          <MiniStat label="52주 저가" value={data.low_52 != null ? fmtNum(data.low_52) : null} />
+          <MiniStat label="52주 위치" value={pct52w != null ? `${pct52w.toFixed(0)}%` : null} />
+          {data.high_52 != null && data.current_price != null && (
+            <MiniStat
+              label="고점 대비"
+              value={`${(((data.current_price - data.high_52) / data.high_52) * 100).toFixed(1)}%`}
+            />
+          )}
         </div>
       )}
       <table className="w-full text-xs">
