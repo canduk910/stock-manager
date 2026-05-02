@@ -184,12 +184,18 @@ class TestPromptSection12:
                                regime="accumulation")
         assert "## 12" in prompt
 
-    def test_section_12_skipped_in_defensive(self):
-        """defensive 체제 → 12번 섹션 미표시."""
+    def test_section_12_defensive_shows_with_warning(self):
+        """defensive 체제 → 12번 섹션 노출 + 50% 감산 경고 (2026-05-02 변경: 보수성 완화).
+
+        과거 동작: defensive에서 섹션 자체 숨김 → GPT가 매수 신호를 전혀 못 봄.
+        새 동작: 섹션은 노출하되 cautious와 동일한 신뢰도 경고로 톤 다운.
+        """
         prompt = _build_prompt(_build_research_with_consensus(_consensus_kr_normal()),
                                regime="defensive")
-        # "## 12. 증권사 컨센서스" / "## 12. 증권사 등급 변경 이력" 모두 없어야 함
-        assert not re.search(r"##\s*12\.", prompt)
+        assert "## 12" in prompt
+        assert "증권사 컨센서스" in prompt
+        # 50% 감산 또는 신뢰도 경고가 함께 노출되어야 함
+        assert ("50%" in prompt) and ("감산" in prompt or "신뢰도" in prompt or "가중" in prompt)
 
     def test_section_12_cautious_warning(self):
         """cautious 체제 → 50% 감산 경고 라인 포함."""
