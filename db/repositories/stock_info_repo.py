@@ -14,10 +14,10 @@ logger = logging.getLogger(__name__)
 
 # ── TTL policy (hours) ──────────────────────────────────────────────────────
 _TTL = {
-    "price":      {"trading": 0.167, "off": 6.0},
-    "metrics":    {"trading": 2.0,   "off": 12.0},
+    "price":      {"trading": 0.167, "off": 12.0},
+    "metrics":    {"trading": 6.0,   "off": 24.0},
     "financials": {"trading": 168.0, "off": 168.0},
-    "returns":    {"trading": 0.5,   "off": 6.0},
+    "returns":    {"trading": 0.5,   "off": 12.0},
 }
 
 

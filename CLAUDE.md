@@ -135,6 +135,9 @@ frontend/           React SPA (Vite + Tailwind + Recharts)
 | `DATABASE_URL` | 선택 | SQLAlchemy DB URL. 기본값: `sqlite:///~/stock-watchlist/app.db`. PostgreSQL/Oracle 전환 시 변경. |
 | `KIS_MCP_URL` | 선택 | KIS AI Extensions MCP 서버 URL. 기본값: `http://127.0.0.1:3846/mcp`. |
 | `KIS_MCP_ENABLED` | 선택 | MCP 백테스트 연동 활성화. 기본값: `false`. `true` 설정 시 백테스트 기능 활성화. |
+| `CACHE_PURGE_ON_START` | 선택 | 컨테이너 시작 시 cache.db 전체 초기화. 기본값: `0`(보존). 스키마 변경/필드 추가 배포 시에만 `1`로 켜고 다음 배포 때 다시 `0`. |
+| `UVICORN_CONCURRENCY` | 선택 | uvicorn `--limit-concurrency`. 기본값: `20` (t3.small worker 보호). 큰 인스턴스에서는 50~100 권장. |
+| `UVICORN_KEEPALIVE` | 선택 | uvicorn `--timeout-keep-alive` 초. 기본값: `5`. idle 연결 정리 주기. |
 | `TEST_DATABASE_URL` | 선택 | 테스트 DB URL. 기본값: `postgresql://stocktest:stocktest@localhost:5433/stocktest` |
 | `TEST_KIS_*` | 선택 | 모의계좌용 (`test.py`에서 사용) |
 
@@ -348,4 +351,5 @@ pytest tests/api/ -v          # API 엔드포인트 테스트
 | 2026-05-01 | AI자문 프롬프트 누락데이터 보강 + 미래지향/역발상 | services/advisory_service, services/schemas/advisory_report_v3, stock/yf_client | 사업개요/사업부문/52주 위치/자본행위 분류(CB/BW/유증/자사주/M&A)/10년 밸류에이션 사이클/경쟁사 비교/배당수익률 6종 추가. 시스템 프롬프트에 catalyst 식별 의무 + 역발상 4대 시그널 + peak-out 검증. 8대 비판적 분석(미래성장동력/역발상관점 추가). Pydantic Optional → backward-compat. |
 | 2026-05-01 | AI 입력 데이터 패널 통합 + 증권사 컨센서스 노출 | frontend/src/components/advisory/ResearchDataPanel.jsx | 기본/리서치 2섹션 구분 제거 → 16카테고리 단일 목록. 신규: 증권사 컨센서스(통계 6종+의견분포+모멘텀5단계+과열+6개월 추이+리포트 5건). 계량지표 ROA/주당배당금/시총 추가. 거시지표에 52주 위치 통합. |
 | 2026-05-02 | 워치리스트 t3.small OOM 핫픽스 | services/watchlist_service.py | ThreadPool max_workers 10→4. 26종목 × 3종 외부 API 호출이 10병렬로 메모리 폭증→swap thrashing→nginx 499 발생하던 문제 해결. |
+| 2026-05-02 | 워치리스트 안정화 추가 개선 4종 | entrypoint.sh, db/repositories/stock_info_repo.py, infra/modules/compute/user_data.sh, CLAUDE.md | (1) cache.db 매재시작 초기화 폐지 → CACHE_PURGE_ON_START=1 옵션화(기본 보존). (2) stock_info TTL 연장: price off 6h→12h, metrics 2h→6h(trading)·12h→24h(off), returns off 6h→12h. (3) uvicorn --limit-concurrency 20 + --timeout-keep-alive 5 적용(ENV 가변). (4) Swap 2GB→4GB + vm.swappiness 60→10 (신규 EC2 user_data 적용). |
 | 2026-05-02 | AI 자문 보수성 완화 + 사이클×체제 + 성장주 트랙 | services/growth_grade(신규), services/macro_regime(get_regime_params 16셀), services/safety_grade(C 부분진입), services/advisory_service(cycle 통합·매트릭스·톤 완화), services/portfolio_advisor_service(톤 균형화), schemas/advisory_report_v3(GrowthAuxiliary), 6개 신규/수정 테스트 | defensive "어떤 경우에도 매수 금지" 폐기. cycle×regime 16셀 매트릭스(defensive+회복=single_cap 7%·margin 35%). C 등급 factor 0.25 부분진입. 가치D+성장G-A factor 0.30 우회진입(분할매수+손절 -20%). Graham 임계 cycle 보정(15%/25%/10%). portfolio "매도 우선/전면 보류" 톤 → "조합 권고/한정 허용/3안 균형". 414 PASS / 0 FAIL. 도메인 자문 4명 합의. |

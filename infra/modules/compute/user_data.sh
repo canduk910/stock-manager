@@ -15,12 +15,15 @@ curl -SL "https://github.com/docker/compose/releases/latest/download/docker-comp
   -o "$DOCKER_CLI_PLUGINS/docker-compose"
 chmod +x "$DOCKER_CLI_PLUGINS/docker-compose"
 
-# ── 2GB Swap 설정 (Docker pull/build 메모리 보완) ────────────
-fallocate -l 2G /swapfile
+# ── 4GB Swap 설정 (t3.small 1.9GB RAM 보완, 워치리스트 yfinance 병렬 호출 대응) ────────────
+fallocate -l 4G /swapfile
 chmod 600 /swapfile
 mkswap /swapfile
 swapon /swapfile
 echo "/swapfile swap swap defaults 0 0" >> /etc/fstab
+# swap 적극 활용 줄여 thrashing 방지 (기본 60 → 10)
+echo "vm.swappiness=10" >> /etc/sysctl.conf
+sysctl -p
 
 # ── 앱 디렉토리 ─────────────────────────────────────────────
 mkdir -p /opt/stock-manager

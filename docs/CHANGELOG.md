@@ -36,6 +36,14 @@
 ### 버그 수정
 - `services/watchlist_service.py:226`: `ThreadPoolExecutor(max_workers=min(10, len(items)))` → `min(4, len(items))` — 워치리스트 26종목 × 3종 외부 API(price/metrics/financials) 호출이 10병렬로 진행되어 t3.small(1.9GB)에서 메모리 폭증 + swap thrashing → 모든 API hang(`/api/watchlist/dashboard nginx 499 timeout`). 동시성 축소로 OOM 방지
 
+## 2026-05-02 — 워치리스트 안정화 추가 개선 4종
+
+### 인프라
+- `entrypoint.sh`: 컨테이너 시작 시 `cache.db` 무조건 초기화 → `CACHE_PURGE_ON_START=1` 환경변수일 때만 초기화. 기본 보존으로 t3.small cold cache 첫 진입 폭주 방지
+- `entrypoint.sh`: uvicorn 실행에 `--limit-concurrency 20 --timeout-keep-alive 5` 추가. `UVICORN_CONCURRENCY`/`UVICORN_KEEPALIVE` 환경변수로 조정 가능. worker가 동시 21번째 요청은 즉시 503 반환하여 전체 hang 방지
+- `db/repositories/stock_info_repo.py`: TTL 연장 — price off 6h→12h, metrics trading 2h→6h·off 12h→24h, returns off 6h→12h. 외부 API 호출 빈도 감소로 메모리/네트워크 부하 완화
+- `infra/modules/compute/user_data.sh`: Swap 2GB→4GB 확장 + `vm.swappiness=10` 추가. 메모리 압박 시 swap thrashing 빈도 감소(다음 EC2 재생성 시 적용, 기존 인스턴스는 수동 적용 필요)
+
 ## 2026-05-01 — AI 입력 데이터 패널 통합 + 증권사 컨센서스 노출
 
 ### UI 개선
