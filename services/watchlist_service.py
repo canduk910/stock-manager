@@ -223,7 +223,7 @@ class WatchlistService:
         if not items:
             return []
         results: list[dict | None] = [None] * len(items)
-        with ThreadPoolExecutor(max_workers=min(10, len(items))) as ex:
+        with ThreadPoolExecutor(max_workers=min(4, len(items))) as ex:
             futures = {ex.submit(_fetch_dashboard_row, item): i for i, item in enumerate(items)}
             for fut in as_completed(futures):
                 results[futures[fut]] = fut.result()
