@@ -1,5 +1,41 @@
 # 변경 이력
 
+## 2026-05-02 — AI 자문 보수성 완화 + 경기사이클×체제 조합 + 성장주 보조 트랙
+
+### 신규 모듈
+- `services/growth_grade.py` — 성장주 보조 등급(G-A/G-B/G-C). 5지표(매출CAGR/영업CAGR/FCF/R&D/사이클정합) 각 4점 → 20점. `combine_grades(value, growth)` 함수가 6종 라벨 + factor 반환 (가치D+성장A → factor 0.30 분할매수, 손절 -20%)
+
+### 프롬프트 개선
+- `services/advisory_service.py`: `_get_cycle_context()` 신규로 macro_cycle 통합. `_CYCLE_REGIME_RULES` 16셀(체제×사이클) 매트릭스 + `_format_cycle_regime_rule()` 신규. `_build_system_prompt()` 시그니처에 `cycle_ctx` 추가. **defensive "어떤 경우에도 매수 금지" 폐기** → "사이클 회복/확장 시 단계적 매수 허용"
+- `_build_consensus_section()` defensive 가드 폐지 → 50% 감산 경고로 완화 (cautious와 동일)
+- Graham 임계 cycle 보정: 회복/확장 15% / 과열 25% / 수축 10% (기존 30% 일괄)
+- 사전 계산에 `growth_grade.compute_growth_grade()` 결과 병기 (가치 D + 성장 G-A 라벨 표시)
+- JSON 응답 스키마에 `성장주_보조판단` 필드 추가
+- `services/portfolio_advisor_service.py`: 톤 균형화 — "현금 확보를 위한 매도 우선 검토" → "조합 권고에 따라 비중 조정", "가중 평균<B면 신규 편입 전면 보류" → "사이클 주도 섹터 + 가치 B 이상 또는 성장 G-A 한정 허용", 손실 -15% "손절 우선" → "손절/평균단가 분할매수/홀딩 3안 균형 제시". `_format_cycle_context`에 사이클×체제 액션 매트릭스 가이드 1줄 추가
+
+### 도메인 규칙
+- `services/macro_regime.py`: `get_regime_params(regime, cycle_phase)` + `get_margin_requirement(regime, cycle_phase)` 신규 — 16셀 매트릭스 동적 single_cap/margin. defensive+회복=7%·35%, +확장=5%·40%, +과열=2%·40%, +수축=0%·40%. 기존 `REGIME_PARAMS` dict는 fallback 호환
+- `services/safety_grade.py`: `GRADE_FACTOR["C"]=0 → 0.25` (C 등급 부분 진입 허용), `GRADE_STOP_LOSS_PCT["C"]=-15%` 신규, `valid_entry`에 C 포함. D는 0 유지(가치). 7지표 임계값 변경 없음
+
+### 스키마
+- `services/schemas/advisory_report_v3.py`: `GrowthAuxiliary` Pydantic 모델 신규(growth_grade/growth_score/growth_thesis/cycle_alignment/combined_label, 모두 Optional, backward-compat)
+
+### 테스트
+- 신규 5: `tests/unit/test_growth_grade.py`(11) / `test_macro_regime_cycle.py`(25) / `test_advisory_prompt_cycle.py`(6 환경 의존 skip) / `tests/integration/test_advisory_growth_track.py`(5) / `test_portfolio_advisor_tone.py`(7 환경 의존 skip)
+- 수정 1: `tests/unit/test_safety_grade.py` C 등급 정책 변경 반영(grade_factor/position_size/stop_loss 3건)
+- **414 PASS / 0 FAIL / 6 SKIP** (skip은 로컬 Python 3.9의 stock/* import 실패만, CI 3.11에서 정상)
+
+### 도메인 자문 합의안 (4명)
+- MacroSentinel: cycle×regime 16셀 single_cap 매트릭스
+- MarginAnalyst: Graham 임계 cycle 보정 15%/25%/10%
+- OrderAdvisor: 분할 진입 30→30→40, D+A 우회 진입 시 1차 25%만+손절 -20%
+- ValueScreener: 성장 5지표 임계값 G-A=16-20, G-B=12-15, G-C<12
+
+## 2026-05-02 — 워치리스트 t3.small OOM 핫픽스
+
+### 버그 수정
+- `services/watchlist_service.py:226`: `ThreadPoolExecutor(max_workers=min(10, len(items)))` → `min(4, len(items))` — 워치리스트 26종목 × 3종 외부 API(price/metrics/financials) 호출이 10병렬로 진행되어 t3.small(1.9GB)에서 메모리 폭증 + swap thrashing → 모든 API hang(`/api/watchlist/dashboard nginx 499 timeout`). 동시성 축소로 OOM 방지
+
 ## 2026-05-01 — AI 입력 데이터 패널 통합 + 증권사 컨센서스 노출
 
 ### UI 개선

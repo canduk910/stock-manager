@@ -411,10 +411,12 @@ class TestComputeGrade7Point:
             assert "points" in details[key]
 
     def test_grade_factor_mapping(self):
+        # 2026-05-01: C 등급은 0 → 0.25 (성장 트랙 도입과 함께 부분 진입 허용)
+        # D는 여전히 0 (가치 평가 진입 금지). 성장 G-A 시 growth_grade.combine_grades에서 0.30 부여.
         assert GRADE_FACTOR["A"] == 1.0
         assert GRADE_FACTOR["B+"] == 0.75
         assert GRADE_FACTOR["B"] == 0.5
-        assert GRADE_FACTOR["C"] == 0.0
+        assert GRADE_FACTOR["C"] == 0.25
         assert GRADE_FACTOR["D"] == 0.0
 
     def test_grade_cutoffs(self):
@@ -570,12 +572,17 @@ class TestComputePositionSize:
         assert result["recommendation"] == "ENTER"
         assert result["position_pct"] == pytest.approx(3.0)
 
-    def test_C_skip(self):
+    def test_C_partial_entry(self):
+        # 2026-05-01: C 등급 factor=0.25 → 부분 진입 허용
+        # target_pct = 4 * 0.25 / 100 = 0.01, max_amount = 100M * 0.01 = 1M
+        # qty = 1M // 50000 = 20
         result = compute_position_size("C", 4, 100_000_000, 50_000_000, 50_000)
-        assert result["qty"] == 0
-        assert result["recommendation"] == "SKIP"
+        assert result["qty"] == 20
+        assert result["recommendation"] == "ENTER"
+        assert result["grade_factor"] == 0.25
 
     def test_D_skip(self):
+        # D 등급은 여전히 진입 금지 (가치 평가 기준). 성장 트랙은 별도 모듈에서 처리.
         result = compute_position_size("D", 4, 100_000_000, 50_000_000, 50_000)
         assert result["qty"] == 0
         assert result["recommendation"] == "SKIP"
@@ -624,9 +631,11 @@ class TestComputeStopLoss:
         assert compute_stop_loss("B", 50000) == pytest.approx(44000.0)
 
     def test_C_grade(self):
-        assert compute_stop_loss("C", 50000) is None
+        # 2026-05-01: C 등급 손절 -15% (부분 진입 허용에 따른 신규 정책)
+        assert compute_stop_loss("C", 50000) == pytest.approx(42500.0)
 
     def test_D_grade(self):
+        # D는 여전히 진입 금지 → 손절 None
         assert compute_stop_loss("D", 50000) is None
 
     def test_zero_price(self):

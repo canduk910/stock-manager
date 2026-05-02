@@ -35,19 +35,21 @@ from typing import Optional
 # A=1.0(100%): 강력매수 등급이므로 한도를 최대로 활용
 # B+=0.75(75%): 매수 등급이지만 소폭 감액 (리스크 관리)
 # B=0.50(50%): 조건부 등급이므로 반으로 축소
-# C/D=0: 진입 금지 (매수 불가 등급)
-GRADE_FACTOR = {"A": 1.0, "B+": 0.75, "B": 0.5, "C": 0.0, "D": 0.0}
+# C=0.25(25%): 소형 분할 진입 허용 (Phase 2026-05-01: 성장 트랙 도입과 함께 0→0.25)
+# D=0: 가치 평가 진입 금지. 단, growth_grade.combine_grades에서 성장 G-A 시 0.30 부여
+GRADE_FACTOR = {"A": 1.0, "B+": 0.75, "B": 0.5, "C": 0.25, "D": 0.0}
 
 # 등급별 손절폭 — 등급이 높을수록 좁은 손절 (확신이 높으므로 빠르게 손절)
 # A=-8%: 강력매수 종목이 8% 하락하면 전제가 틀린 것 → 빠른 손절
 # B+=-10%: 매수 종목에 약간 더 여유
 # B=-12%: 조건부 종목에 최대 여유
-# C/D=None: 진입 자체를 금지
+# C=-15%: 소형 분할 진입 종목 (보수성 vs 변동성 허용 절충)
+# D=None: 가치 진입 금지 (성장 트랙 진입 시 별도 -20%)
 GRADE_STOP_LOSS_PCT = {
     "A": 0.08,    # -8%
     "B+": 0.10,   # -10%
     "B": 0.12,    # -12%
-    "C": None,    # 진입 금지
+    "C": 0.15,    # -15% (성장 보조 트랙)
     "D": None,    # 진입 금지
 }
 
@@ -345,7 +347,7 @@ def compute_grade_7point(
         "score": score,
         "grade": grade,
         "grade_factor": GRADE_FACTOR.get(grade, 0.0),
-        "valid_entry": grade in ("A", "B+", "B"),
+        "valid_entry": grade in ("A", "B+", "B", "C"),
         "details": {
             "discount": {"value": discount, "points": pts_discount},
             "per_vs_avg": {"value": per, "avg": per_avg, "points": pts_per},

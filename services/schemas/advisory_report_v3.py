@@ -152,6 +152,24 @@ class ContrarianView(BaseModel):
         extra = "allow"
 
 
+class GrowthAuxiliary(BaseModel):
+    """9. 성장주 보조 판단 — 가치 평가(7점)와 별도의 성장 보조 등급.
+
+    backward-compat: 모든 필드 Optional. 기존 v3 캐시 영향 없음.
+    growth_grade: G-A(16-20점) / G-B(12-15점) / G-C(<12)
+    cycle_alignment: 현재 경기 사이클 주도 섹터와의 정합성 라벨
+    """
+    growth_grade: Optional[Literal["G-A", "G-B", "G-C"]] = None
+    growth_score: Optional[int] = Field(None, ge=0, le=20)
+    growth_thesis: Optional[str] = None
+    cycle_alignment: Optional[str] = None
+    combined_factor: Optional[float] = Field(None, ge=0, le=1)
+    combined_label: Optional[str] = None  # 가치우위/가치+성장혼합/성장우위(가치D)/진입금지
+
+    class Config:
+        extra = "allow"
+
+
 class TradingStrategy(BaseModel):
     """6. 최종 매매 전략 (v2 포지션가이드 + v3 최종매매전략 통합)."""
     # v2 포지션가이드 필드
@@ -198,6 +216,7 @@ class AdvisoryReportV3Schema(BaseModel):
     최종매매전략: Optional[TradingStrategy] = None
     미래성장동력: Optional[FutureGrowthDrivers] = None
     역발상관점: Optional[ContrarianView] = None
+    성장주_보조판단: Optional[GrowthAuxiliary] = None
 
     # 전략별 정량 평가
     전략별평가: StrategyEvaluation

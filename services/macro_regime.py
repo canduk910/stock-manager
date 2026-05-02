@@ -276,9 +276,109 @@ def determine_regime(
     }
 
 
+# ── Cycle×Regime 보정 (2026-05-01 신규: 보수성 완화) ──────────────────────
+#
+# 기존 REGIME_PARAMS는 cycle을 무시하고 단일 체제 기준이라 강세장/회복기에도
+# defensive=single_cap=0(매수 절대 금지)을 강제했다. 실제 시장에서는
+# defensive 체제에서도 회복/확장기에는 사이클 주도 섹터에 부분 진입이 합리적이다.
+#
+# 도메인 자문 (MacroSentinel):
+# 16셀 single_cap(%) 매트릭스 — 행=regime, 열=cycle_phase
+#                | recovery | expansion | overheating | contraction
+#  accumulation  |    7     |     6     |      5      |      5
+#  selective     |    5     |     4     |      3      |      4
+#  cautious      |    4     |     3     |      2      |      3
+#  defensive     |    7     |     5     |      2      |      0
+#
+# (1) defensive+contraction: 0 — 진입 금지 유지 (기존 정책)
+# (2) defensive+overheating: 2 — 매우 제한적 매수 허용 (사이클 막바지)
+# (3) defensive+expansion:   5 — 사이클 주도 섹터 한정 단계적 매수
+# (4) defensive+recovery:    7 — 회복 초기에는 defensive 체제도 적극 진입
+# 정책 의도: 동일 defensive라도 cycle이 회복/확장이면 사이클 주도 섹터에 한정해
+# advisory에서 분할 매수를 고려할 수 있게 한다.
+
+_CYCLE_SINGLE_CAP: dict[tuple[str, str], int] = {
+    ("accumulation", "recovery"): 7,
+    ("accumulation", "expansion"): 6,
+    ("accumulation", "overheating"): 5,
+    ("accumulation", "contraction"): 5,
+    ("selective", "recovery"): 5,
+    ("selective", "expansion"): 4,
+    ("selective", "overheating"): 3,
+    ("selective", "contraction"): 4,
+    ("cautious", "recovery"): 4,
+    ("cautious", "expansion"): 3,
+    ("cautious", "overheating"): 2,
+    ("cautious", "contraction"): 3,
+    ("defensive", "recovery"): 7,
+    ("defensive", "expansion"): 5,
+    ("defensive", "overheating"): 2,
+    ("defensive", "contraction"): 0,
+}
+
+# 체제+사이클별 안전마진(%) 보정 — MarginAnalyst 자문
+# 강세장(회복/확장)에서 정량 벽이 너무 높아 매수 신호가 사라지는 문제 보정.
+_CYCLE_MARGIN: dict[tuple[str, str], int] = {
+    ("accumulation", "recovery"): 18,
+    ("accumulation", "expansion"): 20,
+    ("accumulation", "overheating"): 22,
+    ("accumulation", "contraction"): 15,
+    ("selective", "recovery"): 25,
+    ("selective", "expansion"): 27,
+    ("selective", "overheating"): 30,
+    ("selective", "contraction"): 20,
+    ("cautious", "recovery"): 30,
+    ("cautious", "expansion"): 35,
+    ("cautious", "overheating"): 40,
+    ("cautious", "contraction"): 25,
+    ("defensive", "recovery"): 35,
+    ("defensive", "expansion"): 40,
+    ("defensive", "overheating"): 50,
+    ("defensive", "contraction"): 999,  # 사실상 진입 차단
+}
+
+
+def get_regime_params(regime: str, cycle_phase: Optional[str] = None) -> dict:
+    """체제+사이클 조합 파라미터.
+
+    cycle_phase가 None이면 기존 REGIME_PARAMS 그대로 반환(하위 호환).
+    cycle_phase가 있으면 single_cap/margin을 _CYCLE_SINGLE_CAP/_CYCLE_MARGIN에서 보정.
+
+    Args:
+        regime: "accumulation" | "selective" | "cautious" | "defensive"
+        cycle_phase: "recovery" | "expansion" | "overheating" | "contraction" | None
+
+    Returns:
+        REGIME_PARAMS[regime] 복사본 + single_cap/margin이 cycle 보정값으로 덮어쓰여짐.
+    """
+    base = REGIME_PARAMS.get(regime, REGIME_PARAMS["selective"]).copy()
+    if not cycle_phase:
+        return base
+
+    key = (regime, cycle_phase)
+    if key in _CYCLE_SINGLE_CAP:
+        base["single_cap"] = _CYCLE_SINGLE_CAP[key]
+    if key in _CYCLE_MARGIN:
+        base["margin"] = _CYCLE_MARGIN[key]
+    base["cycle_phase"] = cycle_phase
+    return base
+
+
+def get_margin_requirement(regime: str, cycle_phase: Optional[str] = None) -> int:
+    """체제+사이클 조합 안전마진 요구치(%) — Graham 할인율 기준선.
+
+    기존 advisory_service._REGIME_MARGIN(체제 단일)을 cycle 보정 버전으로 대체.
+    """
+    if not cycle_phase:
+        return REGIME_PARAMS.get(regime, {}).get("margin", 25)
+    return _CYCLE_MARGIN.get((regime, cycle_phase), REGIME_PARAMS.get(regime, {}).get("margin", 25))
+
+
 __all__ = [
     "REGIME_MATRIX",
     "REGIME_PARAMS",
     "REGIME_DESC",
     "determine_regime",
+    "get_regime_params",
+    "get_margin_requirement",
 ]

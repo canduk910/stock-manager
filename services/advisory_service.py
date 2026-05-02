@@ -46,7 +46,12 @@ from stock.utils import is_domestic
 from services.exceptions import (
     ConfigError, ExternalAPIError, NotFoundError, PaymentRequiredError,
 )
-from services.macro_regime import determine_regime as _shared_determine_regime, REGIME_DESC
+from services.macro_regime import (
+    determine_regime as _shared_determine_regime,
+    REGIME_DESC,
+    get_regime_params as _get_regime_params_cycle,
+    get_margin_requirement as _get_margin_requirement_cycle,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -107,11 +112,14 @@ def generate_ai_report(code: str, market: str, name: str, user_id: int = 1) -> d
     macro_ctx = _get_macro_context()
     regime, regime_desc = _determine_regime(macro_ctx)
 
+    # 경기 사이클 컨텍스트 수집 (신규: 보수성 완화 위해 cycle×regime 조합 판단)
+    cycle_ctx = _get_cycle_context()
+
     # 항상 통합 프롬프트 (v2/v3 분기 없음)
-    system_prompt = _build_system_prompt(regime, regime_desc)
+    system_prompt = _build_system_prompt(regime, regime_desc, cycle_ctx)
     prompt = _build_prompt(code, market, name, fundamental, technical,
                            graham_data, macro_ctx, regime, regime_desc,
-                           strategy_signals, research_data)
+                           strategy_signals, research_data, cycle_ctx)
 
     def _call_openai(max_tokens: int, extra_user_msg: str = "", check_quota: bool = True) -> tuple[str, str]:
         """AI Gateway를 통한 OpenAI 호출. (content, finish_reason) 반환."""
@@ -530,6 +538,21 @@ def _determine_regime(sentiment: dict) -> tuple[str, str]:
     return result["regime"], result["regime_desc"]
 
 
+def _get_cycle_context() -> dict:
+    """경기 사이클 국면 데이터 수집. 실패 시 빈 dict.
+
+    portfolio_advisor와 동일 함수 — 향후 macro_service.get_macro_cycle()로 통합 가능.
+    """
+    try:
+        from stock import macro_fetcher
+        from services.macro_cycle import determine_cycle_phase
+        inputs = macro_fetcher.fetch_cycle_inputs()
+        return determine_cycle_phase(inputs)
+    except Exception as e:
+        logger.debug("경기 사이클 수집 실패: %s", e)
+        return {}
+
+
 # 체제별 요구 안전마진(%) — 공용 모듈 REGIME_PARAMS에서 가져옴 (하위 호환)
 # 예: accumulation=20%, selective=25%, cautious=30%, defensive=40%
 # 이 값은 프롬프트에 "요구 안전마진: N% 이상"으로 삽입되어
@@ -602,41 +625,86 @@ def _build_strategy_signal_section(signals: Optional[dict]) -> str:
     return "\n".join(lines)
 
 
-# ── 체제별 투자 원칙 ───────────────────────────────────────────────────────
-# 각 체제에서 GPT가 따라야 할 투자 행동 지침.
-# 시스템 프롬프트에 삽입되어 GPT의 등급 부여와 매매 판단을 제약한다.
-# - accumulation: 시장 저평가 구간. 안전마진 20%면 적극 진입 가능
-# - selective: 중립 구간. 25% 이상 안전마진을 가진 종목만 선별 매수
-# - cautious: 과열 경계. 30% 이상 안전마진 + 하방 리스크 강조
-# - defensive: 극단 공포/과열. 매수 금지, 현금 보존 최우선
-_REGIME_RULES = {
-    "accumulation": (
-        "시장 체제: accumulation (탐욕 — 축적 구간)\n"
-        "안전마진 20% 이상이면 적극 매수 가능. 기술적 신호가 약해도 밸류에이션이 좋으면 진입 검토.\n"
-        "현금 비중 25% 이상 유지."
-    ),
-    "selective": (
-        "시장 체제: selective (중립 — 선별 매수)\n"
-        "안전마진 25% 이상인 종목만 매수 권고. 기술적 추세와 펀더멘털이 모두 양호한 경우에만.\n"
-        "현금 비중 35% 이상 유지."
-    ),
-    "cautious": (
-        "시장 체제: cautious (신중 — 방어적 운용)\n"
-        "안전마진 30% 이상인 종목만 조건부 매수. 추세 하락 신호는 하향 조정.\n"
-        "하방 리스크를 강조하고 손절 기준을 명시할 것. 현금 비중 50% 이상 유지."
-    ),
-    "defensive": (
-        "시장 체제: defensive (공포 — 방어 구간)\n"
-        "【중요】 매수 등급을 부여하지 마세요. 최대 '관망'까지만 허용.\n"
-        "매도 검토 우선, 현금 보존 최우선. 안전마진 40% 이상이면 관심 목록에만 추가.\n"
-        "현금 비중 75% 이상 유지."
-    ),
+# ── 체제×사이클 16셀 투자 원칙 ─────────────────────────────────────────
+# 기존 단일 체제 규칙은 cycle을 무시해 "확장+defensive" 같은 조합에서 사이클 주도
+# 섹터 진입을 봉쇄했다. 신규 매트릭스는 cycle 보정으로 강세장에서 부분 진입을
+# 허용하면서도 약세장 보수성을 유지한다.
+#
+# 행=regime, 열=cycle_phase (recovery/expansion/overheating/contraction)
+# 각 셀: 진입 정책 한 줄 — 시스템 프롬프트에 삽입되어 GPT 판단을 가이드한다.
+_CYCLE_REGIME_RULES: dict[tuple[str, str], str] = {
+    # accumulation (저평가 — 적극 진입 기조)
+    ("accumulation", "recovery"):
+        "축적+회복기: 사이클 주도 섹터(금융/산업재/소재) 적극 매수. Graham 할인 15%+ 강매수. 종목당 7%까지.",
+    ("accumulation", "expansion"):
+        "축적+확장기: 기술/임의소비재 우선. Graham 할인 15%+ 매수. 종목당 6%까지.",
+    ("accumulation", "overheating"):
+        "축적+과열기: 에너지/소재/필수소비재 회전. Graham 할인 25%+ 강매수. 종목당 5%.",
+    ("accumulation", "contraction"):
+        "축적+수축기: 유틸리티/헬스케어/필수소비재. Graham 할인 10%+ 매수. 종목당 5%.",
+    # selective (중립 — 선별 매수)
+    ("selective", "recovery"):
+        "선별+회복기: 사이클 주도 섹터 한정 매수. Graham 할인 15%+. 종목당 5%.",
+    ("selective", "expansion"):
+        "선별+확장기: 기술 성장주 우선. Graham 할인 15%+. 종목당 4%.",
+    ("selective", "overheating"):
+        "선별+과열기: 방어 회전. Graham 할인 25%+ 만 매수. 종목당 3%.",
+    ("selective", "contraction"):
+        "선별+수축기: 방어주 한정. Graham 할인 10%+ 매수. 종목당 4%.",
+    # cautious (신중 — 방어적 운용)
+    ("cautious", "recovery"):
+        "신중+회복기: 사이클 주도 섹터에 한해 분할 매수 허용. Graham 할인 15%+. 종목당 4%. 손절 명시.",
+    ("cautious", "expansion"):
+        "신중+확장기: 기술 성장주 분할 매수. Graham 할인 15%+. 종목당 3%. 손절 명시.",
+    ("cautious", "overheating"):
+        "신중+과열기: 매수 신호 보수적. Graham 할인 25%+만. 종목당 2%. 손절 -10%.",
+    ("cautious", "contraction"):
+        "신중+수축기: 방어주만 매수. Graham 할인 10%+. 종목당 3%. 손절 명시.",
+    # defensive (방어 — 사이클 보정으로 부분 매수 허용)
+    ("defensive", "recovery"):
+        "방어+회복기: **사이클 주도 섹터 한정 단계적 매수 허용**(권고치의 30~50%). Graham 할인 15%+. 종목당 7%. "
+        "성장 보조 G-A 종목은 가치 D라도 분할 진입 검토.",
+    ("defensive", "expansion"):
+        "방어+확장기: **사이클 주도 섹터(기술/임의소비재) 단계적 매수 허용**(권고치 30~50%). Graham 할인 15%+. 종목당 5%.",
+    ("defensive", "overheating"):
+        "방어+과열기: 매수 매우 제한적(권고치 30%만). Graham 할인 25%+만. 종목당 2%. 손절 -8%.",
+    ("defensive", "contraction"):
+        "방어+수축기: 신규 매수 금지. 매도/관망/현금 보존. 안전마진 40%+ 종목만 관심목록.",
 }
 
 
-def _build_system_prompt(regime: str, regime_desc: str) -> str:
-    """통합 시스템 프롬프트 — 6대 비판적 분석 + 정량 프레임워크 + 미래지향/역발상."""
-    regime_rule = _REGIME_RULES.get(regime, _REGIME_RULES["selective"])
+def _format_cycle_regime_rule(regime: str, cycle_phase: Optional[str]) -> str:
+    """체제+사이클 결합 규칙 1줄 + Graham 할인 임계 cycle 보정 안내."""
+    if cycle_phase:
+        rule = _CYCLE_REGIME_RULES.get((regime, cycle_phase))
+        if rule:
+            return rule
+    # cycle 정보 없으면 기존 체제 단일 기조 (보수성 완화 톤)
+    fallback = {
+        "accumulation": "축적: 안전마진 20%+ 적극 매수. 종목당 5~7%.",
+        "selective": "선별: 안전마진 25%+ 매수. 종목당 4~5%.",
+        "cautious": "신중: 안전마진 30%+ 조건부 매수. 종목당 3~4%. 손절 명시.",
+        "defensive": "방어: 신규 매수 매우 제한적. 사이클 정보 부재 시 관망 우선.",
+    }
+    return fallback.get(regime, fallback["selective"])
+
+
+def _build_system_prompt(
+    regime: str,
+    regime_desc: str,
+    cycle_ctx: Optional[dict] = None,
+) -> str:
+    """통합 시스템 프롬프트 — 6대 비판적 분석 + 정량 프레임워크 + 미래지향/역발상.
+
+    cycle_ctx 추가(2026-05-01): cycle×regime 16셀 매트릭스로 cycle을 반영해
+    "어떤 경우에도 매수 금지" 톤을 사이클 보정으로 완화.
+    """
+    cycle_phase = (cycle_ctx or {}).get("phase")
+    cycle_label = (cycle_ctx or {}).get("phase_label", cycle_phase or "데이터없음")
+    leader_sectors = (cycle_ctx or {}).get("leader_sectors") or []
+    cycle_conf = (cycle_ctx or {}).get("confidence")
+    regime_rule = _format_cycle_regime_rule(regime, cycle_phase)
+    leader_str = ", ".join(leader_sectors) if leader_sectors else "데이터없음"
     return (
         "당신은 20년 경력의 베테랑 수석 에퀴티 리서치 애널리스트이다. "
         "'안전마진'과 '전통적 가치'를 중시하되, **결정은 과거가 아닌 미래에 베팅한다**. "
@@ -689,10 +757,35 @@ def _build_system_prompt(regime: str, regime_desc: str) -> str:
         "ValueScreener Value Trap 6규칙 (2개↑ 시 경고): 1)매출CAGR<0%+PER<5, 2)영업이익률 3년↓, 3)FCF 3년음수, 4)부채비율 30%p↑, 5)배당중단, 6)증권사 컨센서스 과열(consensus_overheated=True 시 가산 1점).\n"
         "KIS 퀀트 (보조): SMA/Momentum/Trend 3전략. consensus=BUY+강도>0.6이면 확인.\n\n"
 
-        f"【현재 매크로 환경】\n{regime_rule}\n\n"
+        f"【현재 매크로 환경】\n"
+        f"체제={regime}({regime_desc}) / 사이클={cycle_label}"
+        + (f" (신뢰도 {cycle_conf}%)" if cycle_conf is not None else "")
+        + f" / 주도 섹터={leader_str}\n"
+        f"진입 정책: {regime_rule}\n\n"
 
-        "defensive 체제에서는 어떤 경우에도 '매수' 등급을 부여하지 마라.\n"
-        "C/D 등급은 매수 추천 금지 (최대 '관망'). 모든 논리적 허점은 가차 없이 비판하라."
+        "【보수성 완화 — 체제×사이클 조합 판단】\n"
+        "- defensive 체제라도 사이클이 회복/확장이면 사이클 주도 섹터에 한정해 단계적 매수(권고치의 30~50%) 가능.\n"
+        "  단 '확신 없는 일괄 매수 금지'는 유효 — 진입가/손절가/리스크보상비율을 명시하라.\n"
+        "- C 등급(점수 12~15)은 GRADE_FACTOR=0.25로 소형 분할 진입 허용. 손절 -15%.\n"
+        "- D 등급(점수 <12)은 가치 평가상 진입 금지가 원칙. 단 **성장주 보조 등급 G-A**(아래 참조)인 경우\n"
+        "  factor=0.30, 손절 -20%로 분할 진입 검토 가능. 일반 가치주 D는 진입 금지 유지.\n"
+        "- 모든 매수 권고는 분할(1차 30% → 2차 30% → 3차 40%)과 손절가를 명시하라.\n\n"
+
+        "【성장주 보조 트랙】\n"
+        "프롬프트 하단 '성장주 보조 등급 사전 계산값'을 참조하여 가치 D 종목이라도 G-A이면\n"
+        "JSON 응답의 '성장주_보조판단' 필드에 growth_grade/growth_score/growth_thesis/cycle_alignment를 채우고,\n"
+        "최종매매전략.action을 '분할매수'로 권고할 수 있다(가치 D + G-A 조합만 허용).\n"
+        "단 가치 D + G-B/G-C는 진입 금지를 유지하라.\n\n"
+
+        "【Graham 할인 임계의 사이클 보정】\n"
+        "강매수 임계는 사이클별로 차등 적용한다 (전 체제 공통):\n"
+        "- 회복/확장기: 15% 이상 (강세장 정량 벽 완화)\n"
+        "- 과열기: 25% 이상 (안전마진 강화)\n"
+        "- 수축기: 10% 이상 (충분한 가격 조정 후)\n"
+        "기존 30% 일률 적용보다 시장 분위기를 반영한 합리적 기준이다.\n\n"
+
+        "모든 논리적 허점은 가차 없이 비판하라. 단 '매도/SKIP만의 일변도'는 회피하라 — "
+        "체제×사이클 조합이 허용하는 범위에서 진입 시그널을 적극 식별할 것."
     )
 
 
@@ -724,10 +817,9 @@ def _build_consensus_section(
     데이터 0건(data_source='empty') → 빈 문자열.
     US (target_price 부재) → 등급 변경 이력 형식.
     """
-    # defensive 체제 가드 (REQ-ANALYST-08)
-    if (regime or "").lower() == "defensive":
-        return ""
-
+    # 2026-05-01: defensive 체제 가드 폐지 — cautious와 동일하게 50% 가중 감산만 적용.
+    # 기존엔 defensive에서 컨센서스 섹션 자체가 사라져 매수 의견이 GPT 시야에서 제거됐다.
+    # 이제 defensive에서도 컨센서스 노출하되 신뢰도 50% 감산 경고를 명시한다.
     if not consensus_data or not isinstance(consensus_data, dict):
         return ""
 
@@ -798,9 +890,10 @@ def _build_consensus_section(
                 "Value Trap 평가 시 가중 반영."
             )
 
-        if (regime or "").lower() == "cautious":
+        regime_lc = (regime or "").lower()
+        if regime_lc in ("cautious", "defensive"):
             lines.append(
-                "  ⚠ 하락 추세장에서는 증권사 컨센서스가 늦은 하향 경향. "
+                "  ⚠ 신중/방어 체제에서는 증권사 컨센서스가 늦은 하향 경향. "
                 "신뢰도 50% 가중 감산 필요."
             )
 
@@ -834,7 +927,8 @@ def _build_prompt(code: str, market: str, name: str, fundamental: dict, technica
                   regime: str = "selective",
                   regime_desc: str = "중립",
                   strategy_signals: Optional[dict] = None,
-                  research_data: Optional[dict] = None) -> str:
+                  research_data: Optional[dict] = None,
+                  cycle_ctx: Optional[dict] = None) -> str:
     """GPT 유저 프롬프트 구성 (통합 v3).
 
     프롬프트 구조 (위→아래 순서):
@@ -1122,6 +1216,26 @@ def _build_prompt(code: str, market: str, name: str, fundamental: dict, technica
         fcf_years_positive=grade_pre["details"]["fcf_trend"]["years_positive"],
     )
 
+    # 성장주 보조 등급 (2026-05-01 신규) — 가치 평가에 불리한 성장주 우회 트랙
+    from services.growth_grade import compute_growth_grade, combine_grades
+    sector_str = (research_data or {}).get("industry_peers", {}).get("sector") or fundamental.get("sector")
+    cycle_phase = (cycle_ctx or {}).get("phase")
+    growth_pre = compute_growth_grade(
+        metrics=metrics,
+        income_stmt=fundamental.get("income_stmt") or [],
+        cashflow=fundamental.get("cashflow") or [],
+        rnd_ratio=metrics.get("rnd_ratio") if metrics else None,
+        sector=sector_str,
+        cycle_phase=cycle_phase,
+    )
+    final_factor, final_label = combine_grades(grade_pre["grade"], growth_pre["grade"])
+
+    # cycle 보정 안전마진 요구치
+    margin_req = _get_margin_requirement_cycle(regime, cycle_phase) if cycle_phase else _REGIME_MARGIN.get(regime, 25)
+    cycle_label_for_prompt = (cycle_ctx or {}).get("phase_label", cycle_phase or "데이터없음")
+    leader_sectors_for_prompt = ", ".join((cycle_ctx or {}).get("leader_sectors") or []) or "데이터없음"
+    cycle_conf = (cycle_ctx or {}).get("confidence")
+
     prompt = f"""다음은 {name}({code}, {market}) 종목의 분석 데이터입니다. 통화단위: {currency}
 
 ## 손익계산서 (전체)
@@ -1201,7 +1315,7 @@ def _build_prompt(code: str, market: str, name: str, fundamental: dict, technica
 - 5일 평균 거래량: {volume_5d}, 20일 평균: {volume_20d}
 - 볼린저밴드 위치: {bb_position} (0=하단 터치, 100=상단 터치, 50=중간)
 
-## 7점 등급 사전 계산값 (참고용)
+## 7점 등급 사전 계산값 (참고용 — 가치 평가)
 사전 계산 등급: {grade_pre['grade']} ({grade_pre['score']}/28점)
 - Graham 할인율: {grade_pre['details']['discount']['points']}/4
 - PER vs 5년평균: {grade_pre['details']['per_vs_avg']['points']}/4
@@ -1212,8 +1326,27 @@ def _build_prompt(code: str, market: str, name: str, fundamental: dict, technica
 - 매출 CAGR: {grade_pre['details']['revenue_cagr']['points']}/4
 복합 점수: {composite_score}/100 (ValueScreener 공식)
 체제 정합성: {regime_alignment_score}/100
+
+## 성장주 보조 등급 사전 계산값 (참고용 — 신규 트랙)
+사전 계산 성장 등급: {growth_pre['grade']} ({growth_pre['score']}/20점)
+- 매출 CAGR: {growth_pre['details']['revenue_cagr']['points']}/4
+- 영업이익 CAGR: {growth_pre['details']['operating_cagr']['points']}/4
+- FCF 추세: {growth_pre['details']['fcf_trend']['points']}/4 ({growth_pre['details']['fcf_trend']['label']})
+- R&D/매출: {growth_pre['details']['rnd_ratio']['points']}/4
+- 사이클 정합성: {growth_pre['details']['cycle_alignment']['points']}/4 ({growth_pre['details']['cycle_alignment']['label']})
+성장 thesis: {growth_pre['thesis']}
+가치+성장 결합 라벨: {final_label} (final_factor={final_factor})
+※ 가치 D + 성장 G-A 종목은 분할 진입 검토 가능 (factor=0.30, 손절 -20%).
 ※ 위는 데이터 기반 사전 계산이며, GPT는 추세·매크로·기술시그널을 종합해 최종 등급을 부여할 것.
    사전 계산을 단순 복사하지 말고, 독립적 판단을 내리되 불일치 시 reasoning에 근거 명시.
+
+## 경기 사이클 + 체제 조합
+- 시장 체제: {regime} ({regime_desc})
+- 경기 사이클 국면: {cycle_label_for_prompt}{f" (신뢰도 {cycle_conf}%)" if cycle_conf is not None else ""}
+- 사이클 주도 섹터: {leader_sectors_for_prompt}
+- 본 종목 섹터: {sector_str or 'N/A'}
+- cycle 보정 안전마진 요구치: {margin_req}% 이상 (Graham 할인율 기준)
+- 진입 정책: {_format_cycle_regime_rule(regime, cycle_phase)}
 
 {_build_macro_section(macro_ctx, regime, regime_desc)}
 
@@ -1318,6 +1451,7 @@ def _build_prompt(code: str, market: str, name: str, fundamental: dict, technica
   "최종매매전략": {{"등급팩터":0-1, "추천진입가":정수|null, "진입가근거":"...", "손절가":정수|null, "손절근거":"...", "리스크보상비율":소수|null, "분할매수제안":"50-30-20%", "recommendation":"ENTER|HOLD|SKIP", "적정가치":정수|null, "적정가치산출":"...", "upside_pct":숫자|null, "downside_pct":숫자|null, "worst_scenario":"최악 시나리오", "action":"적극매수|분할매수|관망|분할매도|전량매도"}},
   "미래성장동력": {{"catalysts":["catalyst1","catalyst2","catalyst3"], "turning_points":["변곡점 신호1","변곡점 신호2"], "industry_tailwinds":"산업 순풍 (수요·정책·사이클)", "peak_out_signals":["피크아웃 신호 또는 빈 배열"], "growth_horizon":"단기(3개월)|중기(12개월)|장기(3년+)", "confidence":"높음|보통|낮음"}},
   "역발상관점": {{"contrarian_thesis":"역발상 핵심 논제 (시장이 놓친 것)", "market_misperception":"시장의 오해·과잉 반응 포인트", "edge":"차별화된 인사이트", "rebut_consensus":"증권사 컨센서스 반박 또는 동조 근거", "asymmetric_payoff":"비대칭 보상 구조(상방/하방 비율)"}},
+  "성장주_보조판단": {{"growth_grade":"G-A|G-B|G-C", "growth_score":0-20, "growth_thesis":"성장 thesis (catalyst+사이클 정합)", "cycle_alignment":"주도섹터/부분일치/중립/반대사이클", "combined_factor":0-1, "combined_label":"가치우위|가치+성장혼합|가치C|성장우위(가치D)|진입금지"}},
 
   "전략별평가": {{"변동성돌파":{{"신호":"...", "목표가":숫자|null, "근거":"..."}}, "안전마진":{{"신호":"...", "graham_number":숫자|null, "할인율":숫자|null, "근거":"..."}}, "추세추종":{{"신호":"...", "추세강도":"강|중|약", "근거":"..."}}}},
   "기술적시그널": {{"신호":"...", "해석":"...", "지표별":{{"macd":"...", "rsi":"...", "stoch":"...", "volume":"...", "bb":"..."}}}},
