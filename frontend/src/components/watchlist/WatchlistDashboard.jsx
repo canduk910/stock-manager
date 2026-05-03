@@ -58,6 +58,25 @@ function ChangeCell({ change, changePct, currency = 'KRW' }) {
   )
 }
 
+// ── QW-3: partial_failure 영역의 셀 표시 헬퍼 ───────────────────────────────
+// 데이터가 None이고 partial_failure에 해당 영역이 포함되면 "일시 미수집" 회색 표시
+function StaleCell({ value, partialFailure, fields, render, fallback = '-' }) {
+  const fieldList = Array.isArray(fields) ? fields : [fields]
+  const failed = (partialFailure || []).some(f => fieldList.includes(f))
+  if (value == null && failed) {
+    return (
+      <span
+        className="text-gray-400 italic"
+        title="외부 API 일시 미수집 — 다음 새로고침에 재시도됩니다"
+      >
+        ⚠ 미수집
+      </span>
+    )
+  }
+  if (value == null) return <span className="text-gray-400">{fallback}</span>
+  return render ? render(value) : value
+}
+
 function MarketBadge({ market }) {
   if (!market || market === 'KR') return null
   return (
@@ -161,6 +180,17 @@ function SortableRow({ id, stock, onDelete, onMemoSave, onShowInfo }) {
 
   const currency = stock.currency || 'KRW'
   const mkt = stock.market || 'KR'
+  const partialFailure = stock.partial_failure || []
+  const hasFailure = partialFailure.length > 0
+
+  // QW-3 부분 실패 시 회색 "미수집" 표시 + tooltip
+  const staleCellPrice = stock.price == null && partialFailure.includes('price')
+  const staleCellMetrics = partialFailure.includes('metrics')
+  const staleCellFin = partialFailure.includes('financials')
+
+  const failureLabel = hasFailure
+    ? `데이터 일시 미수집: ${partialFailure.join(', ')}. 다음 새로고침에 재시도됩니다.`
+    : ''
 
   return (
     <tr ref={setNodeRef} style={style} className="border-b border-gray-100 hover:bg-gray-50">
@@ -177,6 +207,14 @@ function SortableRow({ id, stock, onDelete, onMemoSave, onShowInfo }) {
           {stock.code}
         </button>
         <MarketBadge market={mkt !== 'KR' ? mkt : null} />
+        {hasFailure && (
+          <span
+            className="ml-1 text-amber-500"
+            title={failureLabel}
+          >
+            ⚠
+          </span>
+        )}
       </td>
       <td className="px-3 py-2.5">
         <button
@@ -187,16 +225,22 @@ function SortableRow({ id, stock, onDelete, onMemoSave, onShowInfo }) {
         </button>
       </td>
       <td className="px-3 py-2.5 text-xs text-gray-600 max-w-24 truncate">{stock.sector || '-'}</td>
-      <td className="px-3 py-2.5 text-right font-medium">{fmtPrice(stock.price, currency)}</td>
+      <td className={`px-3 py-2.5 text-right font-medium ${staleCellPrice ? 'text-gray-400 italic' : ''}`}
+          title={staleCellPrice ? failureLabel : ''}>
+        {staleCellPrice ? '⚠ 미수집' : fmtPrice(stock.price, currency)}
+      </td>
       <td className="px-3 py-2.5 text-right whitespace-nowrap">
-        <ChangeCell change={stock.change} changePct={stock.change_pct} currency={currency} />
+        {staleCellPrice
+          ? <span className="text-gray-400 italic">-</span>
+          : <ChangeCell change={stock.change} changePct={stock.change_pct} currency={currency} />}
       </td>
       <td className="px-3 py-2.5 text-right text-xs">
         {fmtCap(stock.market_cap, currency)}
         {stock.market_cap != null && <span className="text-gray-400 ml-0.5">{currency === 'USD' ? 'M' : '억'}</span>}
       </td>
-      <td className="px-3 py-2.5 text-right text-xs">
-        {fmtFinVal(stock.revenue, currency)}
+      <td className={`px-3 py-2.5 text-right text-xs ${stock.revenue == null && staleCellFin ? 'text-gray-400 italic' : ''}`}
+          title={stock.revenue == null && staleCellFin ? failureLabel : ''}>
+        {stock.revenue == null && staleCellFin ? '⚠ 미수집' : fmtFinVal(stock.revenue, currency)}
         {stock.revenue != null && <span className="text-gray-400 ml-0.5">{currency === 'USD' ? 'M' : '억'}</span>}
       </td>
       <td className="px-3 py-2.5 text-right text-xs">
@@ -208,7 +252,12 @@ function SortableRow({ id, stock, onDelete, onMemoSave, onShowInfo }) {
         {stock.net_income != null && <span className="text-gray-400 ml-0.5">{currency === 'USD' ? 'M' : '억'}</span>}
       </td>
       <td className="px-3 py-2.5 text-right">{fmtPct(stock.oi_margin)}</td>
-      <td className="px-3 py-2.5 text-right">{stock.dividend_yield != null ? fmtPct(stock.dividend_yield, 2) : '-'}</td>
+      <td className={`px-3 py-2.5 text-right ${stock.dividend_yield == null && staleCellMetrics ? 'text-gray-400 italic' : ''}`}
+          title={stock.dividend_yield == null && staleCellMetrics ? failureLabel : ''}>
+        {stock.dividend_yield != null
+          ? fmtPct(stock.dividend_yield, 2)
+          : (staleCellMetrics ? '⚠' : '-')}
+      </td>
       <td className="px-3 py-2.5 text-center text-xs text-gray-500">{stock.report_date || '-'}</td>
       <td className="px-3 py-2.5">
         <MemoCell code={stock.code} market={mkt} memo={stock.memo} onSave={onMemoSave} />

@@ -41,6 +41,8 @@ def _period_label(fin: dict) -> str:
 def _fetch_dashboard_row(item: dict) -> dict:
     """단일 종목 대시보드 행 데이터 수집 (ThreadPoolExecutor에서 실행).
 
+    QW-1: stock_info dict를 1번만 fetch 후 dict 기반 fresh 판정 3회 (N+1 제거).
+    QW-3: 외부 API 실패는 logger.warning + row.partial_failure 메타필드 기록.
     stock_info.db에 fresh한 데이터가 있으면 외부 API 호출 없이 즉시 반환.
     stale한 영역만 선택적으로 외부 API를 호출한다.
     """
@@ -65,17 +67,20 @@ def _fetch_dashboard_row(item: dict) -> dict:
         "report_date": None,
         "dividend_yield": None,
         "sector": None,
+        "partial_failure": [],  # QW-3: 외부 API 실패 영역명 목록
     }
 
-    # ── stock_info.db 영속 캐시 우선 조회 ──
+    # ── stock_info.db 영속 캐시 우선 조회 (QW-1: dict 기반 단일 SELECT) ──
     _fmt_cap = _awk if domestic else _usd_m
+    price_fresh = metrics_fresh = fin_fresh = False
     try:
-        from stock.stock_info_store import get_stock_info, is_stale
-        info = get_stock_info(code, market)
+        from stock.stock_info_store import get_stock_info, is_stale_from_dict
+        info = get_stock_info(code, market)  # 1 SELECT
         if info:
-            price_fresh = not is_stale(code, market, "price")
-            metrics_fresh = not is_stale(code, market, "metrics")
-            fin_fresh = not is_stale(code, market, "financials")
+            # 동일 dict로 3번 판정 (DB 쿼리 없음)
+            price_fresh = not is_stale_from_dict(info, "price")
+            metrics_fresh = not is_stale_from_dict(info, "metrics")
+            fin_fresh = not is_stale_from_dict(info, "financials")
 
             if price_fresh and info.get("price"):
                 row["price"] = info["price"]
@@ -102,77 +107,89 @@ def _fetch_dashboard_row(item: dict) -> dict:
             # 모든 영역이 fresh하면 외부 API 호출 건너뛰기
             if price_fresh and metrics_fresh and fin_fresh:
                 return row
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("watchlist stock_info lookup failed code=%s err=%s", code, e)
 
     if domestic:
-        try:
-            price = fetch_price(code)
-            if price:
-                row["price"] = price["close"]
-                row["change"] = price.get("change")
-                row["change_pct"] = price.get("change_pct")
-                row["market_cap"] = _awk(price.get("mktcap"))
-        except Exception as e:
-            logger.debug("시세 조회 실패 (%s): %s", code, e)
+        if not price_fresh:
+            try:
+                price = fetch_price(code)
+                if price:
+                    row["price"] = price["close"]
+                    row["change"] = price.get("change")
+                    row["change_pct"] = price.get("change_pct")
+                    row["market_cap"] = _awk(price.get("mktcap"))
+            except Exception as e:
+                logger.warning("watchlist fetch failed code=%s field=price err=%s", code, e)
+                row["partial_failure"].append("price")
 
-        try:
-            metrics = fetch_market_metrics(code)
-            row["dividend_yield"] = metrics.get("dividend_yield")
-            row["sector"] = metrics.get("sector")
-        except Exception as e:
-            logger.debug("지표 조회 실패 (%s): %s", code, e)
+        if not metrics_fresh:
+            try:
+                metrics = fetch_market_metrics(code)
+                row["dividend_yield"] = metrics.get("dividend_yield")
+                row["sector"] = metrics.get("sector")
+            except Exception as e:
+                logger.warning("watchlist fetch failed code=%s field=metrics err=%s", code, e)
+                row["partial_failure"].append("metrics")
 
-        try:
-            fin = fetch_financials(code)
-            if fin and fin.get("bsns_year"):
-                rev = fin.get("revenue")
-                op = fin.get("operating_income")
-                net = fin.get("net_income")
-                row["revenue"] = _awk(rev)
-                row["operating_profit"] = _awk(op)
-                row["net_income"] = _awk(net)
-                row["oi_margin"] = (
-                    round(op / rev * 100, 1) if rev and op and rev != 0 else None
-                )
-                row["report_date"] = _period_label(fin)
-        except Exception as e:
-            logger.debug("재무 조회 실패 (%s): %s", code, e)
+        if not fin_fresh:
+            try:
+                fin = fetch_financials(code)
+                if fin and fin.get("bsns_year"):
+                    rev = fin.get("revenue")
+                    op = fin.get("operating_income")
+                    net = fin.get("net_income")
+                    row["revenue"] = _awk(rev)
+                    row["operating_profit"] = _awk(op)
+                    row["net_income"] = _awk(net)
+                    row["oi_margin"] = (
+                        round(op / rev * 100, 1) if rev and op and rev != 0 else None
+                    )
+                    row["report_date"] = _period_label(fin)
+            except Exception as e:
+                logger.warning("watchlist fetch failed code=%s field=financials err=%s", code, e)
+                row["partial_failure"].append("financials")
     else:
-        try:
-            price = yf_client.fetch_price_yf(code)
-            if price:
-                row["price"] = price["close"]
-                row["change"] = price.get("change")
-                row["change_pct"] = price.get("change_pct")
-                mktcap = price.get("mktcap")
-                row["market_cap"] = _usd_m(mktcap)
-        except Exception as e:
-            logger.debug("해외 시세 조회 실패 (%s): %s", code, e)
+        if not price_fresh:
+            try:
+                price = yf_client.fetch_price_yf(code)
+                if price:
+                    row["price"] = price["close"]
+                    row["change"] = price.get("change")
+                    row["change_pct"] = price.get("change_pct")
+                    mktcap = price.get("mktcap")
+                    row["market_cap"] = _usd_m(mktcap)
+            except Exception as e:
+                logger.warning("watchlist fetch failed code=%s field=price err=%s", code, e)
+                row["partial_failure"].append("price")
 
-        try:
-            detail = yf_client.fetch_detail_yf(code)
-            if detail:
-                row["dividend_yield"] = detail.get("dividend_yield")
-                row["sector"] = detail.get("sector")
-        except Exception as e:
-            logger.debug("해외 상세 조회 실패 (%s): %s", code, e)
+        if not metrics_fresh:
+            try:
+                detail = yf_client.fetch_detail_yf(code)
+                if detail:
+                    row["dividend_yield"] = detail.get("dividend_yield")
+                    row["sector"] = detail.get("sector")
+            except Exception as e:
+                logger.warning("watchlist fetch failed code=%s field=metrics err=%s", code, e)
+                row["partial_failure"].append("metrics")
 
-        try:
-            fin = yf_client.fetch_financials_yf(code)
-            if fin:
-                rev = fin.get("revenue")
-                op = fin.get("operating_income")
-                net = fin.get("net_income")
-                row["revenue"] = _usd_m(rev)
-                row["operating_profit"] = _usd_m(op)
-                row["net_income"] = _usd_m(net)
-                row["oi_margin"] = (
-                    round(op / rev * 100, 1) if rev and op and rev != 0 else None
-                )
-                row["report_date"] = str(fin.get("year", "")) if fin.get("year") else None
-        except Exception as e:
-            logger.debug("해외 재무 조회 실패 (%s): %s", code, e)
+        if not fin_fresh:
+            try:
+                fin = yf_client.fetch_financials_yf(code)
+                if fin:
+                    rev = fin.get("revenue")
+                    op = fin.get("operating_income")
+                    net = fin.get("net_income")
+                    row["revenue"] = _usd_m(rev)
+                    row["operating_profit"] = _usd_m(op)
+                    row["net_income"] = _usd_m(net)
+                    row["oi_margin"] = (
+                        round(op / rev * 100, 1) if rev and op and rev != 0 else None
+                    )
+                    row["report_date"] = str(fin.get("year", "")) if fin.get("year") else None
+            except Exception as e:
+                logger.warning("watchlist fetch failed code=%s field=financials err=%s", code, e)
+                row["partial_failure"].append("financials")
 
     return row
 

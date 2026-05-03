@@ -9,7 +9,10 @@ cache.db(TTL 캐시, 재시작 시 초기화)와 별도로 운용.
 
 from typing import Optional
 
-from db.repositories.stock_info_repo import StockInfoRepository
+from db.repositories.stock_info_repo import (
+    StockInfoRepository,
+    is_stale_from_dict as _is_stale_from_dict,
+)
 from db.session import get_session
 
 
@@ -17,6 +20,14 @@ def is_stale(code: str, market: str, field: str) -> bool:
     """해당 영역의 데이터가 갱신이 필요한지 판별."""
     with get_session() as db:
         return StockInfoRepository(db).is_stale(code, market, field)
+
+
+def is_stale_from_dict(info, field: str) -> bool:
+    """순수 함수 위임: dict + field만으로 stale 판정 (DB 쿼리 없음).
+
+    QW-1: 대시보드 렌더링에서 동일 종목 4 SELECT → 1 SELECT 단축.
+    """
+    return _is_stale_from_dict(info, field)
 
 
 def get_stock_info(code: str, market: str = "KR") -> Optional[dict]:

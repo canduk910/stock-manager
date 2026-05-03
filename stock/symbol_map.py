@@ -1,5 +1,7 @@
 """종목코드 ↔ 종목명 매핑 (pykrx 기반, 7일 캐싱)."""
 
+from __future__ import annotations  # PEP 604 호환 (Python 3.9 테스트 환경 지원)
+
 import re
 from datetime import datetime, timedelta
 from typing import Optional

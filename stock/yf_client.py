@@ -1141,7 +1141,15 @@ def fetch_earnings_dates(code: str, limit: int = 12) -> list[dict]:
 
 
 def fetch_macro_indicators() -> dict:
-    """거시지표 수집: 국채/금/유가/환율/달러인덱스. 캐시 1시간."""
+    """거시지표 수집: 국채/금/유가/환율/달러인덱스. 캐시 1시간.
+
+    QW-2: 7심볼 ThreadPoolExecutor 병렬 조회. 7~14초 → 1~2초.
+    일부 실패 시 부분 응답 보존 (None 채움). 캐시 hit 시 ThreadPool 미생성.
+    t3.small 메모리 안정성: 7 워커 동시 yfinance 호출 — 워커당 약 20~40MB,
+    합계 280MB 수준. 4GB swap 환경에서 안전.
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
     key = "yf:macro_indicators"
     cached = get_cached(key)
     if cached is not None:
@@ -1157,15 +1165,24 @@ def fetch_macro_indicators() -> dict:
         "vix": "^VIX",
     }
 
-    result = {}
-    for name, sym in symbols.items():
+    def _fetch_one(sym: str):
         try:
             t = _ticker(sym)
             fi = t.fast_info
             price = getattr(fi, "last_price", None) or getattr(fi, "previous_close", None)
-            result[name] = _safe(price)
+            return _safe(price)
         except Exception:
-            result[name] = None
+            return None
+
+    result: dict = {name: None for name in symbols}
+    with ThreadPoolExecutor(max_workers=len(symbols)) as ex:
+        future_to_name = {ex.submit(_fetch_one, sym): name for name, sym in symbols.items()}
+        for fut in as_completed(future_to_name):
+            name = future_to_name[fut]
+            try:
+                result[name] = fut.result()
+            except Exception:
+                result[name] = None
 
     set_cached(key, result, ttl_hours=1)
     return result

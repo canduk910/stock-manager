@@ -20,10 +20,61 @@ _TTL = {
     "returns":    {"trading": 0.5,   "off": 12.0},
 }
 
+# 영역명 → DB 컬럼명 매핑 (financials는 fin_updated_at 변형)
+_FIELD_TO_COLUMN = {
+    "price":      "price_updated_at",
+    "metrics":    "metrics_updated_at",
+    "financials": "fin_updated_at",
+    "returns":    "returns_updated_at",
+}
 
-def _is_kr_trading_hours() -> bool:
-    now = datetime.now(KST)
+
+def _is_kr_trading_hours(now: Optional[datetime] = None) -> bool:
+    if now is None:
+        now = datetime.now(KST)
+    elif now.tzinfo is None:
+        # naive datetime은 KST로 간주
+        now = now.replace(tzinfo=KST)
     return now.weekday() < 5 and time(9, 0) <= now.time() <= time(15, 30)
+
+
+def is_stale_from_dict(
+    info: Optional[dict],
+    field: str,
+    *,
+    now: Optional[datetime] = None,
+) -> bool:
+    """순수 함수: dict + field만으로 stale 여부 판정 (DB 쿼리 없음).
+
+    QW-1: 26종목 × 4 SELECT(get_stock_info × 1 + is_stale × 3 = 104) →
+    fetch 1회 + dict 판정 3회 = 26 SELECT 로 N+1 제거.
+
+    `is_stale(code, market, field)` 와 결과 동일성 보장 (TTL/거래시간 로직 동일).
+
+    Args:
+        info: stock_info 영속 캐시 dict (StockInfoRepository.get_stock_info 결과).
+              None/빈 dict는 stale.
+        field: "price" / "metrics" / "financials" / "returns".
+        now: 트레이딩 시간 판정용 KST datetime (테스트 주입). None이면 datetime.now(KST).
+    """
+    if not info:
+        return True
+
+    col_name = _FIELD_TO_COLUMN.get(field, f"{field}_updated_at")
+    updated_str = info.get(col_name)
+    if not updated_str:
+        return True
+
+    try:
+        updated = datetime.fromisoformat(updated_str).replace(tzinfo=None)
+    except (ValueError, TypeError):
+        return True
+
+    cur = now if now is not None else now_kst()
+    cur_naive = cur.replace(tzinfo=None) if cur.tzinfo else cur
+    ttl_cfg = _TTL.get(field, {"trading": 1.0, "off": 6.0})
+    ttl_h = ttl_cfg["trading"] if _is_kr_trading_hours(cur) else ttl_cfg["off"]
+    return (cur_naive - updated) > timedelta(hours=ttl_h)
 
 
 class StockInfoRepository:
@@ -31,29 +82,13 @@ class StockInfoRepository:
         self.db = db
 
     def is_stale(self, code: str, market: str, field: str) -> bool:
-        """Check if the given data region needs refresh."""
-        col_name = f"{field}_updated_at"
-        row = (
-            self.db.query(StockInfo)
-            .filter_by(code=code, market=market)
-            .first()
-        )
-        if not row:
-            return True
+        """Check if the given data region needs refresh.
 
-        updated_str = getattr(row, col_name, None)
-        if not updated_str:
-            return True
-
-        try:
-            updated = datetime.fromisoformat(updated_str).replace(tzinfo=None)
-        except (ValueError, TypeError):
-            return True
-
-        now = now_kst().replace(tzinfo=None)
-        ttl_cfg = _TTL.get(field, {"trading": 1.0, "off": 6.0})
-        ttl_h = ttl_cfg["trading"] if _is_kr_trading_hours() else ttl_cfg["off"]
-        return (now - updated) > timedelta(hours=ttl_h)
+        QW-1: 내부적으로 get_stock_info → is_stale_from_dict 위임 (단일 SELECT).
+        시그니처 보존(후방 호환).
+        """
+        info = self.get_stock_info(code, market)
+        return is_stale_from_dict(info, field)
 
     def get_stock_info(self, code: str, market: str = "KR") -> Optional[dict]:
         row = (
