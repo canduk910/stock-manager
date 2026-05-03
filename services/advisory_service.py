@@ -65,10 +65,28 @@ def refresh_stock_data(code: str, market: str, name: str, user_id: int = 1) -> d
     해외(US): yf_client + 15분봉 yfinance
     + KIS MCP 전략 신호 (활성화 시)
     """
+    # T-5: 4 페이즈 timing (lazy import — 순환 의존 회피)
+    from services import _telemetry as _tel
+    import time as _time
+
+    _t0 = _time.perf_counter()
     fundamental = _collect_fundamental(code, market, name, user_id)
+    _tel.observe("advisory.phase.fundamental.duration_ms", (_time.perf_counter() - _t0) * 1000.0)
+
+    _t1 = _time.perf_counter()
     technical = _collect_technical(code, market)
+    _tel.observe("advisory.phase.technical.duration_ms", (_time.perf_counter() - _t1) * 1000.0)
+
+    _t2 = _time.perf_counter()
     strategy_signals = _collect_strategy_signals(code, market)
+    _tel.observe("advisory.phase.strategy_signals.duration_ms", (_time.perf_counter() - _t2) * 1000.0)
+
+    _t3 = _time.perf_counter()
     research_data = _collect_research(code, market, name)
+    _tel.observe("advisory.phase.research.duration_ms", (_time.perf_counter() - _t3) * 1000.0)
+
+    _tel.observe("advisory.refresh.total_duration_ms", (_time.perf_counter() - _t0) * 1000.0)
+    _tel.record_event("advisory.refresh.calls")
 
     advisory_store.save_cache(user_id, code, market, fundamental, technical,
                               strategy_signals=strategy_signals,

@@ -10,6 +10,7 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
+from services import _telemetry
 from stock import store, symbol_map
 from stock.dart_fin import fetch_financials, fetch_financials_multi_year
 from stock.market import fetch_detail, fetch_price, fetch_market_metrics
@@ -38,6 +39,7 @@ def _period_label(fin: dict) -> str:
     return f"{bsns_year}/12" if bsns_year else "-"
 
 
+@_telemetry.timed("watchlist.row")
 def _fetch_dashboard_row(item: dict) -> dict:
     """단일 종목 대시보드 행 데이터 수집 (ThreadPoolExecutor에서 실행).
 
@@ -76,11 +78,17 @@ def _fetch_dashboard_row(item: dict) -> dict:
     try:
         from stock.stock_info_store import get_stock_info, is_stale_from_dict
         info = get_stock_info(code, market)  # 1 SELECT
+        if not info:
+            _telemetry.record_event("watchlist.row.stock_info.missing")
         if info:
             # 동일 dict로 3번 판정 (DB 쿼리 없음)
             price_fresh = not is_stale_from_dict(info, "price")
             metrics_fresh = not is_stale_from_dict(info, "metrics")
             fin_fresh = not is_stale_from_dict(info, "financials")
+            # T-2: stock_info dict 기반 fresh/stale 카운터
+            _telemetry.record_event(f"watchlist.row.price.{'fresh' if price_fresh else 'stale'}")
+            _telemetry.record_event(f"watchlist.row.metrics.{'fresh' if metrics_fresh else 'stale'}")
+            _telemetry.record_event(f"watchlist.row.financials.{'fresh' if fin_fresh else 'stale'}")
 
             if price_fresh and info.get("price"):
                 row["price"] = info["price"]

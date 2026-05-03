@@ -43,6 +43,21 @@ def is_stale_from_dict(
     field: str,
     *,
     now: Optional[datetime] = None,
+) -> bool:  # noqa: D401
+    # T-3: N+1 회귀 감시 카운터 (호출 횟수만 누적, 본 로직 미터치)
+    try:
+        from services import _telemetry
+        _telemetry.record_event(f"stock_info.is_stale_from_dict.{field}")
+    except Exception:
+        pass
+    return _is_stale_from_dict_impl(info, field, now=now)
+
+
+def _is_stale_from_dict_impl(
+    info: Optional[dict],
+    field: str,
+    *,
+    now: Optional[datetime] = None,
 ) -> bool:
     """순수 함수: dict + field만으로 stale 여부 판정 (DB 쿼리 없음).
 
@@ -91,6 +106,12 @@ class StockInfoRepository:
         return is_stale_from_dict(info, field)
 
     def get_stock_info(self, code: str, market: str = "KR") -> Optional[dict]:
+        # T-3: N+1 회귀 감시 (단일 SELECT 호출 횟수)
+        try:
+            from services import _telemetry
+            _telemetry.record_event("stock_info.get_stock_info")
+        except Exception:
+            pass
         row = (
             self.db.query(StockInfo)
             .filter_by(code=code, market=market)

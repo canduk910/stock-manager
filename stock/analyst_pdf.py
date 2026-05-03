@@ -225,14 +225,31 @@ def summarize_one(pdf_url: Optional[str]) -> str:
     if not pdf_url:
         return ""
 
+    # T-7: 캐시 hit/miss + 다운로드 latency 계측 (best effort, 본 로직 미터치)
+    try:
+        from services import _telemetry as _tel
+    except Exception:
+        _tel = None
+
     key = _cache_key(pdf_url)
     cached = get_cached(key)
     if cached is not None:
+        if _tel:
+            _tel.record_event("analyst_pdf.cache.hit")
         # 빈 문자열도 캐시한 경우 그대로 반환 (재호출 방지)
         return cached if isinstance(cached, str) else ""
 
+    if _tel:
+        _tel.record_event("analyst_pdf.cache.miss")
+
+    import time as _time
+    _t0 = _time.perf_counter()
     pdf_bytes = _download_pdf(pdf_url)
+    if _tel:
+        _tel.observe("analyst_pdf.download.duration_ms", (_time.perf_counter() - _t0) * 1000.0)
     if not pdf_bytes:
+        if _tel:
+            _tel.record_event("analyst_pdf.download.failed")
         # 실패는 캐시하지 않음 (다음 호출 시 재시도 허용)
         return ""
 

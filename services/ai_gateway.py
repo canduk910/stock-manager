@@ -8,9 +8,11 @@
 """
 
 import logging
+import time
 from typing import Optional
 
 from config import OPENAI_API_KEY, OPENAI_MODEL
+from services import _telemetry
 from services.exceptions import ConfigError, ExternalAPIError, PaymentRequiredError, ServiceError
 
 logger = logging.getLogger(__name__)
@@ -110,6 +112,8 @@ def call_openai_chat(
 
     model = kwargs.pop("model", None) or OPENAI_MODEL
 
+    # T-4: OpenAI latency + token usage 계측
+    _t0 = time.perf_counter()
     try:
         response = client.chat.completions.create(
             model=model,
@@ -117,10 +121,29 @@ def call_openai_chat(
             **kwargs,
         )
     except Exception as e:
+        _telemetry.record_event(f"ai_gateway.{service_name}.errors")
+        _telemetry.record_event(f"ai_gateway.model.{model}.errors")
         err_str = str(e).lower()
         if "insufficient_quota" in err_str or "rate_limit" in err_str:
             raise PaymentRequiredError("OpenAI API 크레딧이 부족합니다.")
         raise ExternalAPIError(f"OpenAI API 호출 실패: {e}")
+    finally:
+        _dur_ms = (time.perf_counter() - _t0) * 1000.0
+        _telemetry.observe(f"ai_gateway.{service_name}.duration_ms", _dur_ms)
+        _telemetry.observe(f"ai_gateway.model.{model}.duration_ms", _dur_ms)
+
+    _telemetry.record_event(f"ai_gateway.{service_name}.calls")
+    _telemetry.record_event(f"ai_gateway.model.{model}.calls")
+    # token usage (best effort — SDK 응답 구조 의존)
+    try:
+        usage = getattr(response, "usage", None)
+        if usage is not None:
+            prompt_tok = getattr(usage, "prompt_tokens", 0) or 0
+            comp_tok = getattr(usage, "completion_tokens", 0) or 0
+            _telemetry.record_event(f"ai_gateway.model.{model}.tokens.prompt", int(prompt_tok))
+            _telemetry.record_event(f"ai_gateway.model.{model}.tokens.completion", int(comp_tok))
+    except Exception:
+        pass
 
     # 사용량 기록 (유저 호출만)
     if user_id is not None:

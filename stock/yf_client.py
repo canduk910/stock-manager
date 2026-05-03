@@ -30,7 +30,7 @@ from stock.cache import get_cached, set_cached
 from stock.market import _is_us_trading_hours
 
 
-def _ticker(code: str):
+def _ticker_uncached(code: str):
     """yfinance Ticker 객체 반환 (LRU 캐시로 중복 생성 방지).
 
     yfinance Ticker 생성 비용은 낮지만, info/history 호출 시 내부적으로
@@ -46,7 +46,29 @@ def _ticker(code: str):
 # Ticker 내부 state가 stale되더라도 history/info 호출 시 새로 fetch하므로
 # 실사용에서는 문제 없음. 256개 초과 시 LRU 정책으로 오래된 것부터 제거.
 from functools import lru_cache as _lru_cache
-_ticker = _lru_cache(maxsize=256)(_ticker)
+_ticker_cached = _lru_cache(maxsize=256)(_ticker_uncached)
+
+
+def _ticker(code: str):
+    """T-6 계측 wrapper: lru_cache hit/miss 분리 카운터.
+
+    `cache_info()`의 hits/misses 차이로 hit/miss 판정.
+    종목별 호출 횟수도 누적(eviction 검증용).
+    """
+    try:
+        from services import _telemetry as _tel
+        prev = _ticker_cached.cache_info()
+        result = _ticker_cached(code)
+        cur = _ticker_cached.cache_info()
+        if cur.hits > prev.hits:
+            _tel.record_event("yf.ticker.hit")
+        else:
+            _tel.record_event("yf.ticker.miss")
+        # 종목별 호출 (RefreshContext 검토 트리거용)
+        _tel.record_event(f"yf.ticker.code.{code.upper()}")
+        return result
+    except Exception:
+        return _ticker_cached(code)
 
 
 def _safe(v) -> Optional[float]:

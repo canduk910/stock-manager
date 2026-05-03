@@ -83,9 +83,21 @@ async def lifespan(app: FastAPI):
         from services.scheduler_service import setup_scheduler as setup_pipeline_scheduler, shutdown_scheduler as shutdown_pipeline_scheduler
         setup_pipeline_scheduler()
 
+        # Phase 3: 5분 간격 telemetry flush (Docker logs로 누적 dump)
+        from services import _telemetry as _tel
+        _flush_interval = int(os.environ.get("TELEMETRY_FLUSH_SEC", "300"))
+        _tel.start_periodic_flush(interval_sec=_flush_interval)
+
     yield
 
     if not _testing:
+        # Phase 3: telemetry 정리 (final flush 포함)
+        try:
+            from services import _telemetry as _tel
+            _tel.stop_periodic_flush(final_flush=True)
+        except Exception:
+            pass
+
         shutdown_pipeline_scheduler()
         stop_scheduler()
         scheduler_task.cancel()

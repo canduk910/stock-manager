@@ -3,7 +3,7 @@
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
-from services import _dashboard_cache
+from services import _dashboard_cache, _telemetry
 from services.auth_deps import get_current_user
 from services.exceptions import NotFoundError, ConflictError, ExternalAPIError
 from services.watchlist_service import WatchlistService
@@ -100,6 +100,7 @@ def update_memo(code: str, body: MemoBody, market: str = Query("KR"), user: dict
 # ── 대시보드 / 상세 ──────────────────────────────────────────────────────────
 
 @router.get("/dashboard")
+@_telemetry.timed("watchlist.dashboard")
 def get_dashboard(user: dict = Depends(get_current_user)):
     """전체 관심종목 시세 + 재무 대시보드.
 
@@ -108,14 +109,17 @@ def get_dashboard(user: dict = Depends(get_current_user)):
     add/remove/update_memo 시 자동 invalidate.
     """
     items = store.all_items(user["id"])
+    _telemetry.observe("watchlist.dashboard.items_count", len(items))
     if not items:
         return {"stocks": []}
 
     # 캐시 hit 시 즉시 반환
     cached = _dashboard_cache.get(user_id=user["id"], items=items)
     if cached is not None:
+        _telemetry.record_event("watchlist.cache.hit")
         return {"stocks": cached}
 
+    _telemetry.record_event("watchlist.cache.miss")
     stocks = _svc.get_dashboard_data(items)
     _dashboard_cache.set(user_id=user["id"], items=items, data=stocks)
     return {"stocks": stocks}
