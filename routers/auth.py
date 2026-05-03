@@ -57,5 +57,15 @@ def change_password(body: ChangePasswordBody, user: dict = Depends(get_current_u
 
 @router.get("/me")
 def get_me(user: dict = Depends(get_current_user)):
-    """현재 사용자 정보."""
-    return {"user": user}
+    """현재 사용자 정보. Phase 4 D.4: has_kis 포함."""
+    has_kis = False
+    try:
+        from db.session import get_session
+        from db.repositories.user_kis_repo import UserKisRepository
+        with get_session() as db:
+            has_kis = UserKisRepository(db).is_valid(user["id"])
+    except Exception:
+        has_kis = False
+    payload = dict(user)
+    payload["has_kis"] = has_kis
+    return {"user": payload}

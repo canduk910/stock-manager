@@ -125,6 +125,60 @@ from services.exceptions import ServiceError  # noqa: E402
 async def service_error_handler(request: Request, exc: ServiceError):
     return JSONResponse(status_code=exc.status_code, content={"detail": exc.message})
 
+
+# ── Phase 4 단계 5 (C): 페이지뷰 통계 미들웨어 ─────────────────────────────
+# /api/health, /assets/*, /static/*, /ws/*, /api/admin/page-stats(자기참조)는 제외.
+# asyncio.create_task로 비동기 INSERT (latency 영향 ≈ 0).
+_PAGE_VIEW_EXCLUDE_PREFIXES = (
+    "/api/health",
+    "/assets/",
+    "/static/",
+    "/ws/",
+    "/api/admin/page-stats",
+)
+
+
+@app.middleware("http")
+async def record_page_view_middleware(request: Request, call_next):
+    import time as _t
+    start = _t.perf_counter()
+    response = await call_next(request)
+    elapsed_ms = (_t.perf_counter() - start) * 1000.0
+
+    path = request.url.path
+    if any(path.startswith(p) for p in _PAGE_VIEW_EXCLUDE_PREFIXES):
+        return response
+
+    # auth_deps.get_current_user는 ContextVar에 user_id를 set한다 (Phase 4 D.3).
+    try:
+        from routers._kis_auth import get_current_user_id
+        user_id = get_current_user_id()
+    except Exception:
+        user_id = None
+
+    async def _record():
+        try:
+            from db.session import get_session
+            from db.repositories.page_view_repo import PageViewRepository
+            with get_session() as db:
+                PageViewRepository(db).record(
+                    user_id=user_id,
+                    path=path,
+                    method=request.method,
+                    status_code=response.status_code,
+                    duration_ms=elapsed_ms,
+                )
+        except Exception:
+            # 로그 기록 실패는 응답에 영향 X
+            pass
+
+    try:
+        asyncio.create_task(_record())
+    except Exception:
+        pass
+
+    return response
+
 # CORS: 프론트엔드 개발 서버 허용
 app.add_middleware(
     CORSMiddleware,
@@ -141,9 +195,12 @@ app.add_middleware(
 # 정책 변경 시 한 곳(nginx app.conf)만 수정하면 된다.
 
 # 라우터 등록
-from routers import auth, screener, earnings, balance, watchlist, detail, order, quote, advisory, search, market_board, macro, portfolio_advisor, report, pipeline, backtest, tax, admin  # noqa: E402
+from routers import auth, screener, earnings, balance, watchlist, detail, order, quote, advisory, search, market_board, macro, portfolio_advisor, report, pipeline, backtest, tax, admin, me_kis, admin_users, admin_stats  # noqa: E402
 
 app.include_router(auth.router)
+app.include_router(me_kis.router)
+app.include_router(admin_users.router)
+app.include_router(admin_stats.router)
 app.include_router(screener.router)
 app.include_router(earnings.router)
 app.include_router(balance.router)

@@ -49,3 +49,38 @@ class UserRepository:
 
     def count(self) -> int:
         return self.db.query(User).count()
+
+    # ── Phase 4 (단계 4): 사용자 관리 ─────────────────────────────
+
+    def list_users(self, q: Optional[str] = None, limit: int = 20, offset: int = 0) -> list[dict]:
+        """username/name 부분 검색 + 페이지네이션. id asc."""
+        query = self.db.query(User)
+        if q:
+            from sqlalchemy import or_
+            pat = f"%{q}%"
+            query = query.filter(or_(User.username.ilike(pat), User.name.ilike(pat)))
+        rows = query.order_by(User.id.asc()).offset(offset).limit(limit).all()
+        return [r.to_dict() for r in rows]
+
+    def count_users(self, q: Optional[str] = None) -> int:
+        query = self.db.query(User)
+        if q:
+            from sqlalchemy import or_
+            pat = f"%{q}%"
+            query = query.filter(or_(User.username.ilike(pat), User.name.ilike(pat)))
+        return query.count()
+
+    def update_role(self, user_id: int, role: str) -> bool:
+        from db.utils import now_kst_iso
+        if role not in ("admin", "user"):
+            raise ValueError(f"invalid role: {role}")
+        count = (
+            self.db.query(User)
+            .filter_by(id=user_id)
+            .update({"role": role, "updated_at": now_kst_iso()})
+        )
+        return count > 0
+
+    def delete_user(self, user_id: int) -> bool:
+        count = self.db.query(User).filter_by(id=user_id).delete()
+        return count > 0

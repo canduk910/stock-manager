@@ -1,9 +1,10 @@
 import { useState } from 'react'
-import { NavLink, useLocation } from 'react-router-dom'
+import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../hooks/useAuth'
 import ChangePasswordModal from '../common/ChangePasswordModal'
 
-// 그룹별 구분: 종목 정보 | 자산 관리 (admin only)
+// 그룹별 구분: 종목 정보 | 자산 관리 (KIS 필수) | 관리 (admin only)
+// `requireKis: true` 항목은 KIS 미등록 시 회색+🔒 + 클릭 → /settings/kis 이동.
 const NAV_GROUPS = [
   // 그룹 1: 종목 정보 (all users)
   [
@@ -20,18 +21,29 @@ const NAV_GROUPS = [
       ],
     },
   ],
-  // 그룹 2: 자산 관리 (admin only)
+  // 그룹 2: 자산 관리 (KIS 필수)
   [
-    { to: '/portfolio', label: '포트폴리오' },
+    { to: '/portfolio', label: '포트폴리오', requireKis: true },
     {
       label: '매매',
       children: [
-        { to: '/order', label: '주문' },
-        { to: '/balance', label: '잔고' },
-        { to: '/tax', label: '양도세' },
+        { to: '/order', label: '주문', requireKis: true },
+        { to: '/balance', label: '잔고', requireKis: true },
+        { to: '/tax', label: '양도세', requireKis: true },
       ],
     },
-    { to: '/admin', label: 'AI관리' },
+  ],
+  // 그룹 3: 관리 (admin only)
+  [
+    {
+      label: '관리',
+      adminOnly: true,
+      children: [
+        { to: '/admin/ai', label: 'AI관리' },
+        { to: '/admin/users', label: '사용자관리' },
+        { to: '/admin/page-stats', label: '페이지별 이용현황' },
+      ],
+    },
   ],
 ]
 
@@ -44,6 +56,8 @@ const WIDTH_OPTIONS = [
 function DropdownMenu({ item }) {
   const [open, setOpen] = useState(false)
   const location = useLocation()
+  const navigate = useNavigate()
+  const { hasKis } = useAuth()
   const isGroupActive = item.children.some(c => location.pathname.startsWith(c.to))
 
   return (
@@ -68,27 +82,155 @@ function DropdownMenu({ item }) {
 
       {open && (
         <div className="absolute top-full left-0 pt-1 z-50">
-          <div className="bg-gray-800 rounded-lg shadow-xl border border-gray-700 py-1 min-w-[120px]">
-            {item.children.map(child => (
+          <div className="bg-gray-800 rounded-lg shadow-xl border border-gray-700 py-1 min-w-[140px]">
+            {item.children.map(child => {
+              const locked = child.requireKis && !hasKis
+              if (locked) {
+                return (
+                  <button
+                    key={child.to}
+                    onClick={() => { setOpen(false); navigate('/settings/kis') }}
+                    title="KIS 자격증명 등록 필요"
+                    className="block w-full text-left px-4 py-2 text-sm text-gray-500 hover:bg-gray-700 hover:text-gray-300 transition-colors"
+                  >
+                    🔒 {child.label}
+                  </button>
+                )
+              }
+              return (
+                <NavLink
+                  key={child.to}
+                  to={child.to}
+                  onClick={() => setOpen(false)}
+                  className={({ isActive }) =>
+                    `block px-4 py-2 text-sm transition-colors ${
+                      isActive
+                        ? 'bg-blue-600 text-white'
+                        : 'text-gray-300 hover:bg-gray-700 hover:text-white'
+                    }`
+                  }
+                >
+                  {child.label}
+                </NavLink>
+              )
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+
+function NavLinkOrLock({ item }) {
+  const navigate = useNavigate()
+  const { hasKis } = useAuth()
+  const locked = item.requireKis && !hasKis
+  if (locked) {
+    return (
+      <button
+        onClick={() => navigate('/settings/kis')}
+        title="KIS 자격증명 등록 필요"
+        className="px-3 py-1.5 rounded text-sm font-medium text-gray-500 hover:bg-gray-700 hover:text-gray-300 transition-colors"
+      >
+        🔒 {item.label}
+      </button>
+    )
+  }
+  return (
+    <NavLink
+      to={item.to}
+      className={({ isActive }) =>
+        `px-3 py-1.5 rounded text-sm font-medium transition-colors ${
+          isActive
+            ? 'bg-blue-600 text-white'
+            : 'text-gray-300 hover:bg-gray-700 hover:text-white'
+        }`
+      }
+    >
+      {item.label}
+    </NavLink>
+  )
+}
+
+
+function MobileMenu({ groups, onClose }) {
+  const navigate = useNavigate()
+  const { hasKis } = useAuth()
+
+  const renderItem = (item) => {
+    if (item.children) {
+      return (
+        <div key={item.label} className="space-y-1">
+          <span className="block px-3 py-1 text-xs font-medium text-gray-500 uppercase">{item.label}</span>
+          {item.children.map((child) => {
+            const locked = child.requireKis && !hasKis
+            if (locked) {
+              return (
+                <button
+                  key={child.to}
+                  onClick={() => { onClose(); navigate('/settings/kis') }}
+                  className="block w-full text-left px-3 py-2.5 rounded text-sm font-medium text-gray-500 hover:bg-gray-700"
+                >
+                  🔒 {child.label}
+                </button>
+              )
+            }
+            return (
               <NavLink
                 key={child.to}
                 to={child.to}
-                onClick={() => setOpen(false)}
+                onClick={onClose}
                 className={({ isActive }) =>
-                  `block px-4 py-2 text-sm transition-colors ${
-                    isActive
-                      ? 'bg-blue-600 text-white'
-                      : 'text-gray-300 hover:bg-gray-700 hover:text-white'
+                  `block px-3 py-2.5 rounded text-sm font-medium transition-colors ${
+                    isActive ? 'bg-blue-600 text-white' : 'text-gray-300 hover:bg-gray-700 hover:text-white'
                   }`
                 }
               >
                 {child.label}
               </NavLink>
-            ))}
-          </div>
+            )
+          })}
         </div>
-      )}
-    </div>
+      )
+    }
+    const locked = item.requireKis && !hasKis
+    if (locked) {
+      return (
+        <button
+          key={item.to}
+          onClick={() => { onClose(); navigate('/settings/kis') }}
+          className="block w-full text-left px-3 py-2.5 rounded text-sm font-medium text-gray-500 hover:bg-gray-700"
+        >
+          🔒 {item.label}
+        </button>
+      )
+    }
+    return (
+      <NavLink
+        key={item.to}
+        to={item.to}
+        onClick={onClose}
+        className={({ isActive }) =>
+          `block px-3 py-2.5 rounded text-sm font-medium transition-colors ${
+            isActive ? 'bg-blue-600 text-white' : 'text-gray-300 hover:bg-gray-700 hover:text-white'
+          }`
+        }
+      >
+        {item.label}
+      </NavLink>
+    )
+  }
+
+  return (
+    <nav className="md:hidden border-t border-gray-700 px-4 py-3 space-y-1">
+      {groups.map((group, gi) => (
+        <div key={gi}>
+          {gi > 0 && <div className="border-t border-gray-700 my-2" />}
+          {group.map(renderItem)}
+        </div>
+      ))}
+    </nav>
   )
 }
 
@@ -118,7 +260,14 @@ function UserMenu() {
 
         {open && (
           <div className="absolute top-full right-0 pt-1 z-50">
-            <div className="bg-gray-800 rounded-lg shadow-xl border border-gray-700 py-1 min-w-[140px]">
+            <div className="bg-gray-800 rounded-lg shadow-xl border border-gray-700 py-1 min-w-[160px]">
+              <NavLink
+                to="/settings/kis"
+                onClick={() => setOpen(false)}
+                className="block px-4 py-2 text-sm text-gray-300 hover:bg-gray-700 hover:text-white transition-colors"
+              >
+                KIS 설정
+              </NavLink>
               <button
                 onClick={() => { setOpen(false); setShowPwModal(true) }}
                 className="block w-full text-left px-4 py-2 text-sm text-gray-300 hover:bg-gray-700 hover:text-white transition-colors"
@@ -145,8 +294,15 @@ export default function Header({ widthKey, onWidthChange, maxCls }) {
   const [mobileOpen, setMobileOpen] = useState(false)
   const location = useLocation()
 
-  // admin이 아닌 경우 자산 관리 그룹(NAV_GROUPS[1]) 숨김
-  const visibleGroups = isAdmin ? NAV_GROUPS : [NAV_GROUPS[0]]
+  // 그룹 가시성:
+  //  그룹 1 (종목정보) — 모든 사용자
+  //  그룹 2 (자산관리, KIS 필수) — 모든 사용자에게 표시(잠금 처리는 항목 단위)
+  //  그룹 3 (관리, adminOnly) — admin에게만
+  const visibleGroups = NAV_GROUPS.filter((group) => {
+    const allAdminOnly = group.every((item) => item.adminOnly === true)
+    if (allAdminOnly) return isAdmin
+    return true
+  })
 
   // 페이지 이동 시 모바일 메뉴 닫기
   const closeMobile = () => setMobileOpen(false)
@@ -185,19 +341,7 @@ export default function Header({ widthKey, onWidthChange, maxCls }) {
                   item.children ? (
                     <DropdownMenu key={item.label} item={item} />
                   ) : (
-                    <NavLink
-                      key={item.to}
-                      to={item.to}
-                      className={({ isActive }) =>
-                        `px-3 py-1.5 rounded text-sm font-medium transition-colors ${
-                          isActive
-                            ? 'bg-blue-600 text-white'
-                            : 'text-gray-300 hover:bg-gray-700 hover:text-white'
-                        }`
-                      }
-                    >
-                      {item.label}
-                    </NavLink>
+                    <NavLinkOrLock key={item.to} item={item} />
                   )
                 )}
               </div>
@@ -234,51 +378,7 @@ export default function Header({ widthKey, onWidthChange, maxCls }) {
 
       {/* 모바일 메뉴 패널 */}
       {mobileOpen && (
-        <nav className="md:hidden border-t border-gray-700 px-4 py-3 space-y-1">
-          {visibleGroups.map((group, gi) => (
-            <div key={gi}>
-              {gi > 0 && <div className="border-t border-gray-700 my-2" />}
-              {group.map((item) =>
-                item.children ? (
-                  <div key={item.label} className="space-y-1">
-                    <span className="block px-3 py-1 text-xs font-medium text-gray-500 uppercase">{item.label}</span>
-                    {item.children.map(child => (
-                      <NavLink
-                        key={child.to}
-                        to={child.to}
-                        onClick={closeMobile}
-                        className={({ isActive }) =>
-                          `block px-3 py-2.5 rounded text-sm font-medium transition-colors ${
-                            isActive
-                              ? 'bg-blue-600 text-white'
-                              : 'text-gray-300 hover:bg-gray-700 hover:text-white'
-                          }`
-                        }
-                      >
-                        {child.label}
-                      </NavLink>
-                    ))}
-                  </div>
-                ) : (
-                  <NavLink
-                    key={item.to}
-                    to={item.to}
-                    onClick={closeMobile}
-                    className={({ isActive }) =>
-                      `block px-3 py-2.5 rounded text-sm font-medium transition-colors ${
-                        isActive
-                          ? 'bg-blue-600 text-white'
-                          : 'text-gray-300 hover:bg-gray-700 hover:text-white'
-                      }`
-                    }
-                  >
-                    {item.label}
-                  </NavLink>
-                )
-              )}
-            </div>
-          ))}
-        </nav>
+        <MobileMenu groups={visibleGroups} onClose={closeMobile} />
       )}
     </header>
   )

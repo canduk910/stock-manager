@@ -6,6 +6,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { fetchAiUsage, fetchAiLimits, setAiLimit, deleteAiLimit, fetchAuditLog } from '../api/admin'
 import LoadingSpinner from '../components/common/LoadingSpinner'
 import ErrorAlert from '../components/common/ErrorAlert'
+import UserSearchCombo from '../components/admin/UserSearchCombo'
 
 const TABS = [
   { key: 'usage', label: '사용량 현황' },
@@ -224,13 +225,11 @@ function LimitsTab() {
         <h3 className="text-sm font-medium text-gray-700 mb-3">한도 추가</h3>
         <div className="flex items-end gap-3">
           <div>
-            <label className="block text-xs text-gray-500 mb-1">User ID (비워두면 기본 한도)</label>
-            <input
-              type="number"
+            <label className="block text-xs text-gray-500 mb-1">사용자 (비워두면 기본 한도)</label>
+            <UserSearchCombo
               value={newUserId}
-              onChange={e => setNewUserId(e.target.value)}
-              placeholder="비워두면 기본"
-              className="border border-gray-300 rounded px-3 py-1.5 text-sm w-40"
+              onChange={setNewUserId}
+              placeholder="이름/username 검색"
             />
           </div>
           <div>

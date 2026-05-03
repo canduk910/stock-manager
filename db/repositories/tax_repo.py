@@ -35,8 +35,10 @@ class TaxRepository:
         commission: float = 0,
         commission_krw: float = 0,
         memo: str = "",
+        user_id: Optional[int] = None,
     ) -> dict:
         tx = TaxTransaction(
+            user_id=user_id,
             source=source,
             source_order_id=source_order_id,
             symbol=symbol,
@@ -124,8 +126,10 @@ class TaxRepository:
         trade_date: str,
         year: int,
         detail_json: str = None,
+        user_id: Optional[int] = None,
     ) -> dict:
         calc = TaxCalculation(
+            user_id=user_id,
             sell_tx_id=sell_tx_id,
             symbol=symbol,
             method=method,
@@ -178,8 +182,10 @@ class TaxRepository:
         buy_trade_date: str = None,
         cost_krw: float = None,
         warning: str = None,
+        user_id: Optional[int] = None,
     ) -> dict:
         lot = TaxFifoLot(
+            user_id=user_id,
             calculation_id=calculation_id,
             sell_tx_id=sell_tx_id,
             buy_tx_id=buy_tx_id,

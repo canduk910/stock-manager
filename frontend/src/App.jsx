@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Routes, Route } from 'react-router-dom'
+import { Routes, Route, Navigate } from 'react-router-dom'
 import { useAuth } from './hooks/useAuth'
 import Header from './components/layout/Header'
 import ProtectedRoute from './components/common/ProtectedRoute'
@@ -19,6 +19,9 @@ import ReportPage from './pages/ReportPage'
 import BacktestPage from './pages/BacktestPage'
 import TaxPage from './pages/TaxPage'
 import AdminPage from './pages/AdminPage'
+import AdminUsersPage from './pages/AdminUsersPage'
+import AdminPageStatsPage from './pages/AdminPageStatsPage'
+import SettingsKisPage from './pages/SettingsKisPage'
 import ToastNotification from './components/common/ToastNotification'
 import { useNotification } from './hooks/useNotification'
 
@@ -62,12 +65,20 @@ export default function App() {
                 <Route path="/macro" element={<ProtectedRoute><MacroPage /></ProtectedRoute>} />
                 <Route path="/reports" element={<ProtectedRoute><ReportPage /></ProtectedRoute>} />
                 <Route path="/backtest" element={<ProtectedRoute><BacktestPage /></ProtectedRoute>} />
-                {/* Admin-only routes */}
-                <Route path="/balance" element={<ProtectedRoute adminOnly><BalancePage notify={notify} /></ProtectedRoute>} />
-                <Route path="/order" element={<ProtectedRoute adminOnly><OrderPage notify={notify} /></ProtectedRoute>} />
-                <Route path="/portfolio" element={<ProtectedRoute adminOnly><PortfolioPage notify={notify} /></ProtectedRoute>} />
-                <Route path="/tax" element={<ProtectedRoute adminOnly><TaxPage /></ProtectedRoute>} />
-                <Route path="/admin" element={<ProtectedRoute adminOnly><AdminPage /></ProtectedRoute>} />
+                {/* User KIS settings (Phase 4 D.4) */}
+                <Route path="/settings/kis" element={<ProtectedRoute><SettingsKisPage /></ProtectedRoute>} />
+
+                {/* Asset management — KIS 자격증명 필수 (Phase 4 D.5) */}
+                <Route path="/balance" element={<ProtectedRoute requireKis><BalancePage notify={notify} /></ProtectedRoute>} />
+                <Route path="/order" element={<ProtectedRoute requireKis><OrderPage notify={notify} /></ProtectedRoute>} />
+                <Route path="/portfolio" element={<ProtectedRoute requireKis><PortfolioPage notify={notify} /></ProtectedRoute>} />
+                <Route path="/tax" element={<ProtectedRoute requireKis><TaxPage /></ProtectedRoute>} />
+
+                {/* Admin-only routes (Phase 4 단계 4-5) */}
+                <Route path="/admin" element={<Navigate to="/admin/ai" replace />} />
+                <Route path="/admin/ai" element={<ProtectedRoute adminOnly><AdminPage /></ProtectedRoute>} />
+                <Route path="/admin/users" element={<ProtectedRoute adminOnly><AdminUsersPage /></ProtectedRoute>} />
+                <Route path="/admin/page-stats" element={<ProtectedRoute adminOnly><AdminPageStatsPage /></ProtectedRoute>} />
               </Routes>
             </main>
             <footer className="border-t border-gray-200 bg-gray-50 py-4 mt-8">

@@ -33,9 +33,11 @@ class OrderRepository:
         org_no: str = None,
         kis_response: str = None,
         status: str = "PLACED",
+        user_id: Optional[int] = None,
     ) -> dict:
         now = _now()
         order = Order(
+            user_id=user_id,
             order_no=order_no,
             org_no=org_no,
             symbol=symbol,
@@ -111,6 +113,7 @@ class OrderRepository:
         date_from: str = None,
         date_to: str = None,
         limit: int = 100,
+        user_id: Optional[int] = None,
     ) -> list[dict]:
         q = self.db.query(Order)
         if symbol:
@@ -123,6 +126,8 @@ class OrderRepository:
             q = q.filter(Order.placed_at >= date_from)
         if date_to:
             q = q.filter(Order.placed_at <= date_to + "T23:59:59")
+        if user_id is not None:
+            q = q.filter(Order.user_id == user_id)
         rows = q.order_by(Order.id.desc()).limit(limit).all()
         return [r.to_dict() for r in rows]
 
@@ -172,9 +177,11 @@ class OrderRepository:
         condition_type: str,
         condition_value: str,
         memo: str = "",
+        user_id: Optional[int] = None,
     ) -> dict:
         now = _now()
         res = Reservation(
+            user_id=user_id,
             symbol=symbol,
             symbol_name=symbol_name,
             market=market,
@@ -213,10 +220,12 @@ class OrderRepository:
         self.db.flush()
         return res.to_dict()
 
-    def list_reservations(self, status: str = None) -> list[dict]:
+    def list_reservations(self, status: str = None, user_id: Optional[int] = None) -> list[dict]:
         q = self.db.query(Reservation)
         if status:
             q = q.filter(Reservation.status == status)
+        if user_id is not None:
+            q = q.filter(Reservation.user_id == user_id)
         rows = q.order_by(Reservation.id.desc()).all()
         return [r.to_dict() for r in rows]
 

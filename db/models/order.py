@@ -9,6 +9,7 @@ class Order(Base):
     __tablename__ = "orders"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, nullable=True, index=True)  # Phase 4 D.3: 소유 사용자
     order_no = Column(String)
     org_no = Column(String)
     symbol = Column(String, nullable=False)
@@ -37,6 +38,7 @@ class Order(Base):
     def to_dict(self) -> dict:
         return {
             "id": self.id,
+            "user_id": self.user_id,
             "order_no": self.order_no,
             "org_no": self.org_no,
             "symbol": self.symbol,
@@ -62,6 +64,7 @@ class Reservation(Base):
     __tablename__ = "reservations"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, nullable=True, index=True)  # Phase 4 D.3
     symbol = Column(String, nullable=False)
     symbol_name = Column(String)
     market = Column(String, nullable=False, default="KR", server_default=text("'KR'"))
@@ -81,6 +84,7 @@ class Reservation(Base):
     def to_dict(self) -> dict:
         return {
             "id": self.id,
+            "user_id": self.user_id,
             "symbol": self.symbol,
             "symbol_name": self.symbol_name,
             "market": self.market,

@@ -2,12 +2,24 @@
 
 기존 함수 시그니처 100% 유지. 내부는 OrderRepository에 위임.
 services/, routers/ 변경 없음.
+
+Phase 4 D.3: insert_order/insert_reservation은 ContextVar에서 현재 user_id를
+자동 부착해 신규 row에 user_id 컬럼을 채운다 (시그니처 변경 없음).
 """
 
 from typing import Optional
 
 from db.repositories.order_repo import OrderRepository
 from db.session import get_session
+
+
+def _ctx_user_id() -> Optional[int]:
+    """ContextVar에서 현재 user_id 추출 (라우터 진입 시 set됨). 시스템 호출 시 None."""
+    try:
+        from routers._kis_auth import get_current_user_id
+        return get_current_user_id()
+    except Exception:
+        return None
 
 
 # ── 주문 CRUD ────────────────────────────────────────────────────────────────
@@ -42,6 +54,7 @@ def insert_order(
             org_no=org_no,
             kis_response=kis_response,
             status=status,
+            user_id=_ctx_user_id(),
         )
 
 
@@ -145,6 +158,7 @@ def insert_reservation(
             condition_type=condition_type,
             condition_value=condition_value,
             memo=memo,
+            user_id=_ctx_user_id(),
         )
 
 

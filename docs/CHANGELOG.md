@@ -1,5 +1,95 @@
 # 변경 이력
 
+## 2026-05-04 — Phase 4: 관리 영역 확장 + 사용자별 KIS 자격증명
+
+### 배경
+멀티유저 운영을 위한 4건 일괄 처리 (옵션 B 권장 default). plan: `/Users/kimdukki/.claude/plans/shiny-herding-catmull.md`.
+1. AI관리 user_id 입력 점검 → UI 정상, 사용자 목록 API 부재가 진짜 원인
+2. 사용자관리 페이지 신설 (관리자 CRUD)
+3. 페이지별 이용현황 통계 페이지 신설
+4. 사용자별 KIS 자격증명 (AES-GCM) → 잔고/매매/양도세/포트폴리오 메뉴 활성화
+
+### 신규 모듈 (백엔드 10)
+- `services/secure_store.py` — AES-GCM 암호화. `encrypt/decrypt`. 32-byte 마스터 키 `KIS_ENCRYPTION_KEY`(SSM SecureString). nonce 12B + tag 16B. 키 미설정 시 ConfigError(503).
+- `services/kis_validator.py` — `validate_kis()` KIS `/oauth2/tokenP` 호출로 즉시 검증.
+- `db/models/user_kis.py` — `UserKisCredentials` 분리 테이블 (`user_id PK FK, app_key_enc, app_secret_enc, base_url, acnt_no_enc, acnt_prdt_cd_stk/fno?, hts_id?, validated_at?`).
+- `db/models/page_view.py` — `PageView(id, user_id?, path, method, status_code, duration_ms, created_at)`.
+- `db/repositories/user_kis_repo.py` — get/upsert/delete/mark_validated/is_valid(TTL 24h).
+- `db/repositories/page_view_repo.py` — record/aggregate_by_path/top_paths/daily_count.
+- `routers/me_kis.py` — POST/GET/DELETE `/api/me/kis` + `POST /api/me/kis/validate`. GET 응답은 마스킹(끝 4자리만).
+- `routers/admin_users.py` — GET 목록/상세, PATCH role·password reset, DELETE. 모두 `require_admin` + audit_log 기록.
+- `routers/admin_stats.py` — `GET /api/admin/page-stats?from=&to=&top=` 경로별 호출+latency+시계열.
+- alembic 3건: `add_user_kis_credentials`, `add_page_view`, `add_user_id_to_orders_reservations_tax` (모두 up/down).
+
+### 수정 (백엔드 13)
+- `routers/_kis_auth.py` — `_token_cache: dict[int|None, (token, expires_at)]`. `get_kis_credentials(user_id=None)`/`get_access_token(user_id=None)`. user_id=None은 시스템(시세 등) 운영자 .env fallback. 사용자 라우터에서 user_id 무조건 전파.
+- `routers/auth.py` — `/api/auth/me` 응답에 `has_kis: bool` 추가.
+- `routers/balance.py`, `routers/order.py`, `routers/tax.py`, `routers/portfolio_advisor.py` — `Depends(get_current_user)` + user_id 전파.
+- `services/order_service.py`, `services/tax_service.py` — 시그니처에 user_id 추가.
+- `services/auth_deps.py` — `require_kis` 의존성 추가.
+- `db/repositories/order_repo.py`, `tax_repo.py` — user_id 필터.
+- `db/repositories/user_repo.py` — `list_users(q, limit, offset)`, `count_users(q)`, `update_role`, `reset_password` 추가.
+- `main.py` — page_view 미들웨어(`asyncio.create_task` 비동기 INSERT, 제외 path: /api/health, /assets/*, /static/*, /ws/*, /api/admin/page-stats).
+- `config.py` — `KIS_ENCRYPTION_KEY`, `KIS_VALIDATION_TTL_HOURS=24`.
+- `requirements.txt` — `cryptography>=42`.
+- `db/models/__init__.py`, `db/models/order.py`, `db/models/tax.py` — user_id 컬럼.
+
+### 신규 (프론트 7)
+- `pages/AdminAIPage.jsx` — 기존 AdminPage 3탭 이전(route `/admin/ai`).
+- `pages/AdminUsersPage.jsx` — 사용자 검색/CRUD(route `/admin/users`).
+- `pages/AdminPageStatsPage.jsx` — Recharts 차트, 기간 필터(route `/admin/page-stats`).
+- `pages/SettingsKisPage.jsx` — KIS 등록 폼 + 검증 결과 표시(route `/settings/kis`).
+- `components/KisRequiredNotice.jsx` — 미등록 안내 + 등록 버튼.
+- `components/admin/*` — 사용자 콤보박스 등 보조 컴포넌트.
+- `api/me.js` — `getMyKis/saveMyKis/deleteMyKis/validateMyKis`.
+
+### 수정 (프론트 6)
+- `pages/AdminPage.jsx` — `/admin` → `/admin/ai` redirect 진입점.
+- `components/layout/Header.jsx` — "AI관리" → "관리" 드롭다운(3개 하위). 자산관리 그룹 메뉴 항목별 `requireKis: true` + 회색+🔒 + 클릭 시 `/settings/kis`.
+- `components/common/ProtectedRoute.jsx` — `requireKis` prop. 미등록 시 `KisRequiredNotice` 렌더.
+- `hooks/useAuth.jsx` — `hasKis` 추가 (`user?.has_kis`).
+- `App.jsx` — 신규 라우트 + `/portfolio·/order/*·/balance·/tax/*`에 requireKis.
+- `api/admin.js` — `fetchUsers/fetchUserById/patchUser/deleteUser`.
+
+### 환경변수 추가
+- `KIS_ENCRYPTION_KEY` — AES-GCM 마스터 키(b64 32-byte). **사용자별 KIS 사용 시 필수**. SSM `/stock-manager/prod/KIS_ENCRYPTION_KEY`(SecureString). 키 분실 시 모든 사용자 KIS 자격증명 영구 복구 불가.
+- `KIS_VALIDATION_TTL_HOURS` — 검증 만료 TTL. 기본 `24` (시간).
+
+### 신규 API (9개)
+- `POST /api/me/kis` — 등록 + 즉시 검증
+- `GET /api/me/kis` — 마스킹된 상태(끝 4자리)
+- `DELETE /api/me/kis` — 삭제 + 토큰 캐시 invalidate
+- `POST /api/me/kis/validate` — 재검증
+- `GET /api/admin/users?q=&limit=&offset=` — 검색/페이지네이션
+- `GET /api/admin/users/{user_id}` — 상세
+- `PATCH /api/admin/users/{user_id}` — role/password 변경
+- `DELETE /api/admin/users/{user_id}` — 삭제
+- `GET /api/admin/page-stats?from=&to=&top=` — 통계
+
+### 도메인 영향
+**0건**. 체제/Graham/등급/Value Trap/주문 안전 규칙/portfolio_advisor 자문 로직 모두 미터치. 시세(quote_kis/quote_overseas/market_board) 운영자 키 통합 유지(rate limit 회피).
+
+### 보안
+- KIS_APP_SECRET 평문 저장 0건 — AES-GCM nonce 12B + tag 16B
+- 응답 마스킹: `app_key`는 끝 4자리만, `app_secret`/`acnt_no`는 미노출
+- 마스터 키 미설정 시 ConfigError(503) fail-fast
+- 마스터 키 분실 → 영구 복구 불가 (별도 안전 백업 필수)
+
+### 테스트
+- 신규 단위 14 PASS: `tests/unit/test_secure_store.py` (9) + `tests/unit/test_kis_validator.py` (5)
+- 신규 통합/API 24: `tests/integration/test_user_kis_repo.py`, `test_page_view_repo.py`, `tests/api/test_admin_users_api.py`, `test_me_kis_api.py`, `test_admin_page_stats_api.py` (PostgreSQL 의존, CI 검증 위탁)
+- 회귀: 기존 단위 453 PASS 유지
+
+### 마이그레이션 영향
+신규 alembic 3건. 기존 운영 데이터:
+- `orders.user_id` NULL 허용 — 기존 row는 NULL 유지(자동 매핑 안 함, 데이터 정합성 보호)
+- `tax_transactions.user_id` 동일
+
+### 멀티 인스턴스 영향 (현재 단일 EC2라 영향 0)
+in-memory 토큰 캐시는 노드별 격리. 확장 시 F-4 메모(perf_audit_report.md 섹션 10.4) 참조 — Redis 전환 필요.
+
+---
+
 ## 2026-05-03 — 성능/가용성 4단계 사이클 (Phase 1~3 + 부수 정리)
 
 워치리스트/AI 자문 로딩 속도 이슈 분석 → 4 phase 점진 개선. RefactorEngineer + QA Inspector 합동 감사 산출물(`_workspace/dev/perf_audit_report.md` 1132줄, 5축 + AWS 인프라 5축) 기반.

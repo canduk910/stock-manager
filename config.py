@@ -34,6 +34,12 @@ KRX_PASSWORD = os.getenv("KRX_PASSWORD", "")
 # ── KIS WS 체결통보 ────────────────────────────────────────────────────────
 KIS_HTS_ID = os.getenv("KIS_HTS_ID", "")
 
+# ── 사용자별 KIS 자격증명 암호화 (Phase 4 D.1) ─────────────────────────────
+# 32-byte urlsafe-base64 마스터 키. 미설정 시 사용자별 KIS 기능 비활성화.
+# 발급: python -c "import base64,secrets; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())"
+KIS_ENCRYPTION_KEY = os.getenv("KIS_ENCRYPTION_KEY", "")
+KIS_VALIDATION_TTL_HOURS = float(os.getenv("KIS_VALIDATION_TTL_HOURS", "24"))
+
 # ── Database ──────────────────────────────────────────────────────────────
 from pathlib import Path  # noqa: E402
 DATABASE_URL = os.getenv(

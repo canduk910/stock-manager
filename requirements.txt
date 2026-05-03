@@ -21,3 +21,4 @@ psycopg2-binary
 pyyaml
 bcrypt
 python-jose[cryptography]
+cryptography>=42

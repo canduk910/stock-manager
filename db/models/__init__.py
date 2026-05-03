@@ -12,9 +12,13 @@ from .backtest import BacktestJob, Strategy
 from .tax import TaxCalculation, TaxFifoLot, TaxTransaction
 from .admin import AiUsageLog, AiLimit, AuditLog
 from .analyst import AnalystReport
+from .user_kis import UserKisCredentials
+from .page_view import PageView
 
 __all__ = [
     "User",
+    "UserKisCredentials",
+    "PageView",
     "Watchlist",
     "WatchlistOrder",
     "Order",

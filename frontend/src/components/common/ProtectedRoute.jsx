@@ -1,8 +1,9 @@
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../hooks/useAuth'
+import KisRequiredNotice from '../KisRequiredNotice'
 
-export default function ProtectedRoute({ children, adminOnly = false }) {
-  const { user, loading, isAdmin } = useAuth()
+export default function ProtectedRoute({ children, adminOnly = false, requireKis = false }) {
+  const { user, loading, isAdmin, hasKis } = useAuth()
 
   if (loading) {
     return (
@@ -14,6 +15,7 @@ export default function ProtectedRoute({ children, adminOnly = false }) {
 
   if (!user) return <Navigate to="/login" replace />
   if (adminOnly && !isAdmin) return <Navigate to="/" replace />
+  if (requireKis && !hasKis) return <KisRequiredNotice />
 
   return children
 }

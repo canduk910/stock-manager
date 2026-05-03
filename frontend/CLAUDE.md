@@ -33,7 +33,8 @@ frontend/
       backtest.js         fetchMcpStatus / fetchPresets / runPresetBacktest / runCustomBacktest / runBatchBacktest / fetchBacktestResult / fetchBacktestHistory → /api/backtest/*
       strategyBuilder.js  convertBuilderToYaml / validateBuilderState / saveStrategy / loadStrategies / loadStrategy / deleteStrategy → /api/backtest/strategy/*
       tax.js              fetchTaxSummary(year) / fetchTaxTransactions / syncTax / recalculateTax(year) / fetchTaxCalculations(year,symbol) / addTaxTransaction / deleteTaxTransaction / fetchSimulationHoldings / simulateTax → /api/tax/* (FIFO 전용, 시뮬레이션 포함)
-      admin.js            fetchAiUsage / fetchMyAiUsage / fetchAiLimits / setAiLimit / deleteAiLimit / fetchAuditLog → /api/admin/* (AI 사용량 관리)
+      admin.js            fetchAiUsage / fetchMyAiUsage / fetchAiLimits / setAiLimit / deleteAiLimit / fetchAuditLog → /api/admin/* (AI 사용량 관리). **(2026-05-04 Phase 4)** fetchUsers/fetchUserById/patchUser/deleteUser/fetchPageStats 추가.
+      me.js               **(신규 2026-05-04 Phase 4)** getMyKis/saveMyKis/deleteMyKis/validateMyKis → /api/me/kis (사용자 본인 KIS 자격증명 등록/검증/삭제).
     hooks/
       useAsyncState.js    useAsyncState(initialData) — 비동기 data/loading/error 상태 관리 공통 훅. run(asyncFn)으로 자동 관리.
       useScreener.js      { data, loading, error, search }
@@ -117,7 +118,11 @@ frontend/
       ReportPage.jsx      /reports       데일리 추천: 페이지 진입 시 KR/US 파이프라인 자동실행(중복방지). 매크로 체제 카드(공유) + KR/US 토글 + 3컨셉 탑픽 섹터(모멘텀/역발상/3개월선점) + 종목추천+관심종목 버튼(기등록 ★ 표시). 하단 이력 카드(클릭→전환).
       BacktestPage.jsx    /backtest      KIS AI Extensions 백테스트: **전략빌더(기본탭)**/프리셋/커스텀 3모드, 빌더에서 바로 실행 가능. 결과 차트/메트릭, 전략 비교. **국내 KRX만 지원**(markets={['KR']}). **거래비용 입력**(수수료0.015%/세금0.23%/슬리피지0.05%). 진행 현황+백그라운드 안내. **이력 테이블**(마운트 시 로드, 완료 시 새로고침, 과거 결과 "보기" 클릭 → 결과패널). MCP 비활성화 시 안내 표시. 저장 전략 직접 실행.
       TaxPage.jsx         /tax           해외주식 양도소득세: 4탭(요약/매매내역/계산상세/시뮬레이션). FIFO 전용, 연도 선택, KIS 적응적 동기화+자동 재계산.
-      AdminPage.jsx       /admin         AI 관리 (admin only): 3탭(사용량 현황/한도 설정/감사 로그). 유저별 일별 사용량+서비스별 상세. 기본/개별 한도 CRUD. 변경 이력 audit trail.
+      AdminPage.jsx       /admin         **(2026-05-04 Phase 4 분할)** /admin → /admin/ai redirect 진입점. 관리 페이지는 3섹션으로 분리됨.
+      AdminAIPage.jsx     /admin/ai      AI 관리 (admin only): 3탭(사용량 현황/한도 설정/감사 로그). 유저별 일별 사용량+서비스별 상세. 기본/개별 한도 CRUD. **(2026-05-04 Phase 4)** LimitsTab의 user_id 입력은 사용자 검색 콤보박스로 교체(`/api/admin/users?q=` 검색).
+      AdminUsersPage.jsx  /admin/users   **(신규 2026-05-04 Phase 4)** 관리자 전용 사용자 CRUD. 검색/페이지네이션, role 변경, 비밀번호 reset, 삭제.
+      AdminPageStatsPage.jsx /admin/page-stats **(신규 2026-05-04 Phase 4)** 페이지별 이용현황 통계. Recharts 라인/바 차트(top 20 path), 기간 필터(7d/30d/90d), 평균/p95 latency.
+      SettingsKisPage.jsx /settings/kis  **(신규 2026-05-04 Phase 4)** 사용자 본인 KIS 자격증명 등록/검증/삭제. 폼 6필드(app_key/app_secret/acnt_no/prdt_stk/prdt_fno?/hts_id?). 저장 시 즉시 검증(`POST /api/me/kis`) → ✓/✗ 표시.
 ```
 
 ---

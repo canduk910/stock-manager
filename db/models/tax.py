@@ -11,6 +11,7 @@ class TaxTransaction(Base):
     __tablename__ = "tax_transactions"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, nullable=True, index=True)  # Phase 4 D.3
     source = Column(String, nullable=False)  # KIS | LOCAL | MANUAL
     source_order_id = Column(Integer)  # orders.id (KIS/LOCAL 소스일 때)
     symbol = Column(String, nullable=False)
@@ -36,6 +37,7 @@ class TaxTransaction(Base):
     def to_dict(self) -> dict:
         return {
             "id": self.id,
+            "user_id": self.user_id,
             "source": self.source,
             "source_order_id": self.source_order_id,
             "symbol": self.symbol,
@@ -60,6 +62,7 @@ class TaxCalculation(Base):
     __tablename__ = "tax_calculations"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, nullable=True, index=True)  # Phase 4 D.3
     sell_tx_id = Column(Integer, nullable=False)  # tax_transactions.id (매도 건)
     symbol = Column(String, nullable=False)
     method = Column(String, nullable=False)  # FIFO | AVG
@@ -81,6 +84,7 @@ class TaxCalculation(Base):
     def to_dict(self) -> dict:
         return {
             "id": self.id,
+            "user_id": self.user_id,
             "sell_tx_id": self.sell_tx_id,
             "symbol": self.symbol,
             "method": self.method,
@@ -102,6 +106,7 @@ class TaxFifoLot(Base):
     __tablename__ = "tax_fifo_lots"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, nullable=True, index=True)  # Phase 4 D.3
     calculation_id = Column(Integer, nullable=False)  # tax_calculations.id
     sell_tx_id = Column(Integer, nullable=False)       # 매도 거래 ID
     buy_tx_id = Column(Integer)                         # 매수 거래 ID (None=부족)
@@ -121,6 +126,7 @@ class TaxFifoLot(Base):
     def to_dict(self) -> dict:
         return {
             "id": self.id,
+            "user_id": self.user_id,
             "calculation_id": self.calculation_id,
             "sell_tx_id": self.sell_tx_id,
             "buy_tx_id": self.buy_tx_id,
