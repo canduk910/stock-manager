@@ -94,6 +94,14 @@ jobs:
             aws ecr get-login-password --region "$REGION" | \
               docker login --username AWS --password-stdin "$ECR_REPO"
 
+            # t3.small EBS 디스크 보호: 사전 prune.
+            # currently-used 이미지(stock-manager, nginx)는 자동 보호됨.
+            # 새 이미지 pull 단계에서 "no space left on device" 회피.
+            echo "[1.5/6] 사전 디스크 정리..."
+            docker image prune -af 2>/dev/null || true
+            docker builder prune -af 2>/dev/null || true
+            df -h / | tail -1
+
             echo "[2/6] 이미지 pull..."
             docker pull "$ECR_REPO:$IMAGE_TAG"
 
