@@ -9,7 +9,9 @@
 | 파일 | 클래스/역할 |
 |------|------------|
 | `exceptions.py` | 서비스 레이어 공용 예외 계층 (FastAPI HTTPException 의존 제거) |
-| `watchlist_service.py` | `WatchlistService` — 관심종목 대시보드 + 상세 조회. ThreadPool max_workers=4 (t3.small OOM 방지, 2026-05-02 10→4) |
+| `_telemetry.py` | **계측(Telemetry) 모듈** (신규, 2026-05-03 Phase 3). stdlib only. `@timed(name)` / `record_event(name)` / `observe(name, value)` (p50/p95/p99) / `start_periodic_flush(interval_sec)`. 7개 hot path 계측. lifespan 5분 주기 stdout dump 후 reset. `TELEMETRY_ENABLED`, `TELEMETRY_FLUSH_SEC` 환경변수. 메모리 < 300KB. |
+| `_dashboard_cache.py` | **워치리스트 dashboard 응답 캐시** (신규, 2026-05-03 Phase 2 QW-4). 사용자별 60s in-memory TTL (부분실패 15s). `(user_id, sorted_codes_hash)` 키. `add/remove_item / update_memo` 핸들러에서 invalidate. threading.Lock 보호. 멀티 인스턴스 확장 시 Redis 재설계 필요. |
+| `watchlist_service.py` | `WatchlistService` — 관심종목 대시보드 + 상세 조회. ThreadPool max_workers=4 (t3.small OOM 방지, 2026-05-02 10→4). **(2026-05-03 Phase 2 QW-1/QW-3)**: `is_stale_from_dict()` dict 기반 fresh 판정으로 N+1 제거(SELECT 104→26). `partial_failure: list[str]` 메타필드 + `logger.debug→warning` 승격. |
 | `detail_service.py` | `DetailService` — 종목 상세 분석 (재무/밸류에이션/리포트) |
 | `quote_service.py` | 실시간 시세 공개 API 진입점 (싱글턴 `get_manager`/`get_overseas_manager`) |
 | `quote_kis.py` | KIS WebSocket 단일 연결 + 심볼별 pub/sub (국내+FNO) + 체결통보(H0STCNI0) |

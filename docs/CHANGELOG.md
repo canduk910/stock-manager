@@ -1,5 +1,60 @@
 # 변경 이력
 
+## 2026-05-03 — 성능/가용성 4단계 사이클 (Phase 1~3 + 부수 정리)
+
+워치리스트/AI 자문 로딩 속도 이슈 분석 → 4 phase 점진 개선. RefactorEngineer + QA Inspector 합동 감사 산출물(`_workspace/dev/perf_audit_report.md` 1132줄, 5축 + AWS 인프라 5축) 기반.
+
+### Phase 1 — 인프라 P0 (nginx 보안 헤더 drift + proxy_read_timeout)
+- `infra/nginx/app.conf`: location 1→3 분리. `^~ /ws/` 3600s + `/api/` 90s + `/` 60s. 공통 프록시 헤더 server 블록 상위 이동.
+- `.github/workflows/deploy.yml`: heredoc 70줄 제거 → SCP staging(`/opt/stock-manager/_staging`) + `nginx -t` 자동 검증 + `nginx -s reload` 명시 호출.
+- `scripts/ec2-deploy.sh`: 비상용 명시(운영은 GitHub Actions 단일 경로).
+- 핫픽스 2건: `--add-host=app:127.0.0.1`(검증 컨테이너 dummy DNS), `nginx -s reload`(volume mount 설정 반영).
+
+### Phase 2 — Week 1 Quick Win 5건 (워치리스트/macro 성능)
+- **QW-1 stock_info N+1 제거**: `db/repositories/stock_info_repo.py`에 `is_stale_from_dict()` 순수 함수 추출. `services/watchlist_service.py:_fetch_dashboard_row`가 dict 기반 fresh 판정으로 단축. 26종목 SELECT 104→26 (-75%).
+- **QW-2 macro 7심볼 병렬**: `stock/yf_client.py:fetch_macro_indicators`가 `^TNX/GC=F/CL=F/USDKRW=X/...` 7심볼을 `ThreadPoolExecutor(max_workers=7)`로 병렬 조회. 첫 채움 7~14초 → 1~2초.
+- **QW-3 partial_failure + logger.warning**: 워치리스트 try/except 6개 `debug→warning` 승격. row dict에 `partial_failure: list[str]` 메타필드. `frontend/src/components/watchlist/WatchlistDashboard.jsx`에 ⚠ 미수집 tooltip UI.
+- **QW-4 워치리스트 dashboard 응답 캐시**: `services/_dashboard_cache.py` 신설. 사용자별 60s in-memory TTL(부분 실패 15s). `add/remove_item / update_memo` 핸들러에서 invalidate. 멀티 인스턴스 확장 시 Redis 재설계 필요(F-4-A 코드 주석).
+- **INF-3 nginx gzip + 정적 캐시**: `infra/nginx/app.conf`에 gzip 8 MIME + `/assets/*` `Cache-Control: public, max-age=31536000, immutable`. 운영 검증 결과 `/assets/*.js` 1.4MB→386KB(-72.5%).
+
+### Phase 2b — 부수 메모 정리 (보안 헤더 SSoT + SPA HEAD)
+- `main.py`: `add_security_headers` 미들웨어 제거. nginx(`infra/nginx/app.conf`)를 single source of truth로 채택. 응답 헤더 중복 노출 해소(backend 5종 + nginx 6종 → nginx 단일 6종).
+- `main.py`: SPA catchall `@app.get("/{full_path:path}")` → `@app.api_route("/{full_path:path}", methods=["GET","HEAD"])`. uptime 모니터/`curl -I`에서 405→200.
+- `.github/workflows/deploy.yml`: 사전 `docker image prune -af` + `docker builder prune -af` 추가(EBS 가득 참으로 인한 image pull 실패 회피).
+
+### Phase 3 — 계측(Telemetry) 도입
+- `services/_telemetry.py` 신규(외부 의존성 0, stdlib only): `@timed(name)` 데코레이터, `record_event(name)` 카운터, `observe(name, value)` percentile(p50/p95/p99 deque), `start_periodic_flush(interval_sec)`.
+- 7개 hot path 계측: T-1 `watchlist.dashboard` 응답+캐시 hit/miss, T-2 `_fetch_dashboard_row` per-stock+영역별 fresh 비율, T-3 `stock_info.get_stock_info`/`is_stale` 호출 횟수, T-4 `ai_gateway.call_openai_chat` latency+per-model token, T-5 `advisory` 4페이즈 timing, T-6 `yf_client._ticker` hit/miss, T-7 `analyst_pdf` 캐시 hit/miss + 다운로드 latency.
+- `main.py` lifespan에서 5분 주기 stdout dump 후 reset. 메모리 < 300KB 상한.
+- `TELEMETRY_ENABLED=0/1`, `TELEMETRY_FLUSH_SEC=300` 환경변수 제어.
+- 1주 누적 측정 후 의사결정 트리거: 워치리스트 캐시 hit ≥ 90% → max_workers 4→8 복원, advisory refresh p95 > 30s → Phase 4 Mid 사이클 P0, yfinance 단일 종목 5+회 → RefreshContext 우선순위 P0.
+
+### 도메인 영향
+- 도메인 로직(체제 판단/Graham/등급 임계값) 변경 0건. 본 PR은 캐싱/중복제거/병렬화/계층 재배치/계측만 다룸.
+- 후방 호환 100%: `is_stale(code, market, field)` 등 모든 기존 시그니처 보존.
+
+### 테스트
+- 단위 신규 5: `tests/unit/test_stock_info_freshness.py`, `test_macro_indicators_parallel.py`, `test_watchlist_partial_failure.py`, `test_dashboard_cache.py`, `test_telemetry.py`.
+- API 신규 1: `tests/api/test_main_misc.py` (SPA GET 회귀 / SPA HEAD 200 / 루트 HEAD / 보안 헤더 부재).
+- 단위 **453 PASS / 0 FAIL / 6 SKIP**(skip은 로컬 Python 3.9 의존성, CI 3.11 정상). 신규 30+ 케이스 모두 통과.
+
+### 환경변수 추가
+- `TELEMETRY_ENABLED` (기본 `1`): 계측 활성/비활성
+- `TELEMETRY_FLUSH_SEC` (기본 `300`): 카운터 flush 간격
+
+### 운영 측정 효과 (이론치)
+| 영역 | Before | After |
+|------|--------|-------|
+| 워치리스트 26종목 SELECT | 104회 | 26회 (-75%) |
+| F5 연타 응답 | 풀 작업 반복 | 즉시 (<50ms) |
+| macro 7심볼 첫 채움 | 7~14초 | 1~2초 |
+| `/assets/*.js` 전송 | 1.4MB | 386KB (-72.5%) |
+| nginx HTTP timeout | 24시간 | 90s (957× 단축) |
+| 보안 헤더 drift | 매 배포 누락 | 6종 안정 적용 (SSoT) |
+| SPA HEAD 응답 | 405 | 200 |
+
+---
+
 ## 2026-05-02 — AI 자문 보수성 완화 + 경기사이클×체제 조합 + 성장주 보조 트랙
 
 ### 신규 모듈

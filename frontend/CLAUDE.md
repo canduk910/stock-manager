@@ -143,7 +143,7 @@ frontend/
 - **ScreenerPage**: "조회하기" 버튼 클릭 시만 API 호출 (onChange 즉시 호출 안 함). 구루 프리셋(greenblatt/neff/seo) 선택 시 DART enrichment 자동 활성화. 체제 연계(regime_aware) 기본 ON → 상단 체제 배너 표시. 서준식 기대수익률은 항상 컬럼 표시, 구루 점수/Value Trap은 DART enrichment 시에만 표시
 - **EarningsPage**: 국내/미국 탭 선택 → 조회 시 필터 초기화. 종목명/종목코드 클라이언트 사이드 필터
 - **BalancePage**: 국내/해외/선물옵션 3섹션 분리. 국내는 항상 표시, FNO는 `fno_enabled`일 때 표시(빈 목록이면 EmptyState). KIS 키 없으면 안내 메시지 (에러 대신)
-- **WatchlistDashboard**: 종목명 클릭 → `/detail/:symbol`. 통화 배지 (US=`[US]`). 삭제/편집 시 market 파라미터 포함. 섹터 컬럼(종목명 우측)
+- **WatchlistDashboard**: 종목명 클릭 → `/detail/:symbol`. 통화 배지 (US=`[US]`). 삭제/편집 시 market 파라미터 포함. 섹터 컬럼(종목명 우측). **(2026-05-03 Phase 2 QW-3)** `partial_failure: list[str]` 메타필드 표시 — 외부 API 부분 실패 영역(price/metrics/financials)은 회색 + ⚠ 마커 + tooltip "데이터 일시 미수집".
 - **DetailPage**: StockHeader → **KLineChartPanel**(KLineChart 캔들차트, 타임프레임/기간/기술지표 토글) → 2탭 (재무분석/종합 리포트). 종합 리포트 내 4개 서브탭 (CAGR요약/기본적분석/기술적분석/AI자문). 밸류에이션(PER/PBR)은 기술적 분석 서브탭 하단에 내장 (1d/1wk만 표시). advisory 데이터는 최초 서브탭 진입 시 lazy load
 - **OrderPage**: 5탭 UI. **공유 상태**(symbol/symbolName/market) 최상단 관리. `isMounted` ref로 중복 API 호출 방지. 미체결/체결 탭 MARKET_TABS: KR/US/FNO. **10초 자동 폴링**(미체결/체결 탭), **체결통보 WS** 수신 시 토스트+자동 갱신, 주문 발송 후 3초 딜레이 갱신
 - **MarketBoardPage**: `useDisplayStocks` 훅 사용 (api/ 직접 import 금지). @dnd-kit 드래그앤드롭으로 종목 카드 순서 변경 가능 (DB 영속화)

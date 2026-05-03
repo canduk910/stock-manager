@@ -7,7 +7,9 @@
 | 파일 | 역할 |
 |------|------|
 | `exceptions.py` | 공용 예외 계층 |
-| `watchlist_service.py` | 관심종목 대시보드(ThreadPoolExecutor 병렬, **max_workers=4** — 2026-05-02 t3.small OOM 방지로 10→4 축소) + 종목 상세 (국내=pykrx+DART, 해외=yfinance) |
+| `_telemetry.py` | **계측(Telemetry) 모듈** (신규, 2026-05-03 Phase 3). 외부 의존성 0(stdlib only). `@timed(name)` 데코레이터, `record_event(name)` 카운터, `observe(name, value)` percentile(p50/p95/p99 deque 기반), `start_periodic_flush(interval_sec)` 5분 주기 stdout dump 후 reset. 7개 hot path 계측 — watchlist.dashboard / _fetch_dashboard_row / stock_info.get·is_stale / ai_gateway.call_openai / advisory 4 페이즈 / yf_client._ticker hit·miss / analyst_pdf 캐시. 메모리 < 300KB 상한. `TELEMETRY_ENABLED=0/1`, `TELEMETRY_FLUSH_SEC` 환경변수 제어. 1주 누적 측정 후 max_workers/RefreshContext/Single-flight 우선순위 재평가 자료. |
+| `_dashboard_cache.py` | **워치리스트 dashboard 응답 캐시** (신규, 2026-05-03 Phase 2 QW-4). 사용자별 60s in-memory TTL (부분 실패 응답은 15s 단축). `(user_id, sorted_codes_hash)` 키. `add_item / remove_item / update_memo` 핸들러에서 invalidate. `threading.Lock`으로 동시성 보호. 멀티 인스턴스 확장 시 Redis로 재설계 필요 — F-4-A 코드 주석 명시. F5 연타 즉시 응답(<50ms), 동시 30 사용자 시 외부 API 호출 1/30. |
+| `watchlist_service.py` | 관심종목 대시보드(ThreadPoolExecutor 병렬, **max_workers=4** — 2026-05-02 t3.small OOM 방지로 10→4 축소) + 종목 상세 (국내=pykrx+DART, 해외=yfinance). **(2026-05-03 Phase 2 QW-1/QW-3)**: stock_info N+1 제거(`is_stale_from_dict()` 순수 함수 + `_fetch_dashboard_row` dict 기반 단축, 26종목 SELECT 104→26 -75%) + `partial_failure: list[str]` 메타필드(외부 API 실패 영역 기록, `logger.debug → warning` 승격). 응답 dict에 `partial_failure` 키. |
 | `detail_service.py` | 재무 테이블 + PER/PBR 히스토리 + CAGR 종합 리포트. KR: metrics에서 PBR/PER/ROE fallback 보충 |
 | `order_service.py` | 주문 오케스트레이션 + 대사 (시장별 실행은 order_kr/us/fno에 위임) |
 | `order_kr.py` | 국내주식 KIS API 주문 실행 (발주/조회/정정/취소) |
@@ -35,7 +37,7 @@
 | `backtest_service.py` | 백테스트 오케스트레이션: **비동기 2단계**(run_tool→job_id→get_backtest_result_tool(wait=true)). MCP 파라미터: `strategy_id`/`symbols`(배열)/`initial_capital`/`commission_rate`/`tax_rate`/`slippage`. `_extract_metrics()` 중첩 메트릭(basic/risk/trading) 플래트닝. 실패 시 `update_job_status("failed")`. `get_strategy_signals()` — 대표 3전략 신호 + 합의. MCP 비활성화 시 None. |
 | `strategy_builder_service.py` | 전략빌더 BuilderState→.kis.yaml 변환(`convert_builder_to_yaml`) + 검증(`validate_builder_state`) + YAML 요약 추출(`extract_strategy_summary`: 지표/조건/리스크 메타데이터). 프론트 5단계 빌더 UI의 JSON을 MCP가 이해하는 YAML로 변환. |
 | `tax_service.py` | 해외주식 양도소득세: CTOS4001R+TTTS3035R 병합 동기화(연속조회 `tr_cont:N` 헤더) + 잔고 기반 적응적 소급(2015년까지) + 시간순 FIFO 재생(매도 시점 이전 매수만 소진) + `tax_fifo_lots` 매도→매수 매핑 + 잔고 `avg_price` fallback + 가상 매도 시뮬레이션 + 동기화 후 자동 재계산. `stock/tax_store.py` 래퍼 경유. 도메인 규칙: `docs/TAX_DOMAIN.md`. |
-| `ai_gateway.py` | **모든 OpenAI API 호출의 단일 진입점** (신규). `call_openai_chat()` — 유저별 일일 쿼터 체크 + OpenAI 호출 + 사용량 기록. `user_id=None`이면 시스템 호출(한도 검사 건너뜀). `check_quota=False`로 재시도 시 중복 검사 방지. `AiQuotaExceededError`(429) 예외. |
+| `ai_gateway.py` | **모든 OpenAI API 호출의 단일 진입점** (신규). `call_openai_chat()` — 유저별 일일 쿼터 체크 + OpenAI 호출 + 사용량 기록. `user_id=None`이면 시스템 호출(한도 검사 건너뜀). `check_quota=False`로 재시도 시 중복 검사 방지. `AiQuotaExceededError`(429) 예외. **(2026-05-03 Phase 3)**: `@timed("ai_gateway.call_openai_chat")` + per-model token counter(`ai_gateway.model.{m}.tokens.prompt/completion`) 계측 추가. |
 
 ---
 
