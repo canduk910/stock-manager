@@ -122,23 +122,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 보안 헤더 (nginx 우회 시에도 적용, HSTS는 HTTPS 전용이므로 제외)
-@app.middleware("http")
-async def add_security_headers(request: Request, call_next):
-    response = await call_next(request)
-    response.headers["X-Frame-Options"] = "SAMEORIGIN"
-    response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
-    response.headers["Content-Security-Policy"] = (
-        "default-src 'self'; "
-        "script-src 'self' 'unsafe-inline'; "
-        "style-src 'self' 'unsafe-inline'; "
-        "img-src 'self' data: https:; "
-        "connect-src 'self' wss: ws:; "
-        "font-src 'self';"
-    )
-    return response
+# 보안 헤더 single source of truth = nginx (`infra/nginx/app.conf`).
+# - 프로덕션 응답은 항상 nginx를 통과하므로 nginx에서 6종(HSTS 포함) 일괄 추가.
+# - dev/TestClient 환경은 nginx 미통과 → 보안 헤더 부재가 정상 (prod 보안 검증 대상 아님).
+# - HSTS는 HTTPS 전용이므로 nginx HTTPS server 블록에서만 추가 (dev로 새지 않음).
+# 정책 변경 시 한 곳(nginx app.conf)만 수정하면 된다.
 
 # 라우터 등록
 from routers import auth, screener, earnings, balance, watchlist, detail, order, quote, advisory, search, market_board, macro, portfolio_advisor, report, pipeline, backtest, tax, admin  # noqa: E402
@@ -172,7 +160,9 @@ if os.path.isdir(_frontend_dist):
     # SPA 캐치올: API에 매칭되지 않는 모든 경로에 index.html 반환
     # (React Router가 클라이언트 사이드에서 라우팅 처리)
     # index.html은 캐싱 금지 — 배포 후 브라우저가 항상 최신 번들을 로드하도록 함
-    @app.get("/{full_path:path}")
+    # HEAD 메서드 지원: uptime 모니터/curl -I/헬스체크 호환 (이전엔 405였음).
+    # FastAPI/Starlette가 HEAD 응답에서 body를 자동 생략하므로 핸들러 분기 불필요.
+    @app.api_route("/{full_path:path}", methods=["GET", "HEAD"])
     def serve_spa(full_path: str):
         response = FileResponse(os.path.join(_frontend_dist, "index.html"))
         response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
