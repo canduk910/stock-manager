@@ -132,6 +132,15 @@ jobs:
             echo "[5/6] 컨테이너 시작..."
             docker compose -f docker-compose.prod.yml up -d --remove-orphans
 
+            # nginx 설정 파일은 volume mount 라 docker compose up 만으로 reload 되지 않음.
+            # 새 설정을 적용하려면 명시적 reload 필요.
+            if docker ps --format '{{.Names}}' | grep -q '^stock-nginx$'; then
+              docker exec stock-nginx nginx -s reload && echo "nginx reload OK" || {
+                echo "WARNING: nginx reload 실패, 컨테이너 재시작 시도"
+                docker compose -f docker-compose.prod.yml restart nginx
+              }
+            fi
+
             echo "[6/6] 정리..."
             docker image prune -f
 
