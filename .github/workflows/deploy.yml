@@ -64,6 +64,17 @@ jobs:
               curl -sf http://localhost:3846/health && echo "MCP 기동 완료" || echo "WARNING: MCP 기동 실패"
             fi
 
+      # nginx 설정 + docker-compose.prod.yml 을 EC2 로 SCP 전송 (단일 source of truth)
+      - name: Copy nginx config to EC2
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ec2-user
+          key: ${{ secrets.EC2_SSH_KEY }}
+          source: "infra/nginx/app.conf,docker-compose.prod.yml"
+          target: "/opt/stock-manager/_staging"
+          strip_components: 0
+
       - name: Deploy to EC2
         uses: appleboy/ssh-action@v1
         with:
@@ -77,6 +88,7 @@ jobs:
             REGION="${AWS_REGION}"
             ECR_REPO="${{ steps.ecr-login.outputs.registry }}/stock-manager"
             IMAGE_TAG="${{ github.sha }}"
+            export ECR_REPO IMAGE_TAG
 
             echo "[1/6] ECR 로그인..."
             aws ecr get-login-password --region "$REGION" | \
@@ -95,84 +107,24 @@ jobs:
                 echo "$(basename "$name")=$value"
             done > /opt/stock-manager/.env
 
-            echo "[4/6] nginx 설정 배포..."
+            echo "[4/6] nginx 설정 + compose 파일 배치 (SCP staging → 운영 위치)..."
             cd /opt/stock-manager
             mkdir -p nginx certbot/conf certbot/www
+            # SCP staging 디렉토리에서 파일 가져오기 (단일 source of truth: infra/nginx/app.conf)
+            cp _staging/infra/nginx/app.conf nginx/app.conf
+            cp _staging/docker-compose.prod.yml docker-compose.prod.yml
+            rm -rf _staging
 
-            cat > nginx/app.conf << 'NGINX_EOF'
-            server {
-                listen 80;
-                server_name dkstock.cloud www.dkstock.cloud;
-                location /.well-known/acme-challenge/ {
-                    root /var/www/certbot;
-                }
-                location / {
-                    return 301 https://$host$request_uri;
-                }
-            }
-            server {
-                listen 443 ssl;
-                server_name dkstock.cloud www.dkstock.cloud;
-                ssl_certificate /etc/letsencrypt/live/dkstock.cloud/fullchain.pem;
-                ssl_certificate_key /etc/letsencrypt/live/dkstock.cloud/privkey.pem;
-                ssl_protocols TLSv1.2 TLSv1.3;
-                ssl_prefer_server_ciphers on;
-                location / {
-                    proxy_pass http://app:8000;
-                    proxy_set_header Host $host;
-                    proxy_set_header X-Real-IP $remote_addr;
-                    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-                    proxy_set_header X-Forwarded-Proto $scheme;
-                    proxy_http_version 1.1;
-                    proxy_set_header Upgrade $http_upgrade;
-                    proxy_set_header Connection "upgrade";
-                    proxy_read_timeout 86400;
-                }
-            }
-            NGINX_EOF
+            # nginx 문법 검증 (실제 운영 컨테이너로 검증)
+            docker run --rm \
+              -v /opt/stock-manager/nginx/app.conf:/etc/nginx/conf.d/default.conf:ro \
+              nginx:alpine nginx -t 2>&1 | tee /tmp/nginx-test.log || {
+                echo "ERROR: nginx 설정 문법 오류. 배포 중단."
+                cat /tmp/nginx-test.log
+                exit 1
+              }
 
             echo "[5/6] 컨테이너 시작..."
-
-            cat > docker-compose.prod.yml << COMPOSE_EOF
-            services:
-              app:
-                image: ${ECR_REPO}:${IMAGE_TAG}
-                container_name: stock-manager
-                restart: unless-stopped
-                env_file: [.env]
-                expose: ["8000"]
-                volumes: [watchlist-data:/home/app/stock-watchlist]
-                healthcheck:
-                  test: ["CMD-SHELL", "curl -f http://localhost:8000/api/health || exit 1"]
-                  interval: 30s
-                  timeout: 5s
-                  retries: 3
-                logging:
-                  driver: json-file
-                  options:
-                    max-size: "10m"
-                    max-file: "3"
-              nginx:
-                image: nginx:alpine
-                container_name: stock-nginx
-                restart: unless-stopped
-                ports: ["80:80", "443:443"]
-                volumes:
-                  - ./nginx/app.conf:/etc/nginx/conf.d/default.conf:ro
-                  - ./certbot/www:/var/www/certbot:ro
-                  - ./certbot/conf:/etc/letsencrypt:ro
-                depends_on: [app]
-              certbot:
-                image: certbot/certbot
-                container_name: stock-certbot
-                volumes:
-                  - ./certbot/www:/var/www/certbot
-                  - ./certbot/conf:/etc/letsencrypt
-                entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait \$\${!}; done;'"
-            volumes:
-              watchlist-data:
-            COMPOSE_EOF
-
             docker compose -f docker-compose.prod.yml up -d --remove-orphans
 
             echo "[6/6] 정리..."

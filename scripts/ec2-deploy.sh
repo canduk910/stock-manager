@@ -1,6 +1,12 @@
 #!/bin/bash
-# EC2에서 수동 배포 시 사용하는 스크립트
+# EC2에서 수동 배포 시 사용하는 스크립트 (긴급/디버깅용 — nginx/HTTPS 없는 단순 배포)
 # 사용법: ECR_REPO=xxxx.dkr.ecr.ap-northeast-2.amazonaws.com/stock-manager ./ec2-deploy.sh [IMAGE_TAG]
+#
+# ⚠ 주의: 이 스크립트는 운영용 nginx 리버스 프록시 + HTTPS 를 포함하지 않는다.
+#   정식 배포는 GitHub Actions (.github/workflows/deploy.yml) 가 담당.
+#   이 스크립트는 GitHub Actions 가 동작하지 않는 비상 상황에서만 사용.
+#   docker-compose.prod.yml 과는 별개 인라인 compose 를 생성하므로,
+#   운영 nginx 설정과 drift 가 발생하지 않는다 (nginx 자체를 띄우지 않음).
 set -euo pipefail
 
 REGION="${AWS_REGION:-ap-northeast-2}"
