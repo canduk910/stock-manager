@@ -224,16 +224,55 @@ export default function BacktestPage() {
           />
         </div>
 
+        {/* 백테스트 가용 기간 가이드 (2026-05-05) — 출처 + 추정값 명시 */}
+        <div className="text-[11px] text-gray-600 bg-blue-50 border border-blue-200 rounded px-3 py-2 mb-3">
+          <div className="font-semibold text-blue-900 mb-1">📅 백테스트 가용 기간 가이드</div>
+          <ul className="space-y-0.5 list-disc pl-4">
+            <li>
+              <b>US</b>: 일봉 기준 <b>1998-01-02 이후</b> 가용 (QuantConnect Lean 공식 데이터 패키지).
+              종목 상장 이전 시점은 자동으로 잘립니다.
+            </li>
+            <li>
+              <b>KR</b>: 일봉 기준 <b>2000-01-04 이후</b> 가용 (KIS API inquire-daily-itemchartprice).
+              ETF는 상장일 이후만 의미 있음 — 추후 종목 메타에서 자동 안내 예정.
+            </li>
+            <li>
+              <b>권장 기간</b>: 통계적 의미가 있으려면 최소 <b>1년(252영업일)</b>, 사이클 1회 이상은 <b>5~10년</b> 권장.
+              범위가 너무 길면 Lean 백테스트 메모리/실행 시간이 증가합니다.
+            </li>
+            <li className="text-gray-500">
+              ※ 정확한 한계는 운영 환경 Lean Data 폴더에 따릅니다 — 위 추정값은 공식 가용 범위 기준.
+              실제로는 이른 시작일을 넣어도 Lean이 자동으로 첫 데이터 시점부터 시작합니다.
+            </li>
+          </ul>
+        </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
           <div>
-            <label className="block text-xs text-gray-500 mb-1">시작일</label>
-            <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)}
-              className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm" />
+            <label className="block text-xs text-gray-500 mb-1">
+              시작일
+              <span className="ml-1 text-gray-400">
+                (US ≥ 1998-01-02 / KR ≥ 2000-01-04 권장)
+              </span>
+            </label>
+            <input
+              type="date"
+              value={startDate}
+              onChange={(e) => setStartDate(e.target.value)}
+              min={market === 'US' ? '1998-01-02' : '2000-01-04'}
+              max={today}
+              className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm"
+            />
           </div>
           <div>
             <label className="block text-xs text-gray-500 mb-1">종료일</label>
-            <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)}
-              className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm" />
+            <input
+              type="date"
+              value={endDate}
+              onChange={(e) => setEndDate(e.target.value)}
+              min={startDate}
+              max={today}
+              className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm"
+            />
           </div>
           <div>
             <label className="block text-xs text-gray-500 mb-1">초기자금</label>

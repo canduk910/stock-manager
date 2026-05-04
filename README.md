@@ -240,6 +240,20 @@ KIS AI Extensions MCP 서버 연동. `KIS_MCP_ENABLED=true` + MCP 서버 실행 
 
 > 백테스트는 서버에서 실행되므로 다른 페이지로 이동해도 작업이 중단되지 않습니다. 돌아오면 이력에서 결과를 확인할 수 있습니다.
 
+#### 가용 기간 가이드
+
+- **US**: 일봉 기준 **1998-01-02 이후** (QuantConnect Lean 공식 데이터 패키지)
+- **KR**: 일봉 기준 **2000-01-04 이후** (KIS API `inquire-daily-itemchartprice`). ETF는 상장일 이후만 의미 있음
+- **권장 기간**: 통계적 의미 ≥ 1년(252영업일), 사이클 1회 이상 권장 5~10년
+
+> 정확한 한계는 운영 환경 Lean Data 폴더에 따릅니다. SSH 접속이 가능하면 다음으로 실측 가능:
+> ```bash
+> ssh -i ~/.ssh/<key>.pem ec2-user@<backtester_public_ip>
+> ls /opt/backtester/Lean/Data/equity/usa/daily/ | head     # US 종목별 첫 일자
+> ls /opt/backtester/Lean/Data/equity/krx/daily/ | head    # KR (KIS adapter)
+> ```
+> 또는 임의 종목으로 매우 이른 시작일(예: 1990-01-01)을 넣어 백테스트를 실행하면 Lean이 자동으로 첫 가용 데이터 시점부터 시작합니다.
+
 ### AI자문 (DetailPage → 종합 리포트 탭)
 
 1. 관심종목 대시보드 또는 종목 스크리너에서 종목 클릭 → `/detail/:symbol`
