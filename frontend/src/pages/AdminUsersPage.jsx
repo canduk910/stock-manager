@@ -91,13 +91,14 @@ export default function AdminUsersPage() {
                 <th className="px-4 py-2.5 text-left">이름</th>
                 <th className="px-4 py-2.5 text-left">역할</th>
                 <th className="px-4 py-2.5 text-center">KIS</th>
+                <th className="px-4 py-2.5 text-right">방문수</th>
                 <th className="px-4 py-2.5 text-left">가입일</th>
                 <th className="px-4 py-2.5 text-center">작업</th>
               </tr>
             </thead>
             <tbody>
               {items.length === 0 ? (
-                <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-400">결과 없음</td></tr>
+                <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-400">결과 없음</td></tr>
               ) : items.map(u => (
                 <tr key={u.id} className="border-b last:border-0 hover:bg-gray-50">
                   <td className="px-4 py-2.5 font-mono text-xs">{u.id}</td>
@@ -110,6 +111,9 @@ export default function AdminUsersPage() {
                   </td>
                   <td className="px-4 py-2.5 text-center">
                     {u.has_kis ? <span className="text-green-600 text-xs">✓ 활성</span> : <span className="text-gray-400 text-xs">미등록</span>}
+                  </td>
+                  <td className="px-4 py-2.5 text-right font-mono text-xs text-gray-700">
+                    {(u.visit_count ?? 0).toLocaleString()}
                   </td>
                   <td className="px-4 py-2.5 text-xs text-gray-500">{u.created_at?.slice(0, 10)}</td>
                   <td className="px-4 py-2.5 text-center space-x-2 text-xs">

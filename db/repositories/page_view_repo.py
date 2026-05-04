@@ -74,6 +74,30 @@ class PageViewRepository:
             for r in rows
         ]
 
+    def count_by_user(self, user_ids: list[int]) -> dict[int, int]:
+        """사용자별 누적 방문 카운트 (PageView 전체 누계).
+
+        N+1 회피: user_ids 목록을 한 번에 IN 쿼리로 집계.
+        anonymous(user_id IS NULL) 행은 제외. 카운트 없는 사용자는 0.
+
+        Returns: {user_id: count}
+        """
+        if not user_ids:
+            return {}
+        rows = (
+            self.db.query(
+                PageView.user_id.label("uid"),
+                func.count(PageView.id).label("cnt"),
+            )
+            .filter(PageView.user_id.in_(user_ids))
+            .filter(PageView.user_id.isnot(None))
+            .group_by(PageView.user_id)
+            .all()
+        )
+        counts = {int(r.uid): int(r.cnt or 0) for r in rows}
+        # 누락 사용자는 0으로 채움
+        return {uid: counts.get(uid, 0) for uid in user_ids}
+
     def daily_timeseries(self, date_from: str, date_to: str, top: int = 5) -> list[dict]:
         """일별 path별 호출 수 시계열 (상위 top path만)."""
         # 1) 상위 top path 추출

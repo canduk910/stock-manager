@@ -1,6 +1,6 @@
 import {
   ResponsiveContainer, LineChart, Line, AreaChart, Area,
-  XAxis, YAxis, Tooltip, CartesianGrid, ReferenceLine,
+  XAxis, YAxis, Tooltip, CartesianGrid, ReferenceLine, ReferenceArea,
 } from 'recharts'
 import LoadingSpinner from '../common/LoadingSpinner'
 import ErrorAlert from '../common/ErrorAlert'
@@ -100,12 +100,67 @@ function CurveShapeChart({ current }) {
   )
 }
 
-function SpreadHistoryChart({ history }) {
+// R2 (2026-05-04): NBER 침체 + S&P -20% 약세장 음영 ReferenceArea 렌더 헬퍼.
+//   recessions = 회색 alpha 0.18 (실물 경제 침체)
+//   bear_markets = 붉은색 alpha 0.10 (자산가격 약세장)
+function EventOverlays({ events }) {
+  const recs = events?.recessions || []
+  const bears = events?.bear_markets || []
+  return (
+    <>
+      {bears.map((b, i) => (
+        <ReferenceArea
+          key={`bear-${i}`}
+          x1={b.start}
+          x2={b.end}
+          y1={undefined}
+          y2={undefined}
+          fill="#ef4444"
+          fillOpacity={0.10}
+          stroke="none"
+          ifOverflow="extendDomain"
+          label={{
+            value: `▼ ${b.label}`,
+            position: 'insideTopLeft',
+            fontSize: 9,
+            fill: '#b91c1c',
+          }}
+        />
+      ))}
+      {recs.map((r, i) => (
+        <ReferenceArea
+          key={`rec-${i}`}
+          x1={r.start}
+          x2={r.end}
+          fill="#6b7280"
+          fillOpacity={0.18}
+          stroke="#374151"
+          strokeOpacity={0.3}
+          strokeDasharray="3 3"
+          ifOverflow="extendDomain"
+          label={{
+            value: `■ ${r.label}`,
+            position: 'insideBottomLeft',
+            fontSize: 9,
+            fill: '#374151',
+          }}
+        />
+      ))}
+    </>
+  )
+}
+
+function SpreadHistoryChart({ history, events }) {
   if (!history?.length) return null
 
   return (
     <div className="rounded-lg border bg-white p-4 shadow-sm">
-      <div className="text-sm font-medium text-gray-500 mb-2">10Y-3M 스프레드 추이</div>
+      <div className="text-sm font-medium text-gray-500 mb-2">
+        10Y-3M 스프레드 추이
+        <span className="ml-2 text-[10px] text-gray-400">
+          ■ 회색=NBER 침체 / ▼ 붉은색=S&amp;P -20% 약세장
+        </span>
+      </div>
       <div className="h-56">
         <ResponsiveContainer width="100%" height="100%">
           <AreaChart data={history}>
@@ -125,6 +180,8 @@ function SpreadHistoryChart({ history }) {
               labelFormatter={(l) => l}
               contentStyle={{ fontSize: 12, borderRadius: 8 }}
             />
+            {/* 음영 이벤트는 데이터 영역 위에 렌더 */}
+            <EventOverlays events={events} />
             <ReferenceLine y={0} stroke="#6b7280" strokeDasharray="4 4" strokeWidth={1.5} />
             <defs>
               <linearGradient id="spreadPos" x1="0" y1="0" x2="0" y2="1">
@@ -170,7 +227,7 @@ export default function YieldCurveSection({ data, loading, error }) {
       />
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <CurveShapeChart current={yc.current} />
-        <SpreadHistoryChart history={yc.history} />
+        <SpreadHistoryChart history={yc.history} events={yc.events} />
       </div>
     </section>
   )

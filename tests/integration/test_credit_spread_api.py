@@ -132,6 +132,28 @@ class TestCreditSpreadShape:
             assert cs.get("oas_current") == 5.5
             mock_fetch.assert_not_called()
 
+    def test_events_embedded_when_history_overlaps_recession(self):
+        """R2: oas_history_5y가 침체/약세장 기간을 포함하면 events에 임베드."""
+        oas = _fake_oas_data()
+        # 2008년 GFC 기간으로 history 교체
+        history = [
+            {"date": f"2008-{m:02d}-01", "oas": 5.0 + m / 10}
+            for m in range(1, 13)
+        ]
+        oas["oas_history_5y"] = history
+        oas["oas_history"] = history
+
+        cached_data = {**oas, "ig_current": 1.4, "hy_ig_spread": 3.6, "partial_failure": []}
+        with patch("services.macro_service.get_macro_today", return_value=cached_data):
+            result = macro_service.get_credit_spread()
+            cs = result["credit_spread"]
+            assert "events" in cs
+            ev = cs["events"]
+            rec_labels = [r["label"] for r in ev.get("recessions", [])]
+            bear_labels = [b["label"] for b in ev.get("bear_markets", [])]
+            assert "글로벌 금융위기" in rec_labels
+            assert "GFC 약세장" in bear_labels
+
 
 class _MultiPatch:
     """다수 patch contextmanager 동시 적용."""

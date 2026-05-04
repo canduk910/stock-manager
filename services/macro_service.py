@@ -16,6 +16,7 @@ from stock import macro_fetcher
 from stock.macro_store import get_today as get_macro_today, save_today as save_macro_today
 from services.exceptions import ExternalAPIError, PaymentRequiredError
 from services.macro_cycle import determine_cycle_phase
+from services.macro_events import get_events_in_range
 from services.macro_regime import determine_regime
 
 logger = logging.getLogger(__name__)
@@ -178,8 +179,25 @@ def get_investor_quotes(user_id=None) -> dict:
 
 # ── 수익률곡선 ──────────────────────────────────────────────────────────────
 
+def _events_for_history(history: list[dict]) -> dict:
+    """history 시계열의 첫·끝 날짜로 NBER 침체 + S&P 약세장 이벤트 임베드.
+
+    R2 (2026-05-04): 차트 ReferenceArea 음영 표시용.
+    """
+    if not history:
+        return {"recessions": [], "bear_markets": []}
+    try:
+        dates = [r.get("date") for r in history if r.get("date")]
+        if not dates:
+            return {"recessions": [], "bear_markets": []}
+        return get_events_in_range(min(dates), max(dates))
+    except Exception as e:
+        logger.debug("events 임베드 실패: %s", e)
+        return {"recessions": [], "bear_markets": []}
+
+
 def get_yield_curve() -> dict:
-    """미국 국채 수익률곡선 — 현재값 + 시계열 + 역전 여부."""
+    """미국 국채 수익률곡선 — 현재값 + 시계열 + 역전 여부 + 침체/약세장 음영 데이터."""
     errors = []
     now = now_kst_iso()
 
@@ -188,6 +206,11 @@ def get_yield_curve() -> dict:
         data = macro_fetcher.fetch_yield_curve_data()
     except Exception as e:
         errors.append(f"수익률곡선: {e}")
+
+    # R2: 침체/약세장 이벤트 임베드 (차트 ReferenceArea 음영용)
+    if isinstance(data, dict):
+        history = data.get("history") or data.get("spread_history") or []
+        data["events"] = _events_for_history(history)
 
     return {
         "yield_curve": data,
@@ -210,6 +233,8 @@ def get_credit_spread() -> dict:
     cached = get_macro_today("credit_spread")
     if cached is not None:
         logger.debug("credit_spread 일일 캐시 hit")
+        # R2: 캐시 응답에도 events 매번 재주입(정적 상수라 비용 0)
+        cached["events"] = _events_for_history(cached.get("oas_history_5y") or cached.get("history") or [])
         return {
             "credit_spread": cached,
             "updated_at": now,
@@ -221,6 +246,10 @@ def get_credit_spread() -> dict:
         data = macro_fetcher.fetch_credit_spread()
     except Exception as e:
         errors.append(f"신용스프레드: {e}")
+
+    # R2: 침체/약세장 이벤트 임베드
+    if isinstance(data, dict):
+        data["events"] = _events_for_history(data.get("oas_history_5y") or data.get("history") or [])
 
     # 캐시 저장 (정상 응답일 때만)
     if data is not None and not errors:

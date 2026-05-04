@@ -17,7 +17,7 @@
 import { useMemo } from 'react'
 import {
   ResponsiveContainer, AreaChart, Area,
-  XAxis, YAxis, Tooltip, CartesianGrid, ReferenceLine,
+  XAxis, YAxis, Tooltip, CartesianGrid, ReferenceLine, ReferenceArea,
 } from 'recharts'
 import LoadingSpinner from '../common/LoadingSpinner'
 import ErrorAlert from '../common/ErrorAlert'
@@ -133,6 +133,7 @@ export default function CreditSpreadSection({ data, loading, error }) {
     oas_current, oas_history_5y, oas_stats, oas_sentiment, oas_percentile,
     ig_current, hy_ig_spread,
     partial_failure,
+    events,
   } = cs
 
   const dirStyle = DIRECTION_STYLE[spread_direction] || DIRECTION_STYLE.stable
@@ -257,10 +258,15 @@ export default function CreditSpreadSection({ data, loading, error }) {
         </div>
       </div>
 
-      {/* OAS 시계열 차트 (FRED) — 백분위 임계선 동적 */}
+      {/* OAS 시계열 차트 (FRED) — 백분위 임계선 동적 + 침체/약세장 음영 */}
       {oasChartData.length > 0 && (
         <div className="rounded-lg border bg-white p-4 shadow-sm mb-4">
-          <div className="text-sm font-medium text-gray-500 mb-2">HY OAS 추이 (5년, FRED)</div>
+          <div className="text-sm font-medium text-gray-500 mb-2">
+            HY OAS 추이 (5년, FRED)
+            <span className="ml-2 text-[10px] text-gray-400">
+              ■ 회색=NBER 침체 / ▼ 붉은색=S&amp;P -20% 약세장
+            </span>
+          </div>
           <div className="h-56">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={oasChartData}>
@@ -272,6 +278,33 @@ export default function CreditSpreadSection({ data, loading, error }) {
                   labelFormatter={(l) => l}
                   contentStyle={{ fontSize: 12, borderRadius: 8 }}
                 />
+                {/* R2: 침체/약세장 음영 (백엔드 events 임베드) */}
+                {(events?.bear_markets || []).map((b, i) => (
+                  <ReferenceArea
+                    key={`bear-${i}`}
+                    x1={b.start}
+                    x2={b.end}
+                    fill="#ef4444"
+                    fillOpacity={0.10}
+                    stroke="none"
+                    ifOverflow="extendDomain"
+                    label={{ value: `▼ ${b.label}`, position: 'insideTopLeft', fontSize: 9, fill: '#b91c1c' }}
+                  />
+                ))}
+                {(events?.recessions || []).map((r, i) => (
+                  <ReferenceArea
+                    key={`rec-${i}`}
+                    x1={r.start}
+                    x2={r.end}
+                    fill="#6b7280"
+                    fillOpacity={0.18}
+                    stroke="#374151"
+                    strokeOpacity={0.3}
+                    strokeDasharray="3 3"
+                    ifOverflow="extendDomain"
+                    label={{ value: `■ ${r.label}`, position: 'insideBottomLeft', fontSize: 9, fill: '#374151' }}
+                  />
+                ))}
                 {refLines.map((rl, i) => (
                   <ReferenceLine
                     key={i}

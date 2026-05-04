@@ -665,6 +665,61 @@ def _classify_oas_sentiment(current: float, stats: dict) -> dict:
         return {"sentiment": "normal", "percentile": None, "zscore": None}
 
 
+# ── FRED HTTP 핫픽스 (2026-05-04, R1) ─────────────────────────────────────────
+# 사용자 신고: hy_oas/ig_oas partial_failure 빈번. 운영 IP에서 FRED `fredgraph.csv`
+# 응답이 가끔 HTML 차단 페이지로 돌아오거나 timeout. 대응:
+#  1) Mozilla UA로 변경
+#  2) timeout 25초 + 1회 재시도(2초 간격)
+#  3) Content-Type 검증 (text/csv 또는 text/plain만 허용)
+#  4) 7일 stale 캐시 fallback — 신선 fetch 실패 시 마지막 성공 응답 재활용
+_FRED_BROWSER_UA = (
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+)
+_FRED_TIMEOUT = 25
+_FRED_STALE_TTL_HOURS = 24 * 7  # 7일
+
+
+def _http_get_fred_csv(url: str) -> Optional[str]:
+    """FRED `fredgraph.csv` 요청을 안전하게 수행한다.
+
+    UA + timeout + Content-Type 검증 + 1회 재시도. 실패 시 None.
+    """
+    import time as _time
+    import requests as _requests
+
+    headers = {"User-Agent": _FRED_BROWSER_UA, "Accept": "text/csv,*/*"}
+    for attempt in (1, 2):
+        try:
+            resp = _requests.get(url, timeout=_FRED_TIMEOUT, headers=headers)
+            resp.raise_for_status()
+            ctype = (resp.headers.get("Content-Type") or "").lower()
+            if ctype.startswith("text/csv") or ctype.startswith("text/plain"):
+                return resp.text
+            logger.error(
+                "FRED 비-CSV 응답 (attempt %d): status=%s ctype=%r body_head=%r",
+                attempt, resp.status_code, ctype, resp.text[:200],
+            )
+        except Exception as e:
+            logger.warning("FRED 요청 실패 (attempt %d) %s: %s", attempt, url, e)
+        if attempt == 1:
+            _time.sleep(2)
+    return None
+
+
+def _parse_fred_csv(text: str, value_key: str) -> list[dict]:
+    """FRED CSV(date,value) → [{date, <value_key>}]."""
+    rows: list[dict] = []
+    for line in text.strip().split("\n")[1:]:
+        parts = line.strip().split(",")
+        if len(parts) == 2 and parts[1] != ".":
+            try:
+                rows.append({"date": parts[0], value_key: round(float(parts[1]), 2)})
+            except ValueError:
+                continue
+    return rows
+
+
 def _fetch_fred_oas() -> dict:
     """FRED에서 HY OAS(BAMLH0A0HYM2) 공식 스프레드 수집 (API 키 불필요).
 
@@ -678,50 +733,48 @@ def _fetch_fred_oas() -> dict:
 
     전 기간 baseline (1996-12-31 ~ 현재, 약 28년) 사용 — 신용 사이클 7~10년.
 
+    R1 (2026-05-04): 신선 fetch 실패 시 7일 stale 캐시(`macro:credit_spread_fred_hy_stale`) 재활용.
+    응답에 `_stale_used: bool` 표시.
+
     Returns: {oas_current, oas_history_5y, oas_history_full, oas_stats,
-              oas_percentile, oas_zscore, sentiment, oas_history(=alias), percentile(=alias)}
-            또는 빈 dict.
+              oas_percentile, oas_zscore, sentiment, oas_history(=alias),
+              percentile(=alias), _stale_used} 또는 빈 dict.
     """
     from datetime import date, timedelta
-    import requests as _requests
 
+    stale_key = "macro:credit_spread_fred_hy_stale"
     try:
-        # 전 기간 baseline (FRED BAMLH0A0HYM2 가용 시작일)
         start = "1996-12-31"
         end = date.today().strftime("%Y-%m-%d")
         url = (
             f"https://fred.stlouisfed.org/graph/fredgraph.csv"
             f"?id=BAMLH0A0HYM2&cosd={start}&coed={end}"
         )
-        resp = _requests.get(url, timeout=20, headers={"User-Agent": "stock-manager/1.0"})
-        resp.raise_for_status()
+        text = _http_get_fred_csv(url)
+        if not text:
+            stale = get_cached(stale_key)
+            if stale:
+                logger.warning("FRED HY OAS stale fallback (HTTP 실패)")
+                return {**stale, "_stale_used": True}
+            return {}
 
-        rows = []
-        for line in resp.text.strip().split("\n")[1:]:  # skip header
-            parts = line.strip().split(",")
-            if len(parts) == 2 and parts[1] != ".":
-                try:
-                    rows.append({"date": parts[0], "oas": round(float(parts[1]), 2)})
-                except ValueError:
-                    continue
-
+        rows = _parse_fred_csv(text, "oas")
         if not rows:
-            logger.error("FRED OAS 빈 응답: status=%s body_head=%r", resp.status_code, resp.text[:200])
+            logger.error("FRED HY OAS 빈 파싱 결과 (body_head=%r)", text[:200])
+            stale = get_cached(stale_key)
+            if stale:
+                logger.warning("FRED HY OAS stale fallback (빈 파싱)")
+                return {**stale, "_stale_used": True}
             return {}
 
         current = rows[-1]["oas"]
-
-        # 분포 통계 (전 기간)
         stats = _compute_oas_stats(rows)
-
-        # 5단계 sentiment + 백분위
         clf = _classify_oas_sentiment(current, stats)
 
-        # 5년 슬라이스 (시각화용)
         five_year_start = (date.today() - timedelta(days=365 * 5)).strftime("%Y-%m-%d")
         oas_history_5y = [r for r in rows if r["date"] >= five_year_start]
 
-        return {
+        result = {
             "oas_current": current,
             "oas_history_5y": oas_history_5y,
             "oas_history_full": rows,
@@ -729,23 +782,33 @@ def _fetch_fred_oas() -> dict:
             "oas_percentile": clf.get("percentile"),
             "oas_zscore": clf.get("zscore"),
             "sentiment": clf.get("sentiment"),
-            # ── 후방호환 alias ──
+            # 후방호환 alias
             "oas_history": oas_history_5y,
             "percentile": clf.get("percentile"),
+            "_stale_used": False,
         }
+        # 7일 stale 캐시에도 저장
+        set_cached(stale_key, result, ttl_hours=_FRED_STALE_TTL_HOURS)
+        return result
     except Exception as e:
-        logger.warning("FRED OAS 조회 실패: %s", e)
+        logger.warning("FRED HY OAS 조회 실패: %s", e)
+        stale = get_cached(stale_key)
+        if stale:
+            logger.warning("FRED HY OAS stale fallback (예외)")
+            return {**stale, "_stale_used": True}
         return {}
 
 
 def _fetch_fred_ig_oas() -> dict:
     """FRED에서 IG OAS(BAMLC0A0CM, Investment Grade Corporate OAS) 수집.
 
-    Returns: {ig_current, ig_history_5y, ig_stats} 또는 {}.
+    R1 (2026-05-04): 7일 stale 캐시(`macro:credit_spread_fred_ig_stale`) fallback.
+
+    Returns: {ig_current, ig_history_5y, ig_stats, _stale_used} 또는 {}.
     """
     from datetime import date, timedelta
-    import requests as _requests
 
+    stale_key = "macro:credit_spread_fred_ig_stale"
     try:
         start = "1996-12-31"
         end = date.today().strftime("%Y-%m-%d")
@@ -753,35 +816,42 @@ def _fetch_fred_ig_oas() -> dict:
             f"https://fred.stlouisfed.org/graph/fredgraph.csv"
             f"?id=BAMLC0A0CM&cosd={start}&coed={end}"
         )
-        resp = _requests.get(url, timeout=20, headers={"User-Agent": "stock-manager/1.0"})
-        resp.raise_for_status()
-
-        rows = []
-        for line in resp.text.strip().split("\n")[1:]:
-            parts = line.strip().split(",")
-            if len(parts) == 2 and parts[1] != ".":
-                try:
-                    rows.append({"date": parts[0], "ig": round(float(parts[1]), 2)})
-                except ValueError:
-                    continue
-
-        if not rows:
+        text = _http_get_fred_csv(url)
+        if not text:
+            stale = get_cached(stale_key)
+            if stale:
+                logger.warning("FRED IG OAS stale fallback (HTTP 실패)")
+                return {**stale, "_stale_used": True}
             return {}
 
-        # stats용으로 oas 키 통일
+        rows = _parse_fred_csv(text, "ig")
+        if not rows:
+            stale = get_cached(stale_key)
+            if stale:
+                logger.warning("FRED IG OAS stale fallback (빈 파싱)")
+                return {**stale, "_stale_used": True}
+            return {}
+
         rows_for_stats = [{"date": r["date"], "oas": r["ig"]} for r in rows]
         stats = _compute_oas_stats(rows_for_stats)
 
         five_year_start = (date.today() - timedelta(days=365 * 5)).strftime("%Y-%m-%d")
         ig_history_5y = [r for r in rows if r["date"] >= five_year_start]
 
-        return {
+        result = {
             "ig_current": rows[-1]["ig"],
             "ig_history_5y": ig_history_5y,
             "ig_stats": stats,
+            "_stale_used": False,
         }
+        set_cached(stale_key, result, ttl_hours=_FRED_STALE_TTL_HOURS)
+        return result
     except Exception as e:
         logger.warning("FRED IG OAS 조회 실패: %s", e)
+        stale = get_cached(stale_key)
+        if stale:
+            logger.warning("FRED IG OAS stale fallback (예외)")
+            return {**stale, "_stale_used": True}
         return {}
 
 
@@ -803,11 +873,15 @@ def fetch_credit_spread() -> dict:
     fred_data = _fetch_fred_oas()
     if not fred_data:
         partial_failure.append("hy_oas")
+    elif fred_data.get("_stale_used"):
+        partial_failure.append("hy_oas_stale_used")
 
     # FRED IG OAS (보조 카드용)
     ig_data = _fetch_fred_ig_oas()
     if not ig_data:
         partial_failure.append("ig_oas")
+    elif ig_data.get("_stale_used"):
+        partial_failure.append("ig_oas_stale_used")
 
     # HY-IG 스프레드 + 5년 시계열
     hy_current = fred_data.get("oas_current") if fred_data else None
@@ -1114,9 +1188,79 @@ def _calc_return(closes: list[float], n_days: int) -> Optional[float]:
         return None
 
 
+# ── R3 (2026-05-04): 섹터 상대평가 산점도 입력 헬퍼 ──────────────────────────
+# 도메인 자문(MacroSentinel/ValueScreener) 합의:
+#   x축 = SMA20 cross 기준 추세 시작점 경과일(부호 포함, ±365 cap)
+#   y축 = 1Y 누적수익률을 모든 섹터 분포 기준 z-score(±3 cap)로 표준화
+
+def _compute_sma20_trend_days(closes: list[float]) -> int:
+    """현재 가격이 20일 이동평균선과 마지막으로 cross한 시점부터 경과일.
+
+    부호: 현재 종가 > SMA20이면 양수(상승추세), 아래면 음수(하락추세).
+    범위: ±365 cap. 데이터 부족(<25일) 시 0.
+    """
+    if not closes or len(closes) < 25:
+        return 0
+    cap = 365
+
+    # 일별 SMA20 시계열
+    sma20: list[Optional[float]] = []
+    for i in range(len(closes)):
+        if i < 19:
+            sma20.append(None)
+        else:
+            window = closes[i - 19 : i + 1]
+            sma20.append(sum(window) / 20)
+
+    # 현재 부호
+    last_close = closes[-1]
+    last_sma = sma20[-1]
+    if last_sma is None:
+        return 0
+    sign = 1 if last_close > last_sma else -1
+
+    # 끝에서 역순으로 부호가 다른 첫 시점 찾기 → 그 다음 일이 cross 직후
+    days = 0
+    for i in range(len(closes) - 1, -1, -1):
+        s = sma20[i]
+        if s is None:
+            break
+        cur_sign = 1 if closes[i] > s else -1
+        if cur_sign != sign:
+            break
+        days += 1
+    days = min(days, cap)
+    return sign * days
+
+
+def _compute_intensity_zscore(returns_1y: list[Optional[float]]) -> list[float]:
+    """1Y 수익률 리스트를 z-score(±3 cap)로 표준화.
+
+    None은 입력 위치 그대로 0.0으로 반환. std=0 또는 유효 데이터 <2 시 모두 0.
+    """
+    valid = [r for r in returns_1y if isinstance(r, (int, float))]
+    n = len(valid)
+    if n < 2:
+        return [0.0] * len(returns_1y)
+    mean = sum(valid) / n
+    var = sum((r - mean) ** 2 for r in valid) / n
+    std = var ** 0.5
+    if std == 0:
+        return [0.0] * len(returns_1y)
+    out: list[float] = []
+    for r in returns_1y:
+        if not isinstance(r, (int, float)):
+            out.append(0.0)
+            continue
+        z = (r - mean) / std
+        z = max(-3.0, min(3.0, z))
+        out.append(round(z, 3))
+    return out
+
+
 def fetch_sector_returns() -> list[dict]:
-    """11개 섹터 ETF 1M/3M/6M/1Y/3Y 수익률."""
-    key = "macro:sector_returns_v2"
+    """11개 섹터 ETF 1M/3M/6M/1Y/3Y 수익률 + R3 산점도 입력(trend_days, intensity_z)."""
+    key = "macro:sector_returns_v3"
     cached = get_cached(key)
     if cached is not None:
         return cached
@@ -1143,6 +1287,7 @@ def fetch_sector_returns() -> list[dict]:
                 "return_6m": _calc_return(closes, 126),
                 "return_1y": _calc_return(closes, 252),
                 "return_3y": _calc_return(closes, 756),
+                "trend_days": _compute_sma20_trend_days(closes),
             }
         except Exception as e:
             logger.warning("섹터 수익률 조회 실패 (%s): %s", sym, e)
@@ -1161,6 +1306,11 @@ def fetch_sector_returns() -> list[dict]:
 
     order_map = {sym: i for i, (sym, _, _) in enumerate(_SECTOR_ETFS)}
     results.sort(key=lambda x: order_map.get(x["symbol"], 99))
+
+    # 1Y z-score 일괄 산출 (전체 섹터 분포 기준)
+    zs = _compute_intensity_zscore([r.get("return_1y") for r in results])
+    for r, z in zip(results, zs):
+        r["intensity_z"] = z
 
     if results:
         set_cached(key, results, ttl_hours=1)
@@ -1187,8 +1337,8 @@ _KR_SECTOR_ETFS = [
 
 
 def fetch_sector_returns_kr() -> list[dict]:
-    """13개 한국 섹터 ETF(KODEX/TIGER) 1M/3M/6M/1Y/3Y 수익률."""
-    key = "macro:sector_returns_kr_v2"
+    """13개 한국 섹터 ETF(KODEX/TIGER) 1M/3M/6M/1Y/3Y 수익률 + R3 산점도 입력."""
+    key = "macro:sector_returns_kr_v3"
     cached = get_cached(key)
     if cached is not None:
         return cached
@@ -1215,6 +1365,7 @@ def fetch_sector_returns_kr() -> list[dict]:
                 "return_6m": _calc_return(closes, 126),
                 "return_1y": _calc_return(closes, 252),
                 "return_3y": _calc_return(closes, 756),
+                "trend_days": _compute_sma20_trend_days(closes),
             }
         except Exception as e:
             logger.warning("한국 섹터 수익률 조회 실패 (%s): %s", sym, e)
@@ -1233,6 +1384,10 @@ def fetch_sector_returns_kr() -> list[dict]:
 
     order_map = {sym: i for i, (sym, _, _) in enumerate(_KR_SECTOR_ETFS)}
     results.sort(key=lambda x: order_map.get(x["symbol"], 99))
+
+    zs = _compute_intensity_zscore([r.get("return_1y") for r in results])
+    for r, z in zip(results, zs):
+        r["intensity_z"] = z
 
     if results:
         set_cached(key, results, ttl_hours=1)

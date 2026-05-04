@@ -118,116 +118,153 @@ def get_overseas_buyable(token, app_key, app_secret, acnt_no, acnt_prdt_cd, symb
 
 
 def get_overseas_open_orders(token, app_key, app_secret, acnt_no, acnt_prdt_cd) -> list[dict]:
-    """해외 미체결 주문 목록 조회."""
+    """해외 미체결 주문 목록 조회.
+
+    2026-05-05 핫픽스: NASD 단일 → NASD/NYSE/AMEX 3개 거래소 순회
+    (체결내역 미반영 신고와 동일 원인).
+    """
     url = f"{BASE_URL}/uapi/overseas-stock/v1/trading/inquire-nccs"
     headers = make_headers(token, app_key, app_secret, "TTTS3018R")
-    orders = []
-    fk200, nk200 = "", ""
-    while True:
-        params = {
-            "CANO": acnt_no,
-            "ACNT_PRDT_CD": acnt_prdt_cd,
-            "OVRS_EXCG_CD": "NASD",
-            "SORT_SQN": "DS",
-            "CTX_AREA_FK200": fk200,
-            "CTX_AREA_NK200": nk200,
-        }
-        try:
-            res = requests.get(url, headers=headers, params=params, timeout=10)
-            data = res.json()
-        except Exception as e:
-            raise ExternalAPIError(f"해외 미체결조회 요청 실패: {e}")
+    orders: list[dict] = []
+    seen_keys: set[str] = set()
 
-        if data.get("rt_cd") != "0":
-            break
+    for excg_cd in ("NASD", "NYSE", "AMEX"):
+        fk200, nk200 = "", ""
+        while True:
+            params = {
+                "CANO": acnt_no,
+                "ACNT_PRDT_CD": acnt_prdt_cd,
+                "OVRS_EXCG_CD": excg_cd,
+                "SORT_SQN": "DS",
+                "CTX_AREA_FK200": fk200,
+                "CTX_AREA_NK200": nk200,
+            }
+            try:
+                res = requests.get(url, headers=headers, params=params, timeout=10)
+                data = res.json()
+            except Exception as e:
+                logger.warning("해외 미체결 조회 실패 (%s): %s", excg_cd, e)
+                break
 
-        for item in data.get("output", []):
-            if not item.get("odno"):
-                continue
-            orders.append({
-                "order_no": item.get("odno", ""),
-                "org_no": item.get("orgn_odno", ""),
-                "symbol": item.get("pdno", ""),
-                "symbol_name": item.get("prdt_name", ""),
-                "market": "US",
-                "side": "buy" if item.get("sll_buy_dvsn_cd") == "02" else "sell",
-                "side_label": "매수" if item.get("sll_buy_dvsn_cd") == "02" else "매도",
-                "order_type": item.get("ord_dvsn", ""),
-                "order_type_label": item.get("ord_dvsn_name", ""),
-                "price": item.get("ft_ord_unpr3", "0"),
-                "quantity": item.get("ft_ord_qty", "0"),
-                "remaining_qty": item.get("nccs_qty", "0"),
-                "filled_qty": item.get("ft_ccld_qty", "0"),
-                "ordered_at": item.get("ord_tmd", ""),
-                "exchange": item.get("ovrs_excg_cd", ""),
-                "currency": "USD",
-            })
+            if data.get("rt_cd") != "0":
+                break
 
-        if res.headers.get("tr_cont") == "M":
-            fk200 = data.get("ctx_area_fk200", "")
-            nk200 = data.get("ctx_area_nk200", "")
-        else:
-            break
+            for item in data.get("output", []):
+                if not item.get("odno"):
+                    continue
+                exch = item.get("ovrs_excg_cd", "") or excg_cd
+                key = f"{item.get('odno')}::{exch}"
+                if key in seen_keys:
+                    continue
+                seen_keys.add(key)
+                orders.append({
+                    "order_no": item.get("odno", ""),
+                    "org_no": item.get("orgn_odno", ""),
+                    "symbol": item.get("pdno", ""),
+                    "symbol_name": item.get("prdt_name", ""),
+                    "market": "US",
+                    "side": "buy" if item.get("sll_buy_dvsn_cd") == "02" else "sell",
+                    "side_label": "매수" if item.get("sll_buy_dvsn_cd") == "02" else "매도",
+                    "order_type": item.get("ord_dvsn", ""),
+                    "order_type_label": item.get("ord_dvsn_name", ""),
+                    "price": item.get("ft_ord_unpr3", "0"),
+                    "quantity": item.get("ft_ord_qty", "0"),
+                    "remaining_qty": item.get("nccs_qty", "0"),
+                    "filled_qty": item.get("ft_ccld_qty", "0"),
+                    "ordered_at": item.get("ord_tmd", ""),
+                    "exchange": exch,
+                    "currency": "USD",
+                })
+
+            if res.headers.get("tr_cont") == "M":
+                fk200 = data.get("ctx_area_fk200", "")
+                nk200 = data.get("ctx_area_nk200", "")
+            else:
+                break
 
     return orders
 
 
 def get_overseas_executions(token, app_key, app_secret, acnt_no, acnt_prdt_cd) -> list[dict]:
-    """해외 당일 체결 내역 조회."""
+    """해외 당일 체결 내역 조회.
+
+    2026-05-05 핫픽스: NASD 단일 조회 → NASD/NYSE/AMEX 3개 거래소 순회
+    (사용자 신고: 미국 체결됐는데 체결내역 미반영 — NYSE/AMEX 종목 누락 원인).
+    날짜 빈 문자열은 KIS가 당일로 해석하지만, 거래소 코드 누락은 응답 0건.
+    """
+    from datetime import datetime, timedelta
+
     url = f"{BASE_URL}/uapi/overseas-stock/v1/trading/inquire-ccnl"
     # KIS 공식: docs/KIS_API_REFERENCE.md:345 — TTTS3035R(실전)/VTTS3035R(모의)
     headers = make_headers(token, app_key, app_secret, "TTTS3035R")
-    executions = []
-    fk200, nk200 = "", ""
-    while True:
-        params = {
-            "CANO": acnt_no,
-            "ACNT_PRDT_CD": acnt_prdt_cd,
-            "PDNO": "",
-            "ORD_STRT_DT": "",
-            "ORD_END_DT": "",
-            "SLL_BUY_DVSN_CD": "00",
-            "CCLD_NCCS_DVSN": "00",
-            "OVRS_EXCG_CD": "NASD",
-            "SORT_SQN": "DS",
-            "CTX_AREA_FK200": fk200,
-            "CTX_AREA_NK200": nk200,
-        }
-        try:
-            res = requests.get(url, headers=headers, params=params, timeout=10)
-            data = res.json()
-        except Exception as e:
-            raise ExternalAPIError(f"해외 체결내역 조회 실패: {e}")
 
-        if data.get("rt_cd") != "0":
-            break
+    # 미국 종목은 ET 기준 거래 → KST 오늘 + 어제 범위로 잡아 날짜 경계 누락 방지
+    today_kst = datetime.now()
+    yesterday_kst = today_kst - timedelta(days=1)
+    ord_strt_dt = yesterday_kst.strftime("%Y%m%d")
+    ord_end_dt = today_kst.strftime("%Y%m%d")
 
-        for item in data.get("output", []):
-            if not item.get("odno"):
-                continue
-            executions.append({
-                "order_no": item.get("odno", ""),
-                "symbol": item.get("pdno", ""),
-                "symbol_name": item.get("prdt_name", ""),
-                "market": "US",
-                "side": "buy" if item.get("sll_buy_dvsn_cd") == "02" else "sell",
-                "side_label": "매수" if item.get("sll_buy_dvsn_cd") == "02" else "매도",
-                "order_type_label": item.get("ord_dvsn_name", ""),
-                "price": item.get("ft_ccld_unpr3", "0"),
-                "quantity": item.get("ft_ord_qty", "0"),
-                "filled_qty": item.get("ft_ccld_qty", "0"),
-                "filled_price": item.get("ft_ccld_unpr3", "0"),
-                "filled_amount": item.get("ft_ccld_amt3", "0"),
-                "ordered_at": item.get("ord_dt", "") + " " + item.get("ord_tmd", ""),
-                "exchange": item.get("ovrs_excg_cd", ""),
-                "currency": "USD",
-            })
+    executions: list[dict] = []
+    seen_keys: set[str] = set()  # (order_no, exchange) 중복 제거
 
-        if res.headers.get("tr_cont") == "M":
-            fk200 = data.get("ctx_area_fk200", "")
-            nk200 = data.get("ctx_area_nk200", "")
-        else:
-            break
+    for excg_cd in ("NASD", "NYSE", "AMEX"):
+        fk200, nk200 = "", ""
+        while True:
+            params = {
+                "CANO": acnt_no,
+                "ACNT_PRDT_CD": acnt_prdt_cd,
+                "PDNO": "",
+                "ORD_STRT_DT": ord_strt_dt,
+                "ORD_END_DT": ord_end_dt,
+                "SLL_BUY_DVSN_CD": "00",
+                "CCLD_NCCS_DVSN": "00",
+                "OVRS_EXCG_CD": excg_cd,
+                "SORT_SQN": "DS",
+                "CTX_AREA_FK200": fk200,
+                "CTX_AREA_NK200": nk200,
+            }
+            try:
+                res = requests.get(url, headers=headers, params=params, timeout=10)
+                data = res.json()
+            except Exception as e:
+                # 한 거래소 실패 시 다른 거래소는 계속 시도
+                logger.warning("해외 체결내역 조회 실패 (%s): %s", excg_cd, e)
+                break
+
+            if data.get("rt_cd") != "0":
+                break
+
+            for item in data.get("output", []):
+                if not item.get("odno"):
+                    continue
+                exch = item.get("ovrs_excg_cd", "") or excg_cd
+                key = f"{item.get('odno')}::{exch}"
+                if key in seen_keys:
+                    continue
+                seen_keys.add(key)
+                executions.append({
+                    "order_no": item.get("odno", ""),
+                    "symbol": item.get("pdno", ""),
+                    "symbol_name": item.get("prdt_name", ""),
+                    "market": "US",
+                    "side": "buy" if item.get("sll_buy_dvsn_cd") == "02" else "sell",
+                    "side_label": "매수" if item.get("sll_buy_dvsn_cd") == "02" else "매도",
+                    "order_type_label": item.get("ord_dvsn_name", ""),
+                    "price": item.get("ft_ccld_unpr3", "0"),
+                    "quantity": item.get("ft_ord_qty", "0"),
+                    "filled_qty": item.get("ft_ccld_qty", "0"),
+                    "filled_price": item.get("ft_ccld_unpr3", "0"),
+                    "filled_amount": item.get("ft_ccld_amt3", "0"),
+                    "ordered_at": item.get("ord_dt", "") + " " + item.get("ord_tmd", ""),
+                    "exchange": exch,
+                    "currency": "USD",
+                })
+
+            if res.headers.get("tr_cont") == "M":
+                fk200 = data.get("ctx_area_fk200", "")
+                nk200 = data.get("ctx_area_nk200", "")
+            else:
+                break
 
     return executions
 

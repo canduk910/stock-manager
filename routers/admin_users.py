@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
 from db.repositories.admin_repo import AdminRepository
+from db.repositories.page_view_repo import PageViewRepository
 from db.repositories.user_kis_repo import UserKisRepository
 from db.repositories.user_repo import UserRepository
 from db.session import get_session
@@ -29,15 +30,22 @@ def list_users(
     offset: int = Query(0, ge=0),
     _admin: dict = Depends(require_admin),
 ):
-    """사용자 목록 (검색 + 페이지네이션). has_kis 플래그 포함."""
+    """사용자 목록 (검색 + 페이지네이션). has_kis + visit_count 포함.
+
+    R4 (2026-05-04): visit_count는 PageViewRepository.count_by_user로 1쿼리(N+1 방지).
+    """
     with get_session() as db:
         urepo = UserRepository(db)
         items = urepo.list_users(q=q, limit=limit, offset=offset)
         total = urepo.count_users(q=q)
 
         kis_repo = UserKisRepository(db)
+        pv_repo = PageViewRepository(db)
+        ids = [item["id"] for item in items]
+        visits = pv_repo.count_by_user(ids)
         for item in items:
             item["has_kis"] = kis_repo.is_valid(item["id"])
+            item["visit_count"] = visits.get(item["id"], 0)
 
     return {"items": items, "total": total, "limit": limit, "offset": offset}
 
@@ -51,6 +59,7 @@ def get_user(user_id: int, _admin: dict = Depends(require_admin)):
         if not user:
             raise NotFoundError(f"user_id={user_id} 사용자를 찾을 수 없습니다.")
         user["has_kis"] = UserKisRepository(db).is_valid(user_id)
+        user["visit_count"] = PageViewRepository(db).count_by_user([user_id]).get(user_id, 0)
     return user
 
 

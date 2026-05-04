@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import LoadingSpinner from '../common/LoadingSpinner'
 import ErrorAlert from '../common/ErrorAlert'
+import SectorRelativeChart from './SectorRelativeChart'
 
 const fmt = (v) =>
   v != null
@@ -39,6 +40,10 @@ export default function SectorHeatmapSection({ data, loading, error }) {
   return (
     <section>
       <h2 className="text-lg font-semibold text-gray-900 mb-3">섹터 히트맵</h2>
+      {/* R3 (2026-05-04): 상단 섹터 상대평가 산점도 */}
+      <div className="mb-4">
+        <SectorRelativeChart data={data} />
+      </div>
       <div className="rounded-lg border bg-white shadow-sm overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
