@@ -235,14 +235,15 @@ def get_overseas_executions(token, app_key, app_secret, acnt_no, acnt_prdt_cd) -
 def modify_overseas_order(
     token, app_key, app_secret, acnt_no, acnt_prdt_cd,
     order_no, org_no, order_type, price, quantity, total,
+    symbol: str = "",
 ) -> dict:
-    """해외 주문 정정."""
+    """해외 주문 정정. PDNO(종목코드) 필수."""
     url = f"{BASE_URL}/uapi/overseas-stock/v1/trading/order-rvsecncl"
     body = {
         "CANO": acnt_no,
         "ACNT_PRDT_CD": acnt_prdt_cd,
         "OVRS_EXCG_CD": _US_EXCHANGE_CODE,
-        "PDNO": "",
+        "PDNO": symbol,  # KIS 미국 정정/취소는 PDNO 필수 (빈 문자열 시 "상품번호 확인" 오류)
         "ORGN_ODNO": order_no,
         "RVSE_CNCL_DVSN_CD": "01",  # 정정
         "ORD_QTY": str(quantity),
@@ -271,14 +272,15 @@ def modify_overseas_order(
 def cancel_overseas_order(
     token, app_key, app_secret, acnt_no, acnt_prdt_cd,
     order_no, org_no, order_type, quantity, total,
+    symbol: str = "",
 ) -> dict:
-    """해외 주문 취소."""
+    """해외 주문 취소. PDNO(종목코드) 필수."""
     url = f"{BASE_URL}/uapi/overseas-stock/v1/trading/order-rvsecncl"
     body = {
         "CANO": acnt_no,
         "ACNT_PRDT_CD": acnt_prdt_cd,
         "OVRS_EXCG_CD": _US_EXCHANGE_CODE,
-        "PDNO": "",
+        "PDNO": symbol,  # KIS 미국 정정/취소는 PDNO 필수 (빈 문자열 시 "상품번호 확인" 오류)
         "ORGN_ODNO": order_no,
         "RVSE_CNCL_DVSN_CD": "02",  # 취소
         "ORD_QTY": str(quantity),

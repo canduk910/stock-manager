@@ -235,8 +235,12 @@ def modify_order(
     nmpr_type_cd: str = "",
     krx_nmpr_cndt_cd: str = "",
     ord_dvsn_cd: str = "",
+    symbol: str = "",
 ) -> dict:
-    """주문 정정. KIS 정정 성공 후 로컬 DB에 가격/수량을 즉시 반영한다."""
+    """주문 정정. KIS 정정 성공 후 로컬 DB에 가격/수량을 즉시 반영한다.
+
+    symbol(PDNO)은 미국 정정에 필수. 클라이언트가 비우면 로컬 DB에서 fallback 조회.
+    """
     app_key, app_secret, acnt_no, acnt_prdt_cd, acnt_prdt_cd_fno = get_kis_credentials()
     token = get_access_token()
 
@@ -254,9 +258,14 @@ def modify_order(
             nmpr_type_cd=nmpr_type_cd, krx_nmpr_cndt_cd=krx_nmpr_cndt_cd, ord_dvsn_cd=ord_dvsn_cd,
         )
     else:
+        if not symbol:
+            local = order_store.get_order_by_order_no(order_no, market)
+            if local and local.get("symbol"):
+                symbol = local["symbol"]
         result = modify_overseas_order(
             token, app_key, app_secret, acnt_no, acnt_prdt_cd,
             order_no, org_no, order_type, price, quantity, total,
+            symbol=symbol,
         )
 
     # KIS 정정 성공 → 로컬 DB에 가격/수량 즉시 반영
@@ -272,8 +281,12 @@ def cancel_order(
     order_type: str = "00",
     quantity: int = 0,
     total: bool = True,
+    symbol: str = "",
 ) -> dict:
-    """주문 취소. KIS 취소 성공 후 로컬 DB 상태를 즉시 갱신한다."""
+    """주문 취소. KIS 취소 성공 후 로컬 DB 상태를 즉시 갱신한다.
+
+    symbol(PDNO)은 미국 취소에 필수. 클라이언트가 비우면 로컬 DB에서 fallback 조회.
+    """
     app_key, app_secret, acnt_no, acnt_prdt_cd, acnt_prdt_cd_fno = get_kis_credentials()
     token = get_access_token()
 
@@ -290,9 +303,14 @@ def cancel_order(
             order_no, quantity, total,
         )
     else:
+        if not symbol:
+            local = order_store.get_order_by_order_no(order_no, market)
+            if local and local.get("symbol"):
+                symbol = local["symbol"]
         result = cancel_overseas_order(
             token, app_key, app_secret, acnt_no, acnt_prdt_cd,
             order_no, org_no, order_type, quantity, total,
+            symbol=symbol,
         )
 
     # KIS 취소 성공 → 로컬 DB 즉시 갱신

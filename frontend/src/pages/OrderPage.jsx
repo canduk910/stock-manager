@@ -187,6 +187,7 @@ export default function OrderPage({ notify }) {
         order_type: order.order_type,
         quantity: Number(order.remaining_qty || order.quantity),
         total: true,
+        symbol: order.symbol || '',  // 미국 취소 PDNO 필수
       })
       notify?.(`취소 요청: ${order.symbol_name || order.symbol}`, 'info')
       loadOpen(market)

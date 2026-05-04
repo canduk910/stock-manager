@@ -17,6 +17,7 @@ export default function ModifyOrderModal({ order, onClose, onModify }) {
       price: Number(price),
       quantity: Number(quantity),
       total,
+      symbol: order.symbol || '',  // 미국 정정 PDNO 필수
     })
   }
 

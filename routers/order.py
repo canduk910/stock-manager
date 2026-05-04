@@ -44,6 +44,8 @@ class ModifyOrderBody(BaseModel):
     nmpr_type_cd: str = ""
     krx_nmpr_cndt_cd: str = ""
     ord_dvsn_cd: str = ""
+    # 미국 정정에 필수 (PDNO). KR/FNO는 무시. 빈 문자열이면 서비스가 로컬 DB에서 fallback 조회.
+    symbol: str = ""
 
 
 class CancelOrderBody(BaseModel):
@@ -52,6 +54,8 @@ class CancelOrderBody(BaseModel):
     order_type: str = "00"
     quantity: int = 0
     total: bool = True
+    # 미국 취소에 필수 (PDNO). KR/FNO는 무시. 빈 문자열이면 서비스가 로컬 DB에서 fallback 조회.
+    symbol: str = ""
 
 
 class ReservationBody(BaseModel):
@@ -132,6 +136,7 @@ def modify_order(order_no: str, body: ModifyOrderBody, _user: dict = Depends(req
         nmpr_type_cd=body.nmpr_type_cd,
         krx_nmpr_cndt_cd=body.krx_nmpr_cndt_cd,
         ord_dvsn_cd=body.ord_dvsn_cd,
+        symbol=body.symbol,
     )
     return result
 
@@ -148,6 +153,7 @@ def cancel_order(order_no: str, body: CancelOrderBody, _user: dict = Depends(req
         order_type=body.order_type,
         quantity=body.quantity,
         total=body.total,
+        symbol=body.symbol,
     )
     return result
 
