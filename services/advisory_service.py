@@ -105,7 +105,7 @@ def _collect_research(code: str, market: str, name: str) -> dict:
 
 
 def generate_ai_report(code: str, market: str, name: str, user_id: int = 1) -> dict:
-    """저장된 캐시 데이터를 기반으로 OpenAI GPT-4o 리포트 생성.
+    """저장된 캐시 데이터를 기반으로 OpenAI GPT-5.4 리포트 생성.
 
     Phase 3: max_completion_tokens 10000 기본, 재시도 시 12000.
     finish_reason=="length" 1차 재시도, 2차 실패 시 ExternalAPIError → 저장 거부.

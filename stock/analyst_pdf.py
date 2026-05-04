@@ -1,4 +1,4 @@
-"""애널리스트 PDF 본문 추출 + GPT-4o-mini 요약.
+"""애널리스트 PDF 본문 추출 + GPT-5.4 요약.
 
 REQ-ANALYST-01/02/03/12:
   - 시스템 프롬프트로 6항목 강제 (catalyst 2 / risk 2 / TP 근거 1 / EPS 변경 1)
@@ -15,7 +15,7 @@ REQ-ANALYST-01/02/03/12:
     → Content-Length/Type 가드
     → pdfplumber 첫 5페이지 텍스트 추출
     → 5000자 절단, 100자 미만 시 ""
-    → ai_gateway.call_openai_chat (gpt-4o-mini, system 호출)
+    → ai_gateway.call_openai_chat (gpt-5.4, system 호출)
     → JSON 파싱 → 6항목 텍스트 결합
     → cache.set(영구)
 """
@@ -178,7 +178,7 @@ def _extract_text(pdf_bytes: bytes) -> str:
 def _call_openai_for_summary(pdf_text: str) -> str:
     """ai_gateway 시스템 호출 → JSON 응답 → 결합 텍스트.
 
-    REQ-ANALYST-03: user_id=None, check_quota=False, model='gpt-4o-mini'.
+    REQ-ANALYST-03: user_id=None, check_quota=False, model='gpt-5.4'.
     """
     from services import ai_gateway
     try:
@@ -190,7 +190,7 @@ def _call_openai_for_summary(pdf_text: str) -> str:
             user_id=None,
             service_name="analyst_summary",
             check_quota=False,
-            model="gpt-4o-mini",
+            model="gpt-5.4",
             max_completion_tokens=_SUMMARY_MAX_TOKENS,
             response_format={"type": "json_object"},
         )
@@ -212,7 +212,7 @@ def _call_openai_for_summary(pdf_text: str) -> str:
 
 
 def summarize_one(pdf_url: Optional[str]) -> str:
-    """PDF 본문을 다운로드 → 추출 → GPT-4o-mini 요약 → 캐시 저장.
+    """PDF 본문을 다운로드 → 추출 → GPT-5.4 요약 → 캐시 저장.
 
     REQ-ANALYST-01~03/12 통합. 모든 실패는 빈 문자열 반환 (상위 전파 없음).
 

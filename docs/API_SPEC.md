@@ -694,7 +694,7 @@ KIS 당일 체결 내역과 로컬 DB 대사(Reconciliation). 로컬 `PLACED`/`P
 
 ## AI자문 — `routers/advisory.py`
 
-자문종목 CRUD + 기본적/기술적 분석 데이터 수집 + OpenAI GPT-4o 리포트 생성.
+자문종목 CRUD + 기본적/기술적 분석 데이터 수집 + OpenAI GPT-5.4 리포트 생성.
 
 로컬 DB: `~/stock-watchlist/advisory.db`
 
@@ -909,9 +909,9 @@ period가 interval 허용 최대치를 초과하면 자동으로 최대값으로
 
 ### `POST /api/advisory/{code}/analyze?market=KR`
 
-OpenAI GPT-4o로 종합 투자 의견 리포트 생성. **10~30초 소요**.
+OpenAI GPT-5.4로 종합 투자 의견 리포트 생성. **10~30초 소요**.
 
-캐시된 분석 데이터를 기반으로 프롬프트를 구성하여 GPT-4o 호출.
+캐시된 분석 데이터를 기반으로 프롬프트를 구성하여 GPT-5.4 호출.
 
 **응답**:
 ```json
@@ -920,7 +920,7 @@ OpenAI GPT-4o로 종합 투자 의견 리포트 생성. **10~30초 소요**.
   "code": "005930",
   "market": "KR",
   "generated_at": "2026-03-04T09:10:52",
-  "model": "gpt-4o",
+  "model": "gpt-5.4",
   "report": {
     "종합투자의견": {
       "등급": "중립",
@@ -1063,8 +1063,8 @@ CREATE TABLE reservations (
 | 공시 조회 (SEC) | ✅ | 10-K/10-Q, 수익률 포함 |
 | 스크리너 | ❌ | 미지원 (국내 전용) |
 | 종목명 검색 | ❌ | 티커 코드만 가능 |
-| AI자문 (국내 KR) | ✅ | DART 재무 3종 + pykrx 계량지표 + KIS 15분봉(yfinance fallback) + GPT-4o |
-| AI자문 (해외 US) | ✅ | yfinance 재무 3종 + yfinance 계량지표 + yfinance 15분봉 + GPT-4o |
+| AI자문 (국내 KR) | ✅ | DART 재무 3종 + pykrx 계량지표 + KIS 15분봉(yfinance fallback) + GPT-5.4 |
+| AI자문 (해외 US) | ✅ | yfinance 재무 3종 + yfinance 계량지표 + yfinance 15분봉 + GPT-5.4 |
 | 지원 시장 | US | NASDAQ/NYSE/AMEX. 일본·홍콩 등 추후 확장 가능 구조 |
 
 ---

@@ -169,7 +169,7 @@ def test_long_pdf_calls_openai_once_and_caches():
 
 
 def test_openai_called_as_system_call():
-    """ai_gateway 호출 인자 검증: user_id=None, check_quota=False, model=gpt-4o-mini."""
+    """ai_gateway 호출 인자 검증: user_id=None, check_quota=False, model=gpt-5.4."""
     from stock import analyst_pdf
 
     long_text = "본문 내용. " * 50
@@ -194,7 +194,7 @@ def test_openai_called_as_system_call():
         assert kwargs.get("user_id") is None
         assert kwargs.get("check_quota") is False
         assert kwargs.get("service_name") == "analyst_summary"
-        assert kwargs.get("model") == "gpt-4o-mini"
+        assert kwargs.get("model") == "gpt-5.4"
 
 
 # ────────────────────────────────────────────────────────────────────────────

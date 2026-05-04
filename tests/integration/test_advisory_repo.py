@@ -121,7 +121,7 @@ class TestAdvisoryReport:
         repo = AdvisoryRepository(db_session)
         report_data = {"opinion": "매수", "target_price": 80000}
         rid = repo.save_report(1, 
-            code="005930", market="KR", model="gpt-4o",
+            code="005930", market="KR", model="gpt-5.4",
             report=report_data, grade="A", grade_score=24,
             composite_score=75.0, regime_alignment=85.0,
             schema_version="v2",
@@ -137,8 +137,8 @@ class TestAdvisoryReport:
 
     def test_get_latest_report(self, db_session):
         repo = AdvisoryRepository(db_session)
-        repo.save_report(1, "005930", "KR", "gpt-4o", {"v": 1})
-        repo.save_report(1, "005930", "KR", "gpt-4o", {"v": 2})
+        repo.save_report(1, "005930", "KR", "gpt-5.4", {"v": 1})
+        repo.save_report(1, "005930", "KR", "gpt-5.4", {"v": 2})
         db_session.commit()
 
         latest = repo.get_latest_report(1, "005930", "KR")
@@ -151,7 +151,7 @@ class TestAdvisoryReport:
     def test_list_reports(self, db_session):
         repo = AdvisoryRepository(db_session)
         for i in range(5):
-            repo.save_report(1, "005930", "KR", "gpt-4o", {"v": i})
+            repo.save_report(1, "005930", "KR", "gpt-5.4", {"v": i})
         db_session.commit()
 
         reports = repo.get_report_history(1, "005930", "KR", limit=3)
@@ -161,7 +161,7 @@ class TestAdvisoryReport:
 
     def test_report_summary_dict(self, db_session):
         repo = AdvisoryRepository(db_session)
-        repo.save_report(1, "005930", "KR", "gpt-4o", {"big": "data"},
+        repo.save_report(1, "005930", "KR", "gpt-5.4", {"big": "data"},
                          grade="B+", grade_score=20, schema_version="v2")
         db_session.commit()
 
@@ -176,7 +176,7 @@ class TestPortfolioReport:
     def test_save_portfolio_report(self, db_session):
         repo = AdvisoryRepository(db_session)
         rid = repo.save_portfolio_report(
-            model="gpt-4o",
+            model="gpt-5.4",
             report={"summary": "test"},
             weighted_grade_avg=3.5,
             regime="selective",
@@ -190,8 +190,8 @@ class TestPortfolioReport:
 
     def test_get_latest_portfolio_report(self, db_session):
         repo = AdvisoryRepository(db_session)
-        repo.save_portfolio_report("gpt-4o", {"v": 1})
-        repo.save_portfolio_report("gpt-4o", {"v": 2})
+        repo.save_portfolio_report("gpt-5.4", {"v": 1})
+        repo.save_portfolio_report("gpt-5.4", {"v": 2})
         db_session.commit()
 
         latest = repo.get_latest_portfolio_report()
@@ -204,7 +204,7 @@ class TestPortfolioReport:
     def test_portfolio_report_history(self, db_session):
         repo = AdvisoryRepository(db_session)
         for i in range(5):
-            repo.save_portfolio_report("gpt-4o", {"v": i})
+            repo.save_portfolio_report("gpt-5.4", {"v": i})
         db_session.commit()
 
         history = repo.get_portfolio_report_history(limit=3)

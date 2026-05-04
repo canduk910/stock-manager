@@ -218,7 +218,7 @@ frontend/
   - **CAGR 요약**: ReportSummary (기존과 동일, advisory 데이터 불필요)
   - **기본적 분석**: FundamentalPanel (사업 개요(#키워드+설명+파이차트) → 계량지표 → 재무제표 3종)
   - **기술적 분석**: TechnicalPanel (타임프레임 선택 + 차트 묶음 + PER/PBR 밸류에이션(1d/1wk만))
-  - **AI 자문**: AIReportPanel (GPT-4o 리포트)
+  - **AI 자문**: AIReportPanel (GPT-5.4 리포트)
 - advisory 데이터: cagr 외 서브탭 최초 진입 시 lazy load (loadAdvData + loadReport 동시 호출)
 - cagr 서브탭에서는 [새로고침] 버튼 숨김. AI자문 서브탭에서만 [AI분석 생성] 버튼 표시.
 - "← 관심종목으로" 뒤로가기 링크

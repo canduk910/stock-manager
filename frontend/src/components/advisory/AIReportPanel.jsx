@@ -1,5 +1,5 @@
 /**
- * AI자문 탭 — OpenAI GPT-4o 리포트 표시.
+ * AI자문 탭 — OpenAI GPT-5.4 리포트 표시.
  *
  * DetailPage > 종합리포트 > AI자문 서브탭에서 렌더링된다.
  *

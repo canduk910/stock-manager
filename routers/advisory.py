@@ -125,7 +125,7 @@ def get_data(code: str, market: str = Query("KR"), user: dict = Depends(get_curr
 
 @router.post("/{code}/analyze")
 def analyze(code: str, market: str = Query("KR"), user: dict = Depends(get_current_user)):
-    """OpenAI GPT-4o 리포트 생성 (10~30초 소요).
+    """OpenAI GPT-5.4 리포트 생성 (10~30초 소요).
 
     OPENAI_API_KEY 미설정 시 503 반환.
     캐시 없을 시 404 반환.

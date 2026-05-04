@@ -275,7 +275,7 @@ in-memory 토큰 캐시는 노드별 격리. 확장 시 F-4 메모(perf_audit_re
 ## 2026-05-01 — 애널리스트 보고서 본문 → 종목 AI 자문 통합
 
 ### 애널리스트 컨센서스 신규
-- `stock/analyst_pdf.py`: 증권사 PDF 본문 추출+요약 신규. `pdfplumber` 첫 5페이지 → `gpt-4o-mini` JSON 응답으로 6항목 강제 추출(catalyst 2 / risk 2 / TP 산정 근거 1 / EPS 추정 변경 1) → 300자 결합 텍스트
+- `stock/analyst_pdf.py`: 증권사 PDF 본문 추출+요약 신규. `pdfplumber` 첫 5페이지 → `gpt-5.4` JSON 응답으로 6항목 강제 추출(catalyst 2 / risk 2 / TP 산정 근거 1 / EPS 추정 변경 1) → 300자 결합 텍스트
 - 환각 방지: 시스템 프롬프트에 "본문에 명시된 숫자만 인용. 추정·외삽·외부 지식 금지" 명시
 - PDF 다운로드 보안: 10MB 한도, Content-Type 검증, 모든 예외 흡수, 짧은 본문(100자 미만) 시 요약 생략
 - 영구 캐시: `cache.db`에 `analyst:summary:{md5(pdf_url)}` 키. 동일 PDF 재요청 시 OpenAI 호출 0회
@@ -370,7 +370,7 @@ in-memory 토큰 캐시는 노드별 격리. 확장 시 F-4 메모(perf_audit_re
 
 ### 리팩토링
 - `dart_fin.py`: DART 계정명 매칭 전면 정규식 전환 — `_ACCOUNT_KEYS`/`_BS_KEYS`/`_IS_DETAIL_KEYS` tuple → `_ACCOUNT_REGEX`/`_BS_REGEX`/`_IS_DETAIL_REGEX` re.Pattern
-- `dart_fin.py`: 공용 `_match_account()` 함수 (공백 제거 + 정��식 매칭) — 5개 추출 함수 통합
+- `dart_fin.py`: 공용 `_match_account()` 함수 (공백 제거 + 정규식 매칭) — 5개 추출 함수 통합
 - `dart_fin.py`: EPS 계정명 `"기본주당손익"` 변형 정규식 대응 (한국가스공사 EPS=None 해결)
 
 ### UI 개선
@@ -532,7 +532,7 @@ in-memory 토큰 캐시는 노드별 격리. 확장 시 F-4 메모(perf_audit_re
 ## 2026-04-26 — 스크리너 구루 프리셋 확장 + UI 개선
 
 ### 구루 프리셋 3종 추가
-- Graham NCAV(`calc_graham_ncav`): 순유동자산가치/시총 비율. 적자기업 ��함. 청산가치 기반 절대 ���전마진
+- Graham NCAV(`calc_graham_ncav`): 순유동자산가치/시총 비율. 적자기업 포함. 청산가치 기반 절대 안전마진
 - Fisher PSR(`calc_fisher_psr`): 시총/매출액. 적자기업 포함. 매출 기반 턴어라운드 발굴
 - Piotroski F-Score(`calc_piotroski_fscore`): 8항목 재무건전성(신주발행 제외). 수익성(4)+재무구조(2)+영업효율(2). 추가 API 호출 0회
 - 구루 패널 12점→24점 확장 (6공식×4점). Value Trap 7규칙 (F-Score극저, 극저PSR+매출급감 추가)
@@ -588,7 +588,7 @@ in-memory 토큰 캐시는 노드별 격리. 확장 시 F-4 메모(perf_audit_re
 
 ### 버그 수정
 - ROE 미표기: `fetch_market_metrics()` — yfinance `returnOnEquity` None 시 분기 TTM순이익/자기자본 fallback 추가
-- PBR 미표기: `_get_report_kr()` ��� `fetch_detail()` PBR/PER None 시 `fetch_market_metrics()` 값으로 보충
+- PBR 미표기: `_get_report_kr()` 및 `fetch_detail()` PBR/PER None 시 `fetch_market_metrics()` 값으로 보충
 
 ---
 
