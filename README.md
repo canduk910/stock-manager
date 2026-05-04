@@ -642,49 +642,76 @@ DATABASE_URL=postgresql://user:pass@localhost:5432/stockmanager
 
 ---
 
-## AI 에이전트 팀 (하네스)
+## AI 에이전트 팀 (계층형 TDD 하네스)
 
-Benjamin Graham의 안전마진 철학을 기반으로 한 7명의 AI 에이전트 팀이 투자 의사결정과 시스템 개발을 지원합니다. 에이전트는 기존 API를 호출하여 동작하며, 서비스 코드를 변경하지 않습니다.
+Benjamin Graham의 안전마진 철학을 기반으로 **부서장 → 팀장 → 팀원** 계층 구조로 12명의 AI 에이전트가 협업하여, 코드 변경이 수반되는 모든 요청을 단일 진입점으로 자동 라우팅하고 **TDD(RED-GREEN-VERIFY) 사이클**로 시스템을 개발합니다.
 
-### 에이전트 구성
+### 에이전트 12명 (`.claude/agents/`)
 
-**도메인 전문가 (4명)** — 투자 분석 파이프라인:
+**관리 3명 — 부서장 + 팀장**
 
-| 에이전트 | 역할 |
-|---------|------|
-| MacroSentinel | 매크로 환경 분석 — 버핏지수/VIX/공포탐욕 → 시장 체제(적극매수/선별/신중/방어) 판단 |
-| ValueScreener | Graham 기준 PER/PBR/ROE 동적 필터로 저평가 종목 스크리닝 |
-| MarginAnalyst | Graham Number 내재가치 산출 + 재무 건전성 + 기술적 매수 타이밍 심층 분석 |
-| OrderAdvisor | 포지션 사이징 + 지정가/손절/익절 주문 추천 (자동 주문 실행 없음, 사용자 승인 필수) |
+| 에이전트 | 파일 | 역할 |
+|---------|------|------|
+| 부서장 | `department-head.md` | 단일 진입점. 요청 분석 → 팀장에게 업무 배분 → 결과 취합 |
+| 도메인팀장 | `domain-lead.md` | 도메인 전문가 팀 관리. 요건 정의 + 도메인 자문 제공 |
+| 개발팀장 | `dev-lead.md` | 개발 팀 관리. TDD 개발 + QA 검증 + 리팩토링 |
 
-**빌더 (3명)** — 시스템 개발/검증/개선:
+**TDD 개발 5명 — 개발팀장 휘하**
 
-| 에이전트 | 역할 |
-|---------|------|
-| DevArchitect | 도메인 전문가에게 자문받으며 통합자산관리 기능(포트폴리오/리밸런싱/리스크/성과/일지) 풀스택 개발 |
-| QA Inspector | API↔프론트 shape 교차 비교, 라우팅 정합성, 투자 로직 정확성 등 경계면 통합 검증 |
-| RefactorEngineer | 도메인 전문가에게 "왜 이렇게 되어있는가" 확인 후 안전한 리팩토링 (도메인 정합성 보존) |
+| 에이전트 | 파일 | TDD 역할 |
+|---------|------|----------|
+| TestEngineer | `test-engineer.md` | **RED**: 요건 수용 기준 → pytest 테스트 선행 작성 |
+| BackendDev | `backend-dev.md` | **BACKEND GREEN**: FastAPI + SQLAlchemy 백엔드 구현 |
+| FrontendDev | `frontend-dev.md` | **FRONTEND**: React + Tailwind 프론트엔드 구현 |
+| QA Inspector | `qa-inspector.md` | **VERIFY**: 각 GREEN 직후 경계면 교차 비교 검증 |
+| RefactorEngineer | `refactor-engineer.md` | 도메인 인지 리팩토링 (도메인 정합성 보존) |
 
-### 파이프라인
+**도메인 전문가 4명 — 도메인팀장 휘하**
 
-| 파이프라인 | 오케스트레이터 | 트리거 예시 | 흐름 |
-|-----------|-------------|-----------|------|
-| 분석 | value-invest | "종목 발굴해줘", "저평가 종목", "안전마진 분석" | Macro → Screener → Analyst → Advisor |
-| 개발 | asset-dev | "대시보드 만들어줘", "리밸런싱 기능" | 자문 → 설계 → 백엔드 → QA → 프론트 → QA → 보고 |
-| 리팩토링 | refactor-audit | "리팩토링 해줘", "코드 감사", "구조 개선" | 감사 → 도메인자문 → 계획 → 실행 → QA → 보고 |
+| 에이전트 | 파일 | 역할 |
+|---------|------|------|
+| MacroSentinel | `macro-sentinel.md` | 체제 판단 요건 + 버핏지수·VIX·공포탐욕·HY OAS 임계값 자문 |
+| ValueScreener | `value-screener.md` | 스크리닝 요건 + 점수/필터/Value Trap 자문 |
+| MarginAnalyst | `margin-analyst.md` | 7점 등급 / 안전마진(Graham Number) / 재무건전성 자문 |
+| OrderAdvisor | `order-advisor.md` | 주문/포지션 사이징 / 손절·익절 / 현금 버퍼 자문 |
+
+### 스킬 4개 (`.claude/skills/`)
+
+| 스킬 | 트리거 | 용도 |
+|------|--------|------|
+| `asset-dev/` | **코드 변경이 수반되는 모든 요청** | 부서장 오케스트레이터: 유형 A/B/C/D 자동 라우팅 |
+| `qa-verify/` | "QA", "정합성 검사" (직접 호출용) | 경계면 교차 비교 검증 |
+| `refactor-audit/` | "리팩토링", "코드 감사" | 감사 → 도메인 자문 → 실행 → QA |
+| `doc-commit/` | "커밋", "문서 반영" | CLAUDE.md + CHANGELOG 갱신 + 커밋 |
+
+### 워크플로우 (계층형 라우팅)
+
+```
+사용자 요청 → asset-dev 스킬 (부서장)
+  ├── 유형 A (기능 개발):
+  │     Phase 1: 부서장 → 도메인팀장 → 도메인 전문가 팀 → 요건서
+  │     Phase 2: 부서장 → 개발팀장 → TDD 팀 → RED → GREEN → VERIFY
+  │     Phase 3: 부서장 → 결과 취합 + 보고
+  ├── 유형 B (리팩토링):
+  │     부서장 → 개발팀장 → RefactorEngineer + QA Inspector (도메인 자문 시 도메인팀장)
+  ├── 유형 C (QA 검증):
+  │     부서장 → 개발팀장 → QA Inspector (도메인 검증 시 도메인팀장)
+  └── 유형 D (소규모 수정):
+        부서장 → 직접 처리 (팀 구성 불필요)
+```
 
 ### 워크스페이스 산출물
 
-분석 파이프라인 실행 시 `_workspace/` 디렉토리에 단계별 결과가 저장됩니다:
+개발 사이클 실행 시 `_workspace/dev/` 디렉토리에 단계별 결과가 저장됩니다:
 
 | 파일 | 내용 |
 |------|------|
-| `01_macro_assessment.json` | 매크로 체제 판단 (regime, 버핏지수, 공포탐욕) |
-| `02_screened_candidates.json` | Graham 필터 통과 후보 종목 (최대 10개) |
-| `03_analyses/{code}_analysis.json` | 종목별 심층 분석 (Graham Number, 7지표 등급) |
-| `05_recommendations.json` | 최종 매수 추천서 (지정가, 수량, 손절/익절) |
+| `01_requirements.md` | 도메인 전문가 합의 요건서 (REQ-{영역}-{번호} + 수용 기준) |
+| `02_test_plan.md` | TestEngineer RED 테스트 계획 |
+| `phase{N}_verification.md` | TDD 사이클별 GREEN/VERIFY 검증 리포트 |
+| `05_final_report.md` | 최종 결과 보고 (요건 이행 표 + pytest 결과 + 변경 파일) |
 
-> 에이전트 정의: `.claude/agents/`, 스킬 정의: `.claude/skills/`
+> 에이전트 정의: `.claude/agents/` (12개) · 스킬 정의: `.claude/skills/` (4개) · 정책 SSoT: `CLAUDE.md` 「하네스: 계층형 TDD 애자일 투자 자동화」 섹션
 
 ---
 
