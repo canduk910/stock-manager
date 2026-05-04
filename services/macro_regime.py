@@ -173,16 +173,45 @@ def _classify_fg_with_hysteresis(
 
 # ── 메인 API ─────────────────────────────────────────────────
 
+def _step_fg_level(level: str, direction: str) -> str:
+    """fg_level을 한 단계 fear/greed 쪽으로 이동.
+
+    direction: "fear" | "greed"
+    """
+    order = ["extreme_greed", "greed", "neutral", "fear", "extreme_fear"]
+    try:
+        idx = order.index(level)
+    except ValueError:
+        return level
+    if direction == "fear" and idx < len(order) - 1:
+        return order[idx + 1]
+    if direction == "greed" and idx > 0:
+        return order[idx - 1]
+    return level
+
+
 def determine_regime(
     sentiment: dict,
     previous_regime: Optional[str] = None,
+    hy_oas_percentile: Optional[float] = None,
+    hy_oas_value: Optional[float] = None,
 ) -> dict:
     """매크로 심리 데이터에서 시장 체제 결정.
+
+    신용 통합 (2026-05-04):
+    - Phase 1 (F&G 보정): hy_oas_percentile >= 90 → fg_level 한 단계 fear,
+                          hy_oas_percentile <= 10 → 한 단계 greed.
+    - Phase 2 (오버라이드): hy_oas_value > 10% OR hy_oas_percentile > 95 →
+                          체제 강제 accumulation (단 buffett high/extreme이면 selective 완화).
+                          hy_oas_percentile < 5 AND buffett high/extreme → defensive 강제.
+    - VIX > 35 오버라이드는 신용 보정보다 우선.
 
     Args:
         sentiment: macro_service.get_sentiment() 반환 형식.
             fear_greed.{score|value}, vix.{value} 또는 vix(float), buffett_indicator.{ratio} 또는 buffett.{ratio}
         previous_regime: 직전 체제. 제공 시 경계값 ±5점(FG) / ±0.05(Buffett) 하이스테리시스 적용.
+        hy_oas_percentile: HY OAS 전 기간 백분위 (0~100). credit_spread 응답에서 전달.
+        hy_oas_value: HY OAS 현재값 (%). 절대 안전장치(>10%) 평가용.
 
     Returns:
         {
@@ -194,6 +223,8 @@ def determine_regime(
             fear_greed_score: float | None,
             buffett_level: str,
             fg_level: str,
+            credit_adjustment: str | None,  # Phase 1 보정 결과
+            credit_override: str | None,    # Phase 2 오버라이드 결과
         }
     """
     # VIX 추출 — dict 또는 float 양쪽 지원
@@ -260,7 +291,47 @@ def determine_regime(
     buffett_level = _classify_buffett_with_hysteresis(buffett_ratio, prev_buffett_level)
     fg_level = _classify_fg_with_hysteresis(fg_score, vix_num, prev_fg_level)
 
+    # ── Phase 1: 신용 F&G 보정 (VIX 오버라이드 후) ──────────────────
+    # VIX > 35 오버라이드 시 fg_level은 이미 extreme_fear로 강제됨 → 신용 보정 미적용
+    credit_adjustment: Optional[str] = None
+    vix_overridden = vix_num is not None and vix_num > 35
+    if not vix_overridden and hy_oas_percentile is not None:
+        if hy_oas_percentile >= 90:
+            new_level = _step_fg_level(fg_level, "fear")
+            if new_level != fg_level:
+                fg_level = new_level
+                credit_adjustment = "fear_one_step"
+        elif hy_oas_percentile <= 10:
+            new_level = _step_fg_level(fg_level, "greed")
+            if new_level != fg_level:
+                fg_level = new_level
+                credit_adjustment = "greed_one_step"
+
     regime = REGIME_MATRIX.get((buffett_level, fg_level), "cautious")
+
+    # ── Phase 2: 신용 오버라이드 (체제 강제) ──────────────────────
+    credit_override: Optional[str] = None
+    # 패닉 강제 (HY OAS > 10% 또는 백분위 > 95)
+    if (
+        (hy_oas_value is not None and hy_oas_value > 10.0)
+        or (hy_oas_percentile is not None and hy_oas_percentile > 95)
+    ):
+        if buffett_level in ("high", "extreme"):
+            # 양방향 위기 — selective로 완화
+            regime = "selective"
+            credit_override = "extreme_fear_selective"
+        else:
+            regime = "accumulation"
+            credit_override = "extreme_fear_accumulation"
+    # 신용버블 정점 (HY OAS 백분위 < 5 + 버핏 과열)
+    elif (
+        hy_oas_percentile is not None
+        and hy_oas_percentile < 5
+        and buffett_level in ("high", "extreme")
+    ):
+        regime = "defensive"
+        credit_override = "credit_greed_defensive"
+
     params = REGIME_PARAMS[regime]
     regime_desc = REGIME_DESC.get(regime, regime)
 
@@ -273,6 +344,8 @@ def determine_regime(
         "fear_greed_score": fg_score,
         "buffett_level": buffett_level,
         "fg_level": fg_level,
+        "credit_adjustment": credit_adjustment,
+        "credit_override": credit_override,
     }
 
 

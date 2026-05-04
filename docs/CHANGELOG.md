@@ -1,5 +1,47 @@
 # 변경 이력
 
+## 2026-05-04 — HY OAS 하워드 막스 시계추 전면 개편 (P0~P3)
+
+### 배경
+사용자 신고: "매크로 하이일드 스프레드가 제대로 동작하지 않는다." MacroSentinel 도메인 자문 결과:
+- 임계값 3.5%/7%는 막스 원전 비정합 (3.5%는 역사적 5%ile에 해당해 거의 도달 불가)
+- 5년 baseline은 코로나 이후 저금리 구간만 잡혀 분포 왜곡
+- macro_regime에 신용 사이클 입력 누락 (주식 선행 지표인데 매트릭스에서 빠짐)
+- 캐시 1시간은 FRED 일일 갱신 대비 과도
+
+사용자 결정: P0~P3 풀스택 + 전 기간(1996-12 ~ 현재) baseline.
+
+plan: `/Users/kimdukki/.claude/plans/shiny-herding-catmull.md`
+
+### 백엔드 수정 (4)
+- `stock/macro_fetcher.py` — `_fetch_fred_oas()` 5년 → **전 기간(1996-12-31~)** baseline. `_compute_oas_stats()` / `_classify_oas_sentiment()` / `_percentile_from_sorted()` 신규. 응답에 `oas_stats{p10,p25,p50,p75,p90,p95,max,max_date,mean,median,std}` / `oas_percentile` / `oas_zscore` / `oas_history_5y` 추가. **5단계 sentiment** (`extreme_greed/greed/normal/fear/extreme_fear`) — 백분위 + OAS>10% 절대 안전장치. `_fetch_fred_ig_oas()` 신규 (FRED `BAMLC0A0CM` Investment Grade OAS). `fetch_credit_spread()` 응답에 `ig_current` / `ig_history_5y` / `hy_ig_spread` / `hy_ig_spread_history_5y` / `partial_failure` 추가. 캐시 1h → **24h**. 후방호환 alias: `oas_history`(=5y), `percentile`(=oas_percentile).
+- `services/macro_service.py` — `get_credit_spread()` MacroRepository 일일 영속 캐시(`get_macro_today/save_macro_today`). `get_macro_cycle()` credit_spread 입력 자동 주입(`oas_momentum_6m` → cycle / `hy_oas_percentile`+value → regime).
+- `services/macro_regime.py` — `_step_fg_level()` 신규. `determine_regime(sentiment, previous_regime, hy_oas_percentile=None, hy_oas_value=None)` 시그니처 확장(Optional, 후방호환). **Phase 1 F&G 보정** (`credit_adjustment`): hy_oas p≥90 → F&G 한 단계 fear / p≤10 → 한 단계 greed. **Phase 2 신용 오버라이드** (`credit_override`): `OAS>10% OR p>95` → `extreme_fear+accumulation` 강제 (단 버핏 high/extreme이면 `selective` 완화). `p<5 + 버핏 high/extreme` → `defensive` 강제. VIX>35 우선순위 보존.
+- `services/macro_cycle.py` — **Phase 3** `_score_credit()`에 `oas_momentum_6m` 가중(+0.3) 입력 추가. 16셀 cycle×regime 매트릭스 미터치(입력만 정밀화).
+
+### 프론트엔드 수정 (1)
+- `frontend/src/components/macro/CreditSpreadSection.jsx` — `SENTIMENT_CONFIG` 5단계 확장(extreme_greed/greed/normal/fear/extreme_fear). 메인 게이지 0~12% 선형 → **백분위 축(0~100)** + 절댓값 부제(역사 평균/p95/정점·날짜) 병기. ReferenceLine을 백분위 임계(p10/p25/p75/p90)에 매핑된 **동적 OAS 값**으로 표시. **IG OAS / HY-IG 스프레드 보조 카드** 추가(>5%p이면 "정크 영역 패닉" 강조). `data.credit_spread || data` 모호 fallback 제거 → `data?.credit_spread` 명시. `partial_failure` 안내 배너.
+
+### 신규 테스트 (5)
+- `tests/unit/test_macro_fetcher_oas.py` — 11 케이스 (5단계 경계, OAS>10% 안전장치, stats 정확성, 빈 응답/ZeroDivision 가드)
+- `tests/unit/test_macro_regime_credit_integration.py` — 7 케이스 (F&G 보정, 신용 오버라이드 4종, dual extreme selective)
+- `tests/unit/test_safety_grade_credit_propagation.py` — 1 케이스 (16셀 cycle 매트릭스 자동 정합)
+- `tests/unit/test_macro_cycle_oas_momentum.py` — 6 케이스 (oas_momentum_6m cycle 입력 반영)
+- `tests/integration/test_credit_spread_api.py` — 3 케이스 (응답 shape + 일일 캐시 동작)
+- 결과: **495 PASS / 0 FAIL / 6 skip** (기존 478 → +17 신규).
+
+### 도메인 자문 합의
+- **MacroSentinel**: ✅ 백분위 5단계 + 전 기간 baseline + OAS>10% 안전장치 + IG OAS 보조 + 체제 통합 3 Phase 권고대로 반영.
+- **MarginAnalyst**: ✅ `safety_grade.compute_grade_7point`은 macro_regime/cycle 독립. cycle 입력 변경 시 `get_margin_requirement(regime, cycle_phase)`의 16셀 매트릭스에서 자동 보정 — 회귀 테스트로 검증.
+- **OrderAdvisor**: ✅ `extreme_fear+accumulation` 강제 시 `REGIME_PARAMS["accumulation"]`(margin=20, single_cap=5%, cash_min=25%) 적용. dual extreme(OAS>10% + 버핏 high)은 `selective`로 완화하여 4% 한도 유지. 적정.
+
+### API 응답 shape 변경 (`GET /api/macro/credit-spread`)
+- 신규: `oas_stats` / `oas_percentile` / `oas_zscore` / `oas_history_5y` / `ig_current` / `ig_history_5y` / `hy_ig_spread` / `hy_ig_spread_history_5y` / `partial_failure`
+- 변경: `oas_sentiment` 3단계 → 5단계
+- 호환: `oas_history`(=oas_history_5y), `percentile`(=oas_percentile) alias 유지
+
+---
+
 ## 2026-05-04 — Phase 4: 관리 영역 확장 + 사용자별 KIS 자격증명
 
 ### 배경

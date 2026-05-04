@@ -98,7 +98,7 @@ frontend/
                           NewsSection (한국+NYT 2컬럼), InvestorSection (4명 투자자 코멘트 카드),
                           MacroCycleSection (4단계 경기국면 다이어그램+**투자체제 나란히 표시**+괴리설명+confidence+지표카드+hover 툴팁),
                           YieldCurveSection (수익률곡선 LineChart+스프레드 시계열 AreaChart),
-                          CreditSpreadSection (FRED HY OAS 하워드 막스 시계추+게이지+5년차트 + HYG/LQD 스프레드+비율 시계열),
+                          CreditSpreadSection (FRED HY OAS **백분위 5단계 시계추**(extreme_greed/greed/normal/fear/extreme_fear)+백분위 축 게이지+절댓값 라벨 병기+5년차트(p10/p25/p75/p90 동적 ReferenceLine) + IG OAS·HY-IG 보조카드(>5%p 정크패닉) + HYG/LQD 스프레드+비율 시계열),
                           CurrencySection (4환율 카드+스파크라인), CommoditySection (5원자재 카드+스파크라인),
                           SectorHeatmapSection (11섹터×5기간(1M/3M/6M/1Y/3Y) 히트맵, 초록~빨강 그라데이션)
       tax/                TaxSummaryCards (4카드: 양도차익/공제/과세표준/세액), TaxBySymbolChart (종목별 BarChart),

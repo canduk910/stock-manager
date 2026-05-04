@@ -71,8 +71,13 @@ def _score_yield_curve(
     return scores
 
 
-def _score_credit(direction: str) -> dict[str, float]:
-    """하이일드 신용스프레드 20% 가중치 점수."""
+def _score_credit(direction: str, oas_momentum_6m: Optional[float] = None) -> dict[str, float]:
+    """하이일드 신용스프레드 20% 가중치 점수.
+
+    oas_momentum_6m: HY OAS 6개월 변화율(%). 양수=확대(contraction), 음수=축소(recovery).
+    - momentum > +50% → contraction +0.3 가중 (신용 패닉 가속)
+    - momentum < -30% → recovery +0.3 가중 (신용 패닉 해소 → 회복 시그널)
+    """
     scores = {"recovery": 0, "expansion": 0, "overheating": 0, "contraction": 0}
 
     if direction == "narrowing":
@@ -83,6 +88,13 @@ def _score_credit(direction: str) -> dict[str, float]:
     else:
         scores["expansion"] = 0.3
         scores["overheating"] = 0.3
+
+    # OAS momentum 가중 (Phase 3, 2026-05-04)
+    if oas_momentum_6m is not None:
+        if oas_momentum_6m > 50.0:
+            scores["contraction"] += 0.3
+        elif oas_momentum_6m < -30.0:
+            scores["recovery"] += 0.3
 
     return scores
 
@@ -179,7 +191,10 @@ def determine_cycle_phase(inputs: dict) -> dict:
 
     # 개별 점수 계산
     s_yield = _score_yield_curve(inputs.get("yield_spread"), inputs.get("yield_direction", "stable"))
-    s_credit = _score_credit(inputs.get("credit_direction", "stable"))
+    s_credit = _score_credit(
+        inputs.get("credit_direction", "stable"),
+        oas_momentum_6m=inputs.get("oas_momentum_6m"),
+    )
     s_vix = _score_vix(inputs.get("vix_value"), inputs.get("vix_level", "normal"))
     s_sector = _score_sector(inputs.get("sector_rotation", "mixed"))
     s_dollar = _score_dollar(inputs.get("dollar_strength", "stable"))

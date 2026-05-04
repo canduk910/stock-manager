@@ -511,27 +511,189 @@ def fetch_yield_curve_data() -> dict:
 
 # ── 신용스프레드 ────────────────────────────────────────────────────────────
 
+def _percentile_from_sorted(sorted_values: list[float], p: float) -> float:
+    """0~100 백분위에 해당하는 값 (정렬된 리스트 인덱스 보간).
+
+    p=10 → 10%ile. n=1 가드.
+    """
+    if not sorted_values:
+        return 0.0
+    n = len(sorted_values)
+    if n == 1:
+        return round(sorted_values[0], 2)
+    idx = max(0, min(n - 1, int(round((p / 100.0) * (n - 1)))))
+    return round(sorted_values[idx], 2)
+
+
+def _compute_oas_stats(rows: list[dict]) -> dict:
+    """OAS 시계열에서 분포 통계.
+
+    Args:
+        rows: [{"date": "YYYY-MM-DD", "oas": float}, ...] (정렬 무관)
+
+    Returns:
+        {mean, median, std, p10, p25, p50, p75, p90, p95, max, max_date} 또는 {}.
+    """
+    if not rows:
+        return {}
+    try:
+        values = [float(r["oas"]) for r in rows if r.get("oas") is not None]
+        if not values:
+            return {}
+        sorted_v = sorted(values)
+        n = len(values)
+        mean = sum(values) / n
+        variance = sum((v - mean) ** 2 for v in values) / n
+        std = variance ** 0.5
+
+        # max + max 날짜
+        max_v = max(values)
+        max_row = next((r for r in rows if float(r.get("oas", 0)) == max_v), None)
+        max_date = max_row["date"] if max_row else None
+
+        return {
+            "mean": round(mean, 2),
+            "median": _percentile_from_sorted(sorted_v, 50),
+            "std": round(std, 2),
+            "p10": _percentile_from_sorted(sorted_v, 10),
+            "p25": _percentile_from_sorted(sorted_v, 25),
+            "p50": _percentile_from_sorted(sorted_v, 50),
+            "p75": _percentile_from_sorted(sorted_v, 75),
+            "p90": _percentile_from_sorted(sorted_v, 90),
+            "p95": _percentile_from_sorted(sorted_v, 95),
+            "max": round(max_v, 2),
+            "max_date": max_date,
+        }
+    except Exception as e:
+        logger.warning("OAS stats 계산 실패: %s", e)
+        return {}
+
+
+def _classify_oas_sentiment(current: float, stats: dict) -> dict:
+    """OAS 현재값을 백분위 5단계 + 절대 안전장치로 분류 (하워드 막스 시계추).
+
+    백분위 5단계 (전 기간 baseline 기반):
+      <10  → extreme_greed
+      <30  → greed
+      <70  → normal
+      <90  → fear
+      >=90 → extreme_fear
+
+    절대 안전장치: current > 10.0 → 백분위 무관 extreme_fear (역사적 단절 감지).
+
+    Args:
+        current: 현재 OAS (%)
+        stats: _compute_oas_stats() 반환값
+
+    Returns:
+        {"sentiment": str, "percentile": float | None, "zscore": float | None}
+    """
+    # 1) 절대 안전장치 (OAS > 10% 패닉)
+    if current is not None and current > 10.0:
+        # percentile/zscore도 가능하면 계산
+        pct = None
+        zscore = None
+        if stats:
+            try:
+                mean = stats.get("mean")
+                std = stats.get("std")
+                if mean is not None and std and std > 0:
+                    zscore = round((current - mean) / std, 2)
+            except Exception:
+                pass
+        return {"sentiment": "extreme_fear", "percentile": pct, "zscore": zscore}
+
+    # 2) stats 없으면 normal 폴백
+    if not stats:
+        return {"sentiment": "normal", "percentile": None, "zscore": None}
+
+    # 3) 백분위 계산 (stats의 분위 임계 사용)
+    # current가 p_X 기준 어느 단계인지 결정
+    try:
+        p10 = stats.get("p10")
+        p25 = stats.get("p25")
+        p75 = stats.get("p75")
+        p90 = stats.get("p90")
+        mean = stats.get("mean")
+        std = stats.get("std")
+
+        # 백분위 (선형 보간 — 분위 임계 사이 위치)
+        # 간단화: 분위 임계 5점 사이의 선형 보간
+        bps = [(0.0, 0.0), (10.0, p10), (25.0, p25), (50.0, stats.get("p50")),
+               (75.0, p75), (90.0, p90), (95.0, stats.get("p95")),
+               (100.0, stats.get("max"))]
+        bps = [(p, v) for p, v in bps if v is not None]
+        bps.sort(key=lambda x: x[1])
+        # current 위치 찾기
+        if current <= bps[0][1]:
+            pct = 0.0
+        elif current >= bps[-1][1]:
+            pct = 100.0
+        else:
+            pct = 50.0
+            for i in range(1, len(bps)):
+                p_lo, v_lo = bps[i - 1]
+                p_hi, v_hi = bps[i]
+                if v_lo <= current <= v_hi:
+                    if v_hi == v_lo:
+                        pct = p_hi
+                    else:
+                        pct = p_lo + (current - v_lo) / (v_hi - v_lo) * (p_hi - p_lo)
+                    break
+        pct = round(pct, 1)
+
+        # zscore
+        zscore = None
+        if mean is not None and std and std > 0:
+            zscore = round((current - mean) / std, 2)
+
+        # 5단계 분류
+        if pct < 10:
+            sentiment = "extreme_greed"
+        elif pct < 30:
+            sentiment = "greed"
+        elif pct < 70:
+            sentiment = "normal"
+        elif pct < 90:
+            sentiment = "fear"
+        else:
+            sentiment = "extreme_fear"
+
+        return {"sentiment": sentiment, "percentile": pct, "zscore": zscore}
+    except Exception as e:
+        logger.warning("OAS sentiment 분류 실패: %s", e)
+        return {"sentiment": "normal", "percentile": None, "zscore": None}
+
+
 def _fetch_fred_oas() -> dict:
     """FRED에서 HY OAS(BAMLH0A0HYM2) 공식 스프레드 수집 (API 키 불필요).
 
-    하워드 막스의 하이일드 스프레드 프레임워크:
-    - OAS < 3.5%: 탐욕(Greed) — 위험 둔감, 수비적 전환 필요
-    - OAS 3.5~7%: 정상(Normal) — 균형 유지
-    - OAS > 7%: 공포(Fear) — 공격적 매수 기회
+    하워드 막스의 하이일드 스프레드 프레임워크 — 백분위 5단계:
+    - 백분위 < 10: extreme_greed (위험 둔감 정점)
+    - < 30:        greed
+    - < 70:        normal
+    - < 90:        fear
+    - >= 90:       extreme_fear (패닉, 매집 기회)
+    + OAS > 10% 절대 안전장치 (역사적 단절 감지) → extreme_fear 강제
 
-    Returns: {"oas_current", "oas_history", "sentiment", "percentile"} 또는 빈 dict
+    전 기간 baseline (1996-12-31 ~ 현재, 약 28년) 사용 — 신용 사이클 7~10년.
+
+    Returns: {oas_current, oas_history_5y, oas_history_full, oas_stats,
+              oas_percentile, oas_zscore, sentiment, oas_history(=alias), percentile(=alias)}
+            또는 빈 dict.
     """
     from datetime import date, timedelta
     import requests as _requests
 
     try:
-        start = (date.today() - timedelta(days=365 * 5)).strftime("%Y-%m-%d")
+        # 전 기간 baseline (FRED BAMLH0A0HYM2 가용 시작일)
+        start = "1996-12-31"
         end = date.today().strftime("%Y-%m-%d")
         url = (
             f"https://fred.stlouisfed.org/graph/fredgraph.csv"
             f"?id=BAMLH0A0HYM2&cosd={start}&coed={end}"
         )
-        resp = _requests.get(url, timeout=15, headers={"User-Agent": "stock-manager/1.0"})
+        resp = _requests.get(url, timeout=20, headers={"User-Agent": "stock-manager/1.0"})
         resp.raise_for_status()
 
         rows = []
@@ -544,47 +706,133 @@ def _fetch_fred_oas() -> dict:
                     continue
 
         if not rows:
+            logger.error("FRED OAS 빈 응답: status=%s body_head=%r", resp.status_code, resp.text[:200])
             return {}
 
         current = rows[-1]["oas"]
 
-        # 하워드 막스 시계추 해석
-        if current < 3.5:
-            sentiment = "greed"
-        elif current > 7.0:
-            sentiment = "fear"
-        else:
-            sentiment = "normal"
+        # 분포 통계 (전 기간)
+        stats = _compute_oas_stats(rows)
 
-        # 백분위수: 현재 OAS가 5년 히스토리에서 몇 %에 해당하는지
-        all_oas = [r["oas"] for r in rows]
-        below = sum(1 for v in all_oas if v <= current)
-        percentile = round(below / len(all_oas) * 100, 1)
+        # 5단계 sentiment + 백분위
+        clf = _classify_oas_sentiment(current, stats)
+
+        # 5년 슬라이스 (시각화용)
+        five_year_start = (date.today() - timedelta(days=365 * 5)).strftime("%Y-%m-%d")
+        oas_history_5y = [r for r in rows if r["date"] >= five_year_start]
 
         return {
             "oas_current": current,
-            "oas_history": rows,
-            "sentiment": sentiment,
-            "percentile": percentile,
+            "oas_history_5y": oas_history_5y,
+            "oas_history_full": rows,
+            "oas_stats": stats,
+            "oas_percentile": clf.get("percentile"),
+            "oas_zscore": clf.get("zscore"),
+            "sentiment": clf.get("sentiment"),
+            # ── 후방호환 alias ──
+            "oas_history": oas_history_5y,
+            "percentile": clf.get("percentile"),
         }
     except Exception as e:
         logger.warning("FRED OAS 조회 실패: %s", e)
         return {}
 
 
-def fetch_credit_spread() -> dict:
-    """HY OAS(FRED) + HYG/LQD 기반 신용스프레드.
+def _fetch_fred_ig_oas() -> dict:
+    """FRED에서 IG OAS(BAMLC0A0CM, Investment Grade Corporate OAS) 수집.
 
-    1순위: FRED OAS 공식 데이터 (하워드 막스 프레임워크)
-    2순위: HYG/LQD ETF 수익률 차이 (yfinance)
+    Returns: {ig_current, ig_history_5y, ig_stats} 또는 {}.
     """
-    key = "macro:credit_spread_v2"
+    from datetime import date, timedelta
+    import requests as _requests
+
+    try:
+        start = "1996-12-31"
+        end = date.today().strftime("%Y-%m-%d")
+        url = (
+            f"https://fred.stlouisfed.org/graph/fredgraph.csv"
+            f"?id=BAMLC0A0CM&cosd={start}&coed={end}"
+        )
+        resp = _requests.get(url, timeout=20, headers={"User-Agent": "stock-manager/1.0"})
+        resp.raise_for_status()
+
+        rows = []
+        for line in resp.text.strip().split("\n")[1:]:
+            parts = line.strip().split(",")
+            if len(parts) == 2 and parts[1] != ".":
+                try:
+                    rows.append({"date": parts[0], "ig": round(float(parts[1]), 2)})
+                except ValueError:
+                    continue
+
+        if not rows:
+            return {}
+
+        # stats용으로 oas 키 통일
+        rows_for_stats = [{"date": r["date"], "oas": r["ig"]} for r in rows]
+        stats = _compute_oas_stats(rows_for_stats)
+
+        five_year_start = (date.today() - timedelta(days=365 * 5)).strftime("%Y-%m-%d")
+        ig_history_5y = [r for r in rows if r["date"] >= five_year_start]
+
+        return {
+            "ig_current": rows[-1]["ig"],
+            "ig_history_5y": ig_history_5y,
+            "ig_stats": stats,
+        }
+    except Exception as e:
+        logger.warning("FRED IG OAS 조회 실패: %s", e)
+        return {}
+
+
+def fetch_credit_spread() -> dict:
+    """HY OAS(FRED) + IG OAS + HYG/LQD 기반 신용스프레드.
+
+    1순위: FRED HY OAS 백분위 5단계 (하워드 막스 프레임워크, 전 기간 baseline)
+    보조: FRED IG OAS + HY-IG 스프레드(정크 디스카운트)
+    참고: HYG/LQD ETF 수익률 차이 (yfinance)
+    """
+    key = "macro:credit_spread_v3"
     cached = get_cached(key)
     if cached is not None:
         return cached
 
-    # FRED OAS (API 키 불필요)
+    partial_failure: list[str] = []
+
+    # FRED HY OAS (전 기간 + 5단계)
     fred_data = _fetch_fred_oas()
+    if not fred_data:
+        partial_failure.append("hy_oas")
+
+    # FRED IG OAS (보조 카드용)
+    ig_data = _fetch_fred_ig_oas()
+    if not ig_data:
+        partial_failure.append("ig_oas")
+
+    # HY-IG 스프레드 + 5년 시계열
+    hy_current = fred_data.get("oas_current") if fred_data else None
+    ig_current = ig_data.get("ig_current") if ig_data else None
+    hy_ig_spread = (
+        round(hy_current - ig_current, 2)
+        if hy_current is not None and ig_current is not None
+        else None
+    )
+    # HY-IG 시계열 (date 기준 매칭)
+    hy_ig_history_5y = []
+    try:
+        hy_5y = fred_data.get("oas_history_5y", []) if fred_data else []
+        ig_5y = ig_data.get("ig_history_5y", []) if ig_data else []
+        if hy_5y and ig_5y:
+            ig_map = {r["date"]: r["ig"] for r in ig_5y}
+            for r in hy_5y:
+                ig_v = ig_map.get(r["date"])
+                if ig_v is not None:
+                    hy_ig_history_5y.append({
+                        "date": r["date"],
+                        "spread": round(r["oas"] - ig_v, 2),
+                    })
+    except Exception as e:
+        logger.debug("HY-IG 시계열 매칭 실패: %s", e)
 
     try:
         import yfinance as yf
@@ -648,26 +896,47 @@ def fetch_credit_spread() -> dict:
             "spread": spread,
             "spread_direction": direction,
             "history": history,
-            # FRED OAS 데이터 (하워드 막스 프레임워크)
+            # FRED HY OAS (전 기간 baseline + 5단계)
             "oas_current": fred_data.get("oas_current"),
-            "oas_history": fred_data.get("oas_history", []),
+            "oas_history_5y": fred_data.get("oas_history_5y", []),
+            "oas_history": fred_data.get("oas_history_5y", []),  # 후방호환 alias
+            "oas_stats": fred_data.get("oas_stats", {}),
+            "oas_percentile": fred_data.get("oas_percentile"),
+            "oas_zscore": fred_data.get("oas_zscore"),
             "oas_sentiment": fred_data.get("sentiment"),
-            "oas_percentile": fred_data.get("percentile"),
+            "percentile": fred_data.get("oas_percentile"),  # 후방호환 alias
+            # FRED IG OAS + HY-IG 스프레드
+            "ig_current": ig_current,
+            "ig_history_5y": ig_data.get("ig_history_5y", []) if ig_data else [],
+            "hy_ig_spread": hy_ig_spread,
+            "hy_ig_spread_history_5y": hy_ig_history_5y,
+            # 부분 실패 메타
+            "partial_failure": partial_failure,
         }
-        set_cached(key, result, ttl_hours=1)
+        set_cached(key, result, ttl_hours=24)
         return result
     except Exception as e:
         logger.warning("신용스프레드 조회 실패: %s", e)
+        partial_failure.append("hyg_lqd")
         return {
             "hyg_yield": None,
             "lqd_yield": None,
             "spread": None,
             "spread_direction": "stable",
             "history": [],
-            "oas_current": fred_data.get("oas_current"),
-            "oas_history": fred_data.get("oas_history", []),
-            "oas_sentiment": fred_data.get("sentiment"),
-            "oas_percentile": fred_data.get("percentile"),
+            "oas_current": fred_data.get("oas_current") if fred_data else None,
+            "oas_history_5y": fred_data.get("oas_history_5y", []) if fred_data else [],
+            "oas_history": fred_data.get("oas_history_5y", []) if fred_data else [],
+            "oas_stats": fred_data.get("oas_stats", {}) if fred_data else {},
+            "oas_percentile": fred_data.get("oas_percentile") if fred_data else None,
+            "oas_zscore": fred_data.get("oas_zscore") if fred_data else None,
+            "oas_sentiment": fred_data.get("sentiment") if fred_data else None,
+            "percentile": fred_data.get("oas_percentile") if fred_data else None,
+            "ig_current": ig_current,
+            "ig_history_5y": ig_data.get("ig_history_5y", []) if ig_data else [],
+            "hy_ig_spread": hy_ig_spread,
+            "hy_ig_spread_history_5y": hy_ig_history_5y,
+            "partial_failure": partial_failure,
         }
 
 

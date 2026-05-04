@@ -199,15 +199,35 @@ def get_yield_curve() -> dict:
 # ── 신용스프레드 ────────────────────────────────────────────────────────────
 
 def get_credit_spread() -> dict:
-    """HYG/LQD 기반 하이일드 신용스프레드."""
+    """HY OAS(FRED) + IG OAS + HYG/LQD 통합 신용스프레드. 일일 영속 캐시.
+
+    하워드 막스 시계추 — 백분위 5단계 + OAS>10% 절대 안전장치 + 전 기간 baseline.
+    """
     errors = []
     now = now_kst_iso()
+
+    # 1) 일일 영속 캐시 (DB) — 같은 날 두 번째 호출은 외부 API 미호출
+    cached = get_macro_today("credit_spread")
+    if cached is not None:
+        logger.debug("credit_spread 일일 캐시 hit")
+        return {
+            "credit_spread": cached,
+            "updated_at": now,
+            "errors": [],
+        }
 
     data = None
     try:
         data = macro_fetcher.fetch_credit_spread()
     except Exception as e:
         errors.append(f"신용스프레드: {e}")
+
+    # 캐시 저장 (정상 응답일 때만)
+    if data is not None and not errors:
+        try:
+            save_macro_today("credit_spread", data)
+        except Exception as e:
+            logger.warning("credit_spread 캐시 저장 실패: %s", e)
 
     return {
         "credit_spread": data,
@@ -279,13 +299,39 @@ def get_sector_heatmap() -> dict:
 # ── 매크로 사이클 ───────────────────────────────────────────────────────────
 
 def get_macro_cycle() -> dict:
-    """경기 사이클 국면 판단 (5지표 가중합산) + 투자 체제 판단."""
+    """경기 사이클 국면 판단 (5지표 가중합산) + 투자 체제 판단.
+
+    신용 통합 (2026-05-04):
+    - cycle 입력에 oas_momentum_6m 자동 주입 (credit_spread 응답에서)
+    - regime 판정에 hy_oas_percentile/value 자동 주입 → F&G 보정 + 신용 오버라이드
+    """
     errors = []
     now = now_kst_iso()
+
+    # credit_spread를 먼저 조회하여 cycle/regime 양쪽에 입력으로 주입
+    hy_oas_percentile = None
+    hy_oas_value = None
+    oas_momentum_6m = None
+    try:
+        cs_resp = get_credit_spread()
+        cs = cs_resp.get("credit_spread") or {}
+        hy_oas_percentile = cs.get("oas_percentile")
+        hy_oas_value = cs.get("oas_current")
+        # 6개월 모멘텀: history_5y 마지막 값 vs 6개월 전 값 변화율(%)
+        history_5y = cs.get("oas_history_5y") or cs.get("oas_history") or []
+        if len(history_5y) >= 130:  # 약 6개월(주 단위 26 * 5 ≈ 130)
+            cur = history_5y[-1].get("oas")
+            past = history_5y[-130].get("oas")
+            if cur and past and past != 0:
+                oas_momentum_6m = round((cur - past) / past * 100, 1)
+    except Exception as e:
+        logger.debug("credit_spread 입력 주입 실패: %s", e)
 
     cycle = None
     try:
         inputs = macro_fetcher.fetch_cycle_inputs()
+        if oas_momentum_6m is not None:
+            inputs["oas_momentum_6m"] = oas_momentum_6m
         cycle = determine_cycle_phase(inputs)
     except Exception as e:
         errors.append(f"경기사이클: {e}")
@@ -293,7 +339,11 @@ def get_macro_cycle() -> dict:
     regime = None
     try:
         sentiment = get_sentiment()
-        regime = determine_regime(sentiment)
+        regime = determine_regime(
+            sentiment,
+            hy_oas_percentile=hy_oas_percentile,
+            hy_oas_value=hy_oas_value,
+        )
     except Exception as e:
         errors.append(f"투자체제: {e}")
 
