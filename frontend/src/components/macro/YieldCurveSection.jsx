@@ -100,58 +100,52 @@ function CurveShapeChart({ current }) {
   )
 }
 
-// R2 (2026-05-04): NBER 침체 + S&P -20% 약세장 음영 ReferenceArea 렌더 헬퍼.
-//   recessions = 회색 alpha 0.18 (실물 경제 침체)
-//   bear_markets = 붉은색 alpha 0.10 (자산가격 약세장)
-function EventOverlays({ events }) {
-  const recs = events?.recessions || []
-  const bears = events?.bear_markets || []
-  return (
-    <>
-      {bears.map((b, i) => (
-        <ReferenceArea
-          key={`bear-${i}`}
-          x1={b.start}
-          x2={b.end}
-          y1={undefined}
-          y2={undefined}
-          fill="#ef4444"
-          fillOpacity={0.10}
-          stroke="none"
-          ifOverflow="extendDomain"
-          label={{
-            value: `▼ ${b.label}`,
-            position: 'insideTopLeft',
-            fontSize: 9,
-            fill: '#b91c1c',
-          }}
-        />
-      ))}
-      {recs.map((r, i) => (
-        <ReferenceArea
-          key={`rec-${i}`}
-          x1={r.start}
-          x2={r.end}
-          fill="#6b7280"
-          fillOpacity={0.18}
-          stroke="#374151"
-          strokeOpacity={0.3}
-          strokeDasharray="3 3"
-          ifOverflow="extendDomain"
-          label={{
-            value: `■ ${r.label}`,
-            position: 'insideBottomLeft',
-            fontSize: 9,
-            fill: '#374151',
-          }}
-        />
-      ))}
-    </>
-  )
+// R2 (2026-05-04, 수정 2026-05-05):
+// 차트 데이터의 실제 dateset 안에 있는 가장 가까운 date로 snap.
+// 이유: Recharts categorical XAxis(dataKey="date")에 데이터에 존재하지 않는 x1/x2를 주면
+//       매칭 실패 → ifOverflow="extendDomain"이 차트 양 끝으로 확장되어 전 기간 음영.
+function _snapToDataset(dataDates, sortedDates, target) {
+  // sortedDates = dataDates를 한 번만 정렬한 결과. target ISO 문자열에 대해
+  // 데이터셋 내부에 들어오는 가장 가까운 점을 반환. 데이터 범위 밖이면 null.
+  if (!sortedDates.length) return null
+  if (target < sortedDates[0]) return sortedDates[0]
+  if (target > sortedDates[sortedDates.length - 1]) return sortedDates[sortedDates.length - 1]
+  // 정확 매칭 우선
+  if (dataDates.has(target)) return target
+  // 인접한 가장 가까운 date 탐색 (선형 — 1.3k건 OK)
+  let best = sortedDates[0]
+  let bestDiff = Math.abs(new Date(target) - new Date(best))
+  for (const d of sortedDates) {
+    const diff = Math.abs(new Date(target) - new Date(d))
+    if (diff < bestDiff) { best = d; bestDiff = diff }
+  }
+  return best
+}
+
+function _eventsForChart(events, history) {
+  if (!events || !history?.length) return { recessions: [], bear_markets: [] }
+  const dataDates = new Set(history.map((h) => h.date))
+  const sortedDates = [...dataDates].sort()
+  const minD = sortedDates[0]
+  const maxD = sortedDates[sortedDates.length - 1]
+  const adapt = (e) => {
+    // 차트 범위와 겹치지 않으면 제외
+    if (e.end < minD || e.start > maxD) return null
+    const x1 = _snapToDataset(dataDates, sortedDates, e.start)
+    const x2 = _snapToDataset(dataDates, sortedDates, e.end)
+    if (!x1 || !x2 || x1 === x2) return null
+    return { ...e, x1, x2 }
+  }
+  return {
+    recessions: (events.recessions || []).map(adapt).filter(Boolean),
+    bear_markets: (events.bear_markets || []).map(adapt).filter(Boolean),
+  }
 }
 
 function SpreadHistoryChart({ history, events }) {
   if (!history?.length) return null
+
+  const ev = _eventsForChart(events, history)
 
   return (
     <div className="rounded-lg border bg-white p-4 shadow-sm">
@@ -169,6 +163,7 @@ function SpreadHistoryChart({ history, events }) {
               dataKey="date"
               tick={{ fontSize: 11 }}
               interval="preserveStartEnd"
+              allowDuplicatedCategory={false}
             />
             <YAxis
               tick={{ fontSize: 12 }}
@@ -180,8 +175,34 @@ function SpreadHistoryChart({ history, events }) {
               labelFormatter={(l) => l}
               contentStyle={{ fontSize: 12, borderRadius: 8 }}
             />
-            {/* 음영 이벤트는 데이터 영역 위에 렌더 */}
-            <EventOverlays events={events} />
+            {/* R2 수정 (2026-05-05): inline ReferenceArea + 데이터셋 snap + ifOverflow="hidden".
+                wrapper 컴포넌트(<EventOverlays>)는 Recharts가 자식으로 인식하지 않아 미렌더. */}
+            {ev.bear_markets.map((b, i) => (
+              <ReferenceArea
+                key={`bear-${i}`}
+                x1={b.x1}
+                x2={b.x2}
+                fill="#ef4444"
+                fillOpacity={0.10}
+                stroke="none"
+                ifOverflow="hidden"
+                label={{ value: `▼ ${b.label}`, position: 'insideTopLeft', fontSize: 9, fill: '#b91c1c' }}
+              />
+            ))}
+            {ev.recessions.map((r, i) => (
+              <ReferenceArea
+                key={`rec-${i}`}
+                x1={r.x1}
+                x2={r.x2}
+                fill="#6b7280"
+                fillOpacity={0.18}
+                stroke="#374151"
+                strokeOpacity={0.3}
+                strokeDasharray="3 3"
+                ifOverflow="hidden"
+                label={{ value: `■ ${r.label}`, position: 'insideBottomLeft', fontSize: 9, fill: '#374151' }}
+              />
+            ))}
             <ReferenceLine y={0} stroke="#6b7280" strokeDasharray="4 4" strokeWidth={1.5} />
             <defs>
               <linearGradient id="spreadPos" x1="0" y1="0" x2="0" y2="1">

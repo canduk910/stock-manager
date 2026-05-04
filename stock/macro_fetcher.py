@@ -697,14 +697,58 @@ def _http_get_fred_csv(url: str) -> Optional[str]:
             if ctype.startswith("text/csv") or ctype.startswith("text/plain"):
                 return resp.text
             logger.error(
-                "FRED 비-CSV 응답 (attempt %d): status=%s ctype=%r body_head=%r",
-                attempt, resp.status_code, ctype, resp.text[:200],
+                "FRED 비-CSV 응답 (attempt %d): status=%s ctype=%r body_head=%r url=%s",
+                attempt, resp.status_code, ctype, resp.text[:200], url,
             )
         except Exception as e:
             logger.warning("FRED 요청 실패 (attempt %d) %s: %s", attempt, url, e)
         if attempt == 1:
             _time.sleep(2)
     return None
+
+
+def _fetch_fred_via_api(series_id: str) -> Optional[list[dict]]:
+    """FRED 공식 JSON API 폴백 (FRED_API_KEY 필요).
+
+    https://fred.stlouisfed.org/docs/api/fred/series_observations.html
+    실패 또는 키 미설정 시 None.
+    """
+    try:
+        from config import FRED_API_KEY
+    except Exception:
+        FRED_API_KEY = ""
+    if not FRED_API_KEY:
+        return None
+    import requests as _requests
+    try:
+        url = "https://api.stlouisfed.org/fred/series/observations"
+        params = {
+            "series_id": series_id,
+            "api_key": FRED_API_KEY,
+            "file_type": "json",
+            "observation_start": "1996-12-31",
+        }
+        resp = _requests.get(
+            url, params=params, timeout=_FRED_TIMEOUT,
+            headers={"User-Agent": _FRED_BROWSER_UA},
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        rows: list[dict] = []
+        for obs in data.get("observations", []):
+            v = obs.get("value", ".")
+            if v == "." or v is None:
+                continue
+            try:
+                rows.append({"date": obs["date"], "value": round(float(v), 2)})
+            except (ValueError, KeyError):
+                continue
+        if rows:
+            logger.info("FRED API 폴백 성공: %s (%d rows)", series_id, len(rows))
+        return rows or None
+    except Exception as e:
+        logger.warning("FRED API 폴백 실패 (%s): %s", series_id, e)
+        return None
 
 
 def _parse_fred_csv(text: str, value_key: str) -> list[dict]:
@@ -751,19 +795,22 @@ def _fetch_fred_oas() -> dict:
             f"?id=BAMLH0A0HYM2&cosd={start}&coed={end}"
         )
         text = _http_get_fred_csv(url)
-        if not text:
-            stale = get_cached(stale_key)
-            if stale:
-                logger.warning("FRED HY OAS stale fallback (HTTP 실패)")
-                return {**stale, "_stale_used": True}
-            return {}
-
-        rows = _parse_fred_csv(text, "oas")
+        rows: list[dict] = []
+        if text:
+            rows = _parse_fred_csv(text, "oas")
         if not rows:
-            logger.error("FRED HY OAS 빈 파싱 결과 (body_head=%r)", text[:200])
+            # CSV 실패 → JSON API 폴백 (FRED_API_KEY 있을 때만 작동)
+            api_rows = _fetch_fred_via_api("BAMLH0A0HYM2")
+            if api_rows:
+                rows = [{"date": r["date"], "oas": r["value"]} for r in api_rows]
+        if not rows:
+            logger.error(
+                "FRED HY OAS 신선 fetch 실패 (CSV + JSON API 모두). body_head=%r",
+                (text or "")[:200],
+            )
             stale = get_cached(stale_key)
             if stale:
-                logger.warning("FRED HY OAS stale fallback (빈 파싱)")
+                logger.warning("FRED HY OAS stale fallback 사용")
                 return {**stale, "_stale_used": True}
             return {}
 
@@ -817,18 +864,21 @@ def _fetch_fred_ig_oas() -> dict:
             f"?id=BAMLC0A0CM&cosd={start}&coed={end}"
         )
         text = _http_get_fred_csv(url)
-        if not text:
-            stale = get_cached(stale_key)
-            if stale:
-                logger.warning("FRED IG OAS stale fallback (HTTP 실패)")
-                return {**stale, "_stale_used": True}
-            return {}
-
-        rows = _parse_fred_csv(text, "ig")
+        rows: list[dict] = []
+        if text:
+            rows = _parse_fred_csv(text, "ig")
         if not rows:
+            api_rows = _fetch_fred_via_api("BAMLC0A0CM")
+            if api_rows:
+                rows = [{"date": r["date"], "ig": r["value"]} for r in api_rows]
+        if not rows:
+            logger.error(
+                "FRED IG OAS 신선 fetch 실패 (CSV + JSON API 모두). body_head=%r",
+                (text or "")[:200],
+            )
             stale = get_cached(stale_key)
             if stale:
-                logger.warning("FRED IG OAS stale fallback (빈 파싱)")
+                logger.warning("FRED IG OAS stale fallback 사용")
                 return {**stale, "_stale_used": True}
             return {}
 

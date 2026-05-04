@@ -24,6 +24,11 @@ OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.4")
 # ── Finnhub ──────────────────────────────────────────────────────────────────
 FINNHUB_API_KEY = os.getenv("FINNHUB_API_KEY", "")
 
+# ── FRED (St. Louis Fed) ─────────────────────────────────────────────────────
+# 무료 발급: https://fred.stlouisfed.org/docs/api/api_key.html
+# 미설정 시 fredgraph.csv 익명 다운로드만 사용 (운영 IP 차단 시 partial_failure 발생).
+FRED_API_KEY = os.getenv("FRED_API_KEY", "")
+
 # ── Portfolio Advisor ─────────────────────────────────────────────────────────
 ADVISOR_CACHE_TTL_HOURS = float(os.getenv("ADVISOR_CACHE_TTL_HOURS", "0.5"))
 

@@ -71,6 +71,7 @@ cp .env.example .env
 | `OPENAI_API_KEY` | AI자문 리포트 생성 시 필수 | [OpenAI Platform](https://platform.openai.com) 에서 발급 |
 | `OPENAI_MODEL` | 선택 | 기본값: `gpt-5.4`. `gpt-5.4`, `o3-mini` 등 지원 |
 | `FINNHUB_API_KEY` | 선택 | 해외주식 실시간 시세. [Finnhub](https://finnhub.io) 무료 플랜. 미설정 시 yfinance 2초 폴링(15분 지연) |
+| `FRED_API_KEY` | 선택 | FRED 공식 JSON API 폴백용. [FRED 무료 발급](https://fred.stlouisfed.org/docs/api/api_key.html). 미설정 시 fredgraph.csv 익명 다운로드만 사용 — 운영 IP 차단 시 HY/IG OAS partial_failure 빈번. 키 설정 시 CSV 실패→JSON API 자동 폴백으로 안정화 |
 | `KIS_HTS_ID` | 선택 | KIS HTS ID. 체결통보 실시간 수신용. 미설정 시 REST 폴링만 동작 |
 | `KIS_MCP_ENABLED` | 선택 | MCP 백테스트 연동 활성화. 기본값: `false`. [open-trading-api](https://github.com/koreainvestment/open-trading-api) MCP 서버 필요 |
 | `KIS_MCP_URL` | 선택 | MCP 서버 URL. 기본값: `http://127.0.0.1:3846/mcp`. Docker 내부: `http://host.docker.internal:3846/mcp` |

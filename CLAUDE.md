@@ -130,6 +130,7 @@ frontend/           React SPA (Vite + Tailwind + Recharts)
 | `OPENAI_API_KEY` | AI자문 리포트 생성 시 필수 | https://platform.openai.com 에서 발급. 미설정 시 `/analyze` → 503. 크레딧 부족 시 402 반환. |
 | `OPENAI_MODEL` | 선택 | AI자문 리포트 생성 모델. 기본값: `gpt-5.4`. `max_completion_tokens` 사용 (신규 모델 호환). |
 | `FINNHUB_API_KEY` | 선택 | 해외주식 실시간 시세 (Finnhub WS). 미설정 시 yfinance 2초 폴링(15분 지연). |
+| `FRED_API_KEY` | 선택 | FRED 공식 JSON API 폴백용. 무료 발급(https://fred.stlouisfed.org/docs/api/api_key.html). 미설정 시 `fredgraph.csv` 익명 다운로드만 — 운영 IP 차단 시 HY/IG OAS partial_failure 발생. 키 설정 시 CSV 실패→JSON API 자동 폴백. |
 | `KIS_HTS_ID` | 선택 | KIS HTS ID. 체결통보(H0STCNI0) WS 실시간 수신용. 미설정 시 폴링만 동작. |
 | `ADVISOR_CACHE_TTL_HOURS` | 선택 | 포트폴리오 자문 캐시 유효기간 (시간). 기본값: `0.5` (30분). |
 | `DATABASE_URL` | 선택 | SQLAlchemy DB URL. 기본값: `sqlite:///~/stock-watchlist/app.db`. PostgreSQL/Oracle 전환 시 변경. |

@@ -166,6 +166,40 @@ export default function CreditSpreadSection({ data, loading, error }) {
 
   const hyIgPanic = hy_ig_spread != null && hy_ig_spread > 5.0
 
+  // R2 (2026-05-05 수정): 음영 이벤트의 x1/x2를 차트 데이터의 실제 date에 snap.
+  // categorical XAxis는 데이터에 없는 좌표를 인식 못해 ifOverflow에 따라 차트 끝까지
+  // 확장될 수 있음. 데이터 범위 밖 이벤트는 제외.
+  const snappedEvents = useMemo(() => {
+    if (!events || !oasChartData.length) return { recessions: [], bear_markets: [] }
+    const dataDates = new Set(oasChartData.map((d) => d.date))
+    const sorted = [...dataDates].sort()
+    const minD = sorted[0]
+    const maxD = sorted[sorted.length - 1]
+    const snap = (target) => {
+      if (target < sorted[0]) return sorted[0]
+      if (target > sorted[sorted.length - 1]) return sorted[sorted.length - 1]
+      if (dataDates.has(target)) return target
+      let best = sorted[0]
+      let bestDiff = Math.abs(new Date(target) - new Date(best))
+      for (const d of sorted) {
+        const diff = Math.abs(new Date(target) - new Date(d))
+        if (diff < bestDiff) { best = d; bestDiff = diff }
+      }
+      return best
+    }
+    const adapt = (e) => {
+      if (e.end < minD || e.start > maxD) return null
+      const x1 = snap(e.start)
+      const x2 = snap(e.end)
+      if (!x1 || !x2 || x1 === x2) return null
+      return { ...e, x1, x2 }
+    }
+    return {
+      recessions: (events.recessions || []).map(adapt).filter(Boolean),
+      bear_markets: (events.bear_markets || []).map(adapt).filter(Boolean),
+    }
+  }, [events, oasChartData])
+
   return (
     <section>
       <h2 className="text-lg font-semibold text-gray-900 mb-3">하이일드 스프레드</h2>
@@ -278,30 +312,30 @@ export default function CreditSpreadSection({ data, loading, error }) {
                   labelFormatter={(l) => l}
                   contentStyle={{ fontSize: 12, borderRadius: 8 }}
                 />
-                {/* R2: 침체/약세장 음영 (백엔드 events 임베드) */}
-                {(events?.bear_markets || []).map((b, i) => (
+                {/* R2 (2026-05-05 수정): snap된 좌표 + ifOverflow="hidden" */}
+                {snappedEvents.bear_markets.map((b, i) => (
                   <ReferenceArea
                     key={`bear-${i}`}
-                    x1={b.start}
-                    x2={b.end}
+                    x1={b.x1}
+                    x2={b.x2}
                     fill="#ef4444"
                     fillOpacity={0.10}
                     stroke="none"
-                    ifOverflow="extendDomain"
+                    ifOverflow="hidden"
                     label={{ value: `▼ ${b.label}`, position: 'insideTopLeft', fontSize: 9, fill: '#b91c1c' }}
                   />
                 ))}
-                {(events?.recessions || []).map((r, i) => (
+                {snappedEvents.recessions.map((r, i) => (
                   <ReferenceArea
                     key={`rec-${i}`}
-                    x1={r.start}
-                    x2={r.end}
+                    x1={r.x1}
+                    x2={r.x2}
                     fill="#6b7280"
                     fillOpacity={0.18}
                     stroke="#374151"
                     strokeOpacity={0.3}
                     strokeDasharray="3 3"
-                    ifOverflow="extendDomain"
+                    ifOverflow="hidden"
                     label={{ value: `■ ${r.label}`, position: 'insideBottomLeft', fontSize: 9, fill: '#374151' }}
                   />
                 ))}
