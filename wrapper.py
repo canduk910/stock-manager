@@ -1368,7 +1368,7 @@ class KoreaInvestment:
                 tr_id = "VTTS0311U" if side == "buy" else "VTTS0310U"
         else:
             if self.exchange in ["나스닥", "뉴욕", "아멕스"]:
-                tr_id = "JTTT1002U" if side == "buy" else "JTTT1006U"
+                tr_id = "TTTT1002U" if side == "buy" else "TTTT1006U"
             elif self.exchange == '도쿄':
                 tr_id = "TTTS0308U" if side == "buy" else "TTTS0307U"
             elif self.exchange == '상해':
@@ -1383,14 +1383,14 @@ class KoreaInvestment:
         exchange_cd = EXCHANGE_CODE3[self.exchange]
 
         ord_dvsn = "00"
-        if tr_id == "JTTT1002U":
+        if tr_id == "TTTT1002U":
             if order_type == "00":
                 ord_dvsn = "00"
             elif order_type == "LOO":
                 ord_dvsn = "32"
             elif order_type == "LOC":
                 ord_dvsn = "34"
-        elif tr_id == "JTTT1006U":
+        elif tr_id == "TTTT1006U":
             if order_type == "00":
                 ord_dvsn = "00"
             elif order_type == "MOO":

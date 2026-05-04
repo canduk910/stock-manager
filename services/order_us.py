@@ -22,10 +22,12 @@ logger = logging.getLogger(__name__)
 # 미국 거래소 코드 (주문용)
 _US_EXCHANGE_CODE = "NASD"  # 미국전체 (NASD/NYSE/AMEX 통합)
 
-# 거래소별 TR_ID (매수/매도)
+# 거래소별 TR_ID (매수/매도) — 실전 환경
+# KIS 공식: docs/KIS_API_REFERENCE.md:350 — TTTT1002U(매수)/TTTT1006U(매도)
+# 모의: VTTT1002U/VTTT1001U (현재 코드는 실전만 지원, 모의 분기는 별도 사이클)
 _US_TR_IDS = {
-    "buy": "JTTT1002U",
-    "sell": "JTTT1006U",
+    "buy": "TTTT1002U",
+    "sell": "TTTT1006U",
 }
 
 
@@ -173,7 +175,8 @@ def get_overseas_open_orders(token, app_key, app_secret, acnt_no, acnt_prdt_cd) 
 def get_overseas_executions(token, app_key, app_secret, acnt_no, acnt_prdt_cd) -> list[dict]:
     """해외 당일 체결 내역 조회."""
     url = f"{BASE_URL}/uapi/overseas-stock/v1/trading/inquire-ccnl"
-    headers = make_headers(token, app_key, app_secret, "JTTT3001R")
+    # KIS 공식: docs/KIS_API_REFERENCE.md:345 — TTTS3035R(실전)/VTTS3035R(모의)
+    headers = make_headers(token, app_key, app_secret, "TTTS3035R")
     executions = []
     fk200, nk200 = "", ""
     while True:
@@ -252,7 +255,8 @@ def modify_overseas_order(
         hashkey = issue_hashkey(body)
     except Exception:
         hashkey = None
-    headers = make_headers(token, app_key, app_secret, "TTTS0309U", hashkey=hashkey)
+    # KIS 공식: docs/KIS_API_REFERENCE.md:341 — TTTT1004U(실전 정정·취소)/VTTT1004U(모의)
+    headers = make_headers(token, app_key, app_secret, "TTTT1004U", hashkey=hashkey)
     try:
         res = requests.post(url, headers=headers, data=json.dumps(body), timeout=10)
         data = res.json()
@@ -287,7 +291,8 @@ def cancel_overseas_order(
         hashkey = issue_hashkey(body)
     except Exception:
         hashkey = None
-    headers = make_headers(token, app_key, app_secret, "TTTS0309U", hashkey=hashkey)
+    # KIS 공식: docs/KIS_API_REFERENCE.md:341 — TTTT1004U(실전 정정·취소)/VTTT1004U(모의)
+    headers = make_headers(token, app_key, app_secret, "TTTT1004U", hashkey=hashkey)
     try:
         res = requests.post(url, headers=headers, data=json.dumps(body), timeout=10)
         data = res.json()
