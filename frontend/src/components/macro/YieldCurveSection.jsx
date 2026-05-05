@@ -1,9 +1,10 @@
 import {
   ResponsiveContainer, LineChart, Line, AreaChart, Area,
-  XAxis, YAxis, Tooltip, CartesianGrid, ReferenceLine, ReferenceArea,
+  XAxis, YAxis, Tooltip, CartesianGrid, ReferenceLine, ReferenceArea, Customized,
 } from 'recharts'
 import LoadingSpinner from '../common/LoadingSpinner'
 import ErrorAlert from '../common/ErrorAlert'
+import EventLabelsOverlay from './EventLabelsOverlay'
 
 const fmt = (v) =>
   v != null
@@ -122,36 +123,6 @@ function _snapToDataset(dataDates, sortedDates, target) {
   return best
 }
 
-// 인접 이벤트 라벨 stagger — 이전 이벤트 종료일로부터 N일 이내면 같은 그룹으로
-// 묶어 dy를 계단식으로 부여. 라벨 충돌 회피.
-const _CLUSTER_DAYS = 730  // 2년 이내 인접이면 stack
-const _LABEL_DY_STEP = 12
-
-function _withStaggeredLabels(events, sign) {
-  if (!events.length) return []
-  const sorted = [...events].sort((a, b) => (a.x1 < b.x1 ? -1 : 1))
-  let groupIdx = 0
-  let prevEnd = null
-  return sorted.map((e) => {
-    if (prevEnd != null) {
-      const gapMs = new Date(e.x1) - new Date(prevEnd)
-      const gapDays = gapMs / 86400000
-      groupIdx = gapDays < _CLUSTER_DAYS ? groupIdx + 1 : 0
-    }
-    prevEnd = e.x2
-    return { ...e, labelDy: sign * groupIdx * _LABEL_DY_STEP }
-  })
-}
-
-function _shortLabel(label, x1, x2) {
-  // 음영 너비가 좁으면(< 365일) 라벨 단축
-  const days = (new Date(x2) - new Date(x1)) / 86400000
-  if (days < 365 && label.length > 5) {
-    return label.replace('약세장', '').replace('침체', '').trim() || label
-  }
-  return label
-}
-
 function _eventsForChart(events, history) {
   if (!events || !history?.length) return { recessions: [], bear_markets: [] }
   const dataDates = new Set(history.map((h) => h.date))
@@ -159,21 +130,14 @@ function _eventsForChart(events, history) {
   const minD = sortedDates[0]
   const maxD = sortedDates[sortedDates.length - 1]
   const adapt = (e) => {
-    // 차트 범위와 겹치지 않으면 제외
     if (e.end < minD || e.start > maxD) return null
     const x1 = _snapToDataset(dataDates, sortedDates, e.start)
     const x2 = _snapToDataset(dataDates, sortedDates, e.end)
     if (!x1 || !x2 || x1 === x2) return null
     return { ...e, x1, x2 }
   }
-  const recs = _withStaggeredLabels(
-    (events.recessions || []).map(adapt).filter(Boolean),
-    -1,  // 침체는 차트 하단 라벨 → 아래로 stagger
-  )
-  const bears = _withStaggeredLabels(
-    (events.bear_markets || []).map(adapt).filter(Boolean),
-    1,  // 약세장은 상단 라벨 → 위에서 아래로 stagger
-  )
+  const recs = (events.recessions || []).map(adapt).filter(Boolean)
+  const bears = (events.bear_markets || []).map(adapt).filter(Boolean)
   return { recessions: recs, bear_markets: bears }
 }
 
@@ -210,8 +174,7 @@ function SpreadHistoryChart({ history, events }) {
               labelFormatter={(l) => l}
               contentStyle={{ fontSize: 12, borderRadius: 8 }}
             />
-            {/* R2 수정 (2026-05-05): inline ReferenceArea + 데이터셋 snap + ifOverflow="hidden".
-                wrapper 컴포넌트(<EventOverlays>)는 Recharts가 자식으로 인식하지 않아 미렌더. */}
+            {/* 음영만 ReferenceArea로 표시. 라벨은 Customized 오버레이가 픽셀-공간 충돌 검사로 자동 적층(원천 차단). */}
             {ev.bear_markets.map((b, i) => (
               <ReferenceArea
                 key={`bear-${i}`}
@@ -221,13 +184,6 @@ function SpreadHistoryChart({ history, events }) {
                 fillOpacity={0.10}
                 stroke="none"
                 ifOverflow="hidden"
-                label={{
-                  value: `▼ ${_shortLabel(b.label, b.x1, b.x2)}`,
-                  position: 'insideTopLeft',
-                  fontSize: 9,
-                  fill: '#b91c1c',
-                  dy: b.labelDy ?? 0,
-                }}
               />
             ))}
             {ev.recessions.map((r, i) => (
@@ -241,15 +197,16 @@ function SpreadHistoryChart({ history, events }) {
                 strokeOpacity={0.3}
                 strokeDasharray="3 3"
                 ifOverflow="hidden"
-                label={{
-                  value: `■ ${_shortLabel(r.label, r.x1, r.x2)}`,
-                  position: 'insideBottomLeft',
-                  fontSize: 9,
-                  fill: '#374151',
-                  dy: r.labelDy ?? 0,
-                }}
               />
             ))}
+            <Customized
+              component={EventLabelsOverlay({
+                events: [
+                  ...ev.bear_markets.map(b => ({ kind: 'bear', x1: b.x1, x2: b.x2, label: b.label })),
+                  ...ev.recessions.map(r => ({ kind: 'rec', x1: r.x1, x2: r.x2, label: r.label })),
+                ],
+              })}
+            />
             <ReferenceLine y={0} stroke="#6b7280" strokeDasharray="4 4" strokeWidth={1.5} />
             <defs>
               <linearGradient id="spreadPos" x1="0" y1="0" x2="0" y2="1">

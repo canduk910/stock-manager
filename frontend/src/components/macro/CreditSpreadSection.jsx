@@ -17,10 +17,11 @@
 import { useMemo } from 'react'
 import {
   ResponsiveContainer, AreaChart, Area,
-  XAxis, YAxis, Tooltip, CartesianGrid, ReferenceLine, ReferenceArea,
+  XAxis, YAxis, Tooltip, CartesianGrid, ReferenceLine, ReferenceArea, Customized,
 } from 'recharts'
 import LoadingSpinner from '../common/LoadingSpinner'
 import ErrorAlert from '../common/ErrorAlert'
+import EventLabelsOverlay from './EventLabelsOverlay'
 
 const fmt = (v, d = 2) =>
   v != null
@@ -166,7 +167,7 @@ export default function CreditSpreadSection({ data, loading, error }) {
 
   const hyIgPanic = hy_ig_spread != null && hy_ig_spread > 5.0
 
-  // R2 (2026-05-05): 음영 좌표 snap + 인접 라벨 stagger.
+  // 음영 좌표 snap만 수행. 라벨 충돌 회피는 EventLabelsOverlay가 픽셀 공간에서 처리.
   const snappedEvents = useMemo(() => {
     if (!events || !oasChartData.length) return { recessions: [], bear_markets: [] }
     const dataDates = new Set(oasChartData.map((d) => d.date))
@@ -192,35 +193,10 @@ export default function CreditSpreadSection({ data, loading, error }) {
       if (!x1 || !x2 || x1 === x2) return null
       return { ...e, x1, x2 }
     }
-    // 인접 그룹(2년 이내 gap) 내에서 라벨 dy stagger
-    const CLUSTER_DAYS = 730
-    const STEP = 12
-    const stagger = (arr, sign) => {
-      const sortedE = [...arr].sort((a, b) => (a.x1 < b.x1 ? -1 : 1))
-      let idx = 0
-      let prevEnd = null
-      return sortedE.map((e) => {
-        if (prevEnd != null) {
-          const gapDays = (new Date(e.x1) - new Date(prevEnd)) / 86400000
-          idx = gapDays < CLUSTER_DAYS ? idx + 1 : 0
-        }
-        prevEnd = e.x2
-        return { ...e, labelDy: sign * idx * STEP }
-      })
-    }
-    const recs = stagger((events.recessions || []).map(adapt).filter(Boolean), -1)
-    const bears = stagger((events.bear_markets || []).map(adapt).filter(Boolean), 1)
+    const recs = (events.recessions || []).map(adapt).filter(Boolean)
+    const bears = (events.bear_markets || []).map(adapt).filter(Boolean)
     return { recessions: recs, bear_markets: bears }
   }, [events, oasChartData])
-
-  // 좁은 음영 라벨 단축 (< 365일이면 약세장/침체 suffix 제거)
-  const shortLabel = (label, x1, x2) => {
-    const days = (new Date(x2) - new Date(x1)) / 86400000
-    if (days < 365 && label.length > 5) {
-      return label.replace('약세장', '').replace('침체', '').trim() || label
-    }
-    return label
-  }
 
   return (
     <section>
@@ -334,7 +310,7 @@ export default function CreditSpreadSection({ data, loading, error }) {
                   labelFormatter={(l) => l}
                   contentStyle={{ fontSize: 12, borderRadius: 8 }}
                 />
-                {/* R2 (2026-05-05): snap + dy stagger + 좁은 음영 라벨 단축 */}
+                {/* 음영만 표시. 라벨은 Customized 오버레이가 픽셀-공간 충돌 검사로 자동 적층. */}
                 {snappedEvents.bear_markets.map((b, i) => (
                   <ReferenceArea
                     key={`bear-${i}`}
@@ -344,13 +320,6 @@ export default function CreditSpreadSection({ data, loading, error }) {
                     fillOpacity={0.10}
                     stroke="none"
                     ifOverflow="hidden"
-                    label={{
-                      value: `▼ ${shortLabel(b.label, b.x1, b.x2)}`,
-                      position: 'insideTopLeft',
-                      fontSize: 9,
-                      fill: '#b91c1c',
-                      dy: b.labelDy ?? 0,
-                    }}
                   />
                 ))}
                 {snappedEvents.recessions.map((r, i) => (
@@ -364,15 +333,16 @@ export default function CreditSpreadSection({ data, loading, error }) {
                     strokeOpacity={0.3}
                     strokeDasharray="3 3"
                     ifOverflow="hidden"
-                    label={{
-                      value: `■ ${shortLabel(r.label, r.x1, r.x2)}`,
-                      position: 'insideBottomLeft',
-                      fontSize: 9,
-                      fill: '#374151',
-                      dy: r.labelDy ?? 0,
-                    }}
                   />
                 ))}
+                <Customized
+                  component={EventLabelsOverlay({
+                    events: [
+                      ...snappedEvents.bear_markets.map(b => ({ kind: 'bear', x1: b.x1, x2: b.x2, label: b.label })),
+                      ...snappedEvents.recessions.map(r => ({ kind: 'rec', x1: r.x1, x2: r.x2, label: r.label })),
+                    ],
+                  })}
+                />
                 {refLines.map((rl, i) => (
                   <ReferenceLine
                     key={i}
