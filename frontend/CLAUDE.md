@@ -97,10 +97,11 @@ frontend/
       macro/              IndexSection (4지수+1년스파크라인+툴팁), SentimentSection (VIX+버핏+공포탐욕),
                           NewsSection (한국+NYT 2컬럼), InvestorSection (4명 투자자 코멘트 카드),
                           MacroCycleSection (4단계 경기국면 다이어그램+**투자체제 나란히 표시**+괴리설명+confidence+지표카드+hover 툴팁),
-                          YieldCurveSection (수익률곡선 LineChart+스프레드 시계열 AreaChart),
-                          CreditSpreadSection (FRED HY OAS **백분위 5단계 시계추**(extreme_greed/greed/normal/fear/extreme_fear)+백분위 축 게이지+절댓값 라벨 병기+5년차트(p10/p25/p75/p90 동적 ReferenceLine) + IG OAS·HY-IG 보조카드(>5%p 정크패닉) + HYG/LQD 스프레드+비율 시계열),
+                          YieldCurveSection (수익률곡선 LineChart+스프레드 시계열 AreaChart, **R2 2026-05-05**: NBER 침체(회색) + S&P -20% 약세장(붉은색) ReferenceArea 음영, 데이터셋 snap + 인접 라벨 dy stagger),
+                          CreditSpreadSection (FRED HY OAS **백분위 5단계 시계추**(extreme_greed/greed/normal/fear/extreme_fear)+백분위 축 게이지+절댓값 라벨 병기+5년차트(p10/p25/p75/p90 동적 ReferenceLine) + IG OAS·HY-IG 보조카드(>5%p 정크패닉) + HYG/LQD 스프레드+비율 시계열, **R2 2026-05-05**: 동일 음영 + snap + stagger 적용),
                           CurrencySection (4환율 카드+스파크라인), CommoditySection (5원자재 카드+스파크라인),
-                          SectorHeatmapSection (11섹터×5기간(1M/3M/6M/1Y/3Y) 히트맵, 초록~빨강 그라데이션)
+                          SectorHeatmapSection (11섹터×5기간(1M/3M/6M/1Y/3Y) 히트맵, 초록~빨강 그라데이션, **R3 2026-05-05**: 상단에 SectorRelativeChart 마운트),
+                          SectorRelativeChart (**신규 2026-05-05 R3**: ScatterChart, x=SMA20 cross 경과일 ±365 / y=1Y z-score ±3, 4분면 음영, 14개 섹터 키워드 매칭 색상+아이콘(💻🏦⚕️⚡🏭🛍️🛒💡🏠⛏️📡🔋🚗🚚), 범례)
       tax/                TaxSummaryCards (4카드: 양도차익/공제/과세표준/세액), TaxBySymbolChart (종목별 BarChart),
                           TaxTransactionsTable (매매내역+수동추가), TaxCalculationDetail (FIFO lots 상세), TaxDisclaimer (면책배너),
                           TaxSimulationPanel (가상매도 시뮬레이션: 보유종목 선택+매도가/수량 입력+예상 세액)
@@ -116,11 +117,11 @@ frontend/
       MacroPage.jsx       /macro         매크로 분석: 지수+심리+뉴스+투자자 코멘트. 4섹션 독립 로딩.
       PortfolioPage.jsx   /portfolio     포트폴리오 통합: 체제배너+자산배분+수익률+AI자문(진단+리밸런싱+매매안+이력). balance+macro+advisor 통합.
       ReportPage.jsx      /reports       데일리 추천: 페이지 진입 시 KR/US 파이프라인 자동실행(중복방지). 매크로 체제 카드(공유) + KR/US 토글 + 3컨셉 탑픽 섹터(모멘텀/역발상/3개월선점) + 종목추천+관심종목 버튼(기등록 ★ 표시). 하단 이력 카드(클릭→전환).
-      BacktestPage.jsx    /backtest      KIS AI Extensions 백테스트: **전략빌더(기본탭)**/프리셋/커스텀 3모드, 빌더에서 바로 실행 가능. 결과 차트/메트릭, 전략 비교. **국내 KRX만 지원**(markets={['KR']}). **거래비용 입력**(수수료0.015%/세금0.23%/슬리피지0.05%). 진행 현황+백그라운드 안내. **이력 테이블**(마운트 시 로드, 완료 시 새로고침, 과거 결과 "보기" 클릭 → 결과패널). MCP 비활성화 시 안내 표시. 저장 전략 직접 실행.
+      BacktestPage.jsx    /backtest      KIS AI Extensions 백테스트: **전략빌더(기본탭)**/프리셋/커스텀 3모드, 빌더에서 바로 실행 가능. 결과 차트/메트릭, 전략 비교. **국내 KRX만 지원**(markets={['KR']}). **거래비용 입력**(수수료0.015%/세금0.23%/슬리피지0.05%). 진행 현황+백그라운드 안내. **이력 테이블**(마운트 시 로드, 완료 시 새로고침, 과거 결과 "보기" 클릭 → 결과패널). MCP 비활성화 시 안내 표시. 저장 전략 직접 실행. **(2026-05-05)** 가용 기간 가이드 박스(US ≥ 1998-01-02 / KR ≥ 2000-01-04 / 권장 1년~10년) + 시작/종료일 input min/max 속성.
       TaxPage.jsx         /tax           해외주식 양도소득세: 4탭(요약/매매내역/계산상세/시뮬레이션). FIFO 전용, 연도 선택, KIS 적응적 동기화+자동 재계산.
       AdminPage.jsx       /admin         **(2026-05-04 Phase 4 분할)** /admin → /admin/ai redirect 진입점. 관리 페이지는 3섹션으로 분리됨.
       AdminAIPage.jsx     /admin/ai      AI 관리 (admin only): 3탭(사용량 현황/한도 설정/감사 로그). 유저별 일별 사용량+서비스별 상세. 기본/개별 한도 CRUD. **(2026-05-04 Phase 4)** LimitsTab의 user_id 입력은 사용자 검색 콤보박스로 교체(`/api/admin/users?q=` 검색).
-      AdminUsersPage.jsx  /admin/users   **(신규 2026-05-04 Phase 4)** 관리자 전용 사용자 CRUD. 검색/페이지네이션, role 변경, 비밀번호 reset, 삭제.
+      AdminUsersPage.jsx  /admin/users   **(신규 2026-05-04 Phase 4)** 관리자 전용 사용자 CRUD. 검색/페이지네이션, role 변경, 비밀번호 reset, 삭제. **(2026-05-05 R4)** 방문수 컬럼(누적 PageView 카운트, locale toLocaleString).
       AdminPageStatsPage.jsx /admin/page-stats **(신규 2026-05-04 Phase 4)** 페이지별 이용현황 통계. Recharts 라인/바 차트(top 20 path), 기간 필터(7d/30d/90d), 평균/p95 latency.
       SettingsKisPage.jsx /settings/kis  **(신규 2026-05-04 Phase 4)** 사용자 본인 KIS 자격증명 등록/검증/삭제. 폼 6필드(app_key/app_secret/acnt_no/prdt_stk/prdt_fno?/hts_id?). 저장 시 즉시 검증(`POST /api/me/kis`) → ✓/✗ 표시.
 ```

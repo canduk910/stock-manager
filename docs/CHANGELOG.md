@@ -1,5 +1,62 @@
 # 변경 이력
 
+## 2026-05-05 — 매크로 음영/섹터 산점도/방문수/미국체결 + FRED 안정화
+
+### 배경
+사용자 신고 4건 (협업 사이클):
+1. 장단기 금리차 / 하이일드 스프레드 그래프에 NBER 침체 + S&P -20% 약세장 음영 표시
+2. 섹터 히트맵 상단에 상대평가 산점도 추가 (x: 추세 지속기간, y: 강도, 색상+아이콘)
+3. 사용자 관리에 사이트 방문횟수 카운트 추가
+4. HY/IG OAS partial_failure 핫픽스 (운영 EC2 IP에서 FRED CSV 차단)
++ 미국 주식 체결됐는데 체결내역/미체결 미반영 (NASD 단일 거래소 한정)
+
+### 백엔드 신규 (1)
+- `services/macro_events.py` — NBER 침체 3건(2001 닷컴 / 2007-2009 GFC / 2020 코로나) + S&P500 -20% 약세장 4건(2000-2002 / 2007-2009 / 2020.2-3 / 2022.1-10) 정적 상수 + `get_events_in_range(start, end)` 범위 클립 헬퍼. 출처 NBER + Macrotrends/Yardeni 코드 주석.
+
+### 백엔드 수정 (5)
+- `stock/macro_fetcher.py` — `_http_get_fred_csv()` Mozilla UA + timeout 25s + Content-Type 검증 + 1회 재시도(2초). `_fetch_fred_via_api(series_id)` 신규(FRED 공식 JSON API 폴백, `FRED_API_KEY` 필요). `_fetch_fred_oas` / `_fetch_fred_ig_oas` 우선순위: CSV → JSON API → 7일 stale 캐시 → 빈 dict. `_compute_sma20_trend_days(closes)` + `_compute_intensity_zscore(returns_1y)` 헬퍼 신규. `fetch_sector_returns` / `fetch_sector_returns_kr` 응답에 `trend_days` + `intensity_z` 추가, 캐시 키 v2→v3.
+- `services/macro_service.py` — `_events_for_history()` 헬퍼 + `get_yield_curve()` / `get_credit_spread()` 응답에 `events: {recessions, bear_markets}` 임베드(캐시 hit 경로 포함).
+- `services/order_us.py` — `get_overseas_executions` + `get_overseas_open_orders`가 NASD 단일 → NASD/NYSE/AMEX 3개 거래소 순회. 체결조회는 KST 어제~오늘 명시(ET 경계 누락 방지). 중복 제거 키 `order_no::exchange`.
+- `db/repositories/page_view_repo.py` — `count_by_user(user_ids: list[int]) -> dict[int, int]` 신규(1쿼리, anonymous 제외, N+1 방지).
+- `routers/admin_users.py` — `GET /api/admin/users` + `GET /{user_id}` 응답에 `visit_count` 추가.
+
+### 프론트엔드 신규 (1)
+- `frontend/src/components/macro/SectorRelativeChart.jsx` — Recharts ScatterChart, 4분면 배경 음영(↗ 모멘텀강세 / ↘ 약세지속 / ↖ 반등초기 / ↙ 약세초기), 14개 섹터 키워드 매칭 색상+아이콘(💻🏦⚕️⚡🏭🛍️🛒💡🏠⛏️📡🔋🚗🚚), x축 ±365일 / y축 ±3 z-score, 범례.
+
+### 프론트엔드 수정 (5)
+- `frontend/src/components/macro/YieldCurveSection.jsx` / `CreditSpreadSection.jsx` — 침체/약세장 ReferenceArea 음영(회색 0.18 / 붉은색 0.10). 음영 좌표를 차트 데이터셋의 실제 date에 snap + `ifOverflow="hidden"`(extendDomain 부작용 회피). 인접 이벤트 라벨 dy stagger(2년 이내 클러스터 12px 계단). 좁은 음영(<365일) 라벨 단축("코로나 약세장" → "코로나"). 백분위 ReferenceLine 보존.
+- `frontend/src/components/macro/SectorHeatmapSection.jsx` — 히트맵 상단에 SectorRelativeChart 마운트.
+- `frontend/src/pages/AdminUsersPage.jsx` — 방문수 컬럼 추가(우측 정렬, locale toLocaleString).
+- `frontend/src/pages/BacktestPage.jsx` — 시작/종료일 input `min`/`max` 속성 + 시장별 한계(US ≥ 1998-01-02 / KR ≥ 2000-01-04). 상단 가이드 박스(파란색)에 출처(QC Lean / KIS API)와 권장 기간(1년~10년) 명시.
+
+### 환경변수 신규
+- `FRED_API_KEY` (선택) — FRED 공식 JSON API 폴백용. 무료 발급(https://fred.stlouisfed.org/docs/api/api_key.html). SSM `/stock-manager/prod/FRED_API_KEY` 등록 시 운영 IP에서 CSV 차단당해도 JSON API로 자동 폴백.
+
+### 신규 테스트 (5 + 보강 1)
+- `tests/unit/test_macro_events.py` (6 케이스) — NBER/S&P 데이터 정합성, 범위 클립, 빈 범위, 인플레 약세장 포함
+- `tests/unit/test_sector_trend.py` (9 케이스) — SMA20 cross 부호/cap, z-score 표준화/None/zero std
+- `tests/unit/test_macro_fetcher_fred_fallback.py` (6 케이스) — 브라우저 UA, Content-Type 차단, 재시도, stale fallback, CSV 파서
+- `tests/unit/test_page_view_repo_count_by_user.py` (4 케이스) — 기본/미존재/anonymous 제외/빈 입력
+- `tests/api/test_admin_users_visit_count.py` (2 케이스) — 목록 + 단건 응답에 visit_count
+- `tests/integration/test_credit_spread_api.py` 보강 — events 임베드(GFC 침체/약세장) 검증 1 케이스 추가
+- 결과: 신규 27 PASS / 0 FAIL (회귀 0)
+
+### 도메인 자문 합의 (사전 확보)
+- MacroSentinel: NBER 3건 + Yardeni S&P 4건 데이터 확정, 음영 색상/투명도 합의(침체=회색 alpha 0.18 위 레이어, 약세장=붉은색 alpha 0.10 아래 레이어)
+- ValueScreener: SMA20 cross + 1Y z-score 축 정의 합의, ±365일/±3 cap
+
+### API 응답 shape 변경
+- `GET /api/macro/yield-curve` 응답 `yield_curve` 필드에 `events: {recessions, bear_markets}` 추가
+- `GET /api/macro/credit-spread` 응답 `credit_spread` 필드에 `events` + `partial_failure` 신규 토큰(`hy_oas_stale_used`, `ig_oas_stale_used`) 추가
+- `GET /api/macro/sector-heatmap` 응답 `sectors[]`에 `trend_days: int` + `intensity_z: float` 추가
+- `GET /api/admin/users` items / `GET /api/admin/users/{user_id}` 응답에 `visit_count: int` 추가
+
+### 배포
+- SSM `/stock-manager/prod/FRED_API_KEY` SecureString 등록 (Version 1, ap-northeast-2)
+- GitHub Actions 자동 배포 → EC2 .env 자동 갱신 → 컨테이너 재기동 시 적용
+
+---
+
 ## 2026-05-04 — HY OAS 하워드 막스 시계추 전면 개편 (P0~P3)
 
 ### 배경
