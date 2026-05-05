@@ -55,6 +55,24 @@
 - SSM `/stock-manager/prod/FRED_API_KEY` SecureString 등록 (Version 1, ap-northeast-2)
 - GitHub Actions 자동 배포 → EC2 .env 자동 갱신 → 컨테이너 재기동 시 적용
 
+### UI 후속 개선 (라벨 충돌 / HYG-LQD 폐기 / 섹터 3Y / 레이아웃)
+
+#### 신규
+- `frontend/src/components/macro/EventLabelsOverlay.jsx` — 시간 도메인 글로벌 row 계산 + ReferenceArea label 콜백 헬퍼. `computeEventRows(events, chartPxWidth=600)`: 라벨 픽셀 폭을 시간 폭으로 환산하여 같은 kind(rec/bear) 내 그리디 row 배정(rowEnds 트래킹). `makeLabelRenderer({kind, displayLabel, row, fill})`: viewBox 받아 row × 13px dy 적용된 SVG `<text>` 반환. 음영-라벨 분리하여 좁은 음영 위 긴 라벨이 인접 영역 침범하던 문제 원천 차단.
+
+#### 수정
+- `frontend/src/components/macro/YieldCurveSection.jsx` / `CreditSpreadSection.jsx` — 라벨 충돌 회피 로직을 EventLabelsOverlay로 이관. ReferenceArea 자체 `label` 콜백 패턴 사용(viewBox 100% 보장으로 글자 사라짐 없음). Customized 시도 폐기(일부 환경에서 chart internals props 미주입). 인접 라벨이 같은 픽셀 영역에 떨어지면 row × 13px 자동 적층.
+- `frontend/src/components/macro/YieldCurveSection.jsx` — **3단 레이아웃** 도입: 1행 4금리 카드(grid-cols-4) → 2행 좌(SpreadCard: 10Y-3M 큰 숫자 + 역전 경고/정상 안내) | 우(수익률 곡선 반쪽) → 3행 10Y-3M 스프레드 추이 풀폭(차트 높이 h-56 → h-80). 60년 시계열 + 음영 라벨 가독성 개선.
+- `frontend/src/components/macro/SectorRelativeChart.jsx` — 고정 도메인 [-365, 365] × [-3, 3] → 데이터 분포 기반 동적 도메인(`max(|값|) × 1.18`, 최소 ±30일/±0.5σ 보장). 4분면 음영 ReferenceArea도 동일 도메인으로 자동 확장. dot 크기 60→110으로 가시성 개선. 부제에 현재 스케일 표기.
+- `stock/macro_fetcher.py` `fetch_credit_spread()` — **HYG/LQD ETF 수익률/비율 차트 폐기**(의미 약화). yfinance HYG/LQD 호출 블록 + `hyg_yield/lqd_yield/spread/spread_direction/history` 응답 필드 제거. 캐시 키 v4→v5. FRED 양쪽 실패 시 캐시 미저장 가드. 매크로 사이클 입력의 `credit_direction`은 `oas_momentum_6m` 부호 기반(>0.5 widening / <-0.5 narrowing / else stable)으로 대체.
+- `stock/macro_fetcher.py` `fetch_sector_returns` / `fetch_sector_returns_kr` — **섹터 히트맵 3Y 항상 미표시 버그 수정**. yfinance `period="3y"`는 거래일 ~755개 반환 → `_calc_return(closes, 756)`은 `len ≥ 757` 요구로 항상 None 반환했음. `period="3y" → "5y"`로 확장(거래일 ~1260, 3Y/SMA20 둘 다 안전). 캐시 키 v3→v4.
+- `services/macro_service.py` / `routers/macro.py` — `get_credit_spread()` docstring "HYG/LQD" 표기 제거.
+- `frontend/src/components/macro/CreditSpreadSection.jsx` — ETF 수익률 3카드 + HYG/LQD 비율 추이 차트 + `DIRECTION_STYLE` 상수 + `spread_direction` 분기 모두 삭제.
+- `main.py` — **방문수 카운트 항상 0이던 버그 수정**. BaseHTTPMiddleware는 새 task에서 라우터 호출 → 라우터의 ContextVar가 미들웨어로 propagate 안 돼 모든 PageView가 anonymous(NULL) 저장 → `count_by_user`가 anonymous 제외하므로 visit_count=0. `_extract_user_id_from_jwt(request)` 신규로 미들웨어 단계에서 Authorization Bearer JWT를 직접 `verify_token()` 파싱하여 user_id 추출.
+
+#### 신규 테스트 (8 케이스 — 침체/약세장 시계열 확장 반영)
+- `tests/unit/test_macro_events.py` — 6 → 8 케이스: 1962~2022 전 시계열 침체 6건/약세장 5건 포함 검증 + GFC → 서브프라임 라벨 변경
+
 ---
 
 ## 2026-05-04 — HY OAS 하워드 막스 시계추 전면 개편 (P0~P3)

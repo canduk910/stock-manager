@@ -97,11 +97,12 @@ frontend/
       macro/              IndexSection (4지수+1년스파크라인+툴팁), SentimentSection (VIX+버핏+공포탐욕),
                           NewsSection (한국+NYT 2컬럼), InvestorSection (4명 투자자 코멘트 카드),
                           MacroCycleSection (4단계 경기국면 다이어그램+**투자체제 나란히 표시**+괴리설명+confidence+지표카드+hover 툴팁),
-                          YieldCurveSection (수익률곡선 LineChart+스프레드 시계열 AreaChart, **R2 2026-05-05**: NBER 침체(회색) + S&P -20% 약세장(붉은색) ReferenceArea 음영, 데이터셋 snap + 인접 라벨 dy stagger),
-                          CreditSpreadSection (FRED HY OAS **백분위 5단계 시계추**(extreme_greed/greed/normal/fear/extreme_fear)+백분위 축 게이지+절댓값 라벨 병기+5년차트(p10/p25/p75/p90 동적 ReferenceLine) + IG OAS·HY-IG 보조카드(>5%p 정크패닉) + HYG/LQD 스프레드+비율 시계열, **R2 2026-05-05**: 동일 음영 + snap + stagger 적용),
+                          YieldCurveSection (**3단 레이아웃**: 1행 4금리 카드(grid-cols-4) → 2행 SpreadCard(10Y-3M 큰 숫자+역전 경고/정상)|수익률곡선 → 3행 10Y-3M 스프레드 추이 풀폭(h-80). NBER 침체(회색) + S&P -20% 약세장(붉은색) ReferenceArea 음영. 라벨 충돌 회피는 EventLabelsOverlay 위임),
+                          CreditSpreadSection (FRED HY OAS **백분위 5단계 시계추**(extreme_greed/greed/normal/fear/extreme_fear)+백분위 축 게이지+절댓값 라벨 병기+5년차트(p10/p25/p75/p90 동적 ReferenceLine) + IG OAS·HY-IG 보조카드(>5%p 정크패닉). **(2026-05-05)** HYG/LQD ETF 수익률/비율 차트 폐기. 침체/약세장 음영은 EventLabelsOverlay 공유),
+                          EventLabelsOverlay (**신규 2026-05-05**: `computeEventRows(events, chartPxWidth=600)` + `makeLabelRenderer({kind, displayLabel, row, fill})`. 시간 도메인 글로벌 row 계산(라벨 픽셀폭→시간폭 환산, 같은 kind 내 그리디 row 배정) + ReferenceArea label 콜백 헬퍼(viewBox 받아 row × 13px dy 적용). 침체/약세장 라벨 충돌 원천 차단),
                           CurrencySection (4환율 카드+스파크라인), CommoditySection (5원자재 카드+스파크라인),
-                          SectorHeatmapSection (11섹터×5기간(1M/3M/6M/1Y/3Y) 히트맵, 초록~빨강 그라데이션, **R3 2026-05-05**: 상단에 SectorRelativeChart 마운트),
-                          SectorRelativeChart (**신규 2026-05-05 R3**: ScatterChart, x=SMA20 cross 경과일 ±365 / y=1Y z-score ±3, 4분면 음영, 14개 섹터 키워드 매칭 색상+아이콘(💻🏦⚕️⚡🏭🛍️🛒💡🏠⛏️📡🔋🚗🚚), 범례)
+                          SectorHeatmapSection (11섹터×5기간(1M/3M/6M/1Y/3Y) 히트맵, 초록~빨강 그라데이션, 상단에 SectorRelativeChart 마운트),
+                          SectorRelativeChart (**신규 2026-05-05 R3**: ScatterChart, x=SMA20 cross 경과일 / y=1Y z-score, **데이터 기반 동적 도메인**(`max(|값|) × 1.18`, 최소 ±30일/±0.5σ), 4분면 음영, 14개 섹터 키워드 매칭 색상+아이콘(💻🏦⚕️⚡🏭🛍️🛒💡🏠⛏️📡🔋🚗🚚), 범례, dot 크기 110)
       tax/                TaxSummaryCards (4카드: 양도차익/공제/과세표준/세액), TaxBySymbolChart (종목별 BarChart),
                           TaxTransactionsTable (매매내역+수동추가), TaxCalculationDetail (FIFO lots 상세), TaxDisclaimer (면책배너),
                           TaxSimulationPanel (가상매도 시뮬레이션: 보유종목 선택+매도가/수량 입력+예상 세액)
