@@ -1,6 +1,8 @@
 import asyncio
 import os
 import threading
+from typing import Optional
+
 import uvicorn
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
@@ -138,6 +140,28 @@ _PAGE_VIEW_EXCLUDE_PREFIXES = (
 )
 
 
+def _extract_user_id_from_jwt(request: Request) -> Optional[int]:
+    """미들웨어 단계에서 Authorization 헤더의 JWT를 직접 파싱해 user_id 추출.
+
+    2026-05-05 fix: 라우터에서 set한 ContextVar는 BaseHTTPMiddleware로 propagate
+    되지 않아 모든 PageView가 anonymous(user_id=None)로 저장되던 문제 해결.
+    JWT 파싱 실패/누락은 anonymous로 폴백.
+    """
+    auth = request.headers.get("authorization") or request.headers.get("Authorization")
+    if not auth or not auth.lower().startswith("bearer "):
+        return None
+    token = auth.split(None, 1)[1].strip()
+    if not token:
+        return None
+    try:
+        from services.auth_service import verify_token
+        payload = verify_token(token, expected_type="access")
+        sub = payload.get("sub")
+        return int(sub) if sub is not None else None
+    except Exception:
+        return None
+
+
 @app.middleware("http")
 async def record_page_view_middleware(request: Request, call_next):
     import time as _t
@@ -149,12 +173,8 @@ async def record_page_view_middleware(request: Request, call_next):
     if any(path.startswith(p) for p in _PAGE_VIEW_EXCLUDE_PREFIXES):
         return response
 
-    # auth_deps.get_current_user는 ContextVar에 user_id를 set한다 (Phase 4 D.3).
-    try:
-        from routers._kis_auth import get_current_user_id
-        user_id = get_current_user_id()
-    except Exception:
-        user_id = None
+    # 인증된 요청이면 user_id 기록, 아니면 anonymous(NULL).
+    user_id = _extract_user_id_from_jwt(request)
 
     async def _record():
         try:
