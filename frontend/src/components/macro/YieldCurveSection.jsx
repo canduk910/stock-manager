@@ -11,7 +11,7 @@ const fmt = (v) =>
     ? v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
     : '-'
 
-function CurrentRatesCards({ current, spread, inverted }) {
+function CurrentRatesCards({ current }) {
   const entries = [
     { label: '3개월', value: current?.['3m'] },
     { label: '5년', value: current?.['5y'] },
@@ -19,24 +19,36 @@ function CurrentRatesCards({ current, spread, inverted }) {
     { label: '30년', value: current?.['30y'] },
   ]
   return (
-    <div className="flex flex-wrap gap-3 mb-4">
+    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
       {entries.map((e) => (
-        <div key={e.label} className="rounded-lg border bg-white px-4 py-2 shadow-sm">
+        <div key={e.label} className="rounded-lg border bg-white px-4 py-3 shadow-sm">
           <div className="text-xs text-gray-500">{e.label}</div>
-          <div className="text-lg font-bold text-gray-900">{fmt(e.value)}%</div>
+          <div className="text-xl font-bold text-gray-900">{fmt(e.value)}%</div>
         </div>
       ))}
-      <div className="rounded-lg border bg-white px-4 py-2 shadow-sm">
-        <div className="text-xs text-gray-500">10Y-3M 스프레드</div>
-        <div className={`text-lg font-bold ${spread < 0 ? 'text-red-600' : 'text-emerald-600'}`}>
-          {fmt(spread)}%
-        </div>
+    </div>
+  )
+}
+
+function SpreadCard({ spread, inverted }) {
+  return (
+    <div className="rounded-lg border bg-white p-4 shadow-sm h-full flex flex-col justify-center">
+      <div className="text-sm font-medium text-gray-500 mb-1">10Y-3M 스프레드</div>
+      <div className={`text-3xl font-bold ${spread < 0 ? 'text-red-600' : 'text-emerald-600'}`}>
+        {fmt(spread)}%
       </div>
-      {inverted && (
-        <div className="flex items-center">
+      {inverted ? (
+        <div className="mt-2">
           <span className="inline-block px-2 py-1 rounded bg-red-100 text-red-700 text-xs font-semibold">
-            역전 경고
+            ⚠ 역전 경고
           </span>
+          <div className="text-[11px] text-gray-500 mt-1">
+            장단기 금리 역전 — 경기 침체 선행 신호
+          </div>
+        </div>
+      ) : (
+        <div className="text-[11px] text-gray-500 mt-2">
+          정상 (장기금리 &gt; 단기금리)
         </div>
       )}
     </div>
@@ -158,7 +170,7 @@ function SpreadHistoryChart({ history, events }) {
           ■ 회색=NBER 침체 / ▼ 붉은색=S&amp;P -20% 약세장
         </span>
       </div>
-      <div className="h-56">
+      <div className="h-80">
         <ResponsiveContainer width="100%" height="100%">
           <AreaChart data={history}>
             <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
@@ -249,15 +261,15 @@ export default function YieldCurveSection({ data, loading, error }) {
   return (
     <section>
       <h2 className="text-lg font-semibold text-gray-900 mb-3">장단기 금리차</h2>
-      <CurrentRatesCards
-        current={yc.current}
-        spread={yc.spread_10y_3m}
-        inverted={yc.inverted}
-      />
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      {/* 1행: 현재 금리 4개 카드 */}
+      <CurrentRatesCards current={yc.current} />
+      {/* 2행: 좌측 스프레드 카드 + 우측 수익률 곡선 (반쪽) */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+        <SpreadCard spread={yc.spread_10y_3m} inverted={yc.inverted} />
         <CurveShapeChart current={yc.current} />
-        <SpreadHistoryChart history={yc.history} events={yc.events} />
       </div>
+      {/* 3행: 장단기 금리차 시계열 (전체 폭) */}
+      <SpreadHistoryChart history={yc.history} events={yc.events} />
     </section>
   )
 }
