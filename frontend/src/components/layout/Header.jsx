@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../hooks/useAuth'
 import ChangePasswordModal from '../common/ChangePasswordModal'
+import AiUsageGauge from '../common/AiUsageGauge'
 
 // 그룹별 구분: 종목 정보 | 자산 관리 (KIS 필수) | 관리 (admin only)
 // `requireKis: true` 항목은 KIS 미등록 시 회색+🔒 + 클릭 → /settings/kis 이동.
@@ -351,6 +352,7 @@ export default function Header({ widthKey, onWidthChange, maxCls }) {
 
           {/* 너비 선택 */}
           <div className="ml-auto flex items-center gap-4">
+            <AiUsageGauge />
             <div className="flex rounded-md border border-gray-600 overflow-hidden text-xs font-medium">
               {WIDTH_OPTIONS.map((opt) => (
                 <button

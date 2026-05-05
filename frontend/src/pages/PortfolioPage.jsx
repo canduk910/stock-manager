@@ -8,6 +8,7 @@ import RegimeBanner from '../components/portfolio/RegimeBanner'
 import AllocationChart from '../components/portfolio/AllocationChart'
 import ProfitChart from '../components/portfolio/ProfitChart'
 import AdvisorPanel from '../components/advisor/AdvisorPanel'
+import ReportChatBubble from '../components/common/ReportChatBubble'
 
 export default function PortfolioPage({ notify }) {
   const {
@@ -82,6 +83,14 @@ export default function PortfolioPage({ notify }) {
           />
         </div>
       )}
+
+      {/* 보고서 챗봇 — 포트폴리오 보고서 존재 시 마운트 */}
+      <ReportChatBubble
+        kind="portfolio"
+        contextId={advisor.result?.report_id}
+        contextLabel="포트폴리오"
+        disabled={!advisor.result?.report_id}
+      />
     </div>
   )
 }

@@ -1,5 +1,79 @@
 # 변경 이력
 
+## 2026-05-06 — 자문보고서·포트폴리오 보고서 챗봇 + 상단 AI 사용량 게이지
+
+### 배경
+사용자 요청 2건:
+1. 종목 자문보고서 / 포트폴리오 자문보고서 페이지에서 보고서 컨텍스트를 가지고 사용자가 궁금한 점을 대화로 확인할 수 있는 작은 챗봇 기능
+2. 각 사용자가 자신의 일간 AI 호출 한도를 인지할 수 있도록 상단 메뉴바에 게이지바 + 수치 표시
+
+### 보고서 챗봇 신규
+
+**백엔드 (2 서비스 함수 + 2 라우터 엔드포인트)**
+
+- `services/advisory_service.py` — `chat_with_report(code, market, report_id, messages, user_id)` 추가.
+  - `advisory_store.get_report_by_id(report_id)` → `user_id` + `code` + `market` 일치 검증, 미일치 시 `NotFoundError`(404).
+  - System prompt 빌드: 보고서 본문(JSON) 첨부 + 답변 가이드라인(보고서에 없는 사실 추정 금지 / 새 의견 생성 금지 / 한국어 간결 답변 / "보고서에 따르면 ~로 평가됩니다" 형식).
+  - 슬라이딩 윈도우(최근 20개 메시지). 입력 검증(`role` user/assistant 한정 / `content` 4000자·50개 상한 / 마지막 user 강제) → `ServiceError`(400).
+  - `ai_gateway.call_openai_chat(service_name="advisory_chat", max_completion_tokens=1500)`.
+  - 반환: `{reply, model, report_id}`.
+
+- `services/portfolio_advisor_service.py` — `chat_with_report(report_id, messages, user_id)` 추가.
+  - `advisory_store.get_portfolio_report_by_id(report_id)`, 라우터에서 `require_admin`로 권한 차단(`PortfolioReport`는 user_id 컬럼 부재).
+  - System prompt에 진단/리밸런싱/매매안/시장코멘트 첨부.
+  - 동일 슬라이딩 윈도우 + `service_name="portfolio_chat"`.
+
+- `routers/advisory.py` — `POST /api/advisory/{code}/chat` 추가. Pydantic `ChatBody { market, report_id, messages: ChatMessage[] }`.
+- `routers/portfolio_advisor.py` — `POST /api/portfolio-advisor/chat` 추가(`require_admin`).
+
+**프론트엔드 (1 API 모듈 + 1 공용 컴포넌트 + 2 페이지 통합)**
+
+- `frontend/src/api/chatbot.js`(신규) — `chatAboutAdvisory(code, market, reportId, messages)` / `chatAboutPortfolio(reportId, messages)`.
+- `frontend/src/components/common/ReportChatBubble.jsx`(신규) — 우하단 플로팅 챗봇.
+  - Props: `kind('advisory'|'portfolio')` / `contextId(reportId)` / `contextLabel` / `market` / `code` / `disabled`.
+  - 닫힘=원형 💬 버튼(`fixed bottom-6 right-6 z-40`, indigo-600). disabled 시 회색+tooltip "보고서 생성 후 이용 가능".
+  - 열림=`w-96 max-h-[70vh]` 카드(헤더 indigo-600 + 메시지 스크롤 + 예시 질문 칩 3개 + textarea + 전송).
+  - 상태: `useState`로 messages/input/pending/error 관리. `contextId`/`kind` 변경 시 messages 초기화. `AbortController`로 unmount 시 cancel.
+  - Enter 전송 / Shift+Enter 줄바꿈. 응답 후 `window.dispatchEvent(new Event('ai-usage-changed'))` (성공/실패 모두).
+  - 모바일: `right-6 left-4` 풀폭.
+- `frontend/src/pages/DetailPage.jsx` — AI 자문 서브탭 활성 시점에 `<ReportChatBubble kind="advisory" code={symbol} market={market} contextId={report?.id} disabled={!report?.id} />` 마운트(다른 탭 미렌더링).
+- `frontend/src/pages/PortfolioPage.jsx` — `<ReportChatBubble kind="portfolio" contextId={advisor.result?.report_id} disabled={!advisor.result?.report_id} />` 상시 마운트.
+
+**도메인 정합성**: 신규 투자 로직 0건. 보고서 본문 재설명 한정. System prompt 가드("보고서 외 추정 금지", "새 의견 생성 금지", "예측·확정 표현 금지")로 환각 차단.
+
+**영속성**: DB 마이그레이션 0건. 메시지 히스토리는 클라이언트 useState만 보관 → 페이지 이동·새로고침 시 초기화. 서버 stateless.
+
+### 상단 AI 사용량 게이지 신규
+
+**백엔드 신규 0** — 기존 `GET /api/admin/ai-usage/me` (`routers/admin.py:50-53`) 그대로 재사용. `services/ai_gateway.py:get_ai_usage_status(user_id) → {used, limit, remaining}`.
+
+**프론트엔드 (1 훅 + 1 컴포넌트 + Header/App 통합)**
+
+- `frontend/src/hooks/useAiUsage.jsx`(신규) — Context Provider.
+  - `fetchMyAiUsage()` 호출, `usage`/`loading`/`refresh` 노출.
+  - 마운트·`useAuth.user` 변화 시 1회 fetch. 로그아웃 시 `usage=null`.
+  - `window.addEventListener('ai-usage-changed', refresh)` 등록 → 챗봇/Analyze 응답 후 자동 갱신. **폴링 X**(이벤트 기반).
+- `frontend/src/components/common/AiUsageGauge.jsx`(신규) — 가로 24px 게이지바 + `used/limit` 수치.
+  - 임계 색상: <50% emerald-400 / 50~80% indigo-400 / 80~95% amber-400 / ≥95% red-500.
+  - hover tooltip: "오늘 AI 호출 사용량 {used}/{limit} · 남은 횟수 {remaining}".
+  - `usage=null` 또는 `limit≤0` 시 미렌더(데스크톱 전용 `hidden sm:flex`).
+- `frontend/src/components/layout/Header.jsx` — 우측 너비 토글 좌측에 `<AiUsageGauge />` 마운트.
+- `frontend/src/App.jsx` — 최상단을 `<AiUsageProvider>`로 래핑.
+- `frontend/src/hooks/useAdvisory.js` — `generate()` 응답 후(성공/실패 모두) `dispatchEvent('ai-usage-changed')`.
+- `frontend/src/hooks/usePortfolioAdvisor.js` — `analyze()` 동일.
+
+### 테스트
+- `tests/unit/test_advisory_service_chat.py`(신규, 10 케이스) — 검증(빈/role/길이/마지막 user) / 권한(미존재/타인/code 불일치) / 정상 호출 / 슬라이딩 윈도우(30→20).
+- `tests/unit/test_portfolio_advisor_service_chat.py`(신규, 3 케이스) — 빈 messages / 미존재 / system prompt 보고서 섹션 포함 검증.
+- `tests/api/test_advisory_chat.py`(신규, 5 케이스) — 404/400/422/모킹 정상.
+- `tests/api/test_portfolio_chat.py`(신규, 3 케이스) — 404/400/모킹 정상.
+- 단위 13 PASS / 회귀 0 (629 PASS 유지).
+
+### 결과
+- 도메인 변경 0건. 신규 백엔드 엔드포인트 2 + 프론트 컴포넌트 2 + 통합 5 + 테스트 21 케이스. DB 마이그레이션 0건.
+
+---
+
 ## 2026-05-05 — 매크로 음영/섹터 산점도/방문수/미국체결 + FRED 안정화
 
 ### 배경

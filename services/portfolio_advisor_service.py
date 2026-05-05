@@ -780,3 +780,92 @@ def get_report_by_id(report_id: int) -> dict:
     if not result:
         raise NotFoundError("해당 자문 리포트를 찾을 수 없습니다.")
     return result
+
+
+# ── 보고서 챗봇 ────────────────────────────────────────────────────────────────
+
+_CHAT_HISTORY_MAX_TURNS = 20
+_CHAT_MESSAGE_MAX_CHARS = 4000
+
+_CHAT_SYSTEM_TEMPLATE = """당신은 사용자가 아래 포트폴리오 자문보고서 내용을 이해하도록 돕는 전문 어시스턴트입니다.
+
+[규칙]
+1. 답변은 반드시 보고서에 수록된 내용 범위 안에서만 제공합니다.
+2. 보고서에 없는 사실(개별 종목 현재가, 최신 거시 데이터 등)은 추정하지 말고 "보고서에는 해당 정보가 없습니다"라고 안내합니다.
+3. 새로운 매매 의견을 만들지 마세요. 보고서의 진단/리밸런싱/매매안/시장코멘트를 인용하여 설명하세요.
+4. 예측·확정 표현 대신 "보고서에 따르면 ~로 평가됩니다" 형식을 사용합니다.
+5. 한국어로 간결하고 명확하게 답변합니다.
+
+[포트폴리오 자문보고서 본문 (JSON)]
+{report_json}
+"""
+
+
+def _trim_chat_history(messages: list[dict]) -> list[dict]:
+    if len(messages) <= _CHAT_HISTORY_MAX_TURNS:
+        return list(messages)
+    return list(messages[-_CHAT_HISTORY_MAX_TURNS:])
+
+
+def _validate_chat_messages(messages) -> list[dict]:
+    from services.exceptions import ServiceError
+
+    if not isinstance(messages, list) or not messages:
+        raise ServiceError("messages는 비어있지 않은 배열이어야 합니다.")
+    if len(messages) > 50:
+        raise ServiceError("messages는 최대 50개까지 허용됩니다.")
+    cleaned: list[dict] = []
+    for idx, msg in enumerate(messages):
+        if not isinstance(msg, dict):
+            raise ServiceError(f"messages[{idx}] 형식이 올바르지 않습니다.")
+        role = msg.get("role")
+        content = msg.get("content")
+        if role not in ("user", "assistant"):
+            raise ServiceError(f"messages[{idx}].role은 user/assistant 여야 합니다.")
+        if not isinstance(content, str) or not content.strip():
+            raise ServiceError(f"messages[{idx}].content는 비어있지 않은 문자열이어야 합니다.")
+        if len(content) > _CHAT_MESSAGE_MAX_CHARS:
+            raise ServiceError(
+                f"messages[{idx}].content는 {_CHAT_MESSAGE_MAX_CHARS}자를 초과할 수 없습니다."
+            )
+        cleaned.append({"role": role, "content": content})
+    if cleaned[-1]["role"] != "user":
+        raise ServiceError("마지막 메시지는 user 역할이어야 합니다.")
+    return cleaned
+
+
+def chat_with_report(report_id: int, messages: list, user_id: int) -> dict:
+    """이미 생성된 포트폴리오 자문보고서에 대한 stateless 챗봇.
+
+    PortfolioReport는 user_id 컬럼이 없으나 라우터에서 require_admin로 권한 차단됨.
+    """
+    if not OPENAI_API_KEY:
+        raise ConfigError("OPENAI_API_KEY가 설정되지 않았습니다.")
+
+    cleaned = _validate_chat_messages(messages)
+
+    report_row = advisory_store.get_portfolio_report_by_id(int(report_id))
+    if not report_row:
+        raise NotFoundError("포트폴리오 자문보고서를 찾을 수 없습니다.")
+
+    report_body = report_row.get("report") or {}
+    try:
+        report_json = json.dumps(report_body, ensure_ascii=False)
+    except Exception:
+        report_json = str(report_body)
+
+    system_prompt = _CHAT_SYSTEM_TEMPLATE.format(report_json=report_json)
+
+    history = _trim_chat_history(cleaned)
+    chat_messages = [{"role": "system", "content": system_prompt}, *history]
+
+    from services.ai_gateway import call_openai_chat
+    resp = call_openai_chat(
+        messages=chat_messages,
+        user_id=user_id,
+        service_name="portfolio_chat",
+        max_completion_tokens=1500,
+    )
+    reply = (resp.choices[0].message.content or "").strip()
+    model_used = getattr(resp, "model", None) or OPENAI_MODEL
+    return {"reply": reply, "model": model_used, "report_id": int(report_id)}

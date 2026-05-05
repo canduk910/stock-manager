@@ -35,6 +35,7 @@ frontend/
       tax.js              fetchTaxSummary(year) / fetchTaxTransactions / syncTax / recalculateTax(year) / fetchTaxCalculations(year,symbol) / addTaxTransaction / deleteTaxTransaction / fetchSimulationHoldings / simulateTax → /api/tax/* (FIFO 전용, 시뮬레이션 포함)
       admin.js            fetchAiUsage / fetchMyAiUsage / fetchAiLimits / setAiLimit / deleteAiLimit / fetchAuditLog → /api/admin/* (AI 사용량 관리). **(2026-05-04 Phase 4)** fetchUsers/fetchUserById/patchUser/deleteUser/fetchPageStats 추가.
       me.js               **(신규 2026-05-04 Phase 4)** getMyKis/saveMyKis/deleteMyKis/validateMyKis → /api/me/kis (사용자 본인 KIS 자격증명 등록/검증/삭제).
+      chatbot.js          **(신규 2026-05-06)** chatAboutAdvisory(code, market, reportId, messages) / chatAboutPortfolio(reportId, messages) → 자문보고서·포트폴리오 보고서 컨텍스트 stateless 챗봇.
     hooks/
       useAsyncState.js    useAsyncState(initialData) — 비동기 data/loading/error 상태 관리 공통 훅. run(asyncFn)으로 자동 관리.
       useScreener.js      { data, loading, error, search }
@@ -55,11 +56,14 @@ frontend/
       usePortfolio.js     포트폴리오 대시보드 훅. balance+sentiment 병렬 로드 + 자산배분/안전마진등급 계산.
       useBacktest.js      백테스트 훅. useMcpStatus(MCP연결상태) / usePresets(전략목록) / useBacktest(실행+3초폴링+결과, MAX_POLLS=200=10분) / useBacktestHistory(이력조회).
       useTax.js           양도세 훅. useTaxSummary / useTaxTransactions(sync/add/remove) / useTaxCalculations(recalc) / useTaxSimulation(loadHoldings/simulate). FIFO 전용.
+      useAiUsage.jsx      **(신규 2026-05-06)** AI 사용량 전역 Context Provider. `fetchMyAiUsage()` 호출 + `'ai-usage-changed'` window 이벤트 자동 갱신(폴링 없음). 로그아웃 시 usage=null 클리어. `useAiUsage()`로 `{ usage, loading, refresh }` 접근.
     components/
-      layout/Header.jsx   네비게이션 바 (5개 탑레벨: 시세판|관심종목|분석▼|포트폴리오|매매▼, 그룹 구분선, 드롭다운 hover+click). 모바일: 햄버거 메뉴(md:hidden) + 세로 네비게이션 패널
+      layout/Header.jsx   네비게이션 바 (5개 탑레벨: 시세판|관심종목|분석▼|포트폴리오|매매▼, 그룹 구분선, 드롭다운 hover+click). 모바일: 햄버거 메뉴(md:hidden) + 세로 네비게이션 패널. **(2026-05-06)** 우측 너비 토글 좌측에 `<AiUsageGauge />` 마운트.
       common/             LoadingSpinner, ErrorAlert, EmptyState, DataTable, ToastNotification
                           WatchlistButton (code/market/alreadyAdded props, ★/+ 버튼, StockTable·FilingsTable 공용)
                           CandlestickChart (ohlcv/indicators props, 캔들+MA5/20/60+BB+거래량, PriceChartPanel·TechnicalPanel 공용)
+                          **AiUsageGauge** (신규 2026-05-06) — Header 우측 가로 24px 게이지바 + `used/limit` 수치 + 80%/95% 임계 색상(amber/red). useAiUsage 훅 사용. limit≤0이면 미렌더.
+                          **ReportChatBubble** (신규 2026-05-06) — 우하단 플로팅 챗봇. props: `kind('advisory'|'portfolio')`/`contextId(reportId)`/`contextLabel`/`market`/`code`/`disabled`. 닫힘=원형 💬 버튼, 열림=`w-96 max-h-[70vh]` 카드(헤더+메시지 스크롤+예시 질문 칩 3개+textarea+전송). contextId 변경 시 messages 초기화. 응답 후 `dispatchEvent('ai-usage-changed')`. 모바일 풀폭(`right-6 left-4`).
       screener/           FilterPanel (구루 프리셋 드롭다운+체제 토글+guru_top), StockTable (섹터+52H대비+서준식 기대수익률+구루점수배지+Value Trap 경고)
       earnings/           FilingsTable (국내/미국 컬럼 분기, market prop)
       balance/            PortfolioSummary, HoldingsTable, OverseasHoldingsTable, FuturesTable

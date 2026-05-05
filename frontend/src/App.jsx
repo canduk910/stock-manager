@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { useAuth } from './hooks/useAuth'
+import { AiUsageProvider } from './hooks/useAiUsage'
 import Header from './components/layout/Header'
 import ProtectedRoute from './components/common/ProtectedRoute'
 import LoginPage from './pages/LoginPage'
@@ -47,6 +48,7 @@ export default function App() {
 
   // 로그인/회원가입 페이지는 Header 없이 렌더링
   return (
+    <AiUsageProvider>
     <div className="min-h-screen bg-gray-50">
       <Routes>
         <Route path="/login" element={<LoginPage />} />
@@ -92,5 +94,6 @@ export default function App() {
         } />
       </Routes>
     </div>
+    </AiUsageProvider>
   )
 }

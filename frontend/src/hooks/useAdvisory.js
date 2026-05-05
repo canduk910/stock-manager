@@ -93,8 +93,10 @@ export function useAdvisoryReport() {
       // 히스토리 갱신
       const h = await fetchReportHistory(code, market)
       setHistory(h)
+      try { window.dispatchEvent(new Event('ai-usage-changed')) } catch (_) {}
     } catch (e) {
       setError(e.message)
+      try { window.dispatchEvent(new Event('ai-usage-changed')) } catch (_) {}
     } finally {
       setLoading(false)
     }

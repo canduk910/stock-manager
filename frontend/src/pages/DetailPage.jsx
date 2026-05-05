@@ -11,6 +11,7 @@ import TechnicalPanel from '../components/advisory/TechnicalPanel'
 import AIReportPanel from '../components/advisory/AIReportPanel'
 import ResearchDataPanel from '../components/advisory/ResearchDataPanel'
 import ValuationChart from '../components/detail/ValuationChart'
+import ReportChatBubble from '../components/common/ReportChatBubble'
 
 const TABS = [
   { id: 'financials', label: '재무분석' },
@@ -265,6 +266,18 @@ export default function DetailPage() {
             )}
           </div>
         </>
+      )}
+
+      {/* 보고서 챗봇 — AI 자문 탭 + 보고서 존재 시에만 마운트 */}
+      {activeTab === 'report' && subTab === 'ai' && (
+        <ReportChatBubble
+          kind="advisory"
+          contextId={report?.id}
+          contextLabel={data?.basic?.name || symbol}
+          code={symbol}
+          market={market}
+          disabled={!report?.id}
+        />
       )}
     </div>
   )

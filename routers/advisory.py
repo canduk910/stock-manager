@@ -140,6 +140,35 @@ def analyze(code: str, market: str = Query("KR"), user: dict = Depends(get_curre
     return result
 
 
+class ChatMessage(BaseModel):
+    role: str
+    content: str
+
+
+class ChatBody(BaseModel):
+    market: str = "KR"
+    report_id: int
+    messages: list[ChatMessage]
+
+
+@router.post("/{code}/chat")
+def chat(code: str, body: ChatBody, user: dict = Depends(get_current_user)):
+    """이미 생성된 자문보고서에 대한 stateless 챗봇.
+
+    messages 히스토리는 클라이언트가 보관하고 매 요청에 동봉한다.
+    서버는 보고서 본문을 system prompt에 주입하여 답변한다.
+    """
+    code = code.upper()
+    market = (body.market or "KR").upper()
+    return advisory_service.chat_with_report(
+        code,
+        market,
+        body.report_id,
+        [m.model_dump() for m in body.messages],
+        user_id=user["id"],
+    )
+
+
 @router.post("/{code}/research")
 def collect_research(code: str, market: str = Query("KR"), name: str = Query(None),
                      user: dict = Depends(get_current_user)):
