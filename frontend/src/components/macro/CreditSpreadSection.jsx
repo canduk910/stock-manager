@@ -166,9 +166,7 @@ export default function CreditSpreadSection({ data, loading, error }) {
 
   const hyIgPanic = hy_ig_spread != null && hy_ig_spread > 5.0
 
-  // R2 (2026-05-05 수정): 음영 이벤트의 x1/x2를 차트 데이터의 실제 date에 snap.
-  // categorical XAxis는 데이터에 없는 좌표를 인식 못해 ifOverflow에 따라 차트 끝까지
-  // 확장될 수 있음. 데이터 범위 밖 이벤트는 제외.
+  // R2 (2026-05-05): 음영 좌표 snap + 인접 라벨 stagger.
   const snappedEvents = useMemo(() => {
     if (!events || !oasChartData.length) return { recessions: [], bear_markets: [] }
     const dataDates = new Set(oasChartData.map((d) => d.date))
@@ -194,11 +192,35 @@ export default function CreditSpreadSection({ data, loading, error }) {
       if (!x1 || !x2 || x1 === x2) return null
       return { ...e, x1, x2 }
     }
-    return {
-      recessions: (events.recessions || []).map(adapt).filter(Boolean),
-      bear_markets: (events.bear_markets || []).map(adapt).filter(Boolean),
+    // 인접 그룹(2년 이내 gap) 내에서 라벨 dy stagger
+    const CLUSTER_DAYS = 730
+    const STEP = 12
+    const stagger = (arr, sign) => {
+      const sortedE = [...arr].sort((a, b) => (a.x1 < b.x1 ? -1 : 1))
+      let idx = 0
+      let prevEnd = null
+      return sortedE.map((e) => {
+        if (prevEnd != null) {
+          const gapDays = (new Date(e.x1) - new Date(prevEnd)) / 86400000
+          idx = gapDays < CLUSTER_DAYS ? idx + 1 : 0
+        }
+        prevEnd = e.x2
+        return { ...e, labelDy: sign * idx * STEP }
+      })
     }
+    const recs = stagger((events.recessions || []).map(adapt).filter(Boolean), -1)
+    const bears = stagger((events.bear_markets || []).map(adapt).filter(Boolean), 1)
+    return { recessions: recs, bear_markets: bears }
   }, [events, oasChartData])
+
+  // 좁은 음영 라벨 단축 (< 365일이면 약세장/침체 suffix 제거)
+  const shortLabel = (label, x1, x2) => {
+    const days = (new Date(x2) - new Date(x1)) / 86400000
+    if (days < 365 && label.length > 5) {
+      return label.replace('약세장', '').replace('침체', '').trim() || label
+    }
+    return label
+  }
 
   return (
     <section>
@@ -312,7 +334,7 @@ export default function CreditSpreadSection({ data, loading, error }) {
                   labelFormatter={(l) => l}
                   contentStyle={{ fontSize: 12, borderRadius: 8 }}
                 />
-                {/* R2 (2026-05-05 수정): snap된 좌표 + ifOverflow="hidden" */}
+                {/* R2 (2026-05-05): snap + dy stagger + 좁은 음영 라벨 단축 */}
                 {snappedEvents.bear_markets.map((b, i) => (
                   <ReferenceArea
                     key={`bear-${i}`}
@@ -322,7 +344,13 @@ export default function CreditSpreadSection({ data, loading, error }) {
                     fillOpacity={0.10}
                     stroke="none"
                     ifOverflow="hidden"
-                    label={{ value: `▼ ${b.label}`, position: 'insideTopLeft', fontSize: 9, fill: '#b91c1c' }}
+                    label={{
+                      value: `▼ ${shortLabel(b.label, b.x1, b.x2)}`,
+                      position: 'insideTopLeft',
+                      fontSize: 9,
+                      fill: '#b91c1c',
+                      dy: b.labelDy ?? 0,
+                    }}
                   />
                 ))}
                 {snappedEvents.recessions.map((r, i) => (
@@ -336,7 +364,13 @@ export default function CreditSpreadSection({ data, loading, error }) {
                     strokeOpacity={0.3}
                     strokeDasharray="3 3"
                     ifOverflow="hidden"
-                    label={{ value: `■ ${r.label}`, position: 'insideBottomLeft', fontSize: 9, fill: '#374151' }}
+                    label={{
+                      value: `■ ${shortLabel(r.label, r.x1, r.x2)}`,
+                      position: 'insideBottomLeft',
+                      fontSize: 9,
+                      fill: '#374151',
+                      dy: r.labelDy ?? 0,
+                    }}
                   />
                 ))}
                 {refLines.map((rl, i) => (

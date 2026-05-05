@@ -122,6 +122,36 @@ function _snapToDataset(dataDates, sortedDates, target) {
   return best
 }
 
+// 인접 이벤트 라벨 stagger — 이전 이벤트 종료일로부터 N일 이내면 같은 그룹으로
+// 묶어 dy를 계단식으로 부여. 라벨 충돌 회피.
+const _CLUSTER_DAYS = 730  // 2년 이내 인접이면 stack
+const _LABEL_DY_STEP = 12
+
+function _withStaggeredLabels(events, sign) {
+  if (!events.length) return []
+  const sorted = [...events].sort((a, b) => (a.x1 < b.x1 ? -1 : 1))
+  let groupIdx = 0
+  let prevEnd = null
+  return sorted.map((e) => {
+    if (prevEnd != null) {
+      const gapMs = new Date(e.x1) - new Date(prevEnd)
+      const gapDays = gapMs / 86400000
+      groupIdx = gapDays < _CLUSTER_DAYS ? groupIdx + 1 : 0
+    }
+    prevEnd = e.x2
+    return { ...e, labelDy: sign * groupIdx * _LABEL_DY_STEP }
+  })
+}
+
+function _shortLabel(label, x1, x2) {
+  // 음영 너비가 좁으면(< 365일) 라벨 단축
+  const days = (new Date(x2) - new Date(x1)) / 86400000
+  if (days < 365 && label.length > 5) {
+    return label.replace('약세장', '').replace('침체', '').trim() || label
+  }
+  return label
+}
+
 function _eventsForChart(events, history) {
   if (!events || !history?.length) return { recessions: [], bear_markets: [] }
   const dataDates = new Set(history.map((h) => h.date))
@@ -136,10 +166,15 @@ function _eventsForChart(events, history) {
     if (!x1 || !x2 || x1 === x2) return null
     return { ...e, x1, x2 }
   }
-  return {
-    recessions: (events.recessions || []).map(adapt).filter(Boolean),
-    bear_markets: (events.bear_markets || []).map(adapt).filter(Boolean),
-  }
+  const recs = _withStaggeredLabels(
+    (events.recessions || []).map(adapt).filter(Boolean),
+    -1,  // 침체는 차트 하단 라벨 → 아래로 stagger
+  )
+  const bears = _withStaggeredLabels(
+    (events.bear_markets || []).map(adapt).filter(Boolean),
+    1,  // 약세장은 상단 라벨 → 위에서 아래로 stagger
+  )
+  return { recessions: recs, bear_markets: bears }
 }
 
 function SpreadHistoryChart({ history, events }) {
@@ -186,7 +221,13 @@ function SpreadHistoryChart({ history, events }) {
                 fillOpacity={0.10}
                 stroke="none"
                 ifOverflow="hidden"
-                label={{ value: `▼ ${b.label}`, position: 'insideTopLeft', fontSize: 9, fill: '#b91c1c' }}
+                label={{
+                  value: `▼ ${_shortLabel(b.label, b.x1, b.x2)}`,
+                  position: 'insideTopLeft',
+                  fontSize: 9,
+                  fill: '#b91c1c',
+                  dy: b.labelDy ?? 0,
+                }}
               />
             ))}
             {ev.recessions.map((r, i) => (
@@ -200,7 +241,13 @@ function SpreadHistoryChart({ history, events }) {
                 strokeOpacity={0.3}
                 strokeDasharray="3 3"
                 ifOverflow="hidden"
-                label={{ value: `■ ${r.label}`, position: 'insideBottomLeft', fontSize: 9, fill: '#374151' }}
+                label={{
+                  value: `■ ${_shortLabel(r.label, r.x1, r.x2)}`,
+                  position: 'insideBottomLeft',
+                  fontSize: 9,
+                  fill: '#374151',
+                  dy: r.labelDy ?? 0,
+                }}
               />
             ))}
             <ReferenceLine y={0} stroke="#6b7280" strokeDasharray="4 4" strokeWidth={1.5} />
