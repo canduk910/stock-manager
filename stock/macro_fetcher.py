@@ -1226,7 +1226,9 @@ def _compute_intensity_zscore(returns_1y: list[Optional[float]]) -> list[float]:
 
 def fetch_sector_returns() -> list[dict]:
     """11개 섹터 ETF 1M/3M/6M/1Y/3Y 수익률 + R3 산점도 입력(trend_days, intensity_z)."""
-    key = "macro:sector_returns_v3"
+    # v4 (2026-05-05): period 3y → 5y 변경. 3y는 거래일 ~755로 3Y 수익률
+    # 계산(756+1일 필요)이 항상 데이터 부족으로 None 반환되던 버그 해소.
+    key = "macro:sector_returns_v4"
     cached = get_cached(key)
     if cached is not None:
         return cached
@@ -1235,7 +1237,7 @@ def fetch_sector_returns() -> list[dict]:
         try:
             import yfinance as yf
             t = yf.Ticker(sym)
-            hist = t.history(period="3y", interval="1d")
+            hist = t.history(period="5y", interval="1d")
             if hist.empty:
                 return None
 
@@ -1304,7 +1306,8 @@ _KR_SECTOR_ETFS = [
 
 def fetch_sector_returns_kr() -> list[dict]:
     """13개 한국 섹터 ETF(KODEX/TIGER) 1M/3M/6M/1Y/3Y 수익률 + R3 산점도 입력."""
-    key = "macro:sector_returns_kr_v3"
+    # v4 (2026-05-05): period 3y → 5y. 위 fetch_sector_returns와 동일 사유.
+    key = "macro:sector_returns_kr_v4"
     cached = get_cached(key)
     if cached is not None:
         return cached
@@ -1313,7 +1316,7 @@ def fetch_sector_returns_kr() -> list[dict]:
         try:
             import yfinance as yf
             t = yf.Ticker(sym)
-            hist = t.history(period="3y", interval="1d")
+            hist = t.history(period="5y", interval="1d")
             if hist.empty:
                 return None
 
