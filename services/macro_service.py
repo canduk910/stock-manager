@@ -13,7 +13,11 @@ from typing import Optional
 
 from config import OPENAI_API_KEY, OPENAI_MODEL
 from stock import macro_fetcher
-from stock.macro_store import get_today as get_macro_today, save_today as save_macro_today
+from stock.macro_store import (
+    get_today as get_macro_today,
+    save_today as save_macro_today,
+    delete_today as delete_macro_today,
+)
 from services.exceptions import ExternalAPIError, PaymentRequiredError
 from services.macro_cycle import determine_cycle_phase
 from services.macro_events import get_events_in_range
@@ -232,14 +236,25 @@ def get_credit_spread() -> dict:
     # 1) 일일 영속 캐시 (DB) — 같은 날 두 번째 호출은 외부 API 미호출
     cached = get_macro_today("credit_spread")
     if cached is not None:
-        logger.debug("credit_spread 일일 캐시 hit")
-        # R2: 캐시 응답에도 events 매번 재주입(정적 상수라 비용 0)
-        cached["events"] = _events_for_history(cached.get("oas_history_5y") or cached.get("history") or [])
-        return {
-            "credit_spread": cached,
-            "updated_at": now,
-            "errors": [],
-        }
+        # 2026-05-05 fix: 캐시된 응답에 hy_oas/ig_oas partial_failure가 있으면
+        # FRED_API_KEY 등록 후 새 fetch 시도하도록 캐시 폐기.
+        cached_pf = set((cached or {}).get("partial_failure") or [])
+        if any(p in cached_pf for p in ("hy_oas", "ig_oas")):
+            logger.warning("credit_spread 캐시에 partial_failure 발견 → 폐기 후 재조회")
+            try:
+                delete_macro_today("credit_spread")
+            except Exception as e:
+                logger.warning("credit_spread 캐시 삭제 실패: %s", e)
+            cached = None
+        else:
+            logger.debug("credit_spread 일일 캐시 hit")
+            # R2: 캐시 응답에도 events 매번 재주입(정적 상수라 비용 0)
+            cached["events"] = _events_for_history(cached.get("oas_history_5y") or cached.get("history") or [])
+            return {
+                "credit_spread": cached,
+                "updated_at": now,
+                "errors": [],
+            }
 
     data = None
     try:
@@ -251,8 +266,12 @@ def get_credit_spread() -> dict:
     if isinstance(data, dict):
         data["events"] = _events_for_history(data.get("oas_history_5y") or data.get("history") or [])
 
-    # 캐시 저장 (정상 응답일 때만)
-    if data is not None and not errors:
+    # 캐시 저장 — 정상 응답이면서 핵심 데이터(hy_oas/ig_oas)가 빠지지 않은 경우만
+    # (2026-05-05 fix: partial_failure 응답이 일일 캐시에 박혀 자정까지 잘못된 데이터
+    #  표시되던 문제. FRED_API_KEY 등록 직후 즉시 새 fetch 시도하도록 변경.)
+    pf = set((data or {}).get("partial_failure") or [])
+    has_core_failure = any(p in pf for p in ("hy_oas", "ig_oas"))
+    if data is not None and not errors and not has_core_failure:
         try:
             save_macro_today("credit_spread", data)
         except Exception as e:

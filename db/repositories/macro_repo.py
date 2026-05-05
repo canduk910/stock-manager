@@ -37,6 +37,13 @@ class MacroRepository:
             return None
         return row.result
 
+    def delete_today(self, category: str) -> int:
+        """오늘자 캐시 강제 삭제. 외부 키 갱신/장애 복구 시 사용."""
+        today = _today_kst()
+        return self.db.query(MacroGptCache).filter_by(
+            category=category, date_kst=today,
+        ).delete()
+
     def save_today(self, category: str, result) -> None:
         today = _today_kst()
         now = now_kst().isoformat()

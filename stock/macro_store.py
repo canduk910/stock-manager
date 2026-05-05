@@ -30,3 +30,9 @@ def cleanup_old(days: int = 30) -> int:
     """N일 이전 캐시 삭제. 삭제 건수 반환."""
     with get_session() as db:
         return MacroRepository(db).cleanup_old(days)
+
+
+def delete_today(category: str) -> int:
+    """오늘자 캐시 강제 삭제 (외부 키 갱신/장애 복구용)."""
+    with get_session() as db:
+        return MacroRepository(db).delete_today(category)

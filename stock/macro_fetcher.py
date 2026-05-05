@@ -912,7 +912,9 @@ def fetch_credit_spread() -> dict:
     보조: FRED IG OAS + HY-IG 스프레드(정크 디스카운트)
     참고: HYG/LQD ETF 수익률 차이 (yfinance)
     """
-    key = "macro:credit_spread_v3"
+    # v4 (2026-05-05): FRED_API_KEY 폴백 도입 후 캐시 강제 invalidate.
+    # 기존 v3 캐시에는 partial_failure 응답이 박혀 있을 수 있음.
+    key = "macro:credit_spread_v4"
     cached = get_cached(key)
     if cached is not None:
         return cached
