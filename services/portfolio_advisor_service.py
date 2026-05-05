@@ -839,14 +839,14 @@ def chat_with_report(report_id: int, messages: list, user_id: int) -> dict:
 
     PortfolioReport는 user_id 컬럼이 없으나 라우터에서 require_admin로 권한 차단됨.
     """
-    if not OPENAI_API_KEY:
-        raise ConfigError("OPENAI_API_KEY가 설정되지 않았습니다.")
-
     cleaned = _validate_chat_messages(messages)
 
     report_row = advisory_store.get_portfolio_report_by_id(int(report_id))
     if not report_row:
         raise NotFoundError("포트폴리오 자문보고서를 찾을 수 없습니다.")
+
+    if not OPENAI_API_KEY:
+        raise ConfigError("OPENAI_API_KEY가 설정되지 않았습니다.")
 
     report_body = report_row.get("report") or {}
     try:

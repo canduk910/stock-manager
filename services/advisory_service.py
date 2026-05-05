@@ -1578,9 +1578,6 @@ def chat_with_report(
     보고서 본문(JSON)을 system prompt에 첨부하고, 클라이언트가 보낸 messages 히스토리에서
     최근 20개를 슬라이딩 윈도우로 잘라 OpenAI에 전달한다. 서버는 대화를 저장하지 않는다.
     """
-    if not OPENAI_API_KEY:
-        raise ConfigError("OPENAI_API_KEY가 설정되지 않았습니다.")
-
     cleaned = _validate_chat_messages(messages)
 
     report_row = advisory_store.get_report_by_id(int(report_id))
@@ -1591,6 +1588,9 @@ def chat_with_report(
     if (report_row.get("code") or "").upper() != (code or "").upper() or \
             (report_row.get("market") or "").upper() != (market or "").upper():
         raise NotFoundError("보고서가 요청한 종목과 일치하지 않습니다.")
+
+    if not OPENAI_API_KEY:
+        raise ConfigError("OPENAI_API_KEY가 설정되지 않았습니다.")
 
     label = report_row.get("name") or report_row.get("code") or code
     report_body = report_row.get("report") or {}

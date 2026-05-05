@@ -72,6 +72,11 @@
 ### 결과
 - 도메인 변경 0건. 신규 백엔드 엔드포인트 2 + 프론트 컴포넌트 2 + 통합 5 + 테스트 21 케이스. DB 마이그레이션 0건.
 
+### 후속 — 챗봇 검증 순서 수정 (CI 실패 해소)
+- `services/advisory_service.chat_with_report` / `services/portfolio_advisor_service.chat_with_report` 검증 순서를 **(1) messages 입력 검증 → (2) 보고서 조회·권한 검증 → (3) `OPENAI_API_KEY` 체크** 순으로 재배치.
+- 이전: 키 체크가 가장 앞에 있어 `OPENAI_API_KEY` 미설정 CI 환경에서 입력/권한 케이스가 모두 503 반환 → API 테스트 5건 FAIL.
+- 수정 후: 입력 400 / 미존재 404 / 환경 503의 의미가 외부 사용자 관점에서도 일관. 단위 13 PASS / 회귀 0.
+
 ---
 
 ## 2026-05-05 — 매크로 음영/섹터 산점도/방문수/미국체결 + FRED 안정화
