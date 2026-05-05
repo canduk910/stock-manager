@@ -8,9 +8,9 @@ from services.macro_events import (
 
 
 def test_data_integrity():
-    """상수 데이터 정합성 — 개수 + 필수 필드."""
-    assert len(NBER_RECESSIONS) == 3
-    assert len(SP500_BEAR_MARKETS) == 4
+    """상수 데이터 정합성 — 개수 + 필수 필드 (1960년 이후 전체 시계열)."""
+    assert len(NBER_RECESSIONS) == 9
+    assert len(SP500_BEAR_MARKETS) == 9
     for r in NBER_RECESSIONS:
         assert r["start"] < r["end"]
         assert r["label"]
@@ -21,10 +21,26 @@ def test_data_integrity():
 
 
 def test_get_events_in_range_includes_overlapping_recession():
-    """입력 범위와 겹치는 침체 포함."""
+    """입력 범위와 겹치는 침체 포함 (서브프라임 침체)."""
     ev = get_events_in_range("2007-01-01", "2010-12-31")
     labels = [r["label"] for r in ev["recessions"]]
-    assert "글로벌 금융위기" in labels
+    assert "서브프라임 침체" in labels
+
+
+def test_legacy_recessions_included():
+    """1962년 이후 전 시계열 침체 (오일쇼크/볼커/걸프전 등)도 포함."""
+    ev = get_events_in_range("1960-01-01", "2025-12-31")
+    labels = {r["label"] for r in ev["recessions"]}
+    for expected in ("오일쇼크 침체", "볼커 침체", "걸프전 침체", "닷컴 침체", "서브프라임 침체", "코로나 침체"):
+        assert expected in labels
+
+
+def test_legacy_bear_markets_included():
+    """1962~1987 약세장(케네디/오일쇼크/블랙먼데이 등)도 포함."""
+    ev = get_events_in_range("1960-01-01", "2025-12-31")
+    labels = {b["label"] for b in ev["bear_markets"]}
+    for expected in ("케네디 슬라이드", "오일쇼크 약세장", "블랙먼데이", "닷컴 약세장", "서브프라임 약세장"):
+        assert expected in labels
 
 
 def test_get_events_in_range_excludes_outside():

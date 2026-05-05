@@ -20,17 +20,29 @@ from __future__ import annotations
 
 from typing import Optional
 
-# NBER Business Cycle Dating Committee 공식 침체 기간 (2000년 이후)
+# NBER Business Cycle Dating Committee 공식 침체 기간 (1960년 이후 전체)
+# 한국 사용자 호칭 기준: "글로벌 금융위기" 대신 "서브프라임"으로 통일.
 NBER_RECESSIONS: list[dict] = [
+    {"start": "1960-04-01", "end": "1961-02-28", "label": "1960 침체"},
+    {"start": "1969-12-01", "end": "1970-11-30", "label": "닉슨 침체"},
+    {"start": "1973-11-01", "end": "1975-03-31", "label": "오일쇼크 침체"},
+    {"start": "1980-01-01", "end": "1980-07-31", "label": "1980 침체"},
+    {"start": "1981-07-01", "end": "1982-11-30", "label": "볼커 침체"},
+    {"start": "1990-07-01", "end": "1991-03-31", "label": "걸프전 침체"},
     {"start": "2001-03-01", "end": "2001-11-30", "label": "닷컴 침체"},
-    {"start": "2007-12-01", "end": "2009-06-30", "label": "글로벌 금융위기"},
+    {"start": "2007-12-01", "end": "2009-06-30", "label": "서브프라임 침체"},
     {"start": "2020-02-01", "end": "2020-04-30", "label": "코로나 침체"},
 ]
 
-# S&P 500 -20% 이상 약세장 (Macrotrends 종가 기준)
+# S&P 500 -20% 이상 약세장 (Macrotrends / Yardeni Research 종가 기준, 1962년 이후 전체)
 SP500_BEAR_MARKETS: list[dict] = [
+    {"start": "1961-12-12", "end": "1962-06-26", "drawdown": -28.0, "label": "케네디 슬라이드"},
+    {"start": "1968-11-29", "end": "1970-05-26", "drawdown": -36.1, "label": "1969 약세장"},
+    {"start": "1973-01-11", "end": "1974-10-03", "drawdown": -48.2, "label": "오일쇼크 약세장"},
+    {"start": "1980-11-28", "end": "1982-08-12", "drawdown": -27.1, "label": "볼커 약세장"},
+    {"start": "1987-08-25", "end": "1987-12-04", "drawdown": -33.5, "label": "블랙먼데이"},
     {"start": "2000-03-24", "end": "2002-10-09", "drawdown": -49.1, "label": "닷컴 약세장"},
-    {"start": "2007-10-09", "end": "2009-03-09", "drawdown": -56.8, "label": "GFC 약세장"},
+    {"start": "2007-10-09", "end": "2009-03-09", "drawdown": -56.8, "label": "서브프라임 약세장"},
     {"start": "2020-02-19", "end": "2020-03-23", "drawdown": -33.9, "label": "코로나 약세장"},
     {"start": "2022-01-03", "end": "2022-10-12", "drawdown": -25.4, "label": "인플레 약세장"},
 ]

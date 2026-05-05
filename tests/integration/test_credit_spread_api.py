@@ -151,8 +151,8 @@ class TestCreditSpreadShape:
             ev = cs["events"]
             rec_labels = [r["label"] for r in ev.get("recessions", [])]
             bear_labels = [b["label"] for b in ev.get("bear_markets", [])]
-            assert "글로벌 금융위기" in rec_labels
-            assert "GFC 약세장" in bear_labels
+            assert "서브프라임 침체" in rec_labels
+            assert "서브프라임 약세장" in bear_labels
 
 
 class _MultiPatch:
