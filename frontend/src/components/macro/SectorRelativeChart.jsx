@@ -73,11 +73,27 @@ export default function SectorRelativeChart({ data, title = '섹터 상대평가
     }))
   }, [data])
 
+  // 데이터 분포 기반 동적 도메인 — 점들이 가운데 모이지 않도록 max(|값|) × 1.15 padding.
+  // 최소 도메인 보장: x ±30일 / y ±0.5z (소수 점이 너무 작아도 4분면 구조 보임).
+  const { xDomain, yDomain } = useMemo(() => {
+    const xs = points.map((p) => p.trend_days).filter((v) => Number.isFinite(v))
+    const ys = points.map((p) => p.intensity_z).filter((v) => Number.isFinite(v))
+    const xAbs = xs.length ? Math.max(30, ...xs.map(Math.abs)) : 30
+    const yAbs = ys.length ? Math.max(0.5, ...ys.map(Math.abs)) : 1
+    return {
+      xDomain: [-xAbs * 1.18, xAbs * 1.18],
+      yDomain: [-yAbs * 1.18, yAbs * 1.18],
+    }
+  }, [points])
+
   if (!points.length) return null
 
   // 모든 점이 trend_days/intensity_z 중 하나라도 없으면 표시 보류
   const hasData = points.some((p) => p.trend_days != null && p.intensity_z != null)
   if (!hasData) return null
+
+  const xMax = xDomain[1]
+  const yMax = yDomain[1]
 
   return (
     <div className="rounded-lg border bg-white p-4 shadow-sm">
@@ -85,7 +101,9 @@ export default function SectorRelativeChart({ data, title = '섹터 상대평가
         <div>
           <div className="text-sm font-medium text-gray-700">{title}</div>
           <div className="text-[10px] text-gray-400">
-            x: SMA20 cross 경과일(부호 포함, ±365) · y: 1Y 수익률 z-score(±3)
+            x: SMA20 cross 경과일(부호 포함, 동적 스케일)
+            {' · '}y: 1Y 수익률 z-score(동적 스케일)
+            {' · '}현재: x ±{xMax.toFixed(0)}일 · y ±{yMax.toFixed(2)}σ
           </div>
         </div>
         <div className="text-[10px] text-gray-500 flex flex-wrap gap-x-3">
@@ -99,30 +117,30 @@ export default function SectorRelativeChart({ data, title = '섹터 상대평가
         <ResponsiveContainer width="100%" height="100%">
           <ScatterChart margin={{ top: 16, right: 24, bottom: 16, left: 8 }}>
             <CartesianGrid stroke="#f0f0f0" />
-            {/* 4분면 음영 */}
-            <ReferenceArea x1={0} x2={365} y1={0} y2={3} fill="#22c55e" fillOpacity={0.05} />
-            <ReferenceArea x1={-365} x2={0} y1={0} y2={3} fill="#3b82f6" fillOpacity={0.05} />
-            <ReferenceArea x1={0} x2={365} y1={-3} y2={0} fill="#f97316" fillOpacity={0.05} />
-            <ReferenceArea x1={-365} x2={0} y1={-3} y2={0} fill="#ef4444" fillOpacity={0.05} />
+            {/* 4분면 음영 — 동적 도메인에 맞춰 자동 확장 */}
+            <ReferenceArea x1={0} x2={xDomain[1]} y1={0} y2={yDomain[1]} fill="#22c55e" fillOpacity={0.05} />
+            <ReferenceArea x1={xDomain[0]} x2={0} y1={0} y2={yDomain[1]} fill="#3b82f6" fillOpacity={0.05} />
+            <ReferenceArea x1={0} x2={xDomain[1]} y1={yDomain[0]} y2={0} fill="#f97316" fillOpacity={0.05} />
+            <ReferenceArea x1={xDomain[0]} x2={0} y1={yDomain[0]} y2={0} fill="#ef4444" fillOpacity={0.05} />
             <ReferenceLine x={0} stroke="#9ca3af" strokeDasharray="3 3" />
             <ReferenceLine y={0} stroke="#9ca3af" strokeDasharray="3 3" />
             <XAxis
               type="number"
               dataKey="trend_days"
               name="지속기간"
-              domain={[-365, 365]}
+              domain={xDomain}
               tick={{ fontSize: 11 }}
-              tickFormatter={(v) => `${v}일`}
+              tickFormatter={(v) => `${Math.round(v)}일`}
             />
             <YAxis
               type="number"
               dataKey="intensity_z"
               name="강도"
-              domain={[-3, 3]}
+              domain={yDomain}
               tick={{ fontSize: 11 }}
-              tickFormatter={(v) => v.toFixed(1)}
+              tickFormatter={(v) => v.toFixed(2)}
             />
-            <ZAxis range={[60, 60]} />
+            <ZAxis range={[110, 110]} />
             <Tooltip content={<CustomTooltip />} cursor={{ strokeDasharray: '3 3' }} />
             <Scatter data={points} isAnimationActive={false}>
               {points.map((p, i) => (

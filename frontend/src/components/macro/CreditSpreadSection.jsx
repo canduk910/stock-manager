@@ -336,12 +336,14 @@ export default function CreditSpreadSection({ data, loading, error }) {
                   />
                 ))}
                 <Customized
-                  component={EventLabelsOverlay({
-                    events: [
-                      ...snappedEvents.bear_markets.map(b => ({ kind: 'bear', x1: b.x1, x2: b.x2, label: b.label })),
-                      ...snappedEvents.recessions.map(r => ({ kind: 'rec', x1: r.x1, x2: r.x2, label: r.label })),
-                    ],
-                  })}
+                  component={
+                    <EventLabelsOverlay
+                      events={[
+                        ...snappedEvents.bear_markets.map(b => ({ kind: 'bear', x1: b.x1, x2: b.x2, label: b.label })),
+                        ...snappedEvents.recessions.map(r => ({ kind: 'rec', x1: r.x1, x2: r.x2, label: r.label })),
+                      ]}
+                    />
+                  }
                 />
                 {refLines.map((rl, i) => (
                   <ReferenceLine

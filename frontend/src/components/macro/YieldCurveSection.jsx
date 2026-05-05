@@ -200,12 +200,14 @@ function SpreadHistoryChart({ history, events }) {
               />
             ))}
             <Customized
-              component={EventLabelsOverlay({
-                events: [
-                  ...ev.bear_markets.map(b => ({ kind: 'bear', x1: b.x1, x2: b.x2, label: b.label })),
-                  ...ev.recessions.map(r => ({ kind: 'rec', x1: r.x1, x2: r.x2, label: r.label })),
-                ],
-              })}
+              component={
+                <EventLabelsOverlay
+                  events={[
+                    ...ev.bear_markets.map(b => ({ kind: 'bear', x1: b.x1, x2: b.x2, label: b.label })),
+                    ...ev.recessions.map(r => ({ kind: 'rec', x1: r.x1, x2: r.x2, label: r.label })),
+                  ]}
+                />
+              }
             />
             <ReferenceLine y={0} stroke="#6b7280" strokeDasharray="4 4" strokeWidth={1.5} />
             <defs>
