@@ -4,7 +4,6 @@
  * 데이터:
  *   1순위: FRED HY OAS (BAMLH0A0HYM2, ICE BofA US High Yield OAS, 1996-12~)
  *   보조:  FRED IG OAS (BAMLC0A0CM, Investment Grade Corporate OAS) + HY-IG 스프레드
- *   참고:  HYG/LQD ETF 수익률 차이 (yfinance)
  *
  * 하워드 막스 시계추 백분위 5단계 (전 기간 baseline 약 28년):
  *   < 10  → extreme_greed (위험 둔감 정점)
@@ -27,12 +26,6 @@ const fmt = (v, d = 2) =>
   v != null
     ? v.toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d })
     : '-'
-
-const DIRECTION_STYLE = {
-  widening: { bg: 'bg-red-100', text: 'text-red-700', label: '확대 중' },
-  narrowing: { bg: 'bg-emerald-100', text: 'text-emerald-700', label: '축소 중' },
-  stable: { bg: 'bg-gray-100', text: 'text-gray-600', label: '안정' },
-}
 
 const SENTIMENT_CONFIG = {
   extreme_greed: {
@@ -130,14 +123,12 @@ export default function CreditSpreadSection({ data, loading, error }) {
   if (!cs) return null
 
   const {
-    hyg_yield, lqd_yield, spread, spread_direction, history,
     oas_current, oas_history_5y, oas_stats, oas_sentiment, oas_percentile,
     ig_current, hy_ig_spread,
     partial_failure,
     events,
   } = cs
 
-  const dirStyle = DIRECTION_STYLE[spread_direction] || DIRECTION_STYLE.stable
   const sentiment = SENTIMENT_CONFIG[oas_sentiment] || null
 
   // 5년 OAS 시계열 — 주 단위 샘플링
@@ -276,25 +267,6 @@ export default function CreditSpreadSection({ data, loading, error }) {
         </div>
       )}
 
-      {/* ETF 수익률 3카드 */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
-        <div className="rounded-lg border bg-white p-4 shadow-sm">
-          <div className="text-sm font-medium text-gray-500 mb-1">HYG 수익률</div>
-          <div className="text-2xl font-bold text-gray-900">{fmt(hyg_yield)}%</div>
-        </div>
-        <div className="rounded-lg border bg-white p-4 shadow-sm">
-          <div className="text-sm font-medium text-gray-500 mb-1">LQD 수익률</div>
-          <div className="text-2xl font-bold text-gray-900">{fmt(lqd_yield)}%</div>
-        </div>
-        <div className="rounded-lg border bg-white p-4 shadow-sm">
-          <div className="text-sm font-medium text-gray-500 mb-1">스프레드 (HYG-LQD)</div>
-          <div className="text-2xl font-bold text-gray-900">{fmt(spread)}%</div>
-          <span className={`inline-block mt-1 px-2 py-0.5 rounded text-xs font-medium ${dirStyle.bg} ${dirStyle.text}`}>
-            {dirStyle.label}
-          </span>
-        </div>
-      </div>
-
       {/* OAS 시계열 차트 (FRED) — 백분위 임계선 동적 + 침체/약세장 음영 */}
       {oasChartData.length > 0 && (
         <div className="rounded-lg border bg-white p-4 shadow-sm mb-4">
@@ -373,36 +345,6 @@ export default function CreditSpreadSection({ data, loading, error }) {
         </div>
       )}
 
-      {/* HYG/LQD 비율 시계열 (참고) */}
-      {history?.length > 0 && (
-        <div className="rounded-lg border bg-white p-4 shadow-sm">
-          <div className="text-sm font-medium text-gray-500 mb-2">HYG/LQD 비율 추이 (참고)</div>
-          <div className="h-48">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={history}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                <XAxis dataKey="date" tick={{ fontSize: 11 }} interval="preserveStartEnd" />
-                <YAxis tick={{ fontSize: 12 }} domain={['auto', 'auto']} tickFormatter={(v) => v.toFixed(3)} />
-                <Tooltip
-                  formatter={(v) => [v.toFixed(4), 'HYG/LQD']}
-                  labelFormatter={(l) => l}
-                  contentStyle={{ fontSize: 12, borderRadius: 8 }}
-                />
-                <defs>
-                  <linearGradient id="creditGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#f97316" stopOpacity={0.3} />
-                    <stop offset="100%" stopColor="#f97316" stopOpacity={0.05} />
-                  </linearGradient>
-                </defs>
-                <Area type="monotone" dataKey="ratio" stroke="#f97316" strokeWidth={1.5} fill="url(#creditGrad)" dot={false} isAnimationActive={false} />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-          <div className="text-xs text-gray-400 mt-1">
-            비율 상승 = 스프레드 확대(위험 증가) / 비율 하락 = 스프레드 축소(안정)
-          </div>
-        </div>
-      )}
     </section>
   )
 }

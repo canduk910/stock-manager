@@ -226,7 +226,7 @@ def get_yield_curve() -> dict:
 # ── 신용스프레드 ────────────────────────────────────────────────────────────
 
 def get_credit_spread() -> dict:
-    """HY OAS(FRED) + IG OAS + HYG/LQD 통합 신용스프레드. 일일 영속 캐시.
+    """HY OAS(FRED) + IG OAS 통합 신용스프레드. 일일 영속 캐시.
 
     하워드 막스 시계추 — 백분위 5단계 + OAS>10% 절대 안전장치 + 전 기간 baseline.
     """

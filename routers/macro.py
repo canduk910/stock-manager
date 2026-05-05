@@ -40,7 +40,7 @@ def get_yield_curve(_user: dict = Depends(get_current_user)):
 
 @router.get("/credit-spread")
 def get_credit_spread(_user: dict = Depends(get_current_user)):
-    """HYG/LQD 기반 하이일드 신용스프레드."""
+    """FRED HY OAS + IG OAS 기반 하이일드 신용스프레드 (하워드 막스 시계추)."""
     return macro_service.get_credit_spread()
 
 

@@ -56,7 +56,7 @@ def _patches(oas=None, ig=None, cached=None):
         patch("stock.macro_fetcher.set_cached"),
         patch("services.macro_service.get_macro_today", return_value=cached),
         patch("services.macro_service.save_macro_today"),
-        # yfinance HYG/LQD는 빈 응답 (외부 의존 격리)
+        # FRED OAS만 모킹 (HYG/LQD 폐기됨, 2026-05-05)
         patch("stock.macro_fetcher._safe", side_effect=lambda v: v),
     ]
 

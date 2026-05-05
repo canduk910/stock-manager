@@ -906,15 +906,13 @@ def _fetch_fred_ig_oas() -> dict:
 
 
 def fetch_credit_spread() -> dict:
-    """HY OAS(FRED) + IG OAS + HYG/LQD 기반 신용스프레드.
+    """HY OAS(FRED) + IG OAS 기반 신용스프레드.
 
     1순위: FRED HY OAS 백분위 5단계 (하워드 막스 프레임워크, 전 기간 baseline)
     보조: FRED IG OAS + HY-IG 스프레드(정크 디스카운트)
-    참고: HYG/LQD ETF 수익률 차이 (yfinance)
     """
-    # v4 (2026-05-05): FRED_API_KEY 폴백 도입 후 캐시 강제 invalidate.
-    # 기존 v3 캐시에는 partial_failure 응답이 박혀 있을 수 있음.
-    key = "macro:credit_spread_v4"
+    # v5 (2026-05-05): HYG/LQD 제거 후 캐시 강제 invalidate.
+    key = "macro:credit_spread_v5"
     cached = get_cached(key)
     if cached is not None:
         return cached
@@ -943,7 +941,6 @@ def fetch_credit_spread() -> dict:
         if hy_current is not None and ig_current is not None
         else None
     )
-    # HY-IG 시계열 (date 기준 매칭)
     hy_ig_history_5y = []
     try:
         hy_5y = fred_data.get("oas_history_5y", []) if fred_data else []
@@ -960,110 +957,27 @@ def fetch_credit_spread() -> dict:
     except Exception as e:
         logger.debug("HY-IG 시계열 매칭 실패: %s", e)
 
-    try:
-        import yfinance as yf
-
-        def _get_yield(sym: str) -> Optional[float]:
-            try:
-                t = yf.Ticker(sym)
-                info = t.info
-                y = _safe(info.get("yield"))
-                if y is not None:
-                    return round(y * 100, 3)
-                tady = _safe(info.get("trailingAnnualDividendYield"))
-                if tady is not None:
-                    return round(tady * 100, 3)
-                return None
-            except Exception:
-                return None
-
-        hyg_yield = _get_yield("HYG")
-        lqd_yield = _get_yield("LQD")
-
-        spread = round(hyg_yield - lqd_yield, 3) if (hyg_yield is not None and lqd_yield is not None) else None
-
-        # 가격 기반 비율 시계열
-        history = []
-        direction = "stable"
-        try:
-            hyg_t = yf.Ticker("HYG")
-            lqd_t = yf.Ticker("LQD")
-            hyg_hist = hyg_t.history(period="max", interval="1wk")
-            lqd_hist = lqd_t.history(period="max", interval="1wk")
-
-            if not hyg_hist.empty and not lqd_hist.empty:
-                hyg_map = {ts.strftime("%Y-%m-%d"): _safe(row["Close"]) for ts, row in hyg_hist.iterrows()}
-                lqd_map = {ts.strftime("%Y-%m-%d"): _safe(row["Close"]) for ts, row in lqd_hist.iterrows()}
-                common_dates = sorted(set(hyg_map.keys()) & set(lqd_map.keys()))
-
-                for dt in common_dates:
-                    hv = hyg_map[dt]
-                    lv = lqd_map[dt]
-                    if hv and lv:
-                        ratio = round(hv / lv, 4)
-                        history.append({"date": dt, "hyg": round(hv, 2), "lqd": round(lv, 2), "ratio": ratio})
-
-                if len(history) >= 20:
-                    ratios = [h["ratio"] for h in history]
-                    ma20 = sum(ratios[-20:]) / 20
-                    diff = ratios[-1] - ma20
-                    if diff < -0.002:
-                        direction = "widening"
-                    elif diff > 0.002:
-                        direction = "narrowing"
-                    else:
-                        direction = "stable"
-        except Exception as e:
-            logger.warning("신용스프레드 시계열 조회 실패: %s", e)
-
-        result = {
-            "hyg_yield": hyg_yield,
-            "lqd_yield": lqd_yield,
-            "spread": spread,
-            "spread_direction": direction,
-            "history": history,
-            # FRED HY OAS (전 기간 baseline + 5단계)
-            "oas_current": fred_data.get("oas_current"),
-            "oas_history_5y": fred_data.get("oas_history_5y", []),
-            "oas_history": fred_data.get("oas_history_5y", []),  # 후방호환 alias
-            "oas_stats": fred_data.get("oas_stats", {}),
-            "oas_percentile": fred_data.get("oas_percentile"),
-            "oas_zscore": fred_data.get("oas_zscore"),
-            "oas_sentiment": fred_data.get("sentiment"),
-            "percentile": fred_data.get("oas_percentile"),  # 후방호환 alias
-            # FRED IG OAS + HY-IG 스프레드
-            "ig_current": ig_current,
-            "ig_history_5y": ig_data.get("ig_history_5y", []) if ig_data else [],
-            "hy_ig_spread": hy_ig_spread,
-            "hy_ig_spread_history_5y": hy_ig_history_5y,
-            # 부분 실패 메타
-            "partial_failure": partial_failure,
-        }
+    result = {
+        # FRED HY OAS (전 기간 baseline + 5단계)
+        "oas_current": fred_data.get("oas_current") if fred_data else None,
+        "oas_history_5y": fred_data.get("oas_history_5y", []) if fred_data else [],
+        "oas_history": fred_data.get("oas_history_5y", []) if fred_data else [],  # 후방호환 alias
+        "oas_stats": fred_data.get("oas_stats", {}) if fred_data else {},
+        "oas_percentile": fred_data.get("oas_percentile") if fred_data else None,
+        "oas_zscore": fred_data.get("oas_zscore") if fred_data else None,
+        "oas_sentiment": fred_data.get("sentiment") if fred_data else None,
+        "percentile": fred_data.get("oas_percentile") if fred_data else None,  # 후방호환 alias
+        # FRED IG OAS + HY-IG 스프레드
+        "ig_current": ig_current,
+        "ig_history_5y": ig_data.get("ig_history_5y", []) if ig_data else [],
+        "hy_ig_spread": hy_ig_spread,
+        "hy_ig_spread_history_5y": hy_ig_history_5y,
+        # 부분 실패 메타
+        "partial_failure": partial_failure,
+    }
+    if fred_data or ig_data:
         set_cached(key, result, ttl_hours=24)
-        return result
-    except Exception as e:
-        logger.warning("신용스프레드 조회 실패: %s", e)
-        partial_failure.append("hyg_lqd")
-        return {
-            "hyg_yield": None,
-            "lqd_yield": None,
-            "spread": None,
-            "spread_direction": "stable",
-            "history": [],
-            "oas_current": fred_data.get("oas_current") if fred_data else None,
-            "oas_history_5y": fred_data.get("oas_history_5y", []) if fred_data else [],
-            "oas_history": fred_data.get("oas_history_5y", []) if fred_data else [],
-            "oas_stats": fred_data.get("oas_stats", {}) if fred_data else {},
-            "oas_percentile": fred_data.get("oas_percentile") if fred_data else None,
-            "oas_zscore": fred_data.get("oas_zscore") if fred_data else None,
-            "oas_sentiment": fred_data.get("sentiment") if fred_data else None,
-            "percentile": fred_data.get("oas_percentile") if fred_data else None,
-            "ig_current": ig_current,
-            "ig_history_5y": ig_data.get("ig_history_5y", []) if ig_data else [],
-            "hy_ig_spread": hy_ig_spread,
-            "hy_ig_spread_history_5y": hy_ig_history_5y,
-            "partial_failure": partial_failure,
-        }
+    return result
 
 
 # ── 환율 ────────────────────────────────────────────────────────────────────
@@ -1486,10 +1400,19 @@ def fetch_cycle_inputs() -> dict:
     except Exception as e:
         logger.warning("수익률곡선 입력 실패: %s", e)
 
-    # 2) 신용스프레드
+    # 2) 신용스프레드 — OAS 백분위 변화로 방향 추론(HYG/LQD 폐기 후)
+    #    oas_momentum_6m이 음수=축소(narrowing), 양수=확대(widening)
     try:
         cs = fetch_credit_spread()
-        result["credit_direction"] = cs.get("spread_direction", "stable")
+        mom = cs.get("oas_momentum_6m")
+        if mom is None:
+            result["credit_direction"] = "stable"
+        elif mom > 0.5:
+            result["credit_direction"] = "widening"
+        elif mom < -0.5:
+            result["credit_direction"] = "narrowing"
+        else:
+            result["credit_direction"] = "stable"
     except Exception as e:
         logger.warning("신용스프레드 입력 실패: %s", e)
 
