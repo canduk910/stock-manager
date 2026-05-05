@@ -1,10 +1,10 @@
 import {
   ResponsiveContainer, LineChart, Line, AreaChart, Area,
-  XAxis, YAxis, Tooltip, CartesianGrid, ReferenceLine, ReferenceArea, Customized,
+  XAxis, YAxis, Tooltip, CartesianGrid, ReferenceLine, ReferenceArea,
 } from 'recharts'
 import LoadingSpinner from '../common/LoadingSpinner'
 import ErrorAlert from '../common/ErrorAlert'
-import EventLabelsOverlay from './EventLabelsOverlay'
+import { computeEventRows, makeLabelRenderer } from './EventLabelsOverlay'
 
 const fmt = (v) =>
   v != null
@@ -145,6 +145,10 @@ function SpreadHistoryChart({ history, events }) {
   if (!history?.length) return null
 
   const ev = _eventsForChart(events, history)
+  const rowMap = computeEventRows([
+    ...ev.bear_markets.map(b => ({ kind: 'bear', x1: b.x1, x2: b.x2, label: b.label })),
+    ...ev.recessions.map(r => ({ kind: 'rec', x1: r.x1, x2: r.x2, label: r.label })),
+  ])
 
   return (
     <div className="rounded-lg border bg-white p-4 shadow-sm">
@@ -174,41 +178,39 @@ function SpreadHistoryChart({ history, events }) {
               labelFormatter={(l) => l}
               contentStyle={{ fontSize: 12, borderRadius: 8 }}
             />
-            {/* 음영만 ReferenceArea로 표시. 라벨은 Customized 오버레이가 픽셀-공간 충돌 검사로 자동 적층(원천 차단). */}
-            {ev.bear_markets.map((b, i) => (
-              <ReferenceArea
-                key={`bear-${i}`}
-                x1={b.x1}
-                x2={b.x2}
-                fill="#ef4444"
-                fillOpacity={0.10}
-                stroke="none"
-                ifOverflow="hidden"
-              />
-            ))}
-            {ev.recessions.map((r, i) => (
-              <ReferenceArea
-                key={`rec-${i}`}
-                x1={r.x1}
-                x2={r.x2}
-                fill="#6b7280"
-                fillOpacity={0.18}
-                stroke="#374151"
-                strokeOpacity={0.3}
-                strokeDasharray="3 3"
-                ifOverflow="hidden"
-              />
-            ))}
-            <Customized
-              component={
-                <EventLabelsOverlay
-                  events={[
-                    ...ev.bear_markets.map(b => ({ kind: 'bear', x1: b.x1, x2: b.x2, label: b.label })),
-                    ...ev.recessions.map(r => ({ kind: 'rec', x1: r.x1, x2: r.x2, label: r.label })),
-                  ]}
+            {/* 음영 + ReferenceArea 자체 label(콜백, viewBox 수신). 글로벌 row 할당으로 충돌 회피. */}
+            {ev.bear_markets.map((b, i) => {
+              const { row, displayLabel } = rowMap.rowDisplayFor('bear', b.x1, b.x2)
+              return (
+                <ReferenceArea
+                  key={`bear-${i}`}
+                  x1={b.x1}
+                  x2={b.x2}
+                  fill="#ef4444"
+                  fillOpacity={0.10}
+                  stroke="none"
+                  ifOverflow="hidden"
+                  label={makeLabelRenderer({ kind: 'bear', displayLabel, row, fill: '#b91c1c' })}
                 />
-              }
-            />
+              )
+            })}
+            {ev.recessions.map((r, i) => {
+              const { row, displayLabel } = rowMap.rowDisplayFor('rec', r.x1, r.x2)
+              return (
+                <ReferenceArea
+                  key={`rec-${i}`}
+                  x1={r.x1}
+                  x2={r.x2}
+                  fill="#6b7280"
+                  fillOpacity={0.18}
+                  stroke="#374151"
+                  strokeOpacity={0.3}
+                  strokeDasharray="3 3"
+                  ifOverflow="hidden"
+                  label={makeLabelRenderer({ kind: 'rec', displayLabel, row, fill: '#374151' })}
+                />
+              )
+            })}
             <ReferenceLine y={0} stroke="#6b7280" strokeDasharray="4 4" strokeWidth={1.5} />
             <defs>
               <linearGradient id="spreadPos" x1="0" y1="0" x2="0" y2="1">

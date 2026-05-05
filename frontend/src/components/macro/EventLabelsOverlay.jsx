@@ -1,19 +1,11 @@
-// EventLabelsOverlay — Recharts <Customized component={<this />} /> 자식.
-// recharts가 cloneElement(this, chartProps)로 호출 → events(외부) + xAxisMap/offset(internal) 동시 접근.
-// 픽셀 공간에서 라벨 폭을 측정하여 같은 kind 내 충돌을 행 단위로 적층 → 침범 원천 차단.
+// 이벤트 라벨 stagger 계산 — 시간 도메인에서 글로벌 충돌 검사로 row 할당.
+// ReferenceArea의 label 콜백(viewBox 수신)에서 사용. Customized 우회로 100% 렌더 보장.
+//
+// 가정: 차트 X축이 균일 시간 매핑이라고 가정하여 라벨 픽셀 폭 → 시간 폭으로 환산.
+// kind(rec/bear)별 독립 적층. 같은 kind 내에서 cx가 가까우면 다음 row로 밀어냄.
 
-const KIND_STYLE = {
-  rec:  { fill: '#374151', prefix: '■' },
-  bear: { fill: '#b91c1c', prefix: '▼' },
-}
-
-function _estimateWidth(text, charWidth) {
-  let w = 0
-  for (const ch of text) {
-    w += /[\x00-\x7f]/.test(ch) ? charWidth * 0.6 : charWidth
-  }
-  return w
-}
+const _CHAR_PX = 6.2
+const _CHART_PX_FALLBACK = 600  // ResponsiveContainer 기본 폭 추정
 
 function _shortLabel(label, x1, x2) {
   const days = (new Date(x2) - new Date(x1)) / 86400000
@@ -23,108 +15,94 @@ function _shortLabel(label, x1, x2) {
   return label
 }
 
-function _safeScale(xAxis, value) {
-  // category scaleBand/scalePoint 모두 .scale(domainValue) 지원.
-  // domain 밖이거나 매칭 실패 시 NaN — fallback으로 NaN 반환.
-  try {
-    const v = xAxis.scale(value)
-    return Number.isFinite(v) ? v : NaN
-  } catch (_) {
-    return NaN
+function _estimateLabelChars(text) {
+  let n = 0
+  for (const ch of text) {
+    n += /[\x00-\x7f]/.test(ch) ? 0.6 : 1
   }
+  return n
 }
 
-export default function EventLabelsOverlay({
-  events = [],
-  // chart internals (recharts cloneElement로 주입)
-  xAxisMap,
-  offset,
-  // 시각 옵션
-  labelGap = 13,
-  sidePadding = 4,
-  charWidth = 6.2,
-  fontSize = 9,
-  topMargin = 4,
-  bottomMargin = 14,
-}) {
-  if (!xAxisMap || !offset) return null
-  const xAxisKey = Object.keys(xAxisMap)[0]
-  const xAxis = xAxisMap[xAxisKey]
-  if (!xAxis || typeof xAxis.scale !== 'function') return null
+// events: [{kind, x1, x2, label}] - 정렬 안 됨
+// 반환: [{kind, x1, x2, label, displayLabel, row}] - row=0/1/2/...
+const _EMPTY_ROW_MAP = {
+  rowFor: () => 0,
+  rowDisplayFor: () => ({ row: 0, displayLabel: '' }),
+}
 
-  // band scale은 .bandwidth() 존재 — 중심 보정에 사용
-  const bw = typeof xAxis.scale.bandwidth === 'function' ? xAxis.scale.bandwidth() : 0
+export function computeEventRows(events, chartPxWidth = _CHART_PX_FALLBACK) {
+  if (!events?.length) return _EMPTY_ROW_MAP
+  // 전체 시간 범위
+  const allDates = events.flatMap(e => [e.x1, e.x2])
+  const minMs = Math.min(...allDates.map(d => new Date(d).getTime()))
+  const maxMs = Math.max(...allDates.map(d => new Date(d).getTime()))
+  const spanMs = Math.max(1, maxMs - minMs)
+  const msPerPx = spanMs / chartPxWidth
 
-  const items = []
-  for (const e of events) {
-    let x1px = _safeScale(xAxis, e.x1)
-    let x2px = _safeScale(xAxis, e.x2)
-    if (!Number.isFinite(x1px) || !Number.isFinite(x2px)) continue
-    // band scale은 left edge 반환 — 중심 보정
-    if (bw) { x1px += bw / 2; x2px += bw / 2 }
-    const left = Math.min(x1px, x2px)
-    const right = Math.max(x1px, x2px)
-    const cx = (left + right) / 2
-    const style = KIND_STYLE[e.kind] || KIND_STYLE.rec
-    const labelText = `${style.prefix} ${_shortLabel(e.label, e.x1, e.x2)}`
-    const w = _estimateWidth(labelText, charWidth) + sidePadding * 2
-    items.push({
-      kind: e.kind,
-      label: e.label,
-      cx,
-      halfW: w / 2,
-      text: labelText,
-      fill: style.fill,
-    })
-  }
+  const items = events.map(e => {
+    const cMs = (new Date(e.x1).getTime() + new Date(e.x2).getTime()) / 2
+    const displayLabel = _shortLabel(e.label, e.x1, e.x2)
+    const prefix = e.kind === 'rec' ? '■ ' : '▼ '
+    const fullText = prefix + displayLabel
+    const widthPx = _estimateLabelChars(fullText) * _CHAR_PX + 8
+    const widthMs = widthPx * msPerPx
+    return { ...e, displayLabel, cMs, widthMs }
+  })
 
   const place = (kindItems) => {
-    const sorted = kindItems.sort((a, b) => a.cx - b.cx)
-    const rowEnds = []
-    const placed = []
-    for (const it of sorted) {
-      const desiredLeft = it.cx - it.halfW
-      const desiredRight = it.cx + it.halfW
+    const sorted = kindItems.sort((a, b) => a.cMs - b.cMs)
+    const rowEnds = [] // 각 row의 마지막 라벨의 right ms
+    return sorted.map(it => {
+      const left = it.cMs - it.widthMs / 2
+      const right = it.cMs + it.widthMs / 2
       let row = 0
-      while (row < rowEnds.length && rowEnds[row] > desiredLeft) row++
-      if (row === rowEnds.length) rowEnds.push(desiredRight)
-      else rowEnds[row] = desiredRight
-      placed.push({ ...it, row })
-    }
-    return placed
+      while (row < rowEnds.length && rowEnds[row] > left) row++
+      if (row === rowEnds.length) rowEnds.push(right)
+      else rowEnds[row] = right
+      return { ...it, row }
+    })
   }
 
   const recItems = place(items.filter(i => i.kind === 'rec'))
   const bearItems = place(items.filter(i => i.kind === 'bear'))
+  // events 원래 순서로 묶어 반환할 필요 없음 — kind별 lookup 맵 제공
+  const map = new Map()
+  for (const it of [...recItems, ...bearItems]) {
+    map.set(`${it.kind}|${it.x1}|${it.x2}`, it.row)
+  }
+  return {
+    rowFor: (kind, x1, x2) => map.get(`${kind}|${x1}|${x2}`) ?? 0,
+    rowDisplayFor: (kind, x1, x2) => {
+      const it = [...recItems, ...bearItems].find(
+        x => x.kind === kind && x.x1 === x1 && x.x2 === x2,
+      )
+      return it ? { row: it.row, displayLabel: it.displayLabel } : { row: 0, displayLabel: '' }
+    },
+  }
+}
 
-  const topY = (offset.top || 0) + topMargin
-  const bottomY = (offset.top || 0) + (offset.height || 0) - bottomMargin
-  const chartLeft = offset.left || 0
-  const chartRight = chartLeft + (offset.width || 0)
-
-  const renderItem = (it, y) => {
-    const minCx = chartLeft + it.halfW
-    const maxCx = chartRight - it.halfW
-    const cx = Math.max(minCx, Math.min(maxCx, it.cx))
+// ReferenceArea label 콜백 헬퍼 — viewBox 받아 row*step만큼 dy 적용 후 SVG <text> 반환.
+// kind: 'rec'(아래) | 'bear'(위)
+export function makeLabelRenderer({ kind, displayLabel, row, fill, fontSize = 9, step = 13 }) {
+  const prefix = kind === 'rec' ? '■' : '▼'
+  return (props) => {
+    const vb = props?.viewBox || {}
+    const x = (vb.x ?? 0) + (vb.width ?? 0) / 2
+    const yBase = kind === 'rec'
+      ? (vb.y ?? 0) + (vb.height ?? 0) - 4
+      : (vb.y ?? 0) + fontSize + 2
+    const dy = kind === 'rec' ? -row * step : row * step
     return (
       <text
-        key={`${it.kind}-${it.label}-${it.cx}-${it.row}`}
-        x={cx}
-        y={y}
+        x={x}
+        y={yBase + dy}
         textAnchor="middle"
         fontSize={fontSize}
-        fill={it.fill}
+        fill={fill}
         style={{ pointerEvents: 'none' }}
       >
-        {it.text}
+        {prefix} {displayLabel}
       </text>
     )
   }
-
-  return (
-    <g className="event-labels-overlay">
-      {bearItems.map(it => renderItem(it, topY + it.row * labelGap + fontSize))}
-      {recItems.map(it => renderItem(it, bottomY - it.row * labelGap))}
-    </g>
-  )
 }
