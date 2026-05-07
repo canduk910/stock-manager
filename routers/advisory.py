@@ -3,7 +3,9 @@
 자문종목 CRUD + 데이터 새로고침 + AI 리포트 생성.
 """
 
-from fastapi import APIRouter, Depends, Query
+from typing import Optional
+
+from fastapi import APIRouter, Body, Depends, Query
 from pydantic import BaseModel
 
 from services.auth_deps import get_current_user
@@ -21,6 +23,11 @@ class AddStockBody(BaseModel):
     code: str
     market: str = "KR"
     memo: str = ""
+
+
+class AnalyzeBody(BaseModel):
+    """POST /{code}/analyze 요청 바디. 사용자 코멘트 기반 양면 평가 트리거."""
+    user_comment: Optional[str] = None
 
 
 # ── 엔드포인트 ────────────────────────────────────────────────────────────────
@@ -124,19 +131,35 @@ def get_data(code: str, market: str = Query("KR"), user: dict = Depends(get_curr
 
 
 @router.post("/{code}/analyze")
-def analyze(code: str, market: str = Query("KR"), user: dict = Depends(get_current_user)):
+def analyze(
+    code: str,
+    body: Optional[AnalyzeBody] = Body(None),
+    market: str = Query("KR"),
+    user: dict = Depends(get_current_user),
+):
     """OpenAI GPT-5.4 리포트 생성 (10~30초 소요).
 
     OPENAI_API_KEY 미설정 시 503 반환.
     캐시 없을 시 404 반환.
+
+    body는 백워드 호환을 위해 Optional. user_comment(1000자 상한, 2026-05-07) 전달 시
+    GPT 응답에 user_commentary_evaluation 섹션이 포함됨.
     """
     code = code.upper()
     market = market.upper()
 
+    raw_comment = (body.user_comment if body else None) or ""
+    raw_comment = raw_comment.strip()
+    if len(raw_comment) > 1000:
+        raise ServiceError("사용자 코멘트는 1000자 이내여야 합니다.")
+    user_comment = raw_comment or None
+
     stock = advisory_store.get_stock(user["id"], code, market)
     name = stock["name"] if stock else code
 
-    result = advisory_service.generate_ai_report(code, market, name, user_id=user["id"])
+    result = advisory_service.generate_ai_report(
+        code, market, name, user_id=user["id"], user_comment=user_comment,
+    )
     return result
 
 

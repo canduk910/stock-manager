@@ -40,12 +40,12 @@ export function usePortfolioAdvisor() {
     }
   }, [])
 
-  // 새 분석 실행
-  const analyze = useCallback(async (balanceData, forceRefresh = false) => {
+  // 새 분석 실행 (userComment 2026-05-07)
+  const analyze = useCallback(async (balanceData, forceRefresh = false, userComment = null) => {
     setLoading(true)
     setError(null)
     try {
-      const res = await analyzePortfolio(balanceData, forceRefresh)
+      const res = await analyzePortfolio(balanceData, forceRefresh, userComment)
       setResult(res)
       loadHistory()  // 이력 목록만 갱신 (fire-and-forget, result 덮어쓰기 없음)
       try { window.dispatchEvent(new Event('ai-usage-changed')) } catch (_) {}

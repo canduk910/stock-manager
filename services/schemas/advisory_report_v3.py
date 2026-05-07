@@ -170,6 +170,58 @@ class GrowthAuxiliary(BaseModel):
         extra = "allow"
 
 
+# ── 사용자 코멘트 평가 (10번 신규, 2026-05-07) ──
+
+class AgreePoint(BaseModel):
+    """사용자 가설에 동의하는 근거 1건.
+
+    strength 1~10:
+      - 1~3: 약한 단서(노이즈 가능)
+      - 4~6: 통상적 신호
+      - 7~8: 강한 정량 근거
+      - 9~10: 결정적 증거
+    """
+    point: str
+    evidence: str
+    strength: int = Field(ge=1, le=10)
+
+    class Config:
+        extra = "allow"
+
+
+class DisagreePoint(BaseModel):
+    """사용자 가설에 반박하는 근거 1건. strength 정의는 AgreePoint와 동일."""
+    point: str
+    evidence: str
+    strength: int = Field(ge=1, le=10)
+
+    class Config:
+        extra = "allow"
+
+
+class UserCommentaryEvaluation(BaseModel):
+    """10. 사용자 의견 평가 — 가설 양면 검증.
+
+    backward-compat: AdvisoryReportV3Schema에서 Optional이므로 누락 시 검증 통과.
+    overall_stance 5단계 임계값(시스템 프롬프트 5번 규칙):
+      - strong_agree: 동의 평균 strength≥7 & 반박 평균<5
+      - agree: 동의>반박
+      - balanced: 양측 ±1 이내
+      - disagree: 반박>동의
+      - strong_disagree: 반박 평균≥7 & 동의 평균<5
+    """
+    user_comment: str
+    overall_stance: Literal[
+        "strong_agree", "agree", "balanced", "disagree", "strong_disagree",
+    ]
+    agree_points: list[AgreePoint] = Field(default_factory=list, max_length=5)
+    disagree_points: list[DisagreePoint] = Field(default_factory=list, max_length=5)
+    summary: str
+
+    class Config:
+        extra = "allow"
+
+
 class TradingStrategy(BaseModel):
     """6. 최종 매매 전략 (v2 포지션가이드 + v3 최종매매전략 통합)."""
     # v2 포지션가이드 필드
@@ -217,6 +269,7 @@ class AdvisoryReportV3Schema(BaseModel):
     미래성장동력: Optional[FutureGrowthDrivers] = None
     역발상관점: Optional[ContrarianView] = None
     성장주_보조판단: Optional[GrowthAuxiliary] = None
+    user_commentary_evaluation: Optional[UserCommentaryEvaluation] = None
 
     # 전략별 정량 평가
     전략별평가: StrategyEvaluation

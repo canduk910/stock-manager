@@ -1,3 +1,6 @@
+import UserCommentInput from '../common/UserCommentInput'
+import UserCommentaryCard from './UserCommentaryCard'
+
 /**
  * AI자문 탭 — OpenAI GPT-5.4 리포트 표시.
  *
@@ -132,11 +135,21 @@ function ScoreBar({ label, value, max, colorClass = 'bg-blue-500' }) {
   )
 }
 
-export default function AIReportPanel({ report, history = [], loading, error, onGenerate, onSelectHistory }) {
+export default function AIReportPanel({
+  report,
+  history = [],
+  loading,
+  error,
+  onGenerate,
+  onSelectHistory,
+  userComment = '',
+  onUserCommentChange,
+}) {
   const reportData = report?.report || {}
   const generatedAt = report?.generated_at
   const model = report?.model
 
+  const userCommentaryEval = reportData.user_commentary_evaluation || null
   const opinion = reportData['종합투자의견'] || reportData.opinion || {}
   const strategies = reportData['전략별평가'] || {}
   const technical = reportData['기술적시그널'] || reportData.technical_signal || {}
@@ -167,6 +180,20 @@ export default function AIReportPanel({ report, history = [], loading, error, on
 
   return (
     <div className="space-y-4">
+      {/* 사용자 코멘트 입력 (2026-05-07) — 액션바 위 */}
+      {onUserCommentChange && (
+        <div className="p-3 bg-blue-50/30 border border-blue-200 rounded-lg">
+          <p className="text-xs font-semibold text-blue-700 mb-2">
+            💬 사용자 의견 (선택) — 가설을 입력하면 GPT가 동의/반박 양면 평가를 추가합니다
+          </p>
+          <UserCommentInput
+            value={userComment}
+            onChange={onUserCommentChange}
+            disabled={loading}
+          />
+        </div>
+      )}
+
       {/* 액션 바 */}
       <div className="flex items-center justify-between gap-4 p-3 bg-gray-50 rounded-lg border border-gray-200">
         <div className="flex items-center gap-3 min-w-0">
@@ -259,6 +286,11 @@ export default function AIReportPanel({ report, history = [], loading, error, on
         <div className="p-4 bg-gray-50 border border-gray-200 rounded text-xs text-gray-700 whitespace-pre-wrap">
           {rawText}
         </div>
+      )}
+
+      {/* 사용자 가설 양면 평가 카드 (보고서 본문 최상단 — 2026-05-07) */}
+      {!loading && !rawText && userCommentaryEval && (
+        <UserCommentaryCard evaluation={userCommentaryEval} />
       )}
 
       {/* 종합 투자 의견 */}

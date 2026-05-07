@@ -30,10 +30,16 @@ export const fetchAdvisoryData = (code, market = 'KR') =>
   apiFetch(`/api/advisory/${encodeURIComponent(code)}/data?market=${market}`)
 
 // ── AI 리포트 생성 ─────────────────────────────────────────────────────────
-export const generateReport = (code, market = 'KR') =>
-  apiFetch(`/api/advisory/${encodeURIComponent(code)}/analyze?market=${market}`, {
+// userComment(2026-05-07): 사용자 가설을 백엔드에 전달, 양면 평가(user_commentary_evaluation) 트리거
+export const generateReport = (code, market = 'KR', userComment = null) => {
+  const cmt = (userComment || '').trim()
+  const body = cmt ? { user_comment: cmt } : null
+  return apiFetch(`/api/advisory/${encodeURIComponent(code)}/analyze?market=${market}`, {
     method: 'POST',
+    headers: body ? { 'Content-Type': 'application/json' } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
   })
+}
 
 // ── AI 리포트 히스토리 목록 ────────────────────────────────────────────────
 export const fetchReportHistory = (code, market = 'KR', limit = 20) =>

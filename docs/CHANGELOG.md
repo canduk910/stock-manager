@@ -1,5 +1,68 @@
 # 변경 이력
 
+## 2026-05-07 — 자문보고서·포트폴리오 자문 사용자 코멘트 양면 평가 (동의/반박 + strength 1~10)
+
+### 배경
+사용자 요청: AI자문보고서·포트폴리오 자문의 분석시작 버튼 주변에 사용자 코멘트 입력박스를 추가. 코멘트를 기반으로 보고서 방향이 의견에 동의하며 논리를 강화하거나 반박하는 형태로 진행되도록 하고, 동의·반박 양쪽 의견의 강도를 10점 만점 점수로 표시.
+
+### 백엔드 — Pydantic 스키마 + 시스템 프롬프트
+- `services/schemas/advisory_report_v3.py` — `AgreePoint`/`DisagreePoint` 모델(`point: str`, `evidence: str`, `strength: int = Field(ge=1, le=10)`) + `UserCommentaryEvaluation` 모델(`user_comment`, `overall_stance: Literal["strong_agree","agree","balanced","disagree","strong_disagree"]`, `agree_points: list max 5`, `disagree_points: list max 5`, `summary`). `AdvisoryReportV3Schema.user_commentary_evaluation: Optional[UserCommentaryEvaluation] = None`(백워드 호환 — 기존 보고서 누락 시 검증 통과).
+- `services/advisory_service.py` — `generate_ai_report(..., user_comment: Optional[str] = None)` 시그니처 확장. `_build_system_prompt(..., user_comment=None)` 후미 가이드 블록 6개 규칙 append:
+  ① 동의/반박 양면 의무(악마의 변호인 — 한쪽 압도여도 반대측 1건 이상)
+  ② strength 1~10 임계값(1~3 약한 단서 / 4~6 통상 / 7~8 강한 정량 / 9~10 결정적) + evidence 출처 명시
+  ③ overall_stance 5단계(strong_agree=동의 평균≥7&반박<5 / agree=동의>반박 / balanced=±1 이내 / disagree / strong_disagree)
+  ④ summary 1~3문장 직접 답변
+  ⑤ 본문 8대 분석과 stance 정합성(본문 우선, stance 보정) — 등급/composite_score/action은 코멘트와 무관하게 데이터 기반
+  ⑥ JSON `user_commentary_evaluation` 필드 필수 + 형식 명세
+  `_build_prompt(..., user_comment=None)` user 메시지 후미에 코멘트 원문 echo.
+- `services/portfolio_advisor_service.py` — `_compute_cache_key(balance_data, user_comment=None)` SHA256 payload에 코멘트 strip 후 포함(동일 잔고+다른 코멘트=다른 보고서, None/""/" "=같은 키). `analyze_portfolio(..., user_comment=None)` + `_build_system_prompt(..., user_comment=None)` 동일 가이드 블록 + `_build_prompt(..., user_comment=None)` user 메시지 echo. JSON 응답 스키마에 `user_commentary_evaluation: null|{...}` 형식 명시.
+
+### 백엔드 — 라우터 (백워드 호환)
+- `routers/advisory.py` — `AnalyzeBody(BaseModel)` 신규(`user_comment: Optional[str] = None`). `POST /{code}/analyze` body는 `Body(None)`으로 백워드 호환(기존 body 미전송 200 유지). 1000자 초과 시 `ServiceError(400)`. 정상화된 코멘트(빈 문자열/공백→None)를 `advisory_service.generate_ai_report`에 전달.
+- `routers/portfolio_advisor.py` — `AnalyzeBody.user_comment: Optional[str] = None` 추가, 1000자 검증 후 서비스에 전달.
+
+### 프론트엔드 — 입력 컴포넌트 + 결과 카드
+- `frontend/src/components/common/UserCommentInput.jsx` (신규) — textarea + 글자수 카운터(0/1000) + 80% amber/100% red 임계 색상. props: `value`/`onChange`/`disabled`/`maxLength=1000`.
+- `frontend/src/components/advisory/UserCommentaryCard.jsx` (신규) — 보고서 본문 최상단 카드. `evaluation` prop. 헤더(코멘트 원문 인용 + stance 5단계 배지: strong_agree=green/agree=lime/balanced=gray/disagree=amber/strong_disagree=red) → 좌(👍 녹색)/우(👎 빨강) 2컬럼 + 항목별 strength 1~10 게이지 막대 → 하단 summary. 모바일 1컬럼 스택. `evaluation` null 시 미렌더.
+- `frontend/src/api/{advisory,advisor}.js` — `generateReport(code, market, userComment=null)` / `analyzePortfolio(balance_data, force_refresh, userComment=null)`. body에 `{user_comment}` 포함, null/공백 시 미전송(`Content-Type` 헤더도 조건부).
+- `frontend/src/hooks/{useAdvisory,usePortfolioAdvisor}.js` — `generate(code, market, userComment=null)` / `analyze(balanceData, forceRefresh, userComment=null)` 시그니처 확장.
+- `frontend/src/components/advisory/AIReportPanel.jsx` — 액션바 위 `<UserCommentInput>`(onUserCommentChange prop 있을 때만), 보고서 본문 최상단 `<UserCommentaryCard>`(reportData.user_commentary_evaluation 있을 때만).
+- `frontend/src/components/advisor/AdvisorPanel.jsx` — "분석 받기" 버튼 위 `<UserCommentInput>`, 분석 결과 본문 상단 `<UserCommentaryCard>`.
+- `frontend/src/pages/DetailPage.jsx` — `userComment` state(페이지 이동 시 초기화), `handleGenerate`에서 `generate(symbol, market, userComment || null)` 전파, AIReportPanel에 props 전달.
+
+### 도메인 정합성
+- **MarginAnalyst**: strength 1~10은 가설 검증용. 본문 등급(A~D)·composite_score는 데이터 기반 산출, 코멘트 무관(시스템 프롬프트 ⑤번 규칙).
+- **OrderAdvisor**: 사용자 코멘트가 매수 권고를 만들지 않음. `action`(적극매수~전량매도)은 cycle×regime 매트릭스 + grade_factor 유지. stance는 내러티브 보강용.
+- **ValueScreener**: Value Trap 6규칙 불변. 사용자가 "가치주야"라고 주장해도 trap 경고가 우선.
+- **악마의 변호인 의무**: 한쪽 strength 평균이 8 이상이어도 반대측 1건 이상 제시(편향 방지).
+
+### 캐시 전략
+- 개별 종목: `advisory_reports`는 매 호출 GPT 재생성(보고서 캐시 없음) → 코멘트 재생성 자연스러움.
+- 포트폴리오: `_compute_cache_key`에 코멘트 해시 포함 — 동일 잔고+다른 코멘트=새 보고서. None/""/" "=같은 키(strip 정규화).
+
+### 백워드 호환 (4/4 PASS)
+- `POST /api/advisory/{code}/analyze` body 없이 호출 → 200 (`Body(None)`)
+- `POST /api/portfolio-advisor/analyze` `user_comment` 없이 호출 → 200 (`Optional`)
+- 기존 보고서 조회 시 `user_commentary_evaluation` 누락 → Pydantic 통과 (`Optional[UserCommentaryEvaluation] = None`)
+- DB 마이그레이션 0건 (`alembic/versions/` 18개 그대로) — JSON 컬럼 안에 자연 저장
+
+### 테스트
+**단위 4건 신규 (35 케이스)**:
+- `tests/unit/test_advisory_schema_v3_user_commentary.py` (14) — strength 0/11=ValidationError, 1/10=통과, overall_stance 5단계, 누락=Optional 통과.
+- `tests/unit/test_advisory_user_comment.py` (6) — `_build_system_prompt` 코멘트 유무 분기, "악마의 변호인"/"1~10" 키워드 포함.
+- `tests/unit/test_portfolio_advisor_cache_key.py` (7) — 동일 잔고+다른 코멘트=다른 키, None/""/" "=같은 키.
+- `tests/unit/test_advisory_router_user_comment.py` (8) — 라우터 `Body(None)` + 1000자 검증 + None 정규화.
+
+**API 1건 신규 (8 케이스, PostgreSQL 의존 CI 위탁)**:
+- `tests/api/test_advisory_analyze_with_comment.py` — body 있음/없음/1001자 체이닝, OpenAI mock.
+
+**결과**: 단위 648 PASS / 0 FAIL / 6 skip. 회귀 0건. frontend 빌드 OK(853 modules).
+
+### 도메인 자문 호출
+**0건** — plan 사전 합의(strength 1~10/stance 5단계/악마의 변호인/등급 불변)를 그대로 코드화. MarginAnalyst/ValueScreener 추가 자문 불필요.
+
+---
+
 ## 2026-05-07 — 자문보고서 챗봇 권한 검증 버그 수정 + 기본적분석 비즈니스 모델 섹션
 
 ### 배경

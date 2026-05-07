@@ -913,6 +913,26 @@ OpenAI GPT-5.4로 종합 투자 의견 리포트 생성. **10~30초 소요**.
 
 캐시된 분석 데이터를 기반으로 프롬프트를 구성하여 GPT-5.4 호출.
 
+**요청 바디** (Optional, 백워드 호환):
+```json
+{
+  "user_comment": "이 종목은 AI 사이클 수혜로 향후 12개월 강세 예상"
+}
+```
+- `user_comment`: 사용자 가설(1000자 상한, 초과 시 400). 전달 시 응답 `report`에 `user_commentary_evaluation` 섹션 추가:
+  ```json
+  {
+    "user_commentary_evaluation": {
+      "user_comment": "원문 echo",
+      "overall_stance": "strong_agree|agree|balanced|disagree|strong_disagree",
+      "agree_points": [{"point": "...", "evidence": "...", "strength": 1~10}],
+      "disagree_points": [{"point": "...", "evidence": "...", "strength": 1~10}],
+      "summary": "1~3문장 직접 답변"
+    }
+  }
+  ```
+- 코멘트 없으면 (또는 body 미전송) 기존 동작과 동일.
+
 **응답**:
 ```json
 {

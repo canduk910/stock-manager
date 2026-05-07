@@ -6,13 +6,14 @@ GET  /api/portfolio-advisor/history  — 자문 이력 목록.
 GET  /api/portfolio-advisor/history/{report_id} — 특정 자문 리포트 조회.
 """
 
-from typing import List
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from services.auth_deps import require_admin
 from services import portfolio_advisor_service
+from services.exceptions import ServiceError
 
 router = APIRouter(prefix="/api/portfolio-advisor", tags=["portfolio-advisor"])
 
@@ -20,6 +21,7 @@ router = APIRouter(prefix="/api/portfolio-advisor", tags=["portfolio-advisor"])
 class AnalyzeBody(BaseModel):
     balance_data: dict
     force_refresh: bool = False
+    user_comment: Optional[str] = None
 
 
 class ChatMessage(BaseModel):
@@ -34,9 +36,21 @@ class ChatBody(BaseModel):
 
 @router.post("/analyze")
 def analyze(body: AnalyzeBody, _user: dict = Depends(require_admin)):
-    """포트폴리오 AI 자문 분석. 캐시 히트 시 즉시 반환."""
+    """포트폴리오 AI 자문 분석. 캐시 히트 시 즉시 반환.
+
+    user_comment(2026-05-07): 1000자 상한 검증 후 캐시 키 + 프롬프트에 전파.
+    동일 잔고+다른 코멘트 = 새 보고서 (캐시 키 분리).
+    """
+    raw_comment = (body.user_comment or "").strip()
+    if len(raw_comment) > 1000:
+        raise ServiceError("사용자 코멘트는 1000자 이내여야 합니다.")
+    user_comment = raw_comment or None
+
     return portfolio_advisor_service.analyze_portfolio(
-        body.balance_data, body.force_refresh, user_id=_user.get("id")
+        body.balance_data,
+        body.force_refresh,
+        user_id=_user.get("id"),
+        user_comment=user_comment,
     )
 
 

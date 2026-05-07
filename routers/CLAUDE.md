@@ -12,11 +12,11 @@
 | `_kis_auth.py` | (내부 모듈) | KIS 인증 공통 (토큰 관리, hashkey 발급). `balance.py`·`order.py` 공용 |
 | `order.py` | `/api/order/*` | 주문 발송/정정/취소/미체결/체결/이력/예약주문 |
 | `quote.py` | `WS /ws/quote/{symbol}`, `WS /ws/execution-notice` | 실시간 호가 WebSocket (KR/FNO/US) + 체결통보 WS |
-| `advisory.py` | `/api/advisory/*` | AI자문 종목 관리 + 데이터 수집(+리서치)/조회 + AI 리포트 생성(v3 통합). `POST /research` 수동 리서치 수집. `GET /{code}/analyst-reports` 증권사별 목표가+리포트(KR=네이버/US=yfinance). **`POST /{code}/chat`** 자문보고서 컨텍스트 기반 stateless 챗봇(messages 배열은 클라이언트가 보관, 보고서 본문을 system prompt에 주입, `service_name="advisory_chat"`). |
+| `advisory.py` | `/api/advisory/*` | AI자문 종목 관리 + 데이터 수집(+리서치)/조회 + AI 리포트 생성(v3 통합). `POST /research` 수동 리서치 수집. `GET /{code}/analyst-reports` 증권사별 목표가+리포트(KR=네이버/US=yfinance). **`POST /{code}/chat`** 자문보고서 컨텍스트 기반 stateless 챗봇(messages 배열은 클라이언트가 보관, 보고서 본문을 system prompt에 주입, `service_name="advisory_chat"`). **(2026-05-07)** `POST /{code}/analyze` body `AnalyzeBody(user_comment: Optional[str])` + `Body(None)` 백워드 호환 + 1000자 ServiceError(400) — 사용자 가설을 GPT에 전달해 동의/반박 양면 평가(`user_commentary_evaluation`) 트리거. |
 | `search.py` | `GET /api/search` | 종목 검색 (KR=자동완성, US=티커 검증, FNO=마스터 검색) |
 | `market_board.py` | `/api/market-board/*`, `WS /ws/market-board` | 신고가/신저가 + sparkline + 당일 OHLC + 시세판 종목 CRUD + 순서 관리(`GET/PUT /api/market-board/order`) + 실시간 WS(시가/고가/저가 포함) |
 | `macro.py` | `/api/macro/*` | 매크로 분석: 지수/뉴스/심리/투자자 + 금리차/신용스프레드/환율/원자재/섹터히트맵/국면. 11개 GET 엔드포인트 |
-| `portfolio_advisor.py` | `/api/portfolio-advisor/*` | AI 포트폴리오 자문: `POST /analyze` (GPT 분석), **`POST /chat`** (보고서 컨텍스트 stateless 챗봇, `service_name="portfolio_chat"`), `GET /history` (이력 목록), `GET /history/{id}` (리포트 상세). |
+| `portfolio_advisor.py` | `/api/portfolio-advisor/*` | AI 포트폴리오 자문: `POST /analyze` (GPT 분석), **`POST /chat`** (보고서 컨텍스트 stateless 챗봇, `service_name="portfolio_chat"`), `GET /history` (이력 목록), `GET /history/{id}` (리포트 상세). **(2026-05-07)** `AnalyzeBody.user_comment: Optional[str]` 추가(1000자 ServiceError) — 동일 잔고+다른 코멘트=다른 보고서(캐시 키 SHA256 payload에 코멘트 strip 포함). |
 | `report.py` | `/api/reports/*` | 일일 보고서 + 추천 이력 + 성과 통계 + 매크로 체제 이력. 8개 GET 엔드포인트. `GET /by-date` 날짜+시장 조회(신규). `/{report_id}` 패스 파라미터는 마지막에 등록 |
 | `pipeline.py` | `/api/pipeline/*` | 투자 파이프라인: `POST /run` (비동기), `POST /run-sync` (동기), `GET /status` (스케줄러+실행 상태) |
 | `backtest.py` | `/api/backtest/*` | KIS AI Extensions MCP 연동 백테스트: 프리셋/커스텀/배치 실행, 결과 조회, 이력 삭제 + **전략빌더 CRUD**(변환/검증/저장/로드/삭제). `KIS_MCP_ENABLED=true` 필요. 15개 엔드포인트. 이력에 종목명(`symbol_name`) 부착. 프리셋 params 오버라이드. `commission_rate`/`tax_rate`/`slippage` 거래비용 파라미터 지원. 전략빌더: `POST /strategy/convert`, `POST /strategy/validate`, `GET/POST /strategies`, `GET/DELETE /strategies/{name}` |

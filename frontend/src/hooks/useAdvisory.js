@@ -84,11 +84,11 @@ export function useAdvisoryReport() {
     }
   }, [])
 
-  const generate = useCallback(async (code, market) => {
+  const generate = useCallback(async (code, market, userComment = null) => {
     setLoading(true)
     setError(null)
     try {
-      const result = await generateReport(code, market)
+      const result = await generateReport(code, market, userComment)
       setReport(result)
       // 히스토리 갱신
       const h = await fetchReportHistory(code, market)

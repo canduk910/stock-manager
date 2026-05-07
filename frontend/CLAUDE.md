@@ -64,6 +64,7 @@ frontend/
                           CandlestickChart (ohlcv/indicators props, 캔들+MA5/20/60+BB+거래량, PriceChartPanel·TechnicalPanel 공용)
                           **AiUsageGauge** (신규 2026-05-06) — Header 우측 가로 24px 게이지바 + `used/limit` 수치 + 80%/95% 임계 색상(amber/red). useAiUsage 훅 사용. limit≤0이면 미렌더.
                           **ReportChatBubble** (신규 2026-05-06) — 우하단 플로팅 챗봇. props: `kind('advisory'|'portfolio')`/`contextId(reportId)`/`contextLabel`/`market`/`code`/`disabled`. 닫힘=원형 💬 버튼, 열림=`w-96 max-h-[70vh]` 카드(헤더+메시지 스크롤+예시 질문 칩 3개+textarea+전송). contextId 변경 시 messages 초기화. 응답 후 `dispatchEvent('ai-usage-changed')`. 모바일 풀폭(`right-6 left-4`).
+                          **UserCommentInput** (신규 2026-05-07) — AI 분석 시작 전 사용자 가설 입력 textarea. props: `value`/`onChange`/`disabled`/`maxLength=1000`. 글자 수 카운터(0/1000), 80% 초과 amber, 100% 초과 red. AIReportPanel + AdvisorPanel 양쪽 액션바 위에 마운트.
       screener/           FilterPanel (구루 프리셋 드롭다운+체제 토글+guru_top), StockTable (섹터+52H대비+서준식 기대수익률+구루점수배지+Value Trap 경고)
       earnings/           FilingsTable (국내/미국 컬럼 분기, market prop)
       balance/            PortfolioSummary, HoldingsTable, OverseasHoldingsTable, FuturesTable
@@ -74,7 +75,8 @@ frontend/
       order/              OrderForm, OrderConfirmModal, OpenOrdersTable, ModifyOrderModal,
                           ExecutionsTable, OrderHistoryTable, ReservationForm, ReservationsTable, SyncButton,
                           OrderbookPanel (실시간 호가창)
-      advisory/           FundamentalPanel, TechnicalPanel, AIReportPanel (v3 통합: 6대비판분석+전략+시나리오), ResearchDataPanel (**입력데이터 통합 미리보기 16항목**: 기본/리서치 구분 제거. 사업개요/손익·BS·CF·분기/계량지표(PER·PBR·ROE·ROA·EPS·배당수익률·주당배당금·시총)/PER·PBR 5Y/10년 밴드/포워드추정/**증권사 컨센서스(목표가 중앙값·평균·dispersion·upside·매수보유매도 분포·5단계 모멘텀·과열 경고·6개월 추이·최근 5건 PDF 링크)**/기술시그널/KIS 퀀트/경영진/자본행위/업황/거시지표+**52주 위치(고가·저가·위치%·고점대비%)**),
+      advisory/           FundamentalPanel, TechnicalPanel, AIReportPanel (v3 통합: 6대비판분석+전략+시나리오. **(2026-05-07)** UserCommentInput 액션바 위 + UserCommentaryCard 본문 최상단 마운트), ResearchDataPanel (**입력데이터 통합 미리보기 16항목**: 기본/리서치 구분 제거. 사업개요/손익·BS·CF·분기/계량지표(PER·PBR·ROE·ROA·EPS·배당수익률·주당배당금·시총)/PER·PBR 5Y/10년 밴드/포워드추정/**증권사 컨센서스(목표가 중앙값·평균·dispersion·upside·매수보유매도 분포·5단계 모멘텀·과열 경고·6개월 추이·최근 5건 PDF 링크)**/기술시그널/KIS 퀀트/경영진/자본행위/업황/거시지표+**52주 위치(고가·저가·위치%·고점대비%)**),
+                          **UserCommentaryCard** (신규 2026-05-07) — 사용자 가설 양면 평가 카드. `evaluation` prop(user_comment/overall_stance/agree_points/disagree_points/summary). 헤더: 코멘트 원문 인용 + stance 5단계 배지(strong_agree=green/agree=lime/balanced=gray/disagree=amber/strong_disagree=red). 좌(👍 녹색)/우(👎 빨강) 2컬럼 + 항목별 strength 1~10 게이지 막대 + 하단 summary. 모바일 1컬럼 스택. evaluation null 시 미렌더,
                           AnalystReportsModal (증권사별 목표가+리포트 팝업, KR=네이버리서치/US=yfinance등급이력)
       report/             ReportDetailView (체제카드+지수+섹터추천+종목추천, v1 Markdown 폴백),
                           SectorConceptTabs (3컨셉 탭: 모멘텀/역발상/3개월선점, WatchlistButton+기등록 ★ 포함),
@@ -176,6 +178,6 @@ frontend/
 
 - **FundamentalPanel**: **사업 개요**(BusinessOverview: #키워드 + 사업설명 + 매출비중 파이차트) → **비즈니스 모델**(BusinessModelSection — 3카드: 💰 매출 흐름 / 💵 현금 창출 / 🔬 R&D 투자, `business_model` 모든 필드 빈 값이면 미렌더, 2026-05-06 추가) → 애널리스트 추정치(매출/순이익/EPS 현재E+차기E, **목표주가 클릭→AnalystReportsModal**) → 계량지표(10개: +EPS+안전마진가격) → 손익계산서(+추정치 바 반투명) → 대차대조표 → 현금흐름표
 - **TechnicalPanel**: 타임프레임(15m/60m/1d/1wk) + 기간 선택. 시그널 카드 + 캔들스틱+MA+BB → 거래량 → MACD → RSI → Stochastic → PER/PBR 밸류에이션(1d/1wk만, `valuationData` prop + `fetchDetailValuation` API)
-- **AIReportPanel**: **v2 등급 카드**(SafetyGradeBadge A/B+/B/C/D + ScoreBar 3개(등급28/복합100/정합성100) + Value Trap 배너 + recommendation 배지; v1 리포트 시 카드 숨김) → 종합투자의견 배지 → 전략별평가 3컬럼 카드(안전마진가격 표시) → 기술적시그널 → 리스크/투자포인트
+- **AIReportPanel**: **v2 등급 카드**(SafetyGradeBadge A/B+/B/C/D + ScoreBar 3개(등급28/복합100/정합성100) + Value Trap 배너 + recommendation 배지; v1 리포트 시 카드 숨김) → 종합투자의견 배지 → 전략별평가 3컬럼 카드(안전마진가격 표시) → 기술적시그널 → 리스크/투자포인트. **(2026-05-07)** 액션바 위 `<UserCommentInput>`(onUserCommentChange prop 있을 때만), 보고서 본문 최상단 `<UserCommentaryCard>`(reportData.user_commentary_evaluation 있을 때만)
 
 > 컴포넌트 상세 → `docs/FRONTEND_SPEC.md`

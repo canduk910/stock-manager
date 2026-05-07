@@ -59,6 +59,8 @@ export default function DetailPage() {
   const { symbol } = useParams()
   const [activeTab, setActiveTab] = useState('financials')
   const [subTab, setSubTab] = useState('cagr')
+  // 사용자 가설 코멘트 (AI 자문 서브탭) — 페이지 이동 시 초기화 (2026-05-07)
+  const [userComment, setUserComment] = useState('')
   const { data, loading, error, load } = useDetailReport()
 
   const { data: advData, loading: advLoading, error: advError, load: loadAdvData, refresh: refreshAdvData } = useAdvisoryData()
@@ -87,8 +89,8 @@ export default function DetailPage() {
   }, [symbol, market, data, refreshAdvData]) // eslint-disable-line
 
   const handleGenerate = useCallback(async () => {
-    await generate(symbol, market)
-  }, [symbol, market, generate])
+    await generate(symbol, market, userComment || null)
+  }, [symbol, market, generate, userComment])
 
   return (
     <div className="space-y-5">
@@ -259,6 +261,8 @@ export default function DetailPage() {
                       error={reportError}
                       onGenerate={handleGenerate}
                       onSelectHistory={(id) => loadReportById(symbol, id, market)}
+                      userComment={userComment}
+                      onUserCommentChange={setUserComment}
                     />
                   </div>
                 )}

@@ -1,7 +1,10 @@
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { usePortfolioAdvisor } from '../../hooks/usePortfolioAdvisor'
 import LoadingSpinner from '../common/LoadingSpinner'
 import ErrorAlert from '../common/ErrorAlert'
+import UserCommentInput from '../common/UserCommentInput'
+import UserCommentaryCard from '../advisory/UserCommentaryCard'
 import DiagnosisCard from './DiagnosisCard'
 import SectorRecommendationCard from './SectorRecommendationCard'
 import RebalanceCard from './RebalanceCard'
@@ -17,6 +20,9 @@ export default function AdvisorPanel({ balanceData, notify, advisor: externalAdv
   const cached = result?.cached
   const analyzedAt = result?.analyzed_at
   const reportId = result?.report_id
+
+  // 사용자 가설 코멘트 (2026-05-07) — 페이지 이동 시 초기화
+  const [userComment, setUserComment] = useState('')
 
   const hasHoldings =
     (balanceData?.stock_list?.length > 0) ||
@@ -54,7 +60,7 @@ export default function AdvisorPanel({ balanceData, notify, advisor: externalAdv
           {/* 새로 분석 버튼 (결과 표시 중일 때) */}
           {analysis && !loading && (
             <button
-              onClick={() => analyze(balanceData, true)}
+              onClick={() => analyze(balanceData, true, userComment || null)}
               disabled={loading}
               className="px-3 py-1.5 text-xs font-medium text-indigo-600 border border-indigo-300 rounded-lg hover:bg-indigo-50 disabled:opacity-50 transition-colors"
             >
@@ -64,7 +70,7 @@ export default function AdvisorPanel({ balanceData, notify, advisor: externalAdv
           {/* 최초 분석 버튼 */}
           {!analysis && !loading && (
             <button
-              onClick={() => analyze(balanceData)}
+              onClick={() => analyze(balanceData, false, userComment || null)}
               disabled={!hasHoldings || loading}
               className="px-4 py-1.5 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors"
             >
@@ -76,6 +82,21 @@ export default function AdvisorPanel({ balanceData, notify, advisor: externalAdv
 
       {/* 본문 */}
       <div className="p-4">
+        {/* 사용자 가설 입력 (분석 전 단계 — 2026-05-07) */}
+        {hasHoldings && !loading && (
+          <div className="mb-4 p-3 bg-blue-50/30 border border-blue-200 rounded-lg">
+            <p className="text-xs font-semibold text-blue-700 mb-2">
+              💬 사용자 의견 (선택) — 가설을 입력하면 GPT가 동의/반박 양면 평가를 추가합니다
+            </p>
+            <UserCommentInput
+              value={userComment}
+              onChange={setUserComment}
+              disabled={loading}
+              compact
+            />
+          </div>
+        )}
+
         {/* 보유 종목 없음 */}
         {!hasHoldings && !loading && !analysis && (
           <p className="text-sm text-gray-400 text-center py-6">
@@ -101,6 +122,11 @@ export default function AdvisorPanel({ balanceData, notify, advisor: externalAdv
               <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-700">
                 AI 분석 결과를 표시할 수 없습니다. "새로 분석" 버튼을 클릭해 다시 시도해주세요.
               </div>
+            )}
+
+            {/* 사용자 가설 양면 평가 (결과 본문 상단 — 2026-05-07) */}
+            {analysis.user_commentary_evaluation && (
+              <UserCommentaryCard evaluation={analysis.user_commentary_evaluation} />
             )}
 
             {/* 시장 코멘트 */}

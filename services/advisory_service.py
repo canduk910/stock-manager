@@ -104,12 +104,21 @@ def _collect_research(code: str, market: str, name: str) -> dict:
         return {}
 
 
-def generate_ai_report(code: str, market: str, name: str, user_id: int = 1) -> dict:
+def generate_ai_report(
+    code: str,
+    market: str,
+    name: str,
+    user_id: int = 1,
+    user_comment: Optional[str] = None,
+) -> dict:
     """저장된 캐시 데이터를 기반으로 OpenAI GPT-5.4 리포트 생성.
 
     Phase 3: max_completion_tokens 10000 기본, 재시도 시 12000.
     finish_reason=="length" 1차 재시도, 2차 실패 시 ExternalAPIError → 저장 거부.
     Pydantic v2 검증 실패 시 1회 재시도.
+
+    user_comment: 사용자 가설/의견. 시스템 프롬프트 후미 가이드 블록 + user 메시지에 echo.
+    GPT 응답 JSON에 user_commentary_evaluation 섹션이 추가됨(코멘트 있을 때만).
     """
     if not OPENAI_API_KEY:
         raise ConfigError("OPENAI_API_KEY가 설정되지 않았습니다.")
@@ -134,10 +143,11 @@ def generate_ai_report(code: str, market: str, name: str, user_id: int = 1) -> d
     cycle_ctx = _get_cycle_context()
 
     # 항상 통합 프롬프트 (v2/v3 분기 없음)
-    system_prompt = _build_system_prompt(regime, regime_desc, cycle_ctx)
+    system_prompt = _build_system_prompt(regime, regime_desc, cycle_ctx, user_comment=user_comment)
     prompt = _build_prompt(code, market, name, fundamental, technical,
                            graham_data, macro_ctx, regime, regime_desc,
-                           strategy_signals, research_data, cycle_ctx)
+                           strategy_signals, research_data, cycle_ctx,
+                           user_comment=user_comment)
 
     def _call_openai(max_tokens: int, extra_user_msg: str = "", check_quota: bool = True) -> tuple[str, str]:
         """AI Gateway를 통한 OpenAI 호출. (content, finish_reason) 반환."""
@@ -727,11 +737,15 @@ def _build_system_prompt(
     regime: str,
     regime_desc: str,
     cycle_ctx: Optional[dict] = None,
+    user_comment: Optional[str] = None,
 ) -> str:
     """통합 시스템 프롬프트 — 6대 비판적 분석 + 정량 프레임워크 + 미래지향/역발상.
 
     cycle_ctx 추가(2026-05-01): cycle×regime 16셀 매트릭스로 cycle을 반영해
     "어떤 경우에도 매수 금지" 톤을 사이클 보정으로 완화.
+
+    user_comment 추가(2026-05-07): 사용자 가설 양면 평가 가이드 블록을 후미에 append.
+    악마의 변호인 의무 + strength 1~10 임계값 + overall_stance 5단계 명시.
     """
     cycle_phase = (cycle_ctx or {}).get("phase")
     cycle_label = (cycle_ctx or {}).get("phase_label", cycle_phase or "데이터없음")
@@ -739,7 +753,7 @@ def _build_system_prompt(
     cycle_conf = (cycle_ctx or {}).get("confidence")
     regime_rule = _format_cycle_regime_rule(regime, cycle_phase)
     leader_str = ", ".join(leader_sectors) if leader_sectors else "데이터없음"
-    return (
+    base_prompt = (
         "당신은 20년 경력의 베테랑 수석 에퀴티 리서치 애널리스트이다. "
         "'안전마진'과 '전통적 가치'를 중시하되, **결정은 과거가 아닌 미래에 베팅한다**. "
         "비판적 투자 보고서를 JSON으로 작성하며, 예스맨의 태도를 버리고 냉철하게 분석하라. "
@@ -821,6 +835,36 @@ def _build_system_prompt(
         "모든 논리적 허점은 가차 없이 비판하라. 단 '매도/SKIP만의 일변도'는 회피하라 — "
         "체제×사이클 조합이 허용하는 범위에서 진입 시그널을 적극 식별할 것."
     )
+
+    # 사용자 코멘트 가이드 블록 (있을 때만 append) — 2026-05-07
+    cmt = (user_comment or "").strip()
+    if cmt:
+        base_prompt += (
+            "\n\n【사용자 의견 — 검증 대상】\n"
+            f'투자자가 제시한 가설:\n"{cmt}"\n\n'
+            "이 가설을 데이터 기반으로 양면 평가하라. 다음 규칙을 엄수:\n"
+            "1. 동의 근거(agree_points)와 반박 근거(disagree_points) 양쪽을 동시에 탐색하라.\n"
+            "   - 한쪽이 압도적이어도 반대 측 근거를 최소 1건은 제시하라(악마의 변호인).\n"
+            "2. 각 근거의 strength는 1~10:\n"
+            "   - 1~3: 약한 단서(노이즈 가능), 4~6: 통상적 신호, 7~8: 강한 정량 근거, 9~10: 결정적 증거.\n"
+            "   - 데이터 출처(재무지표/매크로/기술지표/리서치)를 evidence에 명시하라.\n"
+            "3. overall_stance:\n"
+            "   - strong_agree(평균 동의 strength≥7 & 반박 평균<5)\n"
+            "   - agree(동의>반박)\n"
+            "   - balanced(양측 ±1 이내)\n"
+            "   - disagree(반박>동의)\n"
+            "   - strong_disagree(반박 평균≥7 & 동의 평균<5)\n"
+            "4. summary는 1~3문장으로 사용자에게 직접 답하라(\"귀하의 가설은 …하므로 …\").\n"
+            "5. 사용자 의견과 본 보고서 8대 분석은 **모순 없이 정합**하라 — 본문 결론과 stance가 어긋나면 본문을 우선하고 stance를 보정하라.\n"
+            "   본문 등급(A~D)·composite_score·action은 코멘트와 무관하게 데이터 기반으로 산출하며 stance만 가설 평가용으로 사용하라.\n"
+            "6. JSON 응답에 user_commentary_evaluation 필드를 반드시 포함하라.\n"
+            "   형식: {\"user_comment\": \"<원문>\", \"overall_stance\": \"strong_agree|agree|balanced|disagree|strong_disagree\",\n"
+            "          \"agree_points\": [{\"point\": \"...\", \"evidence\": \"...\", \"strength\": 1~10}, ...],\n"
+            "          \"disagree_points\": [{\"point\": \"...\", \"evidence\": \"...\", \"strength\": 1~10}, ...],\n"
+            "          \"summary\": \"1~3문장 직접 답변\"}"
+        )
+
+    return base_prompt
 
 
 def _format_money(value, market: str) -> str:
@@ -962,7 +1006,8 @@ def _build_prompt(code: str, market: str, name: str, fundamental: dict, technica
                   regime_desc: str = "중립",
                   strategy_signals: Optional[dict] = None,
                   research_data: Optional[dict] = None,
-                  cycle_ctx: Optional[dict] = None) -> str:
+                  cycle_ctx: Optional[dict] = None,
+                  user_comment: Optional[str] = None) -> str:
     """GPT 유저 프롬프트 구성 (통합 v3).
 
     프롬프트 구조 (위→아래 순서):
@@ -1496,6 +1541,15 @@ def _build_prompt(code: str, market: str, name: str, fundamental: dict, technica
   "Value_Trap_경고": true|false,
   "Value_Trap_근거": ["근거1"]
 }}"""
+
+    # 사용자 코멘트 echo (있을 때만, JSON 스키마 명세 직전에 부착)
+    cmt = (user_comment or "").strip()
+    if cmt:
+        prompt += (
+            f"\n\n【사용자 코멘트 원문】\n{cmt}\n"
+            "위 코멘트에 대해 user_commentary_evaluation 필드(agree_points/disagree_points/overall_stance/summary)를 "
+            "JSON 응답에 반드시 포함하라. 형식은 시스템 프롬프트 6번 규칙을 따르라."
+        )
 
     return prompt
 
