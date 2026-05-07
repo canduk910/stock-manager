@@ -21,7 +21,7 @@ export default function ResearchDataPanel({ data, advData, market = 'KR' }) {
   // ── 통합 카테고리 (16개) ──
   const allCategories = [
     // 기업 및 사업 개요
-    { key: 'segments', label: '사업 개요/부문', render: () => renderSegments(fundamental), hasData: !!fundamental.business_description || (fundamental.segments || []).length > 0 },
+    { key: 'segments', label: '사업 개요/부문', render: () => renderSegments(fundamental), hasData: !!fundamental.business_description || (fundamental.segments || []).length > 0 || (fundamental.business_keywords || []).length > 0 },
     // 재무 3종 (3년)
     { key: 'income', label: '손익계산서 (3년)', render: () => renderIncomeStmt(fundamental, market), hasData: (fundamental.income_stmt || []).length > 0 },
     { key: 'bs', label: '대차대조표 (3년)', render: () => renderBalanceSheet(fundamental, market), hasData: (fundamental.balance_sheet || []).length > 0 },
@@ -368,23 +368,43 @@ function renderSegments(fundamental) {
   const desc = fundamental.business_description
   const keywords = fundamental.business_keywords || []
   const segments = fundamental.segments || []
-  if (!desc && !segments.length) return <p className="text-gray-400">데이터 없음</p>
+  if (!desc && !segments.length && !keywords.length) return <p className="text-gray-400">데이터 없음</p>
   return (
     <div className="space-y-2">
       {keywords.length > 0 && (
         <div className="flex flex-wrap gap-1">
-          {keywords.map((k, i) => <span key={i} className="bg-indigo-50 text-indigo-600 px-1.5 py-0.5 rounded text-[10px]">#{k}</span>)}
+          {keywords.map((k, i) => (
+            <span key={i} className="bg-indigo-50 text-indigo-600 px-1.5 py-0.5 rounded text-[10px]">
+              #{typeof k === 'string' ? k : (k?.name || k?.label || '-')}
+            </span>
+          ))}
         </div>
       )}
       {desc && <p className="text-gray-700 text-xs leading-relaxed">{desc}</p>}
       {segments.length > 0 && (
         <div>
-          {segments.map((s, i) => (
-            <div key={i} className="flex justify-between py-0.5">
-              <span>{s.name || s}</span>
-              {s.ratio != null && <span className="text-gray-500">{s.ratio}%</span>}
-            </div>
-          ))}
+          {segments.map((s, i) => {
+            // 백엔드 shape: {segment, revenue_pct, note} (advisory_fetcher.fetch_segments_kr/yf)
+            // 안전 fallback: 문자열, 또는 segment/name 키 매핑, 마지막에 '-'
+            const segName =
+              typeof s === 'string'
+                ? s
+                : (s?.segment || s?.name || s?.product || '-')
+            const segPct =
+              typeof s === 'object' && s
+                ? (s.revenue_pct ?? s.ratio ?? s.percentage ?? s.pct)
+                : null
+            const segNote = typeof s === 'object' && s ? s.note : null
+            return (
+              <div key={i} className="flex justify-between py-0.5">
+                <span>
+                  {segName}
+                  {segNote && <span className="ml-1.5 text-[10px] text-gray-400">({segNote})</span>}
+                </span>
+                {segPct != null && <span className="text-gray-500">{Number(segPct).toFixed(0)}%</span>}
+              </div>
+            )
+          })}
         </div>
       )}
     </div>
@@ -622,20 +642,29 @@ function renderIndustryPeers(data) {
 // 공통 유틸 컴포넌트
 // ══════════════════════════════════════════════════════════════════════════
 
+function _safeText(v) {
+  if (v === null || v === undefined) return null
+  if (typeof v === 'object') {
+    try { return JSON.stringify(v) } catch { return '[object]' }
+  }
+  return v
+}
+
 function Tr({ label, value }) {
   return (
     <tr className="border-b border-gray-50">
       <td className="py-1 text-gray-500 pr-4">{label}</td>
-      <td className="py-1 text-right font-medium">{value}</td>
+      <td className="py-1 text-right font-medium">{_safeText(value)}</td>
     </tr>
   )
 }
 
 function MiniStat({ label, value }) {
+  const safe = _safeText(value)
   return (
     <div className="bg-gray-50 rounded p-1.5">
       <div className="text-gray-500 text-[10px]">{label}</div>
-      <div className="font-medium">{value ?? '-'}</div>
+      <div className="font-medium">{safe ?? '-'}</div>
     </div>
   )
 }

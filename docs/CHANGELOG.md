@@ -1,5 +1,32 @@
 # 변경 이력
 
+## 2026-05-07 — AI 자문 입력데이터 패널 사업 개요/부문 크래시 버그 수정 + 객체 통째 렌더 방어망
+
+### 배경
+사용자 보고: AI 자문 보고서의 "AI분석 입력 데이터" 패널에서 "사업 개요/부문" 카드를 펼치면 페이지가 터지는 버그. 다른 카테고리도 동일 위험이 있는지 점검 요청.
+
+### 근본 원인
+`frontend/src/components/advisory/ResearchDataPanel.jsx`의 `renderSegments`가 백엔드 응답 shape와 키 mismatch — 백엔드(`stock/advisory_fetcher.py:fetch_segments_kr/yf`)는 `{segment, revenue_pct, note}` 형태로 반환하지만 프론트는 `s.name`/`s.ratio`를 봄. `s.name`이 undefined면 `s.name || s` 폴백이 **객체 자체**를 React child로 넘겨 `"Objects are not valid as a React child"` 에러로 페이지 크래시.
+
+### 버그 수정
+- `renderSegments`: `segName = typeof s === 'string' ? s : (s?.segment || s?.name || s?.product || '-')` + `segPct = s.revenue_pct ?? s.ratio ?? s.percentage ?? s.pct` 순으로 키 매핑. `s.note`(예: "AI추정")는 작은 회색 라벨로 표시. keywords 배열 항목이 객체일 경우도 안전 처리.
+- `hasData` 조건에 `keywords-only` 케이스 추가(키워드만 있는 종목도 카드 펼침 가능).
+
+### 회귀 방지 — 공용 안전망
+- `MiniStat` / `Tr` 공용 컴포넌트에 `_safeText()` 헬퍼 적용 — value가 객체이면 `JSON.stringify`로 변환 후 렌더. 향후 16개 카테고리 중 어떤 백엔드 응답이 객체로 오더라도 페이지 크래시 없이 `[object]` 또는 JSON 문자열로 폴백 표시.
+
+### 다른 15개 카테고리 점검 결과 (백엔드 ↔ 프론트 키 일치 검증)
+- 재무 3종(손익/BS/CF) / 분기 / 계량지표 / 밸류에이션 5Y / 10년 밸류에이션 밴드 / 포워드 추정 / 증권사 컨센서스 / 기술 시그널 / KIS 퀀트 / 경영진 / 자본행위 / 업황 / 거시지표 — 모두 키 mismatch **없음**.
+- `renderTechnical`은 `JSON.stringify` 가드 기존, `renderManagement`/`renderForward`는 yfinance string 응답이라 안전.
+- 명백한 크래시 버그는 `renderSegments` 1건만 발견.
+
+### 영향
+- 변경 파일 1개: `frontend/src/components/advisory/ResearchDataPanel.jsx` (+40 -11).
+- 빌드 OK (854 modules).
+- DB/백엔드 변경 0건.
+
+---
+
 ## 2026-05-07 — 백테스트 강화: 4개 KR 전략 프리셋 + 포트폴리오 다중 종목(최대 10) 균등 배분
 
 ### 배경
