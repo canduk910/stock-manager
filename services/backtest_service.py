@@ -41,7 +41,7 @@ from typing import Optional
 
 from config import KIS_MCP_ENABLED
 from db.utils import now_kst_iso
-from services.exceptions import ExternalAPIError, NotFoundError
+from services.exceptions import ExternalAPIError, NotFoundError, ServiceError
 from services.mcp_client import get_mcp_client
 from stock import strategy_store
 
@@ -429,3 +429,179 @@ def _save_completed(job_id: str, data) -> None:
         result_json=data,
         completed_at=now_kst_iso(),
     )
+
+
+# ── 로컬 백테스트 (services/local_backtest 패키지, MCP 미사용) ──────────────────
+
+def list_local_presets() -> list[dict]:
+    """로컬 4개 KR 전략 프리셋 메타데이터 (즉시 반환, MCP 호출 없음).
+
+    응답 키는 기존 MCP `list_presets()`와 동일: id/name/description/category/tags
+    /default_params/param_schema. params는 MCP 호환을 위해 default_params를 그대로 노출.
+    """
+    from services.local_backtest.presets import LOCAL_PRESETS
+
+    out: list[dict] = []
+    for p in LOCAL_PRESETS:
+        # MCP 응답과 동일 형태: parameters는 schema. params는 default 값 모음.
+        params_view: dict = {}
+        for k, v in (p.get("param_schema") or {}).items():
+            params_view[k] = v
+        out.append({
+            "id": p["id"],
+            "name": p["name"],
+            "description": p["description"],
+            "category": p.get("category"),
+            "tags": p.get("tags", []),
+            "default_params": dict(p.get("default_params") or {}),
+            "params": params_view,  # 프론트 슬라이더 렌더용 (StrategySelector PARAM_KR)
+            "param_schema": params_view,
+        })
+    return out
+
+
+def run_local_backtest(
+    preset: str,
+    symbols: list[str],
+    market: str = "KR",
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    initial_capital: float = 10_000_000,
+    commission_rate: float = 0.0015,
+    tax_rate: float = 0.0023,
+    slippage: float = 0.001,
+    params: Optional[dict] = None,
+    user_id: int = 1,
+) -> dict:
+    """로컬 4개 전략 + 균등 배분 포트폴리오 일봉 백테스트.
+
+    plan ai-sleepy-pancake.md — 일봉 단순화. 외부 MCP 미사용. KR market만 지원(MVP).
+
+    검증:
+      - 1 ≤ len(symbols) ≤ 10 (Pydantic도 검증하지만 서비스 레이어 방어적 가드)
+      - 동일 코드 중복 제거 (입력 순서 보존)
+      - market == "KR"
+      - 시작일/종료일 형식
+
+    저장:
+      - BacktestJob (strategy_type="local", symbol=symbols[0], symbols=전체 list)
+      - result_json: {equity_curve, trades, per_symbol_contribution, params, failures}
+    """
+    from datetime import date as _date_cls
+    from services.local_backtest import simulate as _simulate
+    from services.local_backtest.presets import get_preset
+
+    # ── 검증 ──────────────────────────────────────────────────────────
+    if not symbols:
+        raise ServiceError("symbols 비어있음")
+    # 중복 제거 (입력 순서 보존)
+    deduped: list[str] = []
+    seen = set()
+    for s in symbols:
+        if not isinstance(s, str):
+            continue
+        s_clean = s.strip().upper()
+        if not s_clean or s_clean in seen:
+            continue
+        seen.add(s_clean)
+        deduped.append(s_clean)
+    if not deduped:
+        raise ServiceError("symbols에 유효한 종목 코드가 없습니다")
+    if len(deduped) > 10:
+        raise ServiceError("로컬 백테스트는 최대 10종목까지 지원합니다")
+    if (market or "").upper() != "KR":
+        raise ServiceError("로컬 백테스트는 KR market만 지원합니다 (MVP)")
+
+    try:
+        preset_meta = get_preset(preset)
+    except KeyError:
+        raise ServiceError(f"알 수 없는 로컬 프리셋: {preset}")
+
+    # 날짜 파싱 (기본: 시작=1년전, 종료=오늘)
+    from datetime import date as _d, timedelta as _td
+    today = _d.today()
+    try:
+        sd = _d.fromisoformat(start_date) if start_date else today - _td(days=365)
+        ed = _d.fromisoformat(end_date) if end_date else today
+    except ValueError:
+        raise ServiceError("start_date/end_date 형식 오류 (YYYY-MM-DD)")
+    if sd >= ed:
+        raise ServiceError("start_date는 end_date보다 이전이어야 합니다")
+
+    job_id = str(uuid.uuid4())
+
+    # Write-Ahead 저장
+    strategy_store.save_backtest_job(
+        user_id=user_id,
+        job_id=job_id,
+        strategy_name=preset,
+        symbol=deduped[0],
+        symbols=deduped,
+        market="KR",
+        strategy_type="local",
+        submitted_at=now_kst_iso(),
+        params=params,
+        strategy_display_name=preset_meta.get("name"),
+    )
+
+    try:
+        sim = _simulate(
+            symbols=deduped,
+            strategy_id=preset,
+            market="KR",
+            start=sd,
+            end=ed,
+            initial_capital=float(initial_capital),
+            commission_rate=float(commission_rate),
+            tax_rate=float(tax_rate),
+            slippage=float(slippage),
+            params=params,
+        )
+    except ValueError as e:
+        strategy_store.update_job_status(job_id, "failed")
+        raise ServiceError(str(e))
+    except Exception as e:
+        strategy_store.update_job_status(job_id, "failed")
+        logger.error("로컬 백테스트 실패: %s", e, exc_info=True)
+        raise ExternalAPIError(f"로컬 백테스트 실패: {e}")
+
+    result_json = {
+        "preset": preset,
+        "symbols": deduped,
+        "market": "KR",
+        "start_date": sd.isoformat(),
+        "end_date": ed.isoformat(),
+        "params": sim.params,
+        "equity_curve": sim.equity_curve,
+        "trades": sim.trades,
+        "per_symbol_contribution": sim.per_symbol_contribution,
+        "failures": sim.failures,
+        "result": {
+            "metrics": {
+                "basic": {
+                    "total_return": sim.metrics.get("total_return_pct"),
+                    "annual_return": sim.metrics.get("cagr"),
+                    "max_drawdown": sim.metrics.get("max_drawdown"),
+                },
+                "risk": {
+                    "sharpe_ratio": sim.metrics.get("sharpe_ratio"),
+                    "sortino_ratio": sim.metrics.get("sortino_ratio"),
+                },
+                "trading": {
+                    "total_orders": sim.metrics.get("total_trades"),
+                    "win_rate": sim.metrics.get("win_rate"),
+                    "profit_loss_ratio": sim.metrics.get("profit_factor"),
+                },
+            },
+            "equity_curve": sim.equity_curve,
+            "trades": sim.trades,
+        },
+    }
+
+    strategy_store.save_backtest_result(
+        job_id=job_id,
+        metrics=sim.metrics,
+        result_json=result_json,
+        completed_at=now_kst_iso(),
+    )
+    return {"job_id": job_id, "status": "completed", "result": result_json}

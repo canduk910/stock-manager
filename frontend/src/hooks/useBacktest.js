@@ -20,6 +20,7 @@ import {
   fetchMcpStatus, fetchPresets as fetchPresetsApi,
   runPresetBacktest, runCustomBacktest, runBatchBacktest,
   fetchBacktestResult, fetchBacktestHistory,
+  fetchLocalPresets, runLocalBacktest,
 } from '../api/backtest'
 
 /** MCP 서버 상태 (1회 조회) */
@@ -34,6 +35,16 @@ export function usePresets() {
   const { data, loading, error, run } = useAsyncState([])
   const load = useCallback(() => run(() => fetchPresetsApi()).catch(() => {}), [run])
   return { presets: data || [], loading, error, load }
+}
+
+/**
+ * 로컬 4개 KR 전략 프리셋 목록 (즉시 반환).
+ * 응답 형식: { presets: [{id, name, description, default_params, params, ...}, ...] }
+ */
+export function useLocalPresets() {
+  const { data, loading, error, run } = useAsyncState({ presets: [] })
+  const load = useCallback(() => run(() => fetchLocalPresets()).catch(() => {}), [run])
+  return { presets: (data?.presets || []), loading, error, load }
 }
 
 /** 백테스트 실행 + 폴링 */
@@ -138,6 +149,27 @@ export function useBacktest() {
     }
   }, [])
 
+  /**
+   * 로컬 백테스트 실행 (동기 응답 — 폴링 불필요).
+   * payload: { preset, symbols, market='KR', startDate, endDate, initialCapital,
+   *            commissionRate, taxRate, slippage, params }
+   */
+  const runLocal = useCallback(async (payload) => {
+    setStatus('submitting')
+    setResult(null)
+    setError(null)
+    setProgress(null)
+    try {
+      const res = await runLocalBacktest(payload)
+      setJobId(res.job_id)
+      setResult(res)
+      setStatus('completed')
+    } catch (e) {
+      setError(e.message)
+      setStatus('failed')
+    }
+  }, [])
+
   const reset = useCallback(() => {
     stopPolling()
     setJobId(null)
@@ -149,7 +181,7 @@ export function useBacktest() {
 
   return {
     jobId, status, result, error, progress,
-    runPreset, runCustom, runBatch, reset,
+    runPreset, runCustom, runBatch, runLocal, reset,
   }
 }
 

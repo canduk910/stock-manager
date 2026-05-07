@@ -71,6 +71,44 @@ export function fetchBacktestResult(jobId) {
   return apiFetch(`/api/backtest/result/${jobId}`)
 }
 
+// ── 로컬 백테스트 (4개 KR 전략 + 균등 배분 포트폴리오, 최대 10종목) ─────────────
+
+/** 로컬 4개 KR 전략 프리셋 목록 (즉시 반환, MCP 무관) */
+export function fetchLocalPresets() {
+  return apiFetch('/api/backtest/local/presets')
+}
+
+/** 로컬 백테스트 실행 (동기 응답 — 폴링 불필요) → {job_id, status, result} */
+export function runLocalBacktest({
+  preset,
+  symbols,
+  market = 'KR',
+  startDate,
+  endDate,
+  initialCapital = 10_000_000,
+  commissionRate,
+  taxRate,
+  slippage,
+  params,
+}) {
+  const body = {
+    preset,
+    symbols,
+    market,
+    start_date: startDate || undefined,
+    end_date: endDate || undefined,
+    initial_capital: initialCapital,
+  }
+  if (commissionRate != null) body.commission_rate = commissionRate
+  if (taxRate != null) body.tax_rate = taxRate
+  if (slippage != null) body.slippage = slippage
+  if (params && Object.keys(params).length > 0) body.params = params
+  return apiFetch('/api/backtest/run/local', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+}
+
 /** 백테스트 이력 삭제 */
 export function deleteBacktestJob(jobId) {
   return apiFetch(`/api/backtest/history/${jobId}`, { method: 'DELETE' })

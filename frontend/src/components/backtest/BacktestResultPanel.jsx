@@ -72,6 +72,16 @@ export default function BacktestResultPanel({ result, symbol, market }) {
   const resultParams = result.params || result.params_json || result.result?.params || result.result_json?.params
   const resolvedSymbol = symbol || result.symbol || result.result_json?.symbol
 
+  // 종목별 기여도 (로컬 백테스트 다중 종목 모드)
+  const perSymbolContribution = (
+    result.per_symbol_contribution
+    || result.result?.per_symbol_contribution
+    || result.result_json?.per_symbol_contribution
+  ) || null
+  const isMultiSymbol = perSymbolContribution && Object.keys(perSymbolContribution).length > 1
+  // 거래내역에 'symbol' 필드가 있으면 컬럼 표시
+  const showSymbolColumn = isMultiSymbol || rawTrades.some((t) => t && t.symbol)
+
   // ── OHLCV 별도 조회 ──────────────────────────────────────────────────
   const [ohlcvData, setOhlcvData] = useState(null)
 
@@ -95,20 +105,53 @@ export default function BacktestResultPanel({ result, symbol, market }) {
   }, [resolvedSymbol, market, equityCurve])
 
   // ── 거래 전처리 ───────────────────────────────────────────────────────
+  // 로컬 백테스트는 청산 1행(entry_*+exit_*)으로 들어오므로 매수/매도 2행으로 펼침.
+  // MCP 백테스트는 기존처럼 buy/sell 별도 행으로 들어옴.
   const processedTrades = useMemo(() => {
     let lastBuyPrice = null
-    return rawTrades.map((t) => {
-      const isBuy = (t.direction || t.side || '').toLowerCase() === 'buy'
-      const date = toKST(t.date || t.entry_date || t.timestamp || t.time || '-')
-      if (isBuy) {
-        lastBuyPrice = t.price
-        return { ...t, _isBuy: true, _date: date }
+    const out = []
+    for (const t of rawTrades) {
+      const hasLocalRoundTrip = t.entry_date && t.exit_date && t.exit_price != null
+      const explicitSide = (t.direction || t.side || '').toLowerCase()
+      if (hasLocalRoundTrip) {
+        // 로컬: 매수 + 매도 두 행으로 펼침
+        out.push({
+          ...t,
+          _isBuy: true,
+          _date: toKST(t.entry_date),
+          price: t.entry_price,
+        })
+        out.push({
+          ...t,
+          _isBuy: false,
+          _date: toKST(t.exit_date),
+          price: t.exit_price,
+          _profitPct: t.pnl_pct ?? null,
+        })
+      } else if (explicitSide === 'buy' || (t.entry_date && !t.exit_date)) {
+        // 매수만 (로컬 미청산 보유 또는 MCP buy)
+        lastBuyPrice = t.entry_price ?? t.price
+        out.push({
+          ...t,
+          _isBuy: true,
+          _date: toKST(t.entry_date || t.date || t.timestamp || t.time || '-'),
+          price: t.entry_price ?? t.price,
+        })
       } else {
-        const profitPct = t.profit_pct ?? t.return_pct ??
-          (lastBuyPrice && t.price ? ((t.price - lastBuyPrice) / lastBuyPrice * 100) : null)
-        return { ...t, _isBuy: false, _profitPct: profitPct, _date: date }
+        // MCP sell
+        const px = t.price ?? t.exit_price
+        const profitPct = t.profit_pct ?? t.return_pct ?? t.pnl_pct ??
+          (lastBuyPrice && px ? ((px - lastBuyPrice) / lastBuyPrice * 100) : null)
+        out.push({
+          ...t,
+          _isBuy: false,
+          _profitPct: profitPct,
+          _date: toKST(t.date || t.exit_date || t.timestamp || t.time || '-'),
+          price: px,
+        })
       }
-    })
+    }
+    return out
   }, [rawTrades])
 
   // ── 보유 구간 (OHLCV time 또는 equity date 기준) ────────────────────────
@@ -269,6 +312,50 @@ export default function BacktestResultPanel({ result, symbol, market }) {
         </div>
       )}
 
+      {/* 종목별 기여도 (로컬 백테스트 — 포트폴리오 다중 종목) */}
+      {perSymbolContribution && Object.keys(perSymbolContribution).length > 0 && (
+        <div className="bg-white rounded-lg border p-4">
+          <h3 className="text-sm font-medium text-gray-700 mb-3">
+            종목별 기여도 ({Object.keys(perSymbolContribution).length}종목)
+          </h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+            {Object.entries(perSymbolContribution).map(([sym, c]) => {
+              const trades = c?.trades ?? 0
+              const pnl = c?.realized_pnl ?? 0
+              const wins = c?.wins ?? 0
+              const losses = c?.losses ?? 0
+              const isProfit = pnl > 0
+              const isLoss = pnl < 0
+              return (
+                <div key={sym} className="bg-gray-50 border rounded-lg p-3 text-center">
+                  <div className="font-mono text-xs text-gray-500">{sym}</div>
+                  <div className={`text-lg font-semibold mt-0.5 ${
+                    isProfit ? 'text-red-600' : isLoss ? 'text-blue-600' : 'text-gray-700'
+                  }`}>
+                    {pnl >= 0 ? '+' : ''}{floorKRW(pnl).toLocaleString()}
+                  </div>
+                  <div className="text-[10px] text-gray-400 mt-0.5">실현손익(원)</div>
+                  <div className="grid grid-cols-3 gap-1 mt-2 text-[10px]">
+                    <div>
+                      <div className="text-gray-500">거래</div>
+                      <div className="font-semibold text-gray-700">{trades}</div>
+                    </div>
+                    <div>
+                      <div className="text-gray-500">승</div>
+                      <div className="font-semibold text-red-600">{wins}</div>
+                    </div>
+                    <div>
+                      <div className="text-gray-500">패</div>
+                      <div className="font-semibold text-blue-600">{losses}</div>
+                    </div>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
       {/* 포지션 요약 */}
       <PositionSummary trades={rawTrades} />
 
@@ -287,6 +374,7 @@ export default function BacktestResultPanel({ result, symbol, market }) {
               <thead className="bg-gray-50 sticky top-0">
                 <tr>
                   <th className="px-3 py-2 text-left">날짜</th>
+                  {showSymbolColumn && <th className="px-3 py-2 text-left">종목</th>}
                   <th className="px-3 py-2 text-left">방향</th>
                   <th className="px-3 py-2 text-right">가격</th>
                   <th className="px-3 py-2 text-right">수량</th>
@@ -299,6 +387,9 @@ export default function BacktestResultPanel({ result, symbol, market }) {
                   return (
                     <tr key={i} className="border-t">
                       <td className="px-3 py-1.5">{t._date}</td>
+                      {showSymbolColumn && (
+                        <td className="px-3 py-1.5 font-mono text-gray-600">{t.symbol || '-'}</td>
+                      )}
                       <td className="px-3 py-1.5">
                         <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${
                           t._isBuy ? 'bg-red-50 text-red-700' : 'bg-blue-50 text-blue-700'
@@ -306,7 +397,9 @@ export default function BacktestResultPanel({ result, symbol, market }) {
                           {t._isBuy ? 'Buy' : 'Sell'}
                         </span>
                       </td>
-                      <td className="px-3 py-1.5 text-right">{t.price != null ? floorKRW(t.price).toLocaleString() : '-'}</td>
+                      <td className="px-3 py-1.5 text-right">
+                        {t.price != null ? floorKRW(t.price).toLocaleString() : '-'}
+                      </td>
                       <td className="px-3 py-1.5 text-right">{t.quantity || t.qty || '-'}</td>
                       <td className={`px-3 py-1.5 text-right ${
                         profitPct != null ? (profitPct >= 0 ? 'text-red-600' : 'text-blue-600') : ''

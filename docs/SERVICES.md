@@ -596,6 +596,95 @@ OpenAI 응답 JSON 파싱 실패 시 `raw` 필드에 원문 저장 → 프론트
 
 ---
 
+## `local_backtest/` — 자체 일봉 백테스트 엔진 (2026-05-07 신규)
+
+KR yfinance 일봉 기반 포트폴리오(최대 10종목) 균등 배분 시뮬레이터. 외부 backtester(MCP/Lean) 미의존. `services/backtest_service.py`의 `run_local_backtest()` 진입점이 이 엔진을 호출.
+
+### 패키지 구성
+
+```
+services/local_backtest/
+├── __init__.py            # 공개: simulate, list_presets
+├── engine.py              # simulate(symbols, strategy, start, end, capital, fees, params) → SimulationResult
+├── portfolio.py           # PortfolioState — 균등 배분, max_slots=min(10, len(symbols)), 슬롯 가득 차면 신규 신호 스킵
+├── metrics.py             # compute_metrics(equity_curve, trades, start, end) → 8개 메트릭
+├── data_loader.py         # KR yfinance 일봉 fetch + 캐시 (stock.market._kr_yf_ticker_str 재사용)
+├── presets.py             # LOCAL_PRESETS 정적 리스트 (4개 KR 전략 메타데이터)
+└── strategies/
+    ├── __init__.py        # STRATEGY_REGISTRY = {"momentum": ..., "volatility_breakout": ..., ...}
+    ├── _base.py           # Strategy ABC + EntrySignal/ExitSignal/Position 데이터클래스
+    ├── momentum.py        # 상한가 모멘텀
+    ├── volatility_breakout.py   # 변동성 돌파 (K20=노이즈비율)
+    ├── donchian_swing.py        # 20일 신고가 스윙
+    └── long_tail_volatility.py  # 롱테일 변동성
+```
+
+### 4개 전략 단순화 룰 (일봉 기준)
+
+| 전략 ID | 매수 시그널 | 매수가 | 매도 | 매도가 | 손절 |
+|---------|---------|---------|---------|---------|------|
+| `momentum` | 전일종가 대비 당일종가 +29%↑ AND 종가<전일×1.30(상한가 제외) | 당일 종가 | 익일 시가 전량 매도 | 익일 시가 | 익일 저가≤매수가×0.925 → 매수가×0.925 |
+| `volatility_breakout` | 당일 고가≥타겟가 (타겟=시가+전일Range×K20) | 타겟가 | 당일 종가 강제 청산 | 당일 종가 | 당일 저가≤매수가×0.97 → 매수가×0.97 |
+| `donchian_swing` | 종가가 직전 20일 고가 돌파 + 60EMA 5일 변화율≥0 + 거래대금≥20일 평균×1.5 + 갭<+3% | 당일 종가 | 종가≤직전 20일 저가 | 당일 종가 | 종가≤매수가×0.93 |
+| `long_tail_volatility` | VB 매수 + 전일종가 대비 당일종가 +3%↑ | 타겟가 | (a) 고가≥전일종가×1.29 → 익일 시가 / (b) 그 외 당일 종가 | (a)=익일 시가 / (b)=당일 종가 | 당일 저가≤매수가×0.97 / 익일 저가≤매수가×0.95 |
+
+**K20 정의 (VB·long_tail 공유):**
+```
+노이즈 비율 = 1 - |Close - Open| / (High - Low)   # Range=0 도지는 평균에서 제외
+K20 = 직전 20일 평균 노이즈 비율
+타겟 = 당일 시가 + 전일Range × K20
+```
+- 횡보장(흔들림만 큼) → noise≈1 → K20≈1 → 타겟이 시가+전일Range로 매우 높음 → 진입 장벽 ↑ (가짜 돌파 차단)
+- 추세장(시가→종가 일직선) → noise≈0 → K20≈0 → 타겟이 시가에 근접 → 빠른 추격
+- 기존 라이브 표준 K=0.5 스케일과 동일 의미
+
+### 주요 시그니처
+
+```python
+# services/backtest_service.py
+def run_local_backtest(
+    preset: str,                       # "momentum" / "volatility_breakout" / "donchian_swing" / "long_tail_volatility"
+    symbols: list[str],                # 1~10개 KR 종목코드
+    market: str = "KR",                # MVP: "KR"만 허용
+    start_date: str = "YYYY-MM-DD",
+    end_date: str = "YYYY-MM-DD",
+    initial_capital: float = 10_000_000,
+    commission_rate: float = 0.0015,   # 매수+매도 양방향
+    tax_rate: float = 0.0023,          # 매도 시
+    slippage: float = 0.001,           # 양방향 단가 보정
+    params: dict | None = None,        # 전략별 파라미터 오버라이드
+    user_id: int = 1,
+) -> dict:
+    """
+    Returns:
+        {
+            "job_id": str,
+            "status": "completed",
+            "result": {
+                "preset": str,
+                "symbols": list[str],
+                "equity_curve": [{"date": ..., "value": ...}, ...],
+                "trades": [{"symbol", "entry_date", "entry_price", "exit_date", "exit_price", "qty", "pnl_pct", "reason"}, ...],
+                "per_symbol_contribution": {"005930": {"return_pct", "trades", "contribution_pct"}, ...},
+                "metrics": {"total_return_pct", "cagr", "sharpe_ratio", "sortino_ratio", "max_drawdown", "win_rate", "profit_factor", "total_trades"},
+                "failures": list[str],  # 데이터 fetch 실패 종목
+            },
+        }
+    """
+
+def list_local_presets() -> list[dict]:
+    """4개 KR 전략 메타데이터 리스트(MCP 무관, 즉시 반환)."""
+```
+
+### 도메인 정합성
+
+- 4 전략 모두 단기/추세 전용 → `safety_grade.py`(가치주 등급)·`macro_regime.py`(체제)·Value Trap 6규칙과 직교 (별도 트랙).
+- 균등 배분 + 슬롯 가득 시 스킵 = 라이브 자본 부족 거동.
+- 일봉 단순화 한계: intraday 정밀도 ±수% 오차 가능. 손절은 일봉 저가 ≤ 손절가일 때 손절가 체결 가정.
+- 외부 backtester(MCP/Lean) 미의존 — KR 일봉 yfinance 직접 호출.
+
+---
+
 ## 에이전트 서비스 매핑
 
 AI 에이전트 팀(`.claude/agents/`)은 `routers/` 엔드포인트를 HTTP로 호출한다. 아래는 라우터가 위임하는 서비스와 에이전트의 매핑:

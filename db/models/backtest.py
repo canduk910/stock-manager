@@ -30,6 +30,8 @@ class BacktestJob(Base):
     result_json = Column(JSON, nullable=True)
     params_json = Column(JSON, nullable=True)
     strategy_display_name = Column(String, nullable=True)
+    # 다중 종목 백테스트 지원(local 전략 전용). 단일 종목은 NULL — 기존 로직 후방호환.
+    symbols = Column(JSON, nullable=True)
 
     def to_dict(self) -> dict:
         return {
@@ -38,6 +40,7 @@ class BacktestJob(Base):
             "strategy_name": self.strategy_name,
             "strategy_display_name": self.strategy_display_name,
             "symbol": self.symbol,
+            "symbols": self.symbols,
             "market": self.market,
             "strategy_type": self.strategy_type,
             "status": self.status,

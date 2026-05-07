@@ -130,14 +130,30 @@ export const CATEGORY_COLORS = {
   composite: 'bg-indigo-100 text-indigo-700',
 }
 
-export default function StrategySelector({ presets, selectedPreset, customParams, onPresetChange, onParamsChange, mode, onModeChange, yamlContent, onYamlChange, onBuilderYaml, onRunSavedStrategy }) {
+export default function StrategySelector({
+  presets,
+  selectedPreset,
+  customParams,
+  onPresetChange,
+  onParamsChange,
+  mode,
+  onModeChange,
+  yamlContent,
+  onYamlChange,
+  onBuilderYaml,
+  onRunSavedStrategy,
+  // 로컬 프리셋(4개 KR 전략 + 다중 종목 포트폴리오)
+  localPresets,
+}) {
+  // 일반 프리셋 / 로컬 프리셋 — 같은 selectedPreset state를 공유.
+  const activePresetList = mode === 'local-preset' ? (localPresets || []) : (presets || [])
   const presetDetail = useMemo(() => {
-    if (!selectedPreset || !presets?.length) return null
-    return presets.find((p) => {
+    if (!selectedPreset || !activePresetList?.length) return null
+    return activePresetList.find((p) => {
       const id = typeof p === 'string' ? p : p.id || p.strategy_id
       return id === selectedPreset
     })
-  }, [selectedPreset, presets])
+  }, [selectedPreset, activePresetList])
 
   return (
     <div className="space-y-3">
@@ -164,6 +180,17 @@ export default function StrategySelector({ presets, selectedPreset, customParams
           프리셋 전략
         </button>
         <button
+          onClick={() => onModeChange('local-preset')}
+          className={`px-4 py-1.5 text-sm rounded font-medium transition-colors ${
+            mode === 'local-preset'
+              ? 'bg-blue-600 text-white'
+              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+          }`}
+          title="4개 KR 전략 + 균등 배분 포트폴리오 (최대 10종목, 일봉 단순화)"
+        >
+          로컬 프리셋
+        </button>
+        <button
           onClick={() => onModeChange('custom')}
           className={`px-4 py-1.5 text-sm rounded font-medium transition-colors ${
             mode === 'custom'
@@ -183,15 +210,21 @@ export default function StrategySelector({ presets, selectedPreset, customParams
           }}
           onRunSavedStrategy={onRunSavedStrategy}
         />
-      ) : mode === 'preset' ? (
+      ) : mode === 'preset' || mode === 'local-preset' ? (
         <div>
+          {mode === 'local-preset' && (
+            <div className="mb-2 text-[11px] text-gray-600 bg-emerald-50 border border-emerald-200 rounded px-3 py-1.5">
+              <b className="text-emerald-700">로컬 백테스트</b> — 4개 KR 전략 + 균등 배분 포트폴리오 (최대 10종목, 일봉 단순화).
+              MCP 서버 없이 즉시 실행됩니다.
+            </div>
+          )}
           <select
             value={selectedPreset}
             onChange={(e) => onPresetChange(e.target.value)}
             className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
           >
             <option value="">전략 선택...</option>
-            {(presets || []).map((p) => {
+            {(activePresetList || []).map((p) => {
               const id = typeof p === 'string' ? p : p.id || p.strategy_id
               const label = typeof p === 'object' ? p.name : id
               return (

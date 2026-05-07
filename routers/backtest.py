@@ -58,6 +58,21 @@ class BatchBacktestBody(BaseModel):
     initial_cash: int = Field(default=10_000_000, ge=100_000)
 
 
+class LocalBacktestBody(BaseModel):
+    """로컬 4개 KR 전략 + 다중 종목(최대 10) 백테스트 입력."""
+
+    preset: str
+    symbols: list[str] = Field(min_length=1, max_length=10)
+    market: str = "KR"
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    initial_capital: float = Field(default=10_000_000.0, ge=100_000.0)
+    commission_rate: float = Field(default=0.0015, ge=0.0, le=0.1)
+    tax_rate: float = Field(default=0.0023, ge=0.0, le=0.1)
+    slippage: float = Field(default=0.001, ge=0.0, le=0.1)
+    params: Optional[dict] = None
+
+
 # ── 엔드포인트 ────────────────────────────────────────────────────────────────
 
 @router.get("/status")
@@ -130,6 +145,36 @@ def run_batch(body: BatchBacktestBody, _user: dict = Depends(get_current_user)):
         start_date=body.start_date,
         end_date=body.end_date,
         initial_cash=body.initial_cash,
+    )
+
+
+# ── 로컬 백테스트 (services/local_backtest 패키지, MCP 미사용) ──────────────────
+
+
+@router.get("/local/presets")
+def get_local_presets(_user: dict = Depends(get_current_user)):
+    """로컬 4개 KR 전략 프리셋 목록 (즉시 반환).
+
+    `KIS_MCP_ENABLED`와 무관하게 항상 사용 가능. 응답 형식은 기존 MCP `/presets`와 호환.
+    """
+    return {"presets": backtest_service.list_local_presets()}
+
+
+@router.post("/run/local")
+def run_local(body: LocalBacktestBody, user: dict = Depends(get_current_user)):
+    """로컬 4개 전략 + 균등 배분 포트폴리오 일봉 백테스트 (KR 전용 MVP)."""
+    return backtest_service.run_local_backtest(
+        preset=body.preset,
+        symbols=body.symbols,
+        market=body.market,
+        start_date=body.start_date,
+        end_date=body.end_date,
+        initial_capital=body.initial_capital,
+        commission_rate=body.commission_rate,
+        tax_rate=body.tax_rate,
+        slippage=body.slippage,
+        params=body.params,
+        user_id=user["id"],
     )
 
 

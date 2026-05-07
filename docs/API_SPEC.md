@@ -1268,3 +1268,87 @@ Response:
 ```
 
 데이터 소스: `PageView` 모델(FastAPI 미들웨어가 매 요청 비동기 INSERT, 제외 path: /api/health, /assets/*, /static/*, /ws/*, /api/admin/page-stats).
+
+---
+
+## 로컬 백테스트 — `routers/backtest.py` (2026-05-07)
+
+stock-manager 자체 Python 일봉 엔진. 외부 MCP backtester(Lean) 미의존. KR 종목만 지원(MVP). 1~10종목 균등 배분 포트폴리오 시뮬레이션. 4개 KR 단기/추세 전략 프리셋 내장.
+
+### `GET /api/backtest/local/presets`
+인증 필요. MCP 무관, 즉시 응답. 4개 KR 전략 메타데이터(`id`, `name`, `description`, `default_params`, `param_schema`) 반환.
+
+```json
+{
+  "presets": [
+    {"id": "momentum", "name": "상한가 모멘텀", ...},
+    {"id": "volatility_breakout", "name": "변동성 돌파", ...},
+    {"id": "donchian_swing", "name": "20일 신고가 스윙", ...},
+    {"id": "long_tail_volatility", "name": "롱테일 변동성", ...}
+  ]
+}
+```
+
+### `POST /api/backtest/run/local`
+인증 필요. 동기 응답(MCP 비동기 2단계와 다름).
+
+Request Body (`LocalBacktestBody`):
+```json
+{
+  "preset": "momentum",
+  "symbols": ["005930", "000660", "035720"],
+  "market": "KR",
+  "start_date": "2024-01-01",
+  "end_date": "2024-12-31",
+  "initial_capital": 10000000,
+  "commission_rate": 0.0015,
+  "tax_rate": 0.0023,
+  "slippage": 0.001,
+  "params": null
+}
+```
+- `symbols`: `Field(min_length=1, max_length=10)` — 1~10개 KR 종목코드
+- `market`: "KR"만 허용. 그 외 → ServiceError(400)
+- `params`: 전략별 default_params 오버라이드(생략 가능)
+
+Response:
+```json
+{
+  "job_id": "local-{uuid}",
+  "status": "completed",
+  "result": {
+    "preset": "momentum",
+    "symbols": ["005930", "000660", "035720"],
+    "market": "KR",
+    "start_date": "2024-01-01",
+    "end_date": "2024-12-31",
+    "params": {...},
+    "equity_curve": [{"date": "2024-01-02", "value": 10000000}, ...],
+    "trades": [{"symbol": "005930", "entry_date": "...", "entry_price": ..., "exit_date": "...", "exit_price": ..., "qty": ..., "pnl_pct": ..., "reason": "next_open|stop_loss|..."}, ...],
+    "per_symbol_contribution": {
+      "005930": {"return_pct": 12.5, "trades": 8, "contribution_pct": 4.2},
+      ...
+    },
+    "metrics": {
+      "total_return_pct": 8.7,
+      "cagr": 8.7,
+      "sharpe_ratio": 1.2,
+      "sortino_ratio": 1.8,
+      "max_drawdown": -12.4,
+      "win_rate": 56.3,
+      "profit_factor": 1.45,
+      "total_trades": 24
+    },
+    "failures": []
+  }
+}
+```
+
+검증/에러:
+- `symbols` 0개 또는 11개↑ → 422 (Pydantic)
+- 알 수 없는 `preset` → 400 (`ServiceError`)
+- `market != "KR"` → 400 (`ServiceError("로컬 백테스트는 KR만 지원합니다")`)
+- 모든 종목 데이터 fetch 실패 → 400 (`ServiceError`)
+- 부분 실패(일부 종목 실패) → 200 + `failures` 배열에 기록 후 나머지로 시뮬레이션 진행
+
+저장: `BacktestJob`(strategy_type=`"local"`, `symbol`=`symbols[0]`, 신규 `symbols` JSON 컬럼에 전체 리스트). 기존 MCP 백테스트 흐름(`run/preset`/`run/custom`/`run/batch`) 100% 미터치.

@@ -1,5 +1,71 @@
 # 변경 이력
 
+## 2026-05-07 — 백테스트 강화: 4개 KR 전략 프리셋 + 포트폴리오 다중 종목(최대 10) 균등 배분
+
+### 배경
+사용자 요청: 라이브 트레이딩 시스템에서 운용 중인 4개 KR 전략(상한가 모멘텀 / 변동성 돌파 / 20일 신고가 스윙 / 롱테일 변동성)을 stock-manager 백테스트에 추가하고, 동시에 최대 10종목 포트폴리오 백테스트 지원. 라이브 코드는 KIS 거래량순위 API·1분봉·15:20 강제청산 등 intraday 의존이 강해 그대로 외부 backtester(Lean)로 이식하기 어려움 → 사용자 협의로 룰을 일봉 단위로 단순화(트레일링·15:20 청산 생략) → stock-manager 자체 Python 일봉 엔진 신설.
+
+### 백엔드 — `services/local_backtest/` 패키지 신설
+- `engine.py` — 일봉 시뮬레이터 메인 루프(매일 보유 청산→신규 매수 후보 수집→슬롯 가용분 균등 배분→MTM 평가→equity_curve 갱신).
+- `portfolio.py` — `PortfolioState` 균등 배분 자본 관리. `max_slots = min(10, len(symbols))`. 슬롯 가득 차면 신규 신호 스킵(라이브 자본 부족 거동 일치). 청산 시 자본 회수 → 다음 매수에 재사용.
+- `metrics.py` — 8개 메트릭(`total_return_pct`/`cagr`/`sharpe_ratio`/`sortino_ratio`/`max_drawdown`/`win_rate`/`profit_factor`/`total_trades`).
+- `data_loader.py` — KR yfinance 일봉 fetch + 캐시. `stock.market._kr_yf_ticker_str` + `stock.yf_client._ticker` 재사용.
+- `presets.py` — 4개 KR 전략 정적 메타데이터(`id`/`name`/`description`/`default_params`/`param_schema`).
+- `strategies/_base.py` — `Strategy` ABC + `EntrySignal`/`ExitSignal`/`Position` 데이터클래스. `check_entry()`/`check_exit()` 인터페이스.
+- `strategies/momentum.py` — 전일종가 +29%↑ AND 종가<전일×1.30 → 당일 종가 매수 → 익일 시가 매도 → 손절 -7.5%.
+- `strategies/volatility_breakout.py` — 시가+전일Range×K20 돌파 → 타겟가 매수 → 당일 종가 청산 → 손절 -3%. **K20 = 직전 20일 평균 노이즈 비율(`1 - |Close-Open|/(High-Low)`)** — 횡보장 K≈1 진입 장벽↑·추세장 K≈0 빠른 추격, Range=0 도지는 평균 제외. 라이브 표준 K=0.5 스케일과 동일 의미.
+- `strategies/donchian_swing.py` — 20일 신고가 + 60EMA 5일 변화율≥0 + 거래대금≥20일 평균×1.5 + 갭<+3% → 당일 종가 매수 → 20일 저가 이탈 매도 → 손절 -7%.
+- `strategies/long_tail_volatility.py` — VB 매수 + 전일대비 +3% 추가필터 → 타겟가 매수 → (a) 당일 +29% spike 시 익일 시가 매도 / (b) 그 외 당일 종가 매도 → 당일 -3%/익일 -5% 손절.
+
+### 백엔드 — 서비스/라우터/DB 통합
+- `services/backtest_service.py` — `run_local_backtest(preset, symbols, market, start_date, end_date, initial_capital, commission_rate, tax_rate, slippage, params, user_id)` + `list_local_presets()` 추가. 기존 MCP 함수(`run_preset_backtest`/`run_custom_backtest`/`run_batch_backtest`/`get_strategy_signals`) 100% 미터치.
+- `routers/backtest.py` — `LocalBacktestBody` Pydantic(`symbols: list[str] = Field(min_length=1, max_length=10)`, `market="KR"` 검증, ServiceError 사용) + `POST /run/local` + `GET /local/presets` 신규 2건. MCP 라우터/엔드포인트 미터치.
+- `db/models/backtest.py` — `BacktestJob.symbols = Column(JSON, nullable=True)` 추가. 기존 `symbol` 컬럼은 첫 종목 캐싱용으로 유지(인덱스/조회 호환). `to_dict()` 응답에 `symbols` 노출.
+- `db/repositories/backtest_repo.py` — `create_job(symbols=...)` 키워드 인자 확장(후방호환).
+- `stock/strategy_store.py` — `save_backtest_job(symbols=...)` Repository 위임.
+- `alembic/versions/e1f2a3b4c5d6_add_backtest_symbols.py` — `BacktestJob.symbols` JSON 컬럼 add.
+
+### 프론트엔드
+- `frontend/src/components/backtest/SymbolMultiInput.jsx` — 1~10개 종목 칩(chip) 선택. SymbolSearchBar 재사용 + ✕ 제거 + 카운터(N/10).
+- `frontend/src/components/backtest/StrategySelector.jsx` — 4탭 확장(빌더/MCP 프리셋/**로컬 프리셋(신규)**/커스텀). 로컬 프리셋 카드: 4개 KR 전략 메타.
+- `frontend/src/components/backtest/BacktestResultPanel.jsx` — `result.per_symbol_contribution` 존재 시 종목별 기여도 카드 그리드, 거래내역 symbol 컬럼 추가, 로컬 거래(entry+exit 한 행)는 매수/매도 2행 펼침.
+- `frontend/src/pages/BacktestPage.jsx` — `strategyMode === 'local-preset'` 분기 + `multiSymbols` state. MCP 미연결 시 페이지 차단 → 노란색 안내 배너로 완화(빌더/MCP/커스텀 탭만 차단, 로컬은 MCP 불필요).
+- `frontend/src/api/backtest.js` — `runLocalBacktest()` + `fetchLocalPresets()` 추가.
+- `frontend/src/hooks/useBacktest.js` — `useLocalPresets()` + `runLocal()` 훅 추가.
+
+### 도메인 정합성
+- 4 전략 모두 단기/추세 전용 → 가치주 등급(A~D)·Value Trap 6규칙·체제 매트릭스와 직교(별도 트랙). `safety_grade.py`/`macro_regime.py` 미터치.
+- 균등 배분 + 슬롯 가득 시 스킵 = 라이브 자본 부족 거동.
+- 일봉 단순화 한계: intraday 정밀도 ±수% 오차 가능. 손절은 일봉 저가 ≤ 손절가일 때 손절가 체결 가정.
+
+### 백워드 호환
+- 기존 MCP 백테스트(`run/preset`/`run/custom`/`run/batch`/`get_strategy_signals`) 100% 미터치.
+- `BacktestJob.symbol` 그대로 유지(`symbols[0]` 자동 저장, SQL 인덱스 호환).
+- `BacktestJob.symbols` JSON 컬럼은 nullable — 기존 row NULL 허용.
+- `BacktestJob.strategy_type` 기존 "preset"/"custom" + 신규 "local" 추가.
+- 프론트 단일 종목 모드 기본값 유지 — 로컬 프리셋 탭에서만 다중 종목 활성.
+
+### 테스트
+- `tests/unit/test_local_backtest_momentum.py` (6 케이스) — 정상 매수/상한가 제외/29% 미달/익일 시가 매도/손절 우선/필요 history.
+- `tests/unit/test_local_backtest_vb.py` (6 케이스) — **횡보장 K20≈1 진입 장벽↑** + **추세장 K20≈0 빠른 추격** 양면 검증, 타겟 미달, 동일 일봉 종가 청산, 손절 우선, 최소 history 20일.
+- `tests/unit/test_local_backtest_donchian.py` (6 케이스) — 20일 신고가+필터 진입/거래량 미달/갭 초과/20일 저가 이탈 매도/손절/최소 60일.
+- `tests/unit/test_local_backtest_portfolio.py` (6 케이스) — 5종목 균등 배분/슬롯 가득 시 스킵/청산 후 자본 재배분/max_slots=10 캡/정확 자본 분할.
+- `tests/unit/test_local_backtest_metrics.py` (6 케이스) — total_return/MDD/win_rate+PF/CAGR 1년/Sharpe 양수/empty trades 안전.
+- `tests/api/test_backtest_local_endpoint.py` (4 케이스) + `tests/api/test_backtest_local_validation.py` (4 케이스) — POST /run/local 200 + per_symbol_contribution / symbols 0개·11개 → 422 / unknown preset → 400 / market != KR → 400.
+- 단위 30 PASS / 회귀 baseline 648 → 680 (+32). API 8 케이스 PostgreSQL 의존 → CI 위탁.
+
+### DB 마이그레이션
+- 1건: `BacktestJob.symbols` JSON 컬럼 add (nullable).
+
+### K20 정의 보정 (2026-05-07 후속)
+- 초기 구현은 plan 표 그대로 `K20 = (H-L)/시가` 노이즈 비율을 사용 → 실무 표준 변동성돌파 K=0.5 스케일과 의미·스케일 차이(0.02 수준의 미세 가산)로 의도와 어긋남.
+- 사용자 도메인 자문 반영: **K20 = `1 - |Close-Open|/(High-Low)`**(노이즈 비율) 평균. Range=0 도지 캔들은 평균에서 제외.
+- 의미: 횡보장(시가↔종가 본체 작음) → noise≈1 → 진입 장벽↑(가짜 돌파 차단) / 추세장(시가↔종가 본체 큼) → noise≈0 → 빠른 추격.
+- VB의 `_compute_target` 함수 1곳만 수정 → long_tail은 동일 함수 import로 자동 반영.
+- 단위 테스트 헬퍼 `_build_choppy_history`(K≈1) + `_build_trend_history`(K≈0) 양면 검증 추가.
+
+---
+
 ## 2026-05-07 — 자문보고서·포트폴리오 자문 사용자 코멘트 양면 평가 (동의/반박 + strength 1~10)
 
 ### 배경

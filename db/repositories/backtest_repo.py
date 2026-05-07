@@ -25,6 +25,7 @@ class BacktestRepository:
         submitted_at: str,
         params: dict | None = None,
         strategy_display_name: str | None = None,
+        symbols: list[str] | None = None,
     ) -> dict:
         job = BacktestJob(
             user_id=user_id,
@@ -32,6 +33,7 @@ class BacktestRepository:
             strategy_name=strategy_name,
             strategy_display_name=strategy_display_name,
             symbol=symbol.upper(),
+            symbols=[s.upper() for s in symbols] if symbols else None,
             market=market.upper(),
             strategy_type=strategy_type,
             status="submitted",

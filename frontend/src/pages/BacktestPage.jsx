@@ -6,13 +6,16 @@
  */
 import { useState, useEffect, useCallback, useRef } from 'react'
 import SymbolSearchBar from '../components/order/SymbolSearchBar'
+import SymbolMultiInput from '../components/backtest/SymbolMultiInput'
 import StrategySelector from '../components/backtest/StrategySelector'
 import BacktestResultPanel from '../components/backtest/BacktestResultPanel'
 import BatchCompareTable from '../components/backtest/BatchCompareTable'
 import BacktestHistoryTable from '../components/backtest/BacktestHistoryTable'
 import LoadingSpinner from '../components/common/LoadingSpinner'
 import ErrorAlert from '../components/common/ErrorAlert'
-import { useMcpStatus, usePresets, useBacktest, useBacktestHistory } from '../hooks/useBacktest'
+import {
+  useMcpStatus, usePresets, useLocalPresets, useBacktest, useBacktestHistory,
+} from '../hooks/useBacktest'
 import { fetchBacktestResult, deleteBacktestJob } from '../api/backtest'
 
 const DEFAULT_PRESETS_FOR_BATCH = ['sma_crossover', 'momentum', 'trend_filter_signal', 'volatility_breakout']
@@ -20,15 +23,18 @@ const DEFAULT_PRESETS_FOR_BATCH = ['sma_crossover', 'momentum', 'trend_filter_si
 export default function BacktestPage() {
   const { available: mcpAvailable, loading: mcpLoading } = useMcpStatus()
   const { presets, load: loadPresets } = usePresets()
+  const { presets: localPresets, load: loadLocalPresets } = useLocalPresets()
   const {
     status, result, error, progress,
-    runPreset, runCustom, runBatch, reset,
+    runPreset, runCustom, runBatch, runLocal, reset,
   } = useBacktest()
   const { history, loading: historyLoading, load: loadHistory } = useBacktestHistory()
 
   const [market, setMarket] = useState('KR')
   const [symbol, setSymbol] = useState('')
   const [symbolName, setSymbolName] = useState('')
+  // 로컬 프리셋(다중 종목) 모드 전용 — 칩 리스트
+  const [multiSymbols, setMultiSymbols] = useState([]) // [{code, name}]
   const [strategyMode, setStrategyMode] = useState('builder')
   const [selectedPreset, setSelectedPreset] = useState('')
   const [yamlContent, setYamlContent] = useState('')
@@ -72,6 +78,17 @@ export default function BacktestPage() {
     if (mcpAvailable) loadPresets()
   }, [mcpAvailable, loadPresets])
 
+  // 로컬 프리셋은 MCP 무관 — 마운트 시 즉시 로드
+  useEffect(() => {
+    loadLocalPresets()
+  }, [loadLocalPresets])
+
+  // 모드 전환 시 선택값 초기화 (mcp/local preset 사이 ID 충돌 방지)
+  useEffect(() => {
+    setSelectedPreset('')
+    setCustomParams({})
+  }, [strategyMode])
+
   // 마운트 시 + 백테스트 완료 시 히스토리 로드
   useEffect(() => { loadHistory() }, [loadHistory])
   useEffect(() => {
@@ -90,6 +107,37 @@ export default function BacktestPage() {
   }, [])
 
   const handleRun = useCallback(() => {
+    // 로컬 프리셋: 다중 종목 분기
+    if (strategyMode === 'local-preset') {
+      if (!selectedPreset || multiSymbols.length === 0) return
+      reset()
+      setViewResult(null)
+      setResultMode('single')
+      const codes = multiSymbols.map((s) => s.code)
+      const presetObj = (localPresets || []).find((p) => (p.id || p.strategy_id) === selectedPreset)
+      const fullParams = {}
+      const specParams = presetObj && (presetObj.params || presetObj.parameters)
+      if (specParams) {
+        for (const [key, spec] of Object.entries(specParams)) {
+          fullParams[key] = customParams[key] ?? (typeof spec === 'object' ? spec.default : spec) ?? spec
+        }
+      }
+      Object.assign(fullParams, customParams)
+      runLocal({
+        preset: selectedPreset,
+        symbols: codes,
+        market: 'KR',
+        startDate,
+        endDate,
+        initialCapital: initialCash,
+        commissionRate: commissionRate / 100,
+        taxRate: taxRate / 100,
+        slippage: slippage / 100,
+        params: fullParams,
+      })
+      return
+    }
+    // MCP 단일 종목 흐름
     if (!symbol) return
     reset()
     setViewResult(null)
@@ -112,7 +160,7 @@ export default function BacktestPage() {
       const costParams = { commission_rate: commissionRate / 100, tax_rate: taxRate / 100, slippage: slippage / 100 }
       runCustom(yamlContent, symbol, market, startDate, endDate, initialCash, costParams, undefined, builderYamlState)
     }
-  }, [symbol, strategyMode, selectedPreset, yamlContent, market, startDate, endDate, initialCash, commissionRate, taxRate, slippage, customParams, presets, runPreset, runCustom, reset, builderYamlState])
+  }, [symbol, strategyMode, selectedPreset, multiSymbols, yamlContent, market, startDate, endDate, initialCash, commissionRate, taxRate, slippage, customParams, presets, localPresets, runPreset, runCustom, runLocal, reset, builderYamlState])
 
   const handleBatch = useCallback(() => {
     if (!symbol) return
@@ -146,31 +194,20 @@ export default function BacktestPage() {
     }
   }, [reset])
 
-  const canRun = symbol && (
-    (strategyMode === 'preset' && selectedPreset) ||
-    (strategyMode === 'custom' && yamlContent.trim()) ||
-    (strategyMode === 'builder')
+  const canRun = (
+    (strategyMode === 'local-preset' && selectedPreset && multiSymbols.length > 0) ||
+    (
+      symbol && (
+        (strategyMode === 'preset' && selectedPreset) ||
+        (strategyMode === 'custom' && yamlContent.trim()) ||
+        (strategyMode === 'builder')
+      )
+    )
   ) && !isRunning
 
-  // MCP 비활성화 시 안내
-  if (!mcpLoading && !mcpAvailable) {
-    return (
-      <div className="max-w-2xl mx-auto mt-12 text-center">
-        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-6">
-          <h2 className="text-lg font-semibold text-yellow-800 mb-2">KIS MCP 서버 미연결</h2>
-          <p className="text-sm text-yellow-700 mb-4">
-            백테스트 기능을 사용하려면 KIS AI Extensions MCP 서버가 실행되어야 합니다.
-          </p>
-          <div className="text-xs text-left bg-yellow-100 rounded p-3 font-mono">
-            <p># 환경변수 설정</p>
-            <p>KIS_MCP_ENABLED=true</p>
-            <p className="mt-2"># MCP 서버 실행</p>
-            <p>bash backtester/scripts/start_mcp.sh</p>
-          </div>
-        </div>
-      </div>
-    )
-  }
+  // MCP 비활성화 시 안내 (로컬 프리셋은 MCP 무관 → 안내만 띄우되 페이지는 그대로 사용)
+  // 기존 풀화면 차단 → 상단 배너로 변경하여 로컬 프리셋 사용 가능하도록 함.
+  // (로컬 프리셋 4개는 MCP 없이 stock-manager 내부 엔진으로 실행)
 
   return (
     <div className="space-y-4">
@@ -184,24 +221,44 @@ export default function BacktestPage() {
         </span>
       </div>
 
+      {/* MCP 비활성화 시 상단 안내 (로컬 프리셋은 사용 가능) */}
+      {!mcpLoading && !mcpAvailable && (
+        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 text-xs text-yellow-800">
+          <b>KIS MCP 서버 미연결</b> — 빌더/프리셋(MCP)/커스텀 YAML 모드는 사용할 수 없습니다.
+          {' '}<b className="text-emerald-700">로컬 프리셋</b> 탭은 MCP 없이 즉시 실행 가능합니다.
+        </div>
+      )}
+
       {/* 설정 패널 */}
       <div className="bg-white rounded-lg border p-4 space-y-4">
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">종목</label>
-          <SymbolSearchBar
-            market={market}
-            onMarketChange={setMarket}
-            symbol={symbol}
-            symbolName={symbolName}
-            onSymbolSelect={handleSymbolSelect}
-            markets={['KR']}
-          />
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            {strategyMode === 'local-preset' ? '종목 (1~10개)' : '종목'}
+          </label>
+          {strategyMode === 'local-preset' ? (
+            <SymbolMultiInput
+              symbols={multiSymbols}
+              onChange={setMultiSymbols}
+              maxItems={10}
+              disabled={isRunning}
+            />
+          ) : (
+            <SymbolSearchBar
+              market={market}
+              onMarketChange={setMarket}
+              symbol={symbol}
+              symbolName={symbolName}
+              onSymbolSelect={handleSymbolSelect}
+              markets={['KR']}
+            />
+          )}
         </div>
 
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">전략</label>
           <StrategySelector
             presets={presets}
+            localPresets={localPresets}
             selectedPreset={selectedPreset}
             yamlContent={yamlContent}
             mode={strategyMode}

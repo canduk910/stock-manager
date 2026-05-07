@@ -30,7 +30,7 @@ frontend/
       search.js           searchStocks(q, market) → GET /api/search
       macro.js            fetchMacroIndices / fetchMacroNews / fetchMacroSentiment / fetchMacroInvestorQuotes / fetchMacroSummary
       advisor.js          analyzePortfolio / fetchAdvisorHistory / fetchAdvisorReport → /api/portfolio-advisor/*
-      backtest.js         fetchMcpStatus / fetchPresets / runPresetBacktest / runCustomBacktest / runBatchBacktest / fetchBacktestResult / fetchBacktestHistory → /api/backtest/*
+      backtest.js         fetchMcpStatus / fetchPresets / runPresetBacktest / runCustomBacktest / runBatchBacktest / fetchBacktestResult / fetchBacktestHistory / **fetchLocalPresets** / **runLocalBacktest** (2026-05-07 신규 2개) → /api/backtest/*
       strategyBuilder.js  convertBuilderToYaml / validateBuilderState / saveStrategy / loadStrategies / loadStrategy / deleteStrategy → /api/backtest/strategy/*
       tax.js              fetchTaxSummary(year) / fetchTaxTransactions / syncTax / recalculateTax(year) / fetchTaxCalculations(year,symbol) / addTaxTransaction / deleteTaxTransaction / fetchSimulationHoldings / simulateTax → /api/tax/* (FIFO 전용, 시뮬레이션 포함)
       admin.js            fetchAiUsage / fetchMyAiUsage / fetchAiLimits / setAiLimit / deleteAiLimit / fetchAuditLog → /api/admin/* (AI 사용량 관리). **(2026-05-04 Phase 4)** fetchUsers/fetchUserById/patchUser/deleteUser/fetchPageStats 추가.
@@ -88,8 +88,9 @@ frontend/
                           **SectorRecommendationCard** (신규 섹터 진입 추천: 섹터명+목표비중+타이밍+대표종목→DetailPage 링크),
                           RebalanceCard (리밸런싱 제안), TradeTable (매매안+주문실행),
                           TradeConfirmModal (AI 추천 주문 확인 모달)
-      backtest/           StrategySelector (탭 순서: **전략 빌더(기본)**→프리셋 전략→커스텀 YAML. 프리셋 드롭다운+상세 설명 카드(description/category/tags/**파라미터 슬라이더**(min/max→range, fallback=number input)). CATEGORY_LABELS/CATEGORY_COLORS/PARAM_KR export. **PARAM_KR**: 80+개 파라미터 한글명+비유적 설명 매핑), MetricsCard (수익률/샤프/낙폭/승률),
-                          BacktestResultPanel (**캔들차트+수익률곡선 이중축 통합차트**(OHLCV advisory API 별도 조회, 좌축=주가캔들+MA5/MA20, 우축=순자산 녹색선) + **거래량 바차트** + **보유구간 ReferenceArea**(수익=빨강/손실=파랑/보유중=회색) + 사용 파라미터 한글 표시 + **포지션요약**(6카드: 보유기간/수익거래/손실거래/연승/연패/승패분포) + **연간수익률**(테이블) + **월별수익률히트맵**(6단계 색상) + 거래내역(Buy=빨강/Sell=파랑)+매도수익률 자동계산. **원화 금액 Math.floor() 절사**(가격/순자산/Y축/툴팁). OHLCV 미조회 시 수익률곡선 전용 fallback),
+      backtest/           StrategySelector (탭 순서: **전략 빌더(기본)**→**MCP 프리셋**→**로컬 프리셋(2026-05-07 신규)**→커스텀 YAML. 프리셋 드롭다운+상세 설명 카드(description/category/tags/**파라미터 슬라이더**(min/max→range, fallback=number input)). CATEGORY_LABELS/CATEGORY_COLORS/PARAM_KR export. **PARAM_KR**: 80+개 파라미터 한글명+비유적 설명 매핑. **로컬 프리셋 탭**: `/api/backtest/local/presets` GET → 4개 KR 단기/추세 전략(상한가 모멘텀/변동성 돌파/20일 신고가 스윙/롱테일 변동성) 카드, MCP 무관), MetricsCard (수익률/샤프/낙폭/승률),
+                          **SymbolMultiInput** (신규, 2026-05-07): 1~10개 종목 칩(chip) 선택. SymbolSearchBar 재사용+✕ 제거 버튼+카운터(N/10). 로컬 프리셋 모드에서만 사용,
+                          BacktestResultPanel (**캔들차트+수익률곡선 이중축 통합차트**(OHLCV advisory API 별도 조회, 좌축=주가캔들+MA5/MA20, 우축=순자산 녹색선) + **거래량 바차트** + **보유구간 ReferenceArea**(수익=빨강/손실=파랑/보유중=회색) + 사용 파라미터 한글 표시 + **포지션요약**(6카드: 보유기간/수익거래/손실거래/연승/연패/승패분포) + **연간수익률**(테이블) + **월별수익률히트맵**(6단계 색상) + 거래내역(Buy=빨강/Sell=파랑)+매도수익률 자동계산. **원화 금액 Math.floor() 절사**(가격/순자산/Y축/툴팁). OHLCV 미조회 시 수익률곡선 전용 fallback. **(2026-05-07 로컬 백테스트)** 응답에 `per_symbol_contribution` 존재 시 종목별 기여도 카드 그리드 표시, 거래내역에 symbol 컬럼 추가, 로컬 거래(entry+exit 한 행)는 매수/매도 2행으로 펼침),
                           backtestUtils.js (순수 계산 유틸: computeAnnualReturns/computeMonthlyReturns/computePositionSummary),
                           AnnualReturnsTable, MonthlyReturnsHeatmap, PositionSummary (결과 상세 컴포넌트),
                           BatchCompareTable (전략 비교),
@@ -124,7 +125,7 @@ frontend/
       MacroPage.jsx       /macro         매크로 분석: 지수+심리+뉴스+투자자 코멘트. 4섹션 독립 로딩.
       PortfolioPage.jsx   /portfolio     포트폴리오 통합: 체제배너+자산배분+수익률+AI자문(진단+리밸런싱+매매안+이력). balance+macro+advisor 통합.
       ReportPage.jsx      /reports       데일리 추천: 페이지 진입 시 KR/US 파이프라인 자동실행(중복방지). 매크로 체제 카드(공유) + KR/US 토글 + 3컨셉 탑픽 섹터(모멘텀/역발상/3개월선점) + 종목추천+관심종목 버튼(기등록 ★ 표시). 하단 이력 카드(클릭→전환).
-      BacktestPage.jsx    /backtest      KIS AI Extensions 백테스트: **전략빌더(기본탭)**/프리셋/커스텀 3모드, 빌더에서 바로 실행 가능. 결과 차트/메트릭, 전략 비교. **국내 KRX만 지원**(markets={['KR']}). **거래비용 입력**(수수료0.015%/세금0.23%/슬리피지0.05%). 진행 현황+백그라운드 안내. **이력 테이블**(마운트 시 로드, 완료 시 새로고침, 과거 결과 "보기" 클릭 → 결과패널). MCP 비활성화 시 안내 표시. 저장 전략 직접 실행. **(2026-05-05)** 가용 기간 가이드 박스(US ≥ 1998-01-02 / KR ≥ 2000-01-04 / 권장 1년~10년) + 시작/종료일 input min/max 속성.
+      BacktestPage.jsx    /backtest      KIS AI Extensions 백테스트: **전략빌더(기본탭)**/MCP 프리셋/**로컬 프리셋(2026-05-07 신규)**/커스텀 4모드, 빌더에서 바로 실행 가능. 결과 차트/메트릭, 전략 비교. **국내 KRX만 지원**(markets={['KR']}). **거래비용 입력**(수수료0.015%/세금0.23%/슬리피지0.05%). 진행 현황+백그라운드 안내. **이력 테이블**(마운트 시 로드, 완료 시 새로고침, 과거 결과 "보기" 클릭 → 결과패널). MCP 비활성화 시 안내 표시(빌더/MCP/커스텀 탭만 차단). 저장 전략 직접 실행. **(2026-05-05)** 가용 기간 가이드 박스(US ≥ 1998-01-02 / KR ≥ 2000-01-04 / 권장 1년~10년) + 시작/종료일 input min/max 속성. **(2026-05-07 로컬 프리셋 + 다중 종목)** `strategyMode === 'local-preset'`일 때 `<SymbolSearchBar>` 대신 `<SymbolMultiInput>` 렌더(1~10종목 칩) → `runLocalBacktest()` 호출. 균등 배분 자체 Python 일봉 엔진(MCP 무관). MCP 미연결 시 페이지 차단 → 노란색 안내 배너로 완화(로컬 프리셋은 MCP 불필요). 4 전략: 상한가 모멘텀/변동성 돌파/20일 신고가 스윙/롱테일 변동성.
       TaxPage.jsx         /tax           해외주식 양도소득세: 4탭(요약/매매내역/계산상세/시뮬레이션). FIFO 전용, 연도 선택, KIS 적응적 동기화+자동 재계산.
       AdminPage.jsx       /admin         **(2026-05-04 Phase 4 분할)** /admin → /admin/ai redirect 진입점. 관리 페이지는 3섹션으로 분리됨.
       AdminAIPage.jsx     /admin/ai      AI 관리 (admin only): 3탭(사용량 현황/한도 설정/감사 로그). 유저별 일별 사용량+서비스별 상세. 기본/개별 한도 CRUD. **(2026-05-04 Phase 4)** LimitsTab의 user_id 입력은 사용자 검색 콤보박스로 교체(`/api/admin/users?q=` 검색).
