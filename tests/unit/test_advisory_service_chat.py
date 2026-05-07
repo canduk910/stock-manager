@@ -76,6 +76,15 @@ class TestChatValidation:
                 )
 
 
+def _make_user_filtered_lookup(owner_user_id: int = 1, code: str = "005930", market: str = "KR"):
+    """Repository가 user_id 필터링하는 동작을 시뮬레이션한 mock 헬퍼."""
+    def _lookup(report_id, user_id=None):
+        if user_id is not None and user_id != owner_user_id:
+            return None
+        return _fake_report_row(user_id=owner_user_id, code=code, market=market)
+    return _lookup
+
+
 class TestChatReportLookup:
     def test_missing_report_404(self):
         with patch.object(advisory_service, "OPENAI_API_KEY", "x"), \
@@ -88,9 +97,10 @@ class TestChatReportLookup:
                 )
 
     def test_other_user_report_404(self):
+        # Repository가 user_id 필터링하므로 타 유저 호출 시 None 반환
         with patch.object(advisory_service, "OPENAI_API_KEY", "x"), \
              patch.object(advisory_service.advisory_store, "get_report_by_id",
-                          return_value=_fake_report_row(user_id=2)):
+                          side_effect=_make_user_filtered_lookup(owner_user_id=2)):
             with pytest.raises(NotFoundError):
                 advisory_service.chat_with_report(
                     "005930", "KR", 100,
@@ -98,10 +108,26 @@ class TestChatReportLookup:
                     user_id=1,
                 )
 
+    def test_get_report_by_id_called_with_user_id(self):
+        """챗봇 호출 시 Repository에 user_id가 전달되어 권한 필터링되는지 확인."""
+        with patch.object(advisory_service, "OPENAI_API_KEY", "x"), \
+             patch.object(advisory_service.advisory_store, "get_report_by_id",
+                          return_value=_fake_report_row()) as m, \
+             patch("services.ai_gateway.call_openai_chat", return_value=_ai_resp()):
+            advisory_service.chat_with_report(
+                "005930", "KR", 100,
+                [{"role": "user", "content": "?"}],
+                user_id=1,
+            )
+        # 호출 인자 검증: report_id=100, user_id=1
+        args, kwargs = m.call_args
+        assert args[0] == 100
+        assert kwargs.get("user_id") == 1
+
     def test_mismatched_code_404(self):
         with patch.object(advisory_service, "OPENAI_API_KEY", "x"), \
              patch.object(advisory_service.advisory_store, "get_report_by_id",
-                          return_value=_fake_report_row(code="005930")):
+                          side_effect=_make_user_filtered_lookup(code="005930")):
             with pytest.raises(NotFoundError):
                 advisory_service.chat_with_report(
                     "000660", "KR", 100,

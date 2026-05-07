@@ -234,7 +234,7 @@ def get_report_history(code: str, market: str = Query("KR"), limit: int = Query(
 @router.get("/{code}/reports/{report_id}")
 def get_report_by_id(code: str, report_id: int, market: str = Query("KR"), user: dict = Depends(get_current_user)):
     """특정 ID의 AI 리포트 조회."""
-    report = advisory_store.get_report_by_id(user["id"], report_id)
+    report = advisory_store.get_report_by_id(report_id, user_id=user["id"])
     if not report or report["code"] != code.upper():
         raise NotFoundError("리포트를 찾을 수 없습니다.")
     return report

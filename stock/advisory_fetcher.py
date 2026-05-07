@@ -427,6 +427,146 @@ def fetch_segments_kr(code: str, name: str, user_id=None) -> dict:
         return empty
 
 
+# ── 비즈니스 모델 narrative (KR/US 공통, 도메인 자문 적용) ────────────────────
+
+_BUSINESS_MODEL_SYSTEM_PROMPT = (
+    "당신은 한국 가치투자 자문 시스템의 분석 보조다. "
+    "주어진 사업 부문/사업 설명/현금흐름 수치만 사용하여 회사의 비즈니스 모델을 한국어로 설명한다. "
+    "추측이 어려운 부분은 단정하지 말고 '공시 정보 한정' 같은 한계를 명시한다.\n"
+    "\n"
+    "[현금 창출 narrative — MarginAnalyst 가이드]\n"
+    "- 영업현금흐름과 순이익 비교를 언급(가능 시 OCF/NI 비율). 1.0 이상이면 현금 전환력 양호.\n"
+    "- FCF 마진(FCF/매출)과 3년 부호 일관성 함께 기술. 양수 지속+5% 이상이면 안전마진 우호.\n"
+    "- Capex 강도(capex/OCF) 분류: <30% 자산경량, 30~70% 정상, >70% 자본집약·FCF 압박.\n"
+    "- 잉여현금 사용처(배당/자사주/M&A/부채상환)를 financing_cf 부호로 추정하고 환원율 지속가능성 평가.\n"
+    "- 운전자본·일회성 항목으로 OCF가 부풀려졌을 가능성 의심 시 '현금흐름 품질 주의' 한 줄 명시.\n"
+    "\n"
+    "[R&D 전략 narrative — ValueScreener 가이드]\n"
+    "- R&D 투자 성격을 기존 moat 강화(방어형) vs 신사업 발굴(공격형)로 구분. keywords·segments에서 단서 추출.\n"
+    "- 산업 평균 R&D 비중 (반도체 8~15%, 제약 15~20%, 소비재 1~3%) 대비 과소·과대 여부 언급.\n"
+    "- R&D 누적이 매출 성장·신제품으로 전환되는지(자본배분 효율) 또는 비용만 늘고 정체인지 판단.\n"
+    "- Value trap 경계: R&D 증액에도 매출 CAGR 0% 이하거나, R&D 축소+배당 확대로 미래 성장 포기 시 명시.\n"
+    "- 공시 정보로 확인 불가한 항목은 추측 금지, '공시 한정으로 단정 어려움'으로 한계 표기.\n"
+    "\n"
+    "응답은 반드시 JSON 형식으로 다음 키를 포함한다:\n"
+    "  revenue_model: 어떤 고객(B2B/B2C/B2G)에게 어떤 채널로 무엇을 팔아 매출을 만드는지 3~4문장.\n"
+    "  cash_generation: 위 가이드에 따른 현금 창출 분석 3~4문장.\n"
+    "  rd_strategy: 위 가이드에 따른 R&D 전략 분석 2~3문장.\n"
+    "각 값은 한국어 평문 문자열이며 마크다운/불릿 금지."
+)
+
+_BUSINESS_MODEL_CACHE_TTL_HOURS = 7 * 24  # 7일
+
+
+def _empty_business_model() -> dict:
+    return {"revenue_model": None, "cash_generation": None, "rd_strategy": None}
+
+
+def _format_cf_context(financial: dict | None) -> str:
+    """현금흐름 + 매출/이익 최근 3년 요약을 GPT 프롬프트용 한 줄 문자열로 변환."""
+    if not financial:
+        return "(재무 데이터 없음)"
+    cf = financial.get("cashflow") or []
+    is_ = financial.get("income_stmt") or financial.get("income") or []
+
+    def _last3(rows: list, key: str) -> list:
+        out = []
+        for row in rows[-3:]:
+            v = row.get(key) if isinstance(row, dict) else None
+            out.append(v)
+        return out
+
+    parts = []
+    parts.append(f"매출(최근3): {_last3(is_, 'revenue')}")
+    parts.append(f"순이익(최근3): {_last3(is_, 'net_income')}")
+    parts.append(f"영업CF(최근3): {_last3(cf, 'operating_cf')}")
+    parts.append(f"투자CF(최근3): {_last3(cf, 'investing_cf')}")
+    parts.append(f"재무CF(최근3): {_last3(cf, 'financing_cf')}")
+    parts.append(f"CAPEX(최근3): {_last3(cf, 'capex')}")
+    parts.append(f"FCF(최근3): {_last3(cf, 'free_cf')}")
+    return "; ".join(parts)
+
+
+def fetch_business_model(
+    code: str,
+    name: str,
+    market: str,
+    segments_dict: dict | None,
+    financial_dict: dict | None,
+    user_id=None,
+) -> dict:
+    """비즈니스 모델 narrative — revenue_model / cash_generation / rd_strategy.
+
+    GPT 1회 호출(JSON object). MarginAnalyst + ValueScreener 도메인 가이드를 시스템
+    프롬프트에 내장. 매 호출마다 GPT를 부르지 않도록 cache TTL 7일.
+
+    Args:
+        code: 종목코드
+        name: 종목명
+        market: 'KR' | 'US'
+        segments_dict: fetch_segments_kr/us 결과 ({segments, description, keywords})
+        financial_dict: 손익계산서/현금흐름표 dict
+        user_id: AI 게이트웨이 쿼터 추적용 (None이면 시스템 호출)
+
+    Returns:
+        {"revenue_model": str|None, "cash_generation": str|None, "rd_strategy": str|None}
+    """
+    from stock.cache import get_cached, set_cached
+
+    cache_key = f"advisor:business_model:{market}:{code}"
+    cached = get_cached(cache_key)
+    if cached is not None:
+        return cached
+
+    if not OPENAI_API_KEY:
+        return _empty_business_model()
+
+    segments = (segments_dict or {}).get("segments") or []
+    description = (segments_dict or {}).get("description") or ""
+    keywords = (segments_dict or {}).get("keywords") or []
+
+    user_prompt = (
+        f"종목명: {name} (코드 {code}, 시장 {market})\n"
+        f"사업 설명: {description or '(없음)'}\n"
+        f"투자 키워드: {', '.join(keywords) if keywords else '(없음)'}\n"
+        f"사업부문 매출비중: {segments or '(없음)'}\n"
+        f"재무 컨텍스트: {_format_cf_context(financial_dict)}\n"
+        f"\n위 정보를 토대로 revenue_model / cash_generation / rd_strategy 3개 키를 가진 JSON을 생성하라."
+    )
+
+    try:
+        from services.ai_gateway import call_openai_chat
+
+        resp = call_openai_chat(
+            messages=[
+                {"role": "system", "content": _BUSINESS_MODEL_SYSTEM_PROMPT},
+                {"role": "user", "content": user_prompt},
+            ],
+            user_id=user_id,
+            service_name="advisory_business_model",
+            max_completion_tokens=1500,
+            response_format={"type": "json_object"},
+        )
+
+        content = resp.choices[0].message.content or "{}"
+        data = json.loads(content) if isinstance(content, str) else {}
+        if not isinstance(data, dict):
+            return _empty_business_model()
+
+        result = {
+            "revenue_model": (data.get("revenue_model") or "").strip() or None,
+            "cash_generation": (data.get("cash_generation") or "").strip() or None,
+            "rd_strategy": (data.get("rd_strategy") or "").strip() or None,
+        }
+        # 모든 필드가 None이면 캐시하지 않음 (다음에 재시도)
+        if any(v for v in result.values()):
+            set_cached(cache_key, result, ttl_hours=_BUSINESS_MODEL_CACHE_TTL_HOURS)
+        return result
+    except Exception:
+        logger.exception("fetch_business_model failed for %s/%s", market, code)
+        return _empty_business_model()
+
+
 # ── PER/PBR 5년 통계 (Phase 2-2) ─────────────────────────────────────────────
 
 def fetch_valuation_stats(code: str, market: str) -> dict:

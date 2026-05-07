@@ -171,6 +171,35 @@ class TestAdvisoryReport:
         assert "report" not in history[0]
         assert history[0]["grade"] == "B+"
 
+    def test_get_report_by_id_user_id_filter(self, db_session):
+        """user_id 인자가 주어지면 해당 user_id의 보고서만 반환."""
+        repo = AdvisoryRepository(db_session)
+        rid = repo.save_report(1, "005930", "KR", "gpt-5.4", {"v": 1})
+        db_session.commit()
+
+        # 본인(user_id=1)은 조회 가능
+        own = repo.get_report_by_id(rid, user_id=1)
+        assert own is not None
+        assert own["id"] == rid
+
+        # 타 유저(user_id=2)는 None
+        other = repo.get_report_by_id(rid, user_id=2)
+        assert other is None
+
+        # user_id 미지정 시 기존 동작 — 누구든 조회 (라우터에서 user_id 강제)
+        any_ = repo.get_report_by_id(rid)
+        assert any_ is not None
+
+    def test_to_dict_does_not_expose_user_id(self, db_session):
+        """to_dict() 응답에 user_id가 노출되지 않아야 함 (응답 보안)."""
+        repo = AdvisoryRepository(db_session)
+        rid = repo.save_report(7, "AAPL", "US", "gpt-5.4", {"v": 1})
+        db_session.commit()
+
+        report = repo.get_report_by_id(rid, user_id=7)
+        assert report is not None
+        assert "user_id" not in report
+
 
 class TestPortfolioReport:
     def test_save_portfolio_report(self, db_session):

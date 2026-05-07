@@ -1,5 +1,75 @@
 # 변경 이력
 
+## 2026-05-07 — 자문보고서 챗봇 권한 검증 버그 수정 + 기본적분석 비즈니스 모델 섹션
+
+### 배경
+사용자 요청 2건:
+1. **챗봇 버그**: 자문보고서 챗봇이 본인 보고서임에도 항상 "자문보고서를 찾을 수 없습니다"라고 응답하는 문제 — 원인 파악 + 수정.
+2. **기능 추가**: 관심종목 → DetailPage → AI자문 → 기본적분석 패널에 "비즈니스 모델" 섹션 추가. "무엇을 만들어 누구에게 어떻게 팔아 이익/현금을 내는지, R&D는 어떤 분야에 투자하는지"를 한눈에 파악.
+
+### 챗봇 권한 검증 버그 수정
+
+**근본 원인**: `db/models/advisory.py:74-88`의 `AdvisoryReport.to_dict()`에 `user_id` 키가 빠져 있어 `services/advisory_service.py:1586`의 `report_row.get("user_id") != user_id` 검증이 항상 `None != user_id`로 실패. 결과: 어떤 사용자든 자기 보고서임에도 항상 `NotFoundError("자문보고서를 찾을 수 없습니다.")` 반환.
+
+**부수 버그**: `routers/advisory.py:237`이 `advisory_store.get_report_by_id(user["id"], report_id)`로 인자 2개를 전달하지만 `stock/advisory_store.py:92` / `db/repositories/advisory_repo.py:155`는 `(report_id)` 1개만 받음 → `GET /api/advisory/{code}/reports/{id}` 호출 시 TypeError.
+
+**수정 (B안 — DB 레벨 user_id 필터링 통일)**:
+- `db/repositories/advisory_repo.py:155` — `get_report_by_id(report_id, user_id=None)`로 시그니처 확장. `user_id` 주어지면 `filter_by(id=report_id, user_id=user_id)` 추가.
+- `stock/advisory_store.py:92` — 동일 시그니처 위임.
+- `services/advisory_service.py:1583` — `advisory_store.get_report_by_id(int(report_id), user_id=user_id)`로 호출. `report_row.get("user_id") != user_id` 비교 라인 삭제(이미 Repo에서 필터링됨). code/market 일치 검증은 유지.
+- `routers/advisory.py:237` — `get_report_by_id(report_id, user_id=user["id"])`로 정상화.
+- `db/models/advisory.py` to_dict는 그대로(응답 보안 — user_id 노출 차단).
+
+**검증**:
+- 자문 보고서 생성 후 챗봇 질문 → 정상 답변
+- 다른 사용자의 report_id로 호출 → Repo가 None 반환 → 404
+- `GET /api/advisory/{code}/reports/{id}` — 본인 200, 타인 404 (이전 TypeError → 정상)
+
+### 기본적분석 비즈니스 모델 narrative
+
+**도메인 자문 합의** (MarginAnalyst + ValueScreener):
+- **MarginAnalyst — 현금 창출 가이드** (시스템 프롬프트 내장):
+  - OCF/NI 비율 — 1.0 이상이면 현금 전환력 양호, 지속 0.7 미만이면 이익의 질 의심.
+  - FCF 마진(FCF/매출) + 3년 부호 일관성 — 양수 지속 + 5% 이상이면 안전마진 우호.
+  - Capex 강도(capex/OCF) 분류 — <30% 자산경량, 30~70% 정상, >70% 자본집약·FCF 압박.
+  - 잉여현금 사용처(배당/자사주/M&A/부채상환) 환원율 지속가능성.
+  - 운전자본·일회성 항목으로 OCF 부풀려졌을 가능성 의심 시 "현금흐름 품질 주의" 명시.
+- **ValueScreener — R&D 전략 가이드** (시스템 프롬프트 내장):
+  - 기존 moat 강화(방어형) vs 신사업 발굴(공격형) 구분 — keywords·segments에서 단서 추출.
+  - 산업 평균 R&D 비중 대비 — 반도체 8~15% / 제약 15~20% / 소비재 1~3%.
+  - R&D 누적 → 매출 성장·신제품 전환(자본배분 효율) vs 비용만 증가·매출 정체.
+  - Value trap 경계 — R&D 증액에도 매출 CAGR 0% 이하 / R&D 축소+배당 확대.
+  - 공시 정보로 확인 불가 항목은 추측 금지, "공시 한정으로 단정 어려움" 명시.
+
+**구현**:
+- `stock/advisory_fetcher.py` — `fetch_business_model(code, name, market, segments_dict, financial_dict, user_id) -> dict`. KR/US 공통. GPT 1회(`response_format=json_object`, `max_completion_tokens=1500`, `service_name="advisory_business_model"` user_id 쿼터 차감) → `{revenue_model, cash_generation, rd_strategy}` 각 한국어 narrative. 시스템 프롬프트에 두 도메인 가이드 내장. 캐시 키 `advisor:business_model:{market}:{code}` TTL 7일(168h). 모든 필드 None이면 캐시 안 함(다음 재시도). `_format_cf_context()` 헬퍼로 매출/순이익/CF/CAPEX/FCF 최근 3년을 GPT 프롬프트 한 줄에 요약.
+- `services/advisory_service.py` — `_collect_fundamental_kr/us`에서 segments 호출 직후 `fetch_business_model` 호출. fundamental dict에 `business_model: {revenue_model, cash_generation, rd_strategy}` Optional 필드 추가(백워드 호환). `_collect_fundamental_us(code, name="", user_id=1)` 시그니처 확장. `_collect_fundamental` dispatch도 `(code, market, name, user_id)` 전체 전달.
+- `frontend/src/components/advisory/FundamentalPanel.jsx` — `BusinessModelSection` 컴포넌트 신규. 3카드 그리드(💰 매출 흐름 / 💵 현금 창출 / 🔬 R&D 투자), 각 카드 = 이모지 + 제목 + narrative whitespace-pre-wrap. `business_model`이 null이거나 모든 필드 빈 값이면 미렌더. `<SectionTitle>비즈니스 모델</SectionTitle>` BusinessOverview 직후 마운트.
+
+**호출 시점**: `refresh_stock_data` 페이즈에서만(매 GET 호출 금지, research_collector 패턴). 캐시 hit 시 GPT 미호출.
+
+### 테스트
+
+| 카테고리 | 결과 | 비고 |
+|----------|------|------|
+| `tests/unit/test_advisory_business_model.py` | 8/8 PASS (신규) | 캐시 hit GPT 미호출 / TTL 7일 / 도메인 가이드 키워드 포함 / 시그니처 / 부분 응답 / 빈 응답 미캐시 / 재무 컨텍스트 키 포함 |
+| `tests/unit/test_advisory_service_chat.py` | 11/11 PASS (보강) | user_id 인자 전달 검증 + 본인/타 유저 권한 케이스 신규 추가, 기존 mock 시그니처 정합 |
+| `tests/integration/test_advisory_repo.py` | +2 케이스 | `get_report_by_id` user_id 필터, `to_dict` user_id 미노출 |
+| 프론트 build | OK | 851 modules transformed, 1.41s |
+| 회귀 영향 | 0건 | `pdfplumber` 미설치 / Docker PostgreSQL 미실행으로 인한 기존 환경 의존성 실패와 무관 |
+
+### 변경 파일
+
+**백엔드 (5)**: `db/repositories/advisory_repo.py`, `stock/advisory_store.py`, `services/advisory_service.py`, `routers/advisory.py`, `stock/advisory_fetcher.py`
+
+**프론트엔드 (1)**: `frontend/src/components/advisory/FundamentalPanel.jsx`
+
+**테스트 (3)**: `tests/unit/test_advisory_business_model.py`(신규), `tests/unit/test_advisory_service_chat.py`(보강), `tests/integration/test_advisory_repo.py`(보강)
+
+**DB 마이그레이션 0건** / **도메인 변경 0건**(챗봇 권한 검증은 동일 정책의 위치 이동, 비즈니스 모델은 새 narrative만).
+
+---
+
 ## 2026-05-06 — 자문보고서·포트폴리오 보고서 챗봇 + 상단 AI 사용량 게이지
 
 ### 배경

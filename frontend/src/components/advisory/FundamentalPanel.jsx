@@ -401,6 +401,38 @@ function BusinessOverview({ segments, description, keywords }) {
   )
 }
 
+// ── 비즈니스 모델 (revenue_model / cash_generation / rd_strategy) ──────────
+function BusinessModelSection({ model }) {
+  const m = model || {}
+  const items = [
+    { key: 'revenue_model',    icon: '💰', label: '매출 흐름',  text: m.revenue_model },
+    { key: 'cash_generation',  icon: '💵', label: '현금 창출',  text: m.cash_generation },
+    { key: 'rd_strategy',      icon: '🔬', label: 'R&D 투자',  text: m.rd_strategy },
+  ].filter(x => x.text && String(x.text).trim().length > 0)
+
+  if (items.length === 0) return null
+
+  return (
+    <div className="grid gap-3 md:grid-cols-3">
+      {items.map(({ key, icon, label, text }) => (
+        <div
+          key={key}
+          className="border border-gray-200 rounded-xl bg-gray-50/60 p-3 flex flex-col"
+        >
+          <div className="flex items-center gap-2 mb-1.5">
+            <span className="text-lg leading-none">{icon}</span>
+            <span className="text-sm font-semibold text-gray-700">{label}</span>
+          </div>
+          <p className="text-xs text-gray-600 leading-relaxed whitespace-pre-wrap">
+            {text}
+          </p>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+
 const FW_REC_MAP = {
   strong_buy:  { label: '적극매수', cls: 'bg-red-100 text-red-700 border-red-300' },
   buy:         { label: '매수',     cls: 'bg-red-50  text-red-600 border-red-200' },
@@ -508,7 +540,12 @@ export default function FundamentalPanel({ data, market, code }) {
   const segments = fundamental.segments || []
   const businessDescription = fundamental.business_description || ''
   const businessKeywords = fundamental.business_keywords || []
+  const businessModel = fundamental.business_model || null
   const forwardEstimates = fundamental.forward_estimates || null
+
+  const hasBizModel = businessModel && Object.values(businessModel).some(
+    v => v && String(v).trim().length > 0
+  )
 
   return (
     <div className="space-y-2">
@@ -519,6 +556,14 @@ export default function FundamentalPanel({ data, market, code }) {
         description={businessDescription}
         keywords={businessKeywords}
       />
+
+      {/* 비즈니스 모델 — 매출 흐름 / 현금 창출 / R&D 투자 */}
+      {hasBizModel && (
+        <>
+          <SectionTitle>비즈니스 모델</SectionTitle>
+          <BusinessModelSection model={businessModel} />
+        </>
+      )}
 
       {/* 포워드 가이던스 */}
       <ForwardEstimatesSection forward={forwardEstimates} market={market} code={code} currentPrice={metrics.price} />

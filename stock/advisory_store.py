@@ -89,10 +89,10 @@ def get_report_history(user_id: int, code: str, market: str, limit: int = 20) ->
         return AdvisoryRepository(db).get_report_history(user_id, code, market, limit)
 
 
-def get_report_by_id(report_id: int) -> Optional[dict]:
-    """특정 ID의 AI 리포트 조회."""
+def get_report_by_id(report_id: int, user_id: Optional[int] = None) -> Optional[dict]:
+    """특정 ID의 AI 리포트 조회. user_id 지정 시 본인 보고서만 반환(권한 검증)."""
     with get_session() as db:
-        return AdvisoryRepository(db).get_report_by_id(report_id)
+        return AdvisoryRepository(db).get_report_by_id(report_id, user_id=user_id)
 
 
 def get_latest_report(user_id: int, code: str, market: str) -> Optional[dict]:

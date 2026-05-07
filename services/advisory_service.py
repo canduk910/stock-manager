@@ -241,7 +241,7 @@ def _collect_fundamental(code: str, market: str, name: str, user_id: int = 1) ->
     """기본적 분석 데이터 수집."""
     if market == "KR":
         return _collect_fundamental_kr(code, name, user_id)
-    return _collect_fundamental_us(code)
+    return _collect_fundamental_us(code, name, user_id)
 
 
 def _collect_fundamental_kr(code: str, name: str, user_id: int = 1) -> dict:
@@ -293,6 +293,13 @@ def _collect_fundamental_kr(code: str, name: str, user_id: int = 1) -> dict:
         biz_desc = ""
         biz_keywords = []
 
+    business_model = advisory_fetcher.fetch_business_model(
+        code, name, "KR",
+        segments_dict={"segments": segments, "description": biz_desc, "keywords": biz_keywords},
+        financial_dict={"income_stmt": income_stmt, "cashflow": cashflow},
+        user_id=user_id,
+    )
+
     return {
         "income_stmt": income_stmt,
         "balance_sheet": balance_sheet,
@@ -301,13 +308,14 @@ def _collect_fundamental_kr(code: str, name: str, user_id: int = 1) -> dict:
         "segments": segments,
         "business_description": biz_desc,
         "business_keywords": biz_keywords,
+        "business_model": business_model,
         "forward_estimates": forward_estimates,
         "valuation_stats": valuation_stats,  # Phase 2-2
         "quarterly": quarterly,              # Phase 2-3
     }
 
 
-def _collect_fundamental_us(code: str) -> dict:
+def _collect_fundamental_us(code: str, name: str = "", user_id: int = 1) -> dict:
     """해외 종목 기본적 분석 데이터 수집.
 
     ThreadPoolExecutor 8개 task — 모두 yfinance 기반 (DART 미사용).
@@ -354,6 +362,13 @@ def _collect_fundamental_us(code: str) -> dict:
         biz_desc = ""
         biz_keywords = []
 
+    business_model = advisory_fetcher.fetch_business_model(
+        code, name or code, "US",
+        segments_dict={"segments": segments, "description": biz_desc, "keywords": biz_keywords},
+        financial_dict={"income_stmt": income_stmt, "cashflow": cashflow},
+        user_id=user_id,
+    )
+
     return {
         "income_stmt": income_stmt,
         "balance_sheet": balance_sheet,
@@ -362,6 +377,7 @@ def _collect_fundamental_us(code: str) -> dict:
         "segments": segments,
         "business_description": biz_desc,
         "business_keywords": biz_keywords,
+        "business_model": business_model,
         "forward_estimates": forward_estimates,
         "valuation_stats": valuation_stats,  # Phase 2-2
         "quarterly": quarterly,              # Phase 2-3
@@ -1580,10 +1596,8 @@ def chat_with_report(
     """
     cleaned = _validate_chat_messages(messages)
 
-    report_row = advisory_store.get_report_by_id(int(report_id))
+    report_row = advisory_store.get_report_by_id(int(report_id), user_id=user_id)
     if not report_row:
-        raise NotFoundError("자문보고서를 찾을 수 없습니다.")
-    if report_row.get("user_id") != user_id:
         raise NotFoundError("자문보고서를 찾을 수 없습니다.")
     if (report_row.get("code") or "").upper() != (code or "").upper() or \
             (report_row.get("market") or "").upper() != (market or "").upper():

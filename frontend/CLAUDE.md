@@ -174,7 +174,7 @@ frontend/
 
 ### Advisory 컴포넌트
 
-- **FundamentalPanel**: **사업 개요**(BusinessOverview: #키워드 + 사업설명 + 매출비중 파이차트) → 애널리스트 추정치(매출/순이익/EPS 현재E+차기E, **목표주가 클릭→AnalystReportsModal**) → 계량지표(10개: +EPS+안전마진가격) → 손익계산서(+추정치 바 반투명) → 대차대조표 → 현금흐름표
+- **FundamentalPanel**: **사업 개요**(BusinessOverview: #키워드 + 사업설명 + 매출비중 파이차트) → **비즈니스 모델**(BusinessModelSection — 3카드: 💰 매출 흐름 / 💵 현금 창출 / 🔬 R&D 투자, `business_model` 모든 필드 빈 값이면 미렌더, 2026-05-06 추가) → 애널리스트 추정치(매출/순이익/EPS 현재E+차기E, **목표주가 클릭→AnalystReportsModal**) → 계량지표(10개: +EPS+안전마진가격) → 손익계산서(+추정치 바 반투명) → 대차대조표 → 현금흐름표
 - **TechnicalPanel**: 타임프레임(15m/60m/1d/1wk) + 기간 선택. 시그널 카드 + 캔들스틱+MA+BB → 거래량 → MACD → RSI → Stochastic → PER/PBR 밸류에이션(1d/1wk만, `valuationData` prop + `fetchDetailValuation` API)
 - **AIReportPanel**: **v2 등급 카드**(SafetyGradeBadge A/B+/B/C/D + ScoreBar 3개(등급28/복합100/정합성100) + Value Trap 배너 + recommendation 배지; v1 리포트 시 카드 숨김) → 종합투자의견 배지 → 전략별평가 3컬럼 카드(안전마진가격 표시) → 기술적시그널 → 리스크/투자포인트
 

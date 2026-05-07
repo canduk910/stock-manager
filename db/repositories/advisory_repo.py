@@ -152,8 +152,11 @@ class AdvisoryRepository:
         )
         return [r.to_summary_dict() for r in rows]
 
-    def get_report_by_id(self, report_id: int) -> Optional[dict]:
-        row = self.db.query(AdvisoryReport).filter_by(id=report_id).first()
+    def get_report_by_id(self, report_id: int, user_id: Optional[int] = None) -> Optional[dict]:
+        query = self.db.query(AdvisoryReport).filter_by(id=report_id)
+        if user_id is not None:
+            query = query.filter_by(user_id=user_id)
+        row = query.first()
         return row.to_dict() if row else None
 
     def get_latest_report(self, user_id: int, code: str, market: str) -> Optional[dict]:

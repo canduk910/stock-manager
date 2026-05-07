@@ -11,7 +11,7 @@ CLI와 API 라우터 양쪽에서 공용으로 사용한다. 비즈니스 데이
 | `order_store.py` | 주문 이력 + 예약주문 CRUD. `db/repositories/order_repo.py` 위임 래퍼. 기존 함수 시그니처 100% 유지. |
 | `advisory_store.py` | AI자문 CRUD. `db/repositories/advisory_repo.py` 위임 래퍼. `save_cache(research_data=)` + `save_research_data()` 추가. |
 | `research_collector.py` | **리서치 데이터 6카테고리 수집**. 거시지표/밸류에이션밴드/경영진/공시/뉴스/**증권사 컨센서스** ThreadPoolExecutor 병렬. `collect_all_research()`. 컨센서스: KR=`naver_research`+`analyst_pdf` 요약+`AnalystRepository` 영속 + 중앙값/dispersion/upside/momentum_signal/consensus_overheated 산출. US=`fetch_upgrades_downgrades` 메타데이터만. |
-| `advisory_fetcher.py` | AI자문 OHLCV 수집 + 사업부문 추론 + **`fetch_valuation_stats()`**(PER/PBR 5년 통계). 기술지표 계산은 indicators.py 위임. KIS 1분봉 4시간대 병렬 수집(ThreadPoolExecutor). |
+| `advisory_fetcher.py` | AI자문 OHLCV 수집 + 사업부문 추론 + **`fetch_valuation_stats()`**(PER/PBR 5년 통계) + **`fetch_business_model(code, name, market, segments_dict, financial_dict, user_id)`**(비즈니스 모델 narrative — revenue_model/cash_generation/rd_strategy 3 키, GPT 1회 + JSON object, MarginAnalyst·ValueScreener 도메인 가이드 시스템 프롬프트 내장, 캐시 키 `advisor:business_model:{market}:{code}` TTL 7일, `service_name="advisory_business_model"`). 기술지표 계산은 indicators.py 위임. KIS 1분봉 4시간대 병렬 수집(ThreadPoolExecutor). |
 | `stock_info_store.py` | 종목 정보 영속 캐시. `db/repositories/stock_info_repo.py` 위임 래퍼. 시세/지표/재무/수익률 영역별 TTL. write-through 패턴. |
 | `indicators.py` | 기술적 지표 순수 계산 (MACD/RSI/Stochastic/BB/MA/ATR/**volume_signal**/**bb_position**). 외부 의존 없음. |
 | `utils.py` | `is_domestic(code)` — 6자리 숫자=국내. `is_fno(code)` — FNO 단축코드 판별. |
