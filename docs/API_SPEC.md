@@ -686,7 +686,7 @@ KIS 당일 체결 내역과 로컬 DB 대사(Reconciliation). 로컬 `PLACED`/`P
 
 - **국내(`market=KR`)**: KIS WebSocket(`ws://ops.koreainvestment.com:21000`) 브릿지. **(2026-05-08 KRX+NXT 통합)** 시간대 자동 분기 — 09:00~15:30 = `H0UNCNT0`(통합)+`H0UNASP0`, 15:30~15:40 = `H0STCNT0`(KRX)+`H0STASP0`, 08:00~09:00 / 15:40~20:00 = `H0NXCNT0`(NXT)+`H0NXASP0`. `exchange` 명시(`UN`/`KRX`/`NXT`) 시 시계와 무관하게 강제. `auto`(기본) 시 `KISQuoteManager._resolve_exchange_by_clock()` + `H0UNMKO0` WS override. NXT/통합 호가도 ASKP1~10/RSQN1~10 동일 10호가 구조.
 - **선물옵션(`market=FNO`)**: KIS WebSocket FNO 채널 브릿지. `_resolve_fno_type(symbol)`으로 TR_ID 자동 선택. 지수선물(1xxx): `H0IFCNT0`(체결)+`H0IFASP0`(5레벨 호가), 지수옵션(2xxx): `H0IOCNT0`+`H0IOASP0`, 주식선물(3xxx): `H0ZFCNT0`+`H0ZFASP0`(10레벨), 주식옵션(3xxx): `H0ZOCNT0`+`H0ZOASP0`. `_stream_fno()` 핸들러로 분기.
-- **해외(`market=US`)**: yfinance `Ticker.fast_info` 2초 주기 polling. 체결가만 (호가 미지원).
+- **해외(`market=US`)**: **(2026-05-08~09)** KIS REST `get_kis_price()` 우선 + Finnhub WS / yfinance 2초 폴링 fallback (가격 채널). **호가 채널 신규** — KIS WS HDFSASP0 우선(2026-05-09 통합) + REST `HHDFS76200100` 2초 폴링 폴백 자동 전환. broadcast `{type:"orderbook", asks, bids, total_*_volume}` 국내와 동일 shape. KIS WS 키 부재 환경 graceful → REST 폴링.
 - KIS 키 미설정 시 연결은 수락되나 데이터 없음(ping만 수신).
 
 **메시지 타입**
@@ -705,6 +705,45 @@ KIS 당일 체결 내역과 로컬 DB 대사(Reconciliation). 로컬 `PLACED`/`P
 - `bids[0]` = 최우선(최고가) 매수호가. 그대로 표시(높은가격 → 낮은가격).
 
 **에러 처리**: 예외 발생 시 code=1011로 WS 종료. 클라이언트는 비정상 종료(code≠1000) 시 3초 후 재연결.
+
+### `GET /api/quote/us/{symbol}/orderbook` (2026-05-08 신규)
+
+미국주식 10단계 호가 REST 폴백. `Depends(get_current_user)`. KIS `HHDFS76200100`. WS 차단 환경 또는 디버깅용 — 일반 사용자 경로는 `/ws/quote/{symbol}` WS 사용.
+
+**응답 (200)**:
+```json
+{
+  "asks": [{"price": 150.52, "volume": 100, "total_volume": 250}, ...up to 10],
+  "bids": [{"price": 150.50, "volume": 80, "total_volume": 200}, ...up to 10],
+  "total_ask_volume": 1234,
+  "total_bid_volume": 5678,
+  "exchange": "NAS"
+}
+```
+
+응답 단계가 10 미만일 수 있음(KIS Level 2 미제공 종목 → 응답 받은 단계만). 가격은 USD 소수 2자리.
+
+**에러**: 503(KIS 키 부재 — ConfigError) / 504(KIS 응답 None — `get_kis_orderbook` 실패).
+
+### `GET /api/quote/us/{symbol}/detail` (2026-05-08 신규)
+
+미국주식 현재가 상세(시/고/저/거래량/52주). KIS `HHDFS76200200`.
+
+**응답 (200)**:
+```json
+{
+  "open": 150.20,
+  "high": 151.80,
+  "low": 149.50,
+  "prev_close": 150.10,
+  "volume": 12345678,
+  "high_52w": 198.23,
+  "low_52w": 124.17,
+  "exchange": "NAS"
+}
+```
+
+**에러**: 503 / 504.
 
 ---
 

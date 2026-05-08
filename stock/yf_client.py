@@ -28,6 +28,10 @@ from typing import Optional
 
 from stock.cache import get_cached, set_cached
 from stock.market import _is_us_trading_hours
+from stock.kis_overseas_client import get_kis_price, get_kis_ohlcv_daily
+
+import logging
+logger = logging.getLogger(__name__)
 
 
 def _ticker_uncached(code: str):
@@ -123,12 +127,51 @@ def validate_ticker(code: str) -> Optional[dict]:
 # ── 현재가 ────────────────────────────────────────────────────────────────────
 
 def fetch_price_yf(code: str) -> Optional[dict]:
-    """현재가/등락/시가총액 (USD 기준). 15분 지연."""
+    """현재가/등락/시가총액 (USD 기준).
+
+    REQ-INTEG-06: KIS 우선 → KIS None 시 yfinance fallback.
+    응답 dict 키 변경 없음 (close/change/change_pct/mktcap/currency).
+    KIS는 시가총액(mktcap)을 제공하지 않으므로 KIS 사용 시 mktcap은 None.
+    """
     key = f"yf:price:{code.upper()}"
     cached = get_cached(key)
     if cached is not None:
         return cached or None
 
+    # ── KIS 우선 ───────────────────────────────────────────────────────────
+    try:
+        kis = get_kis_price(code)
+    except Exception as e:
+        # ConfigError 등 — yfinance fallback (서비스 무중단)
+        logger.warning("yf_client.fetch_price_yf KIS 호출 예외 (%s): %s — yfinance fallback", code, e)
+        kis = None
+
+    if kis:
+        try:
+            close_val = _safe(kis.get("last"))
+            change_val = _safe(kis.get("change"))
+            change_pct_val = _safe(kis.get("change_rate"))
+            if close_val is not None:
+                result = {
+                    "code": code.upper(),
+                    "close": _safe(round(close_val, 4)),
+                    "change": _safe(round(change_val, 4)) if change_val is not None else None,
+                    "change_pct": _safe(round(change_pct_val, 2)) if change_pct_val is not None else None,
+                    "mktcap": None,  # KIS 미제공
+                    "currency": kis.get("currency") or "USD",
+                }
+                ttl = 2 / 60 if _is_us_trading_hours() else 0.5
+                set_cached(key, result, ttl_hours=ttl)
+                try:
+                    from .stock_info_store import upsert_price
+                    upsert_price(code, "US", result)
+                except Exception:
+                    pass
+                return result
+        except Exception as e:
+            logger.warning("yf_client.fetch_price_yf KIS 매핑 실패 (%s): %s", code, e)
+
+    # ── yfinance fallback (기존 경로) ─────────────────────────────────────
     try:
         t = _ticker(code)
         fi = t.fast_info
@@ -236,6 +279,26 @@ def fetch_detail_yf(code: str) -> Optional[dict]:
             "dividend_yield": dividend_yield,
             "dividend_per_share": dividend_per_share,
         }
+
+        # REQ-INTEG-07: KIS 가격이 정상이면 close/change/change_pct만 덮어쓰기.
+        # PER/PBR/52주/배당/sector 등은 KIS 미제공이라 yfinance 보존 필수.
+        try:
+            kis = get_kis_price(code)
+        except Exception as e:
+            logger.warning("yf_client.fetch_detail_yf KIS 호출 예외 (%s): %s", code, e)
+            kis = None
+        if kis:
+            try:
+                kis_close = _safe(kis.get("last"))
+                if kis_close is not None:
+                    kis_change = _safe(kis.get("change"))
+                    kis_rate = _safe(kis.get("change_rate"))
+                    result["close"] = _safe(round(kis_close, 4))
+                    result["change"] = _safe(round(kis_change, 4)) if kis_change is not None else result["change"]
+                    result["change_pct"] = _safe(round(kis_rate, 2)) if kis_rate is not None else result["change_pct"]
+            except Exception as e:
+                logger.warning("yf_client.fetch_detail_yf KIS 가격 매핑 실패 (%s): %s", code, e)
+
         ttl = 0.5 if _is_us_trading_hours() else 6  # 장중 30분, 장외 6시간
         set_cached(key, result, ttl_hours=ttl)
         # 영속 캐시 write-through
@@ -253,12 +316,53 @@ def fetch_detail_yf(code: str) -> Optional[dict]:
 # ── 수익률 ────────────────────────────────────────────────────────────────────
 
 def fetch_period_returns_yf(code: str) -> dict:
-    """당일/3M/6M/1Y 수익률."""
+    """당일/3M/6M/1Y 수익률.
+
+    REQ-INTEG-09: 1Y(252봉) 확보 가능 시 KIS 우선.
+    KIS 응답 봉수 부족(252 미만) 또는 None 시 yfinance fallback.
+    반환 dict 키 변경 없음 (change_pct/return_3m/return_6m/return_1y).
+    """
     key = f"yf:returns:{code.upper()}"
     cached = get_cached(key)
     if cached is not None:
         return cached
 
+    # ── KIS 우선 ───────────────────────────────────────────────────────────
+    try:
+        kis_rows = get_kis_ohlcv_daily(code)
+    except Exception as e:
+        logger.warning("yf_client.fetch_period_returns_yf KIS 호출 예외 (%s): %s", code, e)
+        kis_rows = None
+
+    if kis_rows and len(kis_rows) >= 252:
+        try:
+            # KIS 응답: 최신 → 과거. closes[0]이 최신.
+            closes = [float(r["close"]) for r in kis_rows if r.get("close")]
+            if len(closes) >= 252:
+                last = closes[0]
+                prev = closes[1] if len(closes) >= 2 else last
+
+                def _ret_kis(n_days: int) -> Optional[float]:
+                    if len(closes) < n_days:
+                        return None
+                    base = closes[n_days - 1]
+                    if base == 0:
+                        return None
+                    return _safe(round((last - base) / base * 100, 2))
+
+                result = {
+                    "change_pct": _safe(round((last - prev) / prev * 100, 2)) if prev else None,
+                    "return_3m": _ret_kis(63),
+                    "return_6m": _ret_kis(126),
+                    "return_1y": _ret_kis(252),
+                }
+                ttl = 0.25 if _is_us_trading_hours() else 6
+                set_cached(key, result, ttl_hours=ttl)
+                return result
+        except Exception as e:
+            logger.warning("yf_client.fetch_period_returns_yf KIS 매핑 실패 (%s): %s", code, e)
+
+    # ── yfinance fallback (기존 경로) ─────────────────────────────────────
     try:
         hist = _ticker(code).history(period="1y")
         if hist.empty:

@@ -27,6 +27,7 @@ import requests
 from config import KIS_APP_KEY, KIS_APP_SECRET, KIS_BASE_URL, OPENAI_API_KEY, OPENAI_MODEL
 from routers._kis_auth import get_access_token_safe
 from stock.indicators import calc_technical_indicators
+from stock.kis_overseas_client import get_kis_ohlcv_15min
 
 
 # ── KIS 1분봉 → 15분봉 리샘플 ────────────────────────────────────────────────
@@ -203,14 +204,55 @@ def fetch_15min_ohlcv_kr(code: str) -> list[dict]:
         return _fetch_15min_ohlcv_kr_yf(code)
 
 
-def fetch_15min_ohlcv_us(code: str) -> list[dict]:
-    """yfinance 15분봉 해외 종목 (최대 60일치). 최근 300봉 반환.
+# 모듈 스코프에 _ticker 노출 (테스트/REQ-INTEG-08 KIS fallback 경로 공용)
+from stock.yf_client import _ticker  # noqa: E402
 
-    해외 종목은 KIS API가 아닌 yfinance만 사용한다.
-    yfinance 15m interval 제한: 최대 60일. 15분 지연 데이터.
+
+def _normalize_kis_15min_to_advisory(rows: list[dict]) -> list[dict]:
+    """KIS 15분봉 응답 → advisory_fetcher 표준 OHLCV 형식.
+
+    표준 키: time/open/high/low/close/volume.
+    KIS 응답에는 datetime/time 둘 다 있으므로 time을 보존하면서 open/high/low/close 형식 통일.
     """
+    out = []
+    for r in rows:
+        try:
+            ts_str = r.get("time") or r.get("datetime")
+            close = float(r.get("close") or 0)
+            if not ts_str or close <= 0:
+                continue
+            out.append({
+                "time": ts_str,
+                "open": float(r.get("open") or close),
+                "high": float(r.get("high") or close),
+                "low": float(r.get("low") or close),
+                "close": close,
+                "volume": int(float(r.get("volume") or 0)),
+            })
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def fetch_15min_ohlcv_us(code: str) -> list[dict]:
+    """미국 15분봉 (60일치). 최근 300봉 반환.
+
+    REQ-INTEG-08: KIS 우선(HHDFS76950200) → 실패 시 yfinance fallback (15분 지연).
+    기술분석(MACD/RSI/Stochastic) 입력 호환: 정렬 과거→최신, 키 time/open/high/low/close/volume.
+    """
+    # ── KIS 우선 ───────────────────────────────────────────────────────────
     try:
-        from stock.yf_client import _ticker
+        kis_rows = get_kis_ohlcv_15min(code, days=60)
+    except Exception:
+        kis_rows = None
+
+    if kis_rows:
+        normalized = _normalize_kis_15min_to_advisory(kis_rows)
+        if normalized:
+            return normalized[-300:]
+
+    # ── yfinance fallback (기존 경로) ─────────────────────────────────────
+    try:
         t = _ticker(code.upper())
         hist = t.history(period="60d", interval="15m")
         if hist is None or hist.empty:

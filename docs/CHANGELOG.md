@@ -1,5 +1,133 @@
 # 변경 이력
 
+## 2026-05-09 — 해외매매화면 후속: KIS WS 호가 채널 실제 통합 + 미국 공휴일 휴장 + 실 키 통합 테스트
+
+### 배경
+이전 phase에서 해외매매화면(`/order`, `market='US'`)에 호가창/현재가상세/환율/거래시간이 도입됐으나 호가 채널은 KIS REST(`HHDFS76200100`) 2초 폴링이 1차 운영. WS 인터페이스(`KoreaInvestmentWS.subscribe_overseas_orderbook` HDFSASP0)와 메시지 파서(`wrapper.parse_overseas_orderbook`)만 마련된 상태로 실제 WS 채널은 미연결. `useUsMarketClock`도 주말 휴장만 판정. KIS HHDFS76200100/76200200 응답 필드명도 가이드 추정값으로 실 키 검증 미실시.
+
+### 사용자 결정 (3개)
+1. **WS 우선 + REST 폴백 동시 구현** — WS 정상 시 WS, 끊김 시 자동 REST 폴링 재시작
+2. **모의투자 미지원 정책 무관** — 사용자가 해외거래 모의투자 미사용
+3. **공휴일 10일 / 부분 휴장은 v3** — Black Friday 13:00 ET 조기마감 등 단축 거래일은 보류
+
+### 변경
+- **`services/quote_overseas.py`** (+220): `KISOverseasOrderbookWS` 신규 내부 클래스 — KIS WS HDFSASP0 단일 연결 + 다종목 토픽(`f"D{exchange3}{symbol}"`) + `wrapper.parse_overseas_orderbook` 재사용 + 지수 백오프 재연결(1→2→4→8→16→30s 캡, KIS rate limit 안전 마진) + WS 메시지 수신 시 해당 종목 REST 폴링 자동 중단/끊김 시 자동 재시작. KIS 키 부재 환경 graceful → REST 폴링.
+- **`frontend/src/hooks/useUsMarketClock.js`** (+90): `US_HOLIDAYS_ET` 2026~2028 30일 명단 + `isUsHoliday(dateString)` 헬퍼 + `resolveUsPhaseByClock` 휴장 분기 강화. 공휴일: New Year/MLK/Presidents/Good Friday/Memorial/Juneteenth/Independence/Labor/Thanksgiving/Christmas. 단축 거래일은 v3 주석으로 표시.
+- **`tests/integration/test_kis_overseas_live.py`** (신규, 3 케이스): `pytest.mark.live` + `KIS_LIVE_TEST` 환경변수 가드. HHDFS76200100/76200200/HDFSASP0 응답 필드명 확정용. CI 자동 SKIP, 사용자 로컬 실 키 환경에서 1회 실행.
+- **`pytest.ini`**: `live` 마커 등록.
+- **`_workspace/dev/05_live_test_runbook.md`** (신규): 사용자 실 키 검증 절차 + 응답 필드 보정 가이드 (`_normalize_orderbook_response` 키 매핑 한 줄 패치 위치 명시).
+
+### 신규 텔레메트리 (8종)
+`quote_overseas.kis_orderbook_ws.{start, stop, connect, disconnect, reconnect_attempt, topic_subscribe, topic_unsubscribe, message}`
+
+### 도메인 자문 (OrderAdvisor)
+- WS 재연결 백오프 1→30s 캡 — KIS 분당 connect 한도와 안전 마진 확보
+- 메시지 파서는 `wrapper.parse_overseas_orderbook` 재사용 — offset 가정은 실 키 통합 테스트로 검증, 런북에 보정 위치 명시
+
+### 회귀 가드
+- 가격 채널(Finnhub/yfinance/KIS price) 무영향 — 호가 채널만 신규
+- KIS WS 키 부재 환경 graceful → REST 폴링 자동 사용
+- 평일 거래시간 동작 무영향 — 휴장 분기만 강화
+- 통합 테스트 스크립트 CI skip — 회귀 0
+- broadcast shape 5키 100% 보존 → 프론트 useQuote 변경 0건
+- 도메인 알고리즘(safety_grade/macro_regime) 무영향
+- DB 변경 0건
+- 단위 **849 PASS / 0 FAIL** (baseline 838 + 신규 10 + 회귀 0)
+- 통합 3 SKIP (KIS_LIVE_TEST 미설정 의도)
+- frontend 빌드: vite v6.4.1 / 4.64s / 0 error
+
+---
+
+## 2026-05-08 — 해외매매화면 호가창 + 현재가 상세 + USD/KRW 환율 + 미국 거래시간
+
+### 배경
+이전 phase에서 미국 시세는 KIS로 전환됐지만 `/order` 페이지의 해외 매매화면(`market='US'`)은 `OrderbookPanel.jsx:230-234`에서 "해외주식 호가는 지원되지 않습니다" 안내만 표시. 국내(KR)는 10단계 호가창 + 호가 클릭→가격 자동입력 완성. KIS 미구현 API 4종(HHDFS76200100 호가/HHDFS76200200 상세/HDFSASP0 WS 호가/USDKRW 매수가능 환산)을 통합해 국내매매화면 수준으로 정보 밀도 향상.
+
+### 사용자 결정 (4개)
+1. **개선 범위**: 호가창 + 현재가 상세 + USD/KRW 환율 + 미국 거래시간(KST/ET) 4종
+2. **호가 데이터 소스**: WS(HDFSASP0) + REST(HHDFS76200100) 동시 구현 — WS 우선/끊김 시 REST 폴백
+3. **모의투자 정책**: 해외거래 미사용 → 정책 분기 생략
+4. **호가 단계**: 10단계 시도, 응답 부족 시 실제 받은 단계만 표시
+
+### 변경 (Backend 5 + Frontend 3 + 테스트 7)
+
+#### Backend
+- **`wrapper.py`** (+138): `fetch_oversea_asking_price(symbol, exchange)` 신규(HHDFS76200100, `/uapi/overseas-price/v1/quotations/inquire-asking-price`) + `fetch_oversea_price_detail(symbol, exchange)` 신규(HHDFS76200200, `/uapi/overseas-price/v1/quotations/price-detail`) + `KoreaInvestmentWS.subscribe/unsubscribe_overseas_orderbook(rsym)` 신규(HDFSASP0) + 모듈 함수 `parse_overseas_orderbook(t)` 신규(rsym 파싱 D/R + EXCD3 + SYMB, 빈 단계 동적 제외, `len(t) < 49` 안전 가드).
+- **`stock/kis_overseas_client.py`** (+150): `get_kis_orderbook(symbol)` — `{asks: up to 10, bids: up to 10, total_ask_volume, total_bid_volume, exchange}`. `get_kis_price_detail(symbol)` — `{open, high, low, prev_close, volume, high_52w, low_52w, exchange}`. `_normalize_orderbook_response(raw)` 헬퍼 — None/0/누락 키 안전 처리(graceful, 실 응답 필드명 보정 시 한 줄 매핑 패치). `_resolve_exchange` 재사용. ConfigError(KIS 키 부재) raise, 기타 외부 호출 실패 None.
+- **`services/quote_overseas.py`** (+45): `_orderbook_pollers: dict[symbol, Task]` + `_orderbook_poll_loop` 2초 주기 — `get_kis_orderbook` 호출 → broadcast `{type:"orderbook", asks, bids, total_*_volume}` 국내 호가와 100% 동일 shape. 종목 구독 시 폴링 시작/구독자 0 시 폴링 중단.
+- **`routers/quote.py`** (+50): `GET /api/quote/us/{symbol}/orderbook` 200/503/504 + `GET /api/quote/us/{symbol}/detail` 신규 — `Depends(get_current_user)` + `kis_overseas_client` 위임. `_stream_overseas` WS 분기는 dict 메시지 그대로 forward.
+- **`services/order_us.py`** (+50): `_fetch_usd_krw_rate()` 헬퍼 — `stock/macro_fetcher.fetch_currency_quotes` 재사용(USDKRW=X, 15분 캐시) lazy import. `get_overseas_buyable` 응답에 `usd_krw_rate`/`deposit_krw`/`buyable_amount_krw` 추가. 환율 조회 실패 시 USD만 정상 반환(graceful degrade).
+
+#### Frontend
+- **`OrderbookPanel.jsx`** (~30): `market !== 'US'` 가드 제거 → `showOrderbook` 항상 true. 동적 단계 표시(`displayAsks = asks.slice(0, asks.length || 10)`). USD `toFixed(2)` 포맷. 매도/매수 호가 클릭 → 기존 `onPriceSelect(price, side)`. KR/FNO 동작 0 변경(가드 제거만, 그리드 코드 100% 공유). useUsMarketClock 결합 헤더 거래시간 라벨.
+- **`useUsMarketClock.js`** (신규, +110): ET 시계 4구간(`pre`/`regular`/`after`/`closed`). DST 자동 — `Intl.DateTimeFormat('en-US', {timeZone:'America/New_York'})`. 1분 setInterval. 순수 함수 `resolveUsPhaseByClock(now)` export. 반환: `{phase, label, etTime, kstTime}`.
+- **`OrderForm.jsx`** (~20): US 매수가능 표시 `$X (₩X) · 환율 ₩1,XXX/USD`. 신규 필드 누락 시 USD만 표시(graceful).
+
+### 신규 테스트 (단위 39 + API 8 = 47 케이스)
+- `test_wrapper_overseas_orderbook.py` (7) / `test_wrapper_overseas_detail.py` (6) / `test_wrapper_overseas_orderbook_ws.py` (9, parse_overseas_orderbook + WS 토픽 dedupe) / `test_kis_overseas_orderbook.py` (10) / `test_quote_overseas_kis_orderbook.py` (3, _orderbook_poll_loop) / `test_order_us_buyable_krw.py` (4) / `test_quote_us_orderbook_detail.py` (8 API)
+
+### 신규 API
+- `GET /api/quote/us/{symbol}/orderbook` — 10단계 호가 REST 폴백
+- `GET /api/quote/us/{symbol}/detail` — 현재가 상세
+
+### 신규 WS 메시지 타입
+- `{type: "orderbook", symbol, asks, bids, total_ask_volume, total_bid_volume}` — 2초 주기 broadcast (국내와 동일 shape)
+
+### 회귀 가드
+- 국내(KR)/FNO 호가창 무영향 — 분기 가드 제거만, 그리드 코드 100% 공유
+- DB 변경 0건 (호가/상세는 실시간이라 영속 불필요)
+- 도메인 알고리즘 무영향
+- KIS_APP_KEY 미설정 환경 graceful — 빈 호가 + 안내
+- 단위 **838 PASS / 0 FAIL** (baseline 817 + 신규 39 + 회귀 0)
+- frontend 빌드: 857 modules / 5.27s / 0 error
+
+### 후속 (별도 phase)
+- KIS WS HDFSASP0 실제 통합 → 다음 phase에서 처리(2026-05-09)
+- 응답 필드명 실 키 보정 → `_normalize_orderbook_response` graceful, 통합 테스트 후 한 줄 패치
+- 미국 공휴일 휴장 → 다음 phase에서 처리(2026-05-09)
+
+---
+
+## 2026-05-08 — 미국주식 시세 KIS API 1차 대체 (현재가/일봉/15분봉)
+
+### 배경
+미국주식 시세를 yfinance에서 가져오고 있어 (1) 15분 지연, (2) 비공식 API 의존, (3) 간헐 차단 위험이 누적. KIS OpenAPI 정식 메서드로 대체 가능한 항목을 식별하여 1차 SoT를 KIS로 전환. KIS 미제공 항목(PER/PBR/52주/배당/재무/매크로 ETF)은 yfinance 유지.
+
+### 사용자 결정 (4개)
+1. **대체 범위**: 현재가(`HHDFS00000300`) + 일봉(`HHDFS76240000`) + 15분봉(`HHDFS76950200`) 3종
+2. **거래소 매핑**: `stock_info.exchange` 영속 캐시 + 미스 시 NAS→NYS→AMS 순회 후 영속
+3. **Fallback 정책**: KIS 우선 + 실패 시 yfinance 자동 fallback (서비스 무중단)
+4. **인증**: 사용자 키 우선 + 운영자 키 폴백 (`get_kis_credentials(user_id)` 재사용)
+
+### 변경 (Backend 6 + 테스트 6 + DB 1)
+
+#### Backend
+- **`wrapper.py`** (+75): `fetch_minute_bar_overesea(symbol, exchange, time_period, end_day)` 신규 — TR_ID `HHDFS76950200`. EXCD/SYMB/NMIN/PINC/NEXT/NREC/FILL/KEYB 페이로드. KEYB 페이지네이션 인자.
+- **`stock/kis_overseas_client.py`** (신규, +291): KIS 해외 시세 단일 게이트웨이. `get_kis_price`/`get_kis_ohlcv_daily`/`get_kis_ohlcv_15min` 3종. `_resolve_exchange(symbol)` — `stock_info.exchange` 캐시 우선 → 미스 시 NAS→NYS→AMS 순회 후 영속. `_get_kis_client(user_id)` — `get_kis_credentials(user_id)` 재사용. 외부 호출 실패 시 None(fallback hook), ConfigError(키 부재) raise.
+- **`services/quote_overseas.py`** (+45): `_fetch_quote_message(symbol)` — KIS 우선 + yfinance fallback. 텔레메트리 `quote_overseas.fallback_to_yf`. WS 메시지 shape 보존.
+- **`stock/yf_client.py`** (+108): `fetch_price_yf`/`fetch_detail_yf`/`fetch_period_returns_yf` 미국 종목에서 KIS 우선. `fetch_detail_yf`는 가격 필드만 KIS 덮어쓰기, PER/PBR/52주/배당/sector 등은 yfinance 유지(KIS 미제공). 함수 시그니처/반환 dict 키 100% 보존. 부수 해소: logger 정의 누락 잠재 NameError.
+- **`stock/advisory_fetcher.py`** (+50): `fetch_15min_ohlcv_us` KIS 우선 + yfinance fallback. `_normalize_kis_15min_to_advisory` — OHLCV 형식 통일, 정렬 과거→최신, max 300봉.
+- **`db/models/stock_info.py`** (+3): `exchange: String(8) NULL` 컬럼.
+- **`db/repositories/stock_info_repo.py`** (+27): `get_exchange(code, market="US")` / `set_exchange(code, market, exchange)`.
+- **alembic** `e4f5a6b7c8d9_add_exchange_to_stock_info.py` 신규: NULLABLE 무손실.
+
+### 신규 테스트 (단위 6 / 51 케이스)
+test_wrapper_overseas_minute (10) / test_stock_info_repo_exchange (7) / test_kis_overseas_client (15) / test_quote_overseas_kis_first (4) / test_yf_client_kis_first (10) / test_advisory_fetcher_kis_first (5)
+
+### 신규 텔레메트리
+- `kis_overseas.{resolve_exchange,get_kis_price,get_kis_ohlcv_daily,get_kis_ohlcv_15min}.{success,fail}`
+- `quote_overseas.fallback_to_yf`
+
+### 회귀 가드
+- 함수 시그니처/반환 dict 키 100% 보존(후방호환)
+- DB 무손실(NULLABLE 컬럼만)
+- 도메인 알고리즘(safety_grade/macro_regime) 무영향
+- 매크로 ETF/지수/원자재/환율 — yfinance 그대로(macro_fetcher 미터치)
+- yfinance fallback 100% 보존 — KIS 장애 시 서비스 무중단
+- 단위 **817 PASS / 0 FAIL** (baseline 766 + 신규 51 + 회귀 0)
+
+---
+
 ## 2026-05-08 — 매매화면 KRX+NXT 통합시세 + SOR 활용 + KIS API 신 TR_ID 일괄 전환
 
 ### 배경

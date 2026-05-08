@@ -1,7 +1,10 @@
 /**
  * 실시간 호가창 컴포넌트.
  * 국내(KR): KIS WS 기반 10호가 + 현재가
- * 해외(US): yfinance polling 현재가만 (호가 미지원)
+ * 해외(US): KIS REST 폴링 기반 10호가 + 현재가 (REQ-FE-08, 2026-05-09)
+ *           — Finnhub WS 또는 yfinance 2초 폴링 가격 채널과는 별도로
+ *             KIS HHDFS76200100 호가 채널이 백엔드(quote_overseas)에서 운영됨.
+ *           — 응답 단계가 부족하면 받은 단계만 동적 표시 (asks.length || 0).
  * 선물옵션(FNO): KIS WS 기반 5호가(지수) or 10호가(주식선물옵션) + 현재가
  *
  * Props:
@@ -12,6 +15,7 @@
 import { memo, useMemo } from 'react'
 import { useQuote } from '../../hooks/useQuote'
 import { useMarketClock } from '../../hooks/useMarketClock'
+import { useUsMarketClock } from '../../hooks/useUsMarketClock'
 
 function formatPrice(price, market) {
   if (price == null || price === 0) return '—'
@@ -36,10 +40,14 @@ function calcPct(volume, maxVolume) {
 function OrderbookPanel({ symbol, market = 'KR', onPriceSelect }) {
   const isFNO = market === 'FNO'
   const isDomestic = market === 'KR'
-  const showOrderbook = market !== 'US'  // KR/FNO 모두 호가창 표시
+  const isUs = market === 'US'
+  // REQ-FE-08: KR/US/FNO 모두 호가창 표시 (US는 KIS REST 폴링 채널)
+  const showOrderbook = true
 
   // KR 거래소 시계 — 4구간 자동 분기 (08~09 NXT / 09~15:30 UN / 15:30~15:40 KRX / 15:40~20:00 NXT)
   const clock = useMarketClock()
+  // REQ-FE-09: 미국 거래세션 시계 (프리/정규/애프터/휴장)
+  const usClock = useUsMarketClock()
   // KR 종목은 'auto'로 백엔드 시간대 분기 위임. FNO/US는 무시.
   const { price, change, changeRate, sign, asks, bids, totalAskVolume, totalBidVolume, connected } =
     useQuote(symbol, market, isDomestic ? 'auto' : undefined)
@@ -60,9 +68,12 @@ function OrderbookPanel({ symbol, market = 'KR', onPriceSelect }) {
   ) : null
 
   // asks[0]은 최우선(최저) 매도호가 → UI 상단은 높은가격 → reverse
+  // REQ-FE-08: US 응답이 10단계 미만이면 받은 단계만 동적 표시
   const { displayAsks, displayBids, maxVolume } = useMemo(() => {
-    const da = showOrderbook ? [...asks].reverse() : []
-    const db = showOrderbook ? bids : []
+    const safeAsks = Array.isArray(asks) ? asks : []
+    const safeBids = Array.isArray(bids) ? bids : []
+    const da = showOrderbook ? [...safeAsks].reverse() : []
+    const db = showOrderbook ? safeBids : []
     const allVolumes = [...da, ...db].map((r) => r.volume).filter(Boolean)
     const mv = allVolumes.length > 0 ? Math.max(...allVolumes) : 1
     return { displayAsks: da, displayBids: db, maxVolume: mv }
@@ -84,7 +95,7 @@ function OrderbookPanel({ symbol, market = 'KR', onPriceSelect }) {
       <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <span className="text-sm font-bold text-gray-800">{symbol}</span>
-          {(isDomestic || isFNO) && (
+          {(isDomestic || isFNO || isUs) && (
             <span className={`inline-flex items-center gap-1 text-xs ${connected ? 'text-green-500' : 'text-gray-400'}`}>
               <span className={`w-1.5 h-1.5 rounded-full ${connected ? 'bg-green-500' : 'bg-gray-300'}`} />
               {connected ? '실시간' : '연결 중...'}
@@ -113,8 +124,22 @@ function OrderbookPanel({ symbol, market = 'KR', onPriceSelect }) {
         {isFNO && (
           <span className="text-xs text-gray-400 bg-gray-50 px-2 py-0.5 rounded">선물옵션</span>
         )}
-        {!isDomestic && !isFNO && (
-          <span className="text-xs text-gray-400 bg-gray-50 px-2 py-0.5 rounded">15분 지연</span>
+        {/* REQ-FE-09: 미국 거래세션 라벨 (프리/정규/애프터/휴장) */}
+        {isUs && (
+          <span
+            className={`text-[10px] px-2 py-0.5 rounded font-medium ${
+              usClock.phase === 'regular'
+                ? 'bg-green-50 text-green-700'
+                : usClock.phase === 'pre'
+                  ? 'bg-amber-50 text-amber-700'
+                  : usClock.phase === 'after'
+                    ? 'bg-blue-50 text-blue-700'
+                    : 'bg-gray-100 text-gray-500'
+            }`}
+            title={`ET ${usClock.etTime} / KST ${usClock.kstTime}`}
+          >
+            {usClock.label}
+          </span>
         )}
       </div>
 
@@ -173,7 +198,7 @@ function OrderbookPanel({ symbol, market = 'KR', onPriceSelect }) {
           {/* 현재가 구분선 */}
           {price != null && (
             <div
-              onClick={() => onPriceSelect?.(isFNO ? price : Math.floor(price))}
+              onClick={() => onPriceSelect?.((isFNO || isUs) ? price : Math.floor(price))}
               className="grid grid-cols-3 text-center py-1.5 bg-gray-100 border-y border-gray-200 cursor-pointer hover:bg-gray-150"
             >
               <div />
@@ -222,17 +247,15 @@ function OrderbookPanel({ symbol, market = 'KR', onPriceSelect }) {
           {/* 호가 데이터 없을 때 안내 */}
           {displayAsks.length === 0 && displayBids.length === 0 && (
             <div className="py-8 text-center text-gray-400 text-xs">
-              {isFNO ? '선물옵션 호가 데이터 수신 중...' : '호가 데이터 수신 중...'}
+              {isFNO
+                ? '선물옵션 호가 데이터 수신 중...'
+                : isUs
+                  ? '해외 호가 데이터 수신 중... (KIS API)'
+                  : '호가 데이터 수신 중...'}
             </div>
           )}
         </div>
-      ) : (
-        /* 해외주식: 호가 미지원 안내 */
-        <div className="px-4 py-8 text-center">
-          <p className="text-sm text-gray-400">해외주식 호가는 지원되지 않습니다</p>
-          <p className="text-xs text-gray-300 mt-1">현재가만 2초 간격으로 업데이트됩니다</p>
-        </div>
-      )}
+      ) : null}
     </div>
   )
 }

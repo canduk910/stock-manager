@@ -19,7 +19,8 @@
 | `symbol_map.py` | 종목코드 ↔ 종목명 매핑 (pykrx 기반, fallback 포함). 서버 시작 시 background thread로 pre-warm. |
 | `market.py` | yfinance 기반 국내 시세/펀더멘털 수집. `_is_kr_trading_hours()` / `_is_us_trading_hours()` 장중판별 헬퍼 포함. TTL 장중/장외 자동 분리. |
 | `dart_fin.py` | OpenDart 재무데이터 수집 (IS + BS + CF) |
-| `yf_client.py` | yfinance 해외주식 데이터 수집 + 밸류에이션 히스토리 추정 |
+| `yf_client.py` | yfinance 해외주식 데이터 수집 + 밸류에이션 히스토리 추정. **(2026-05-08)** 미국 종목에서 `fetch_price_yf`/`fetch_detail_yf`/`fetch_period_returns_yf`가 `kis_overseas_client` 우선 호출 + yfinance fallback. 함수 시그니처 100% 보존. |
+| `kis_overseas_client.py` | **KIS 해외 시세 단일 게이트웨이** (신규 2026-05-08). `get_kis_price`/`get_kis_ohlcv_daily`/`get_kis_ohlcv_15min`/`get_kis_orderbook`/`get_kis_price_detail`. wrapper.py 직접 호출은 이 모듈에서만. `_resolve_exchange(symbol)` — `stock_info.exchange` 캐시 + NAS→NYS→AMS 순회 후 영속. `_get_kis_client(user_id)` — `routers/_kis_auth.get_kis_credentials(user_id)` 재사용(사용자 키 우선/운영자 키 폴백). 외부 호출 실패 시 None(fallback hook), ConfigError(키 부재) raise. |
 | `sec_filings.py` | SEC EDGAR 미국 공시 조회 |
 | `utils.py` | `is_domestic(code)` 국내/해외 구분. `is_fno(code)` FNO 단축코드 여부 판별. |
 | `display.py` | Rich 테이블 렌더링 + CSV 내보내기 |

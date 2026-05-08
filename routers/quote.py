@@ -1,13 +1,19 @@
 """
 실시간 호가 WebSocket 엔드포인트.
 국내(KR): KIS WS 브릿지 (100ms 메시지 병합), 해외(US): OverseasQuoteManager pub/sub.
+
+REQ-ROUTER-06: 미국 10단계 호가 + 현재가 상세 REST 엔드포인트 추가
+(WS 차단/초기 로딩용 폴백).
 """
 import asyncio
 import logging
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
+from fastapi.responses import JSONResponse
 
+from services.auth_deps import get_current_user
 from services.quote_service import get_manager, get_overseas_manager
+from stock.kis_overseas_client import get_kis_orderbook, get_kis_price_detail
 from stock.utils import is_domestic, is_fno
 
 router = APIRouter(tags=["quote"])
@@ -136,6 +142,48 @@ async def _stream_overseas(websocket: WebSocket, symbol: str):
                 await websocket.send_json({"type": "ping"})
     finally:
         manager.unsubscribe(symbol, queue)
+
+
+@router.get("/api/quote/us/{symbol}/orderbook")
+def get_us_orderbook(symbol: str, user: dict = Depends(get_current_user)):
+    """미국 주식 10단계 호가 REST 폴백 엔드포인트 (REQ-ROUTER-06).
+
+    WS 차단/초기 로딩용. 평시에는 ``/ws/quote/{symbol}`` 가 orderbook 메시지를
+    push하므로 사용 빈도 낮음.
+
+    Returns:
+        200: ``{asks, bids, total_ask_volume, total_bid_volume, exchange}``
+        503: KIS 키 부재(ConfigError)
+        504: KIS 응답 없음/타임아웃
+    """
+    user_id = user.get("id") if isinstance(user, dict) else None
+    ob = get_kis_orderbook(symbol.upper(), user_id=user_id)
+    if ob is None:
+        return JSONResponse(
+            status_code=504,
+            content={"detail": "KIS 해외 호가 응답 없음/타임아웃"},
+        )
+    return ob
+
+
+@router.get("/api/quote/us/{symbol}/detail")
+def get_us_price_detail(symbol: str, user: dict = Depends(get_current_user)):
+    """미국 주식 현재가 상세 REST 엔드포인트 (REQ-ROUTER-06).
+
+    Returns:
+        200: ``{open, high, low, last, prev_close, volume, high_52w, low_52w,
+                currency: "USD", exchange}``
+        503: KIS 키 부재
+        504: KIS 응답 없음
+    """
+    user_id = user.get("id") if isinstance(user, dict) else None
+    d = get_kis_price_detail(symbol.upper(), user_id=user_id)
+    if d is None:
+        return JSONResponse(
+            status_code=504,
+            content={"detail": "KIS 해외 현재가 상세 응답 없음/타임아웃"},
+        )
+    return d
 
 
 @router.websocket("/ws/execution-notice")

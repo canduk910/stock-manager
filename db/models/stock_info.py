@@ -10,6 +10,8 @@ class StockInfo(Base):
 
     code = Column(String, primary_key=True)
     market = Column(String, primary_key=True, default="KR")
+    # REQ-DB-02: 미국 거래소(NAS/NYS/AMS) 캐시. NULLABLE — 무손실 마이그레이션.
+    exchange = Column(String(8), nullable=True)
     price = Column(Float)
     change_val = Column(Float)
     change_pct = Column(Float)
@@ -44,6 +46,7 @@ class StockInfo(Base):
         return {
             "code": self.code,
             "market": self.market,
+            "exchange": self.exchange,
             "price": self.price,
             "change_val": self.change_val,
             "change_pct": self.change_pct,

@@ -88,8 +88,36 @@ def place_overseas_order(
     }
 
 
+def _fetch_usd_krw_rate() -> float | None:
+    """USDKRW=X 환율 조회. 실패 시 None.
+
+    REQ-ORDER-07: stock.macro_fetcher.fetch_currency_quotes 재사용 (15분 캐시).
+    lazy import로 순환 의존 회피. 호출자에서 broad except로 graceful degrade.
+    """
+    try:
+        from stock.macro_fetcher import fetch_currency_quotes  # lazy import
+        quotes = fetch_currency_quotes() or []
+        for q in quotes:
+            if q.get("symbol") == "USDKRW=X":
+                rate = q.get("price")
+                if rate is None:
+                    return None
+                try:
+                    return float(rate)
+                except (TypeError, ValueError):
+                    return None
+        return None
+    except Exception as e:
+        logger.debug("USDKRW 조회 실패 (graceful degrade): %s", e)
+        return None
+
+
 def get_overseas_buyable(token, app_key, app_secret, acnt_no, acnt_prdt_cd, symbol, price, order_type) -> dict:
-    """해외 매수가능 금액/수량 조회."""
+    """해외 매수가능 금액/수량 조회.
+
+    REQ-ORDER-07: 응답에 USDKRW 환율 + 원화 환산 필드(usd_krw_rate, deposit_krw,
+    buyable_amount_krw) 추가. 환율 조회 실패 시 KRW 필드는 None (USD 필드는 정상).
+    """
     url = f"{BASE_URL}/uapi/overseas-stock/v1/trading/inquire-psamount"
     headers = make_headers(token, app_key, app_secret, "TTTS3007R")
     params = {
@@ -105,11 +133,30 @@ def get_overseas_buyable(token, app_key, app_secret, acnt_no, acnt_prdt_cd, symb
         if data.get("rt_cd") != "0":
             raise ServiceError(f"해외 매수가능조회 오류: {data.get('msg1')}")
         out = data.get("output", {})
+        buyable_amount = out.get("frcr_ord_psbl_amt1", "0")
+        deposit = out.get("frcr_dncl_amt_2", "0")
+
+        # REQ-ORDER-07: 환율 + KRW 환산
+        rate = _fetch_usd_krw_rate()
+        if rate is not None:
+            try:
+                deposit_krw = float(deposit) * rate
+                buyable_amount_krw = float(buyable_amount) * rate
+            except (TypeError, ValueError):
+                deposit_krw = None
+                buyable_amount_krw = None
+        else:
+            deposit_krw = None
+            buyable_amount_krw = None
+
         return {
-            "buyable_amount": out.get("frcr_ord_psbl_amt1", "0"),
+            "buyable_amount": buyable_amount,
             "buyable_quantity": out.get("max_buy_qty", "0"),
-            "deposit": out.get("frcr_dncl_amt_2", "0"),
+            "deposit": deposit,
             "currency": "USD",
+            "usd_krw_rate": rate,
+            "deposit_krw": deposit_krw,
+            "buyable_amount_krw": buyable_amount_krw,
         }
     except ServiceError:
         raise

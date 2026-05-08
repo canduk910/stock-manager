@@ -332,6 +332,102 @@ class KoreaInvestmentWS(Process):
         if self.is_alive():
             self.kill()
 
+    # ── REQ-WRAPPER-03: 해외 호가 WS 구독/해지 ────────────────────────────────
+    def subscribe_overseas_orderbook(self, rsym: str) -> None:
+        """해외 실시간 호가(HDFSASP0) 토픽 등록.
+
+        Args:
+            rsym: 실시간 심볼키. 형식 ``D{exchange3}{symbol}`` (실시간 D, 지연 R).
+                  예) ``DNASAAPL`` (NAS의 AAPL 실시간).
+        """
+        if "HDFSASP0" not in self.tr_id_list:
+            self.tr_id_list.append("HDFSASP0")
+        if rsym not in self.tr_key_list:
+            self.tr_key_list.append(rsym)
+
+    def unsubscribe_overseas_orderbook(self, rsym: str) -> None:
+        """해외 실시간 호가(HDFSASP0) 토픽 해지.
+
+        등록되지 않은 키 해지 호출은 예외 없이 무시한다.
+        """
+        if rsym in self.tr_key_list:
+            self.tr_key_list.remove(rsym)
+
+
+# ── REQ-WRAPPER-03: 해외 호가 WS 메시지 파서 (모듈 레벨, services 공용) ─────────
+
+
+def parse_overseas_orderbook(raw: str) -> dict | None:
+    """KIS 해외 실시간 호가(HDFSASP0) 메시지 → 표준 dict.
+
+    KIS 가이드 추정 ``^`` 구분 페이로드:
+        [0]=rsym(D/R + EXCD3 + SYMB)
+        [1..6]=영업일/현지일/현지시간/한국일/한국시간 메타
+        [7..16]=매도호가1~10
+        [17..26]=매수호가1~10
+        [27..36]=매도잔량1~10
+        [37..46]=매수잔량1~10
+        [47]=총매도잔량
+        [48]=총매수잔량
+
+    응답 단계가 부족하면(빈 가격/잔량) 받은 단계만 반환.
+
+    Args:
+        raw: ``^`` 구분 raw 메시지.
+
+    Returns:
+        ``{"symbol", "exchange", "asks": [...], "bids": [...], "total_ask_volume",
+        "total_bid_volume"}`` 또는 ``None`` (필드 부족 시).
+    """
+    if not raw:
+        return None
+    t = raw.split("^")
+    if len(t) < 49:
+        return None
+
+    rsym = t[0] or ""
+    if len(rsym) < 4:
+        return None
+    # rsym = D/R + EXCD3 + SYMB
+    exchange = rsym[1:4]
+    symbol = rsym[4:]
+    if exchange not in ("NAS", "NYS", "AMS"):
+        # 도쿄/홍콩 등 v1 미지원 — None 반환
+        return None
+
+    def _f(s: str) -> float:
+        try:
+            return float(s)
+        except (TypeError, ValueError):
+            return 0.0
+
+    def _i(s: str) -> int:
+        try:
+            return int(float(s))
+        except (TypeError, ValueError):
+            return 0
+
+    asks: list[dict] = []
+    bids: list[dict] = []
+    for i in range(10):
+        p_ask = _f(t[7 + i])
+        v_ask = _i(t[27 + i])
+        if p_ask > 0:
+            asks.append({"price": p_ask, "volume": v_ask})
+        p_bid = _f(t[17 + i])
+        v_bid = _i(t[37 + i])
+        if p_bid > 0:
+            bids.append({"price": p_bid, "volume": v_bid})
+
+    return {
+        "symbol": symbol,
+        "exchange": exchange,
+        "asks": asks,
+        "bids": bids,
+        "total_ask_volume": _i(t[47]),
+        "total_bid_volume": _i(t[48]),
+    }
+
 
 class KoreaInvestment:
     '''
@@ -1465,6 +1561,172 @@ class KoreaInvestment:
         }
         resp = requests.get(url, headers=headers, params=params)
         return resp.json()
+
+    def fetch_minute_bar_overesea(self, symbol: str, exchange: str,
+                                  time_period: str = "60",
+                                  end_day: str = "",
+                                  end_time: str = "",
+                                  *,
+                                  keyb: str = "",
+                                  next_flag: str = "",
+                                  pinc: str = "1",
+                                  nrec: str = "120",
+                                  fill: str = "") -> dict:
+        """해외주식 분봉 (HHDFS76950200).
+
+        REQ-WRAPPER-01: 미국주식 분봉(15분/60분 단위) 조회.
+        거래소 코드는 인자로 명시(자동 resolve는 상위 레이어 책임).
+
+        Args:
+            symbol (str): 종목 코드 (예: "AAPL")
+            exchange (str): 거래소 코드 (NAS/NYS/AMS — 인자 그대로 EXCD에 사용)
+            time_period (str): 분봉 단위 ("15"/"60" 등). 기본 60.
+            end_day (str): 조회 종료일 YYYYMMDD. 기본 ""(최신).
+            end_time (str): 조회 종료시각 HHMMSS. 기본 ""(최신).
+            keyb (str): 연속조회 키 (페이지네이션). 기본 ""(첫 페이지).
+            next_flag (str): NEXT 플래그 (KIS 컨벤션 ""=초기 / "N"=재요청).
+            pinc (str): PINC (포함여부). 기본 "1".
+            nrec (str): NREC (요청 건수). 기본 "120".
+            fill (str): FILL (결측 채우기). 기본 ""(미사용).
+
+        Returns:
+            dict: KIS 원시 응답({"output1": {...메타}, "output2": [...분봉 배열]}).
+
+        Raises:
+            ExternalAPIError: rt_cd != "0" 인 경우.
+        """
+        # 지연 import (서비스 레이어 예외 계층)
+        from services.exceptions import ExternalAPIError as _ExternalAPIError
+
+        path = "/uapi/overseas-price/v1/quotations/inquire-time-itemchartprice"
+        url = f"{self.base_url}{path}"
+
+        headers = {
+            "content-type": "application/json",
+            "authorization": self.access_token,
+            "appKey": self.api_key,
+            "appSecret": self.api_secret,
+            "tr_id": "HHDFS76950200"
+        }
+
+        params = {
+            "AUTH": "",
+            "EXCD": exchange,
+            "SYMB": symbol,
+            "NMIN": time_period,
+            "PINC": pinc,
+            "NEXT": next_flag,
+            "NREC": nrec,
+            "FILL": fill,
+            "KEYB": keyb,
+        }
+        # end_day/end_time 은 KIS가 지원하면 추가, 미지원 환경 호환을 위해 옵션 (요건서 시그니처 보존)
+        if end_day:
+            params["EDAY"] = end_day
+        if end_time:
+            params["ETIM"] = end_time
+
+        resp = requests.get(url, headers=headers, params=params)
+        try:
+            data = resp.json()
+        except ValueError as e:
+            raise _ExternalAPIError(f"KIS 분봉 응답 파싱 실패: {e}")
+
+        if data.get("rt_cd") != "0":
+            raise _ExternalAPIError(
+                f"KIS 분봉 조회 실패 (rt_cd={data.get('rt_cd')} msg={data.get('msg1', '')})"
+            )
+        return data
+
+    def fetch_oversea_asking_price(self, symbol: str, exchange: str) -> dict:
+        """해외주식 10단계 호가 조회 (HHDFS76200100, 실전 한정).
+
+        REQ-WRAPPER-01. 거래소 코드는 인자로 명시(NAS/NYS/AMS).
+
+        Args:
+            symbol (str): 종목 코드 (예: "AAPL").
+            exchange (str): 거래소 코드 (NAS/NYS/AMS — EXCD에 직접 사용).
+
+        Returns:
+            dict: KIS 원시 응답 ({"output1": {...메타}, "output2": {...10단계 호가}}).
+
+        Raises:
+            ExternalAPIError: rt_cd != "0" 또는 JSON 파싱 실패 시.
+        """
+        from services.exceptions import ExternalAPIError as _ExternalAPIError
+
+        path = "/uapi/overseas-price/v1/quotations/inquire-asking-price"
+        url = f"{self.base_url}{path}"
+
+        headers = {
+            "content-type": "application/json",
+            "authorization": self.access_token,
+            "appKey": self.api_key,
+            "appSecret": self.api_secret,
+            "tr_id": "HHDFS76200100",
+        }
+        params = {
+            "AUTH": "",
+            "EXCD": exchange,
+            "SYMB": symbol,
+        }
+
+        resp = requests.get(url, headers=headers, params=params)
+        try:
+            data = resp.json()
+        except ValueError as e:
+            raise _ExternalAPIError(f"KIS 해외 호가 응답 파싱 실패: {e}")
+
+        if data.get("rt_cd") != "0":
+            raise _ExternalAPIError(
+                f"KIS 해외 호가 조회 실패 (rt_cd={data.get('rt_cd')} msg={data.get('msg1', '')})"
+            )
+        return data
+
+    def fetch_oversea_price_detail(self, symbol: str, exchange: str) -> dict:
+        """해외주식 현재가 상세 조회 (HHDFS76200200).
+
+        REQ-WRAPPER-02. 시/고/저/거래량/52주 고저/전일종가 등 상세 시세.
+
+        Args:
+            symbol (str): 종목 코드.
+            exchange (str): 거래소 코드 (NAS/NYS/AMS — EXCD에 직접 사용).
+
+        Returns:
+            dict: KIS 원시 응답 (output에 가격 상세 필드 포함).
+
+        Raises:
+            ExternalAPIError: rt_cd != "0" 또는 JSON 파싱 실패 시.
+        """
+        from services.exceptions import ExternalAPIError as _ExternalAPIError
+
+        path = "/uapi/overseas-price/v1/quotations/price-detail"
+        url = f"{self.base_url}{path}"
+
+        headers = {
+            "content-type": "application/json",
+            "authorization": self.access_token,
+            "appKey": self.api_key,
+            "appSecret": self.api_secret,
+            "tr_id": "HHDFS76200200",
+        }
+        params = {
+            "AUTH": "",
+            "EXCD": exchange,
+            "SYMB": symbol,
+        }
+
+        resp = requests.get(url, headers=headers, params=params)
+        try:
+            data = resp.json()
+        except ValueError as e:
+            raise _ExternalAPIError(f"KIS 해외 현재가상세 응답 파싱 실패: {e}")
+
+        if data.get("rt_cd") != "0":
+            raise _ExternalAPIError(
+                f"KIS 해외 현재가상세 조회 실패 (rt_cd={data.get('rt_cd')} msg={data.get('msg1', '')})"
+            )
+        return data
 
     def fetch_ohlcv_overesea(self, symbol: str, timeframe:str='D',
                              end_day:str="", adj_price:bool=True):

@@ -181,6 +181,33 @@ class StockInfoRepository:
         except Exception as e:
             logger.warning("stock_info upsert_financials error: %s", e)
 
+    # ── REQ-REPO-03: 거래소 캐시 헬퍼 (미국 NAS/NYS/AMS 영속) ───────────────
+    def get_exchange(self, code: str, market: str = "US") -> Optional[str]:
+        """미국 거래소 코드 캐시 조회.
+
+        종목이 없거나 exchange가 NULL이면 None.
+        """
+        row = (
+            self.db.query(StockInfo)
+            .filter_by(code=code, market=market)
+            .first()
+        )
+        if not row:
+            return None
+        return row.exchange or None
+
+    def set_exchange(self, code: str, market: str, exchange: str) -> None:
+        """거래소 코드 영속.
+
+        - 종목이 없으면 INSERT (code/market/exchange 최소 필드).
+        - 종목이 있으면 UPDATE만 (다른 필드 보존).
+        """
+        try:
+            row = self._ensure_row(code, market)
+            row.exchange = exchange
+        except Exception as e:
+            logger.warning("stock_info set_exchange error (%s/%s): %s", code, market, e)
+
     def upsert_returns(self, code: str, market: str, data: dict) -> None:
         try:
             row = self._ensure_row(code, market)

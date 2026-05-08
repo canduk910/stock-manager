@@ -343,8 +343,23 @@ export default function OrderForm({
           </div>
           {buyable && (
             <div className="text-xs text-gray-700 space-y-0.5">
-              <div>가능금액: <span className="font-medium">{Number(buyable.buyable_amount).toLocaleString()} {buyable.currency}</span></div>
-              <div>가능수량: <span className="font-medium">{Number(buyable.buyable_quantity).toLocaleString()}주</span></div>
+              {/* REQ-FE-10: US 시장은 USD + KRW + 환율 동시 표시
+                  환율 조회 실패(buyable_amount_krw == null) 시 USD만 표시 (graceful degrade) */}
+              {market === 'US' && buyable.buyable_amount_krw != null && buyable.usd_krw_rate != null ? (
+                <>
+                  <div>
+                    가능금액: <span className="font-medium">${Number(buyable.buyable_amount).toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
+                    <span className="text-gray-500 ml-1">(₩{Math.floor(Number(buyable.buyable_amount_krw)).toLocaleString()})</span>
+                  </div>
+                  <div>가능수량: <span className="font-medium">{Number(buyable.buyable_quantity).toLocaleString()}주</span></div>
+                  <div className="text-gray-500">환율: <span className="font-medium">₩{Math.floor(Number(buyable.usd_krw_rate)).toLocaleString()}/USD</span></div>
+                </>
+              ) : (
+                <>
+                  <div>가능금액: <span className="font-medium">{Number(buyable.buyable_amount).toLocaleString()} {buyable.currency}</span></div>
+                  <div>가능수량: <span className="font-medium">{Number(buyable.buyable_quantity).toLocaleString()}주</span></div>
+                </>
+              )}
             </div>
           )}
         </div>
