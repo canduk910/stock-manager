@@ -354,6 +354,52 @@ class KISQuoteManager:
             except Exception as e:
                 logger.debug("[QuoteService] unsubscribe 전송 실패 %s/%s: %s", symbol, tr_id, e)
 
+    async def _clock_resync_loop(self):
+        """1분 주기 시간대 경계 reconcile (KRX+NXT 통합시세, 2026-05-08).
+
+        'auto' 선호로 구독된 KR 종목의 시계 기반 거래소가 바뀌면
+        기존 TR_ID 구독을 해제하고 신 거래소 TR_ID로 재구독한다.
+        실제 갱신은 08:00/09:00/15:30/15:40/20:00 경계에서만 발생.
+        """
+        while self._running:
+            try:
+                await asyncio.sleep(60)
+            except asyncio.CancelledError:
+                raise
+            try:
+                if not self._ws:
+                    continue
+                for symbol in list(self._kr_exchange_pref.keys()):
+                    if self._kr_exchange_pref.get(symbol, "auto") != "auto":
+                        continue
+                    if symbol in self._fno_symbols:
+                        continue
+                    desired = self._resolve_kr_exchange(symbol)
+                    current = self._kr_active_exchange.get(symbol)
+                    if not current or desired == current:
+                        continue
+                    logger.info(
+                        "[QuoteService] 시간대 경계 reconcile: %s %s → %s",
+                        symbol, current, desired,
+                    )
+                    try:
+                        await self._send_unsubscribe(symbol, current)
+                    except Exception as e:
+                        logger.debug("[QuoteService] 해제 실패 %s/%s: %s", symbol, current, e)
+                    self._subscribed_symbols.discard(symbol)
+                    self._kr_active_exchange.pop(symbol, None)
+                    try:
+                        await self._send_subscribe(symbol)
+                    except Exception as e:
+                        logger.warning(
+                            "[QuoteService] reconcile 재구독 실패 %s → %s: %s",
+                            symbol, desired, e,
+                        )
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                logger.error("[QuoteService] clock_resync 오류: %s", e)
+
     async def _send_subscribe_fno(self, symbol: str):
         fno_type = _resolve_fno_type(symbol)
         self._fno_types[symbol] = fno_type
