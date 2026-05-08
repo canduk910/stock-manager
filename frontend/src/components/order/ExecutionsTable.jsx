@@ -1,6 +1,8 @@
 /**
  * 당일 체결 내역 테이블.
  */
+import ExchangeBadge from './ExchangeBadge'
+
 function SideBadge({ side }) {
   const isBuy = side === 'buy'
   return (
@@ -22,7 +24,7 @@ export default function ExecutionsTable({ executions }) {
       <table className="min-w-full text-sm">
         <thead>
           <tr className="border-b border-gray-200 bg-gray-50">
-            {['시장', '종목', '매매', '유형', '체결가', '주문수량', '체결수량', '체결금액', '주문번호'].map((h) => (
+            {['시장', '거래소', '종목', '매매', '유형', '체결가', '주문수량', '체결수량', '체결금액', '주문번호'].map((h) => (
               <th key={h} className="px-3 py-2 text-left text-xs font-semibold text-gray-600 whitespace-nowrap">
                 {h}
               </th>
@@ -33,6 +35,11 @@ export default function ExecutionsTable({ executions }) {
           {executions.map((exec, i) => (
             <tr key={`${exec.order_no}-${i}`} className="hover:bg-gray-50">
               <td className="px-3 py-2 text-xs text-gray-500">{exec.market}</td>
+              <td className="px-3 py-2">
+                {exec.market === 'KR' && (
+                  <ExchangeBadge exchange={exec.exchange || exec.excg_id_dvsn_cd} size="xs" />
+                )}
+              </td>
               <td className="px-3 py-2">
                 <div className="font-medium text-gray-900">{exec.symbol_name || exec.symbol}</div>
                 <div className="text-xs text-gray-400">{exec.symbol}</div>

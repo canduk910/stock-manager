@@ -46,8 +46,9 @@ frontend/
       useOrder.js         useOrderPlace / useBuyable(load(symbol,market,price,orderType,side)) / useOpenOrders / useExecutions / useOrderHistory / useOrderSync / useReservations
       useNotification.js  토스트 상태 관리 + 브라우저 Notification API 래퍼
       useWebSocket.js     공용 WebSocket 훅. 연결 수명주기 + 지수 백오프 재연결(500ms→10초) + visibilitychange. { connected, sendMessage }. buildWsUrl(path) 헬퍼 export. **(2026-05-08 stale-token fix)** url 인자에 함수형 추가 — `connect()` 안에서 `typeof url === 'function' ? url() : url` lazy 평가. 1008 close 후 백오프 재시도 시점에 자동으로 신선한 access_token 반영(stale-token 무한 백오프 방지). 호출자는 함수 인스턴스를 모듈 const 또는 useCallback로 안정화 필수.
-      useQuote.js         실시간 호가 WebSocket 훅 (useWebSocket 기반). useQuote(symbol, market='KR'). rAF throttle 자체 관리.
-      useExecutionNotice.js  체결통보(H0STCNI0) WS 수신 훅 (useWebSocket 기반). /ws/execution-notice 연결. execution_notice 메시지 콜백.
+      useQuote.js         실시간 호가 WebSocket 훅 (useWebSocket 기반). **(2026-05-08 KRX+NXT+SOR)** `useQuote(symbol, market='KR', exchange='auto')` 3번째 파라미터 추가. `buildUrl`에 `&exchange=auto\|UN\|KRX\|NXT` 쿼리 자동 부착. 'auto' 기본 — 백엔드 KISQuoteManager 가 KST 시계 기반 4구간 자동 분기(08~09 NXT / 09~15:30 UN / 15:30~15:40 KRX / 15:40~20:00 NXT). rAF throttle 자체 관리.
+      useExecutionNotice.js  체결통보(H0STCNI0) WS 수신 훅 (useWebSocket 기반). /ws/execution-notice 연결. execution_notice 메시지 콜백. **(2026-05-08)** `mapOrdExgGb(code)` 헬퍼 + 응답에 `exchange` 필드 추가(1=KRX/2=NXT/3=SOR-KRX/4=SOR-NXT, 누락 시 KRX 폴백). 토스트 메시지 거래소 prefix 표기에 사용.
+      useMarketClock.js   **(신규 2026-05-08)** KST 시계 기반 KR 거래소 4구간 자동 판정 훅. `resolvePhaseByClock(now)` 순수 함수 export(테스트용). 1분 setInterval 폴링 + `/ws/market-status` 메시지 도착 시 override(정밀 trigger). 반환: `{exchange:'UN'\|'KRX'\|'NXT', label, isHoliday, isClosed, phase}`. 휴장 1차=주말, 2차=공휴일(v2), 3차=WS market-status. OrderbookPanel 헤더 거래소 라벨에 사용.
       useMarketBoard.js   useMarketBoard (신고가/신저가 + sparkline + ohlc) + useDisplayStocks (관심종목+별도등록 종목 병합+순서+reorder)
       useAdvisory.js      useAdvisoryStocks / useAdvisoryData / useAdvisoryReport / useAdvisoryOhlcv
       useMacro.js         useMacroIndices / useMacroNews / useMacroSentiment / useMacroInvestorQuotes (섹션별 독립 훅)
@@ -74,7 +75,8 @@ frontend/
                           klineTheme.js (한국식 색상 테마: 상승=빨강, 하락=파랑)
       order/              OrderForm, OrderConfirmModal, OpenOrdersTable, ModifyOrderModal,
                           ExecutionsTable, OrderHistoryTable, ReservationForm, ReservationsTable, SyncButton,
-                          OrderbookPanel (실시간 호가창)
+                          OrderbookPanel (실시간 호가창),
+                          **ExchangeBadge** (신규 2026-05-08): 거래소 5종 배지(■KRX/◆NXT/⚡SOR/⚡SOR→KRX/⚡SOR→NXT) + size('xs'/'sm'). OpenOrdersTable·ExecutionsTable 거래소 컬럼 + 향후 OrderHistoryTable에서 공용. NULL/legacy 값은 KRX 폴백.
       advisory/           FundamentalPanel, TechnicalPanel, AIReportPanel (v3 통합: 6대비판분석+전략+시나리오. **(2026-05-07)** UserCommentInput 액션바 위 + UserCommentaryCard 본문 최상단 마운트), ResearchDataPanel (**입력데이터 통합 미리보기 16항목**: 기본/리서치 구분 제거. 사업개요/손익·BS·CF·분기/계량지표(PER·PBR·ROE·ROA·EPS·배당수익률·주당배당금·시총)/PER·PBR 5Y/10년 밴드/포워드추정/**증권사 컨센서스(목표가 중앙값·평균·dispersion·upside·매수보유매도 분포·5단계 모멘텀·과열 경고·6개월 추이·최근 5건 PDF 링크)**/기술시그널/KIS 퀀트/경영진/자본행위/업황/거시지표+**52주 위치(고가·저가·위치%·고점대비%)**. **(2026-05-07 버그수정)** `renderSegments` 키 mismatch 수정 — 백엔드 `{segment, revenue_pct, note}` ↔ 프론트 `s.name`/`s.ratio` 불일치로 `s.name||s` 폴백이 객체 자체를 React child로 넘겨 "Objects are not valid as a React child" 크래시 발생하던 버그 해소. `s.segment||s.name||s.product`+`s.revenue_pct ?? s.ratio ?? s.percentage ?? s.pct` 순으로 키 매핑, `s.note`는 작은 회색 라벨로 표시. keywords 배열 항목이 객체일 경우도 안전 처리. `hasData` 조건에 keywords-only 케이스 추가. **`MiniStat`/`Tr` 공용 안전망**: `_safeText()` 헬퍼로 객체 value를 `JSON.stringify`로 변환 → 향후 어떤 카테고리 응답이 객체로 오더라도 페이지 크래시 없이 폴백 표시.),
                           **UserCommentaryCard** (신규 2026-05-07) — 사용자 가설 양면 평가 카드. `evaluation` prop(user_comment/overall_stance/agree_points/disagree_points/summary). 헤더: 코멘트 원문 인용 + stance 5단계 배지(strong_agree=green/agree=lime/balanced=gray/disagree=amber/strong_disagree=red). 좌(👍 녹색)/우(👎 빨강) 2컬럼 + 항목별 strength 1~10 게이지 막대 + 하단 summary. 모바일 1컬럼 스택. evaluation null 시 미렌더,
                           AnalystReportsModal (증권사별 목표가+리포트 팝업, KR=네이버리서치/US=yfinance등급이력)
@@ -171,9 +173,9 @@ frontend/
 ### 주문 컴포넌트
 
 - **SymbolSearchBar**: 시장 드롭다운(KR/US/FNO). `markets` prop으로 표시할 시장 필터링 가능 (기본: 전체). KR·FNO=자동완성, US=티커 직접 입력 검증. `marketRef`로 async race condition 방지
-- **OrderbookPanel**: `useQuote(symbol, market)` 훅 사용 (REST 폴링 없음). KR/FNO=동일 호가창 그리드. US=현재가만. 매도호가 클릭→`side='sell'`, 매수호가 클릭→`side='buy'`
-- **OrderForm**: `symbol`/`symbolName`/`market` props 외부 제어. `externalPrice`/`externalSide` prop. FNO: 지정가/시장가/조건부지정가/최유리지정가 + IOC/FOK
-- **OpenOrdersTable**: `excg_id_dvsn_cd === 'SOR'`(HTS/MTS 주문)은 "앱취소필요" 안내
+- **OrderbookPanel**: `useQuote(symbol, market, 'auto')` 훅 사용 (REST 폴링 없음). KR/FNO=동일 호가창 그리드. US=현재가만. 매도호가 클릭→`side='sell'`, 매수호가 클릭→`side='buy'`. **(2026-05-08)** KR 종목은 `useMarketClock()` 결합 헤더 거래소 라벨(🟦 통합 09:00~15:30 / 🟢 NXT 08~09 또는 15:40~20 / 🟧 KRX 15:30~15:40 / 휴장).
+- **OrderForm**: `symbol`/`symbolName`/`market` props 외부 제어. `externalPrice`/`externalSide` prop. FNO: 지정가/시장가/조건부지정가/최유리지정가 + IOC/FOK. **(2026-05-08 KRX+NXT+SOR)** `KR_EXCHANGE_OPTIONS = [SOR(추천)/KRX/NXT]` 거래소 셀렉터(market==='KR'만 노출). `isSimulation` prop 시 SOR/NXT 비활성+안내. 선택값은 `body.exchange`로 forward. 통합(UN)은 시세 전용 코드라 셀렉터 미노출.
+- **OpenOrdersTable** + **ExecutionsTable**: `excg_id_dvsn_cd === 'SOR'`(HTS/MTS 주문)은 "앱취소필요" 안내. **(2026-05-08)** "거래소" 컬럼 추가 + `ExchangeBadge` 사용(orders.exchange 또는 excg_id_dvsn_cd, NULL→KRX 폴백). KR 행에서만 렌더, US/FNO 행은 빈 셀.
 
 ### Advisory 컴포넌트
 

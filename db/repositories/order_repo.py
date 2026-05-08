@@ -34,6 +34,7 @@ class OrderRepository:
         kis_response: str = None,
         status: str = "PLACED",
         user_id: Optional[int] = None,
+        exchange: Optional[str] = None,
     ) -> dict:
         now = _now()
         order = Order(
@@ -53,6 +54,7 @@ class OrderRepository:
             placed_at=now,
             updated_at=now,
             kis_response=kis_response,
+            exchange=exchange,
         )
         self.db.add(order)
         self.db.flush()
@@ -68,6 +70,7 @@ class OrderRepository:
         order_no: str = None,
         org_no: str = None,
         kis_response: str = None,
+        exchange: Optional[str] = None,
     ) -> Optional[dict]:
         order = self.db.query(Order).filter_by(id=order_id).first()
         if not order:
@@ -86,6 +89,9 @@ class OrderRepository:
             order.org_no = org_no
         if kis_response is not None:
             order.kis_response = kis_response
+        # KRX+NXT 통합시세 (2026-05-08): SOR 라우팅 결과(SOR-KRX/SOR-NXT)로 정밀 거래소 덮어쓰기.
+        if exchange is not None:
+            order.exchange = exchange
         if status == "FILLED":
             order.filled_at = _now()
 

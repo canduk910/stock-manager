@@ -38,6 +38,7 @@ def insert_order(
     org_no: str = None,
     kis_response: str = None,
     status: str = "PLACED",
+    exchange: Optional[str] = None,
 ) -> dict:
     with get_session() as db:
         return OrderRepository(db).insert_order(
@@ -55,6 +56,7 @@ def insert_order(
             kis_response=kis_response,
             status=status,
             user_id=_ctx_user_id(),
+            exchange=exchange,
         )
 
 
@@ -67,6 +69,7 @@ def update_order_status(
     order_no: str = None,
     org_no: str = None,
     kis_response: str = None,
+    exchange: Optional[str] = None,
 ) -> Optional[dict]:
     with get_session() as db:
         return OrderRepository(db).update_order_status(
@@ -77,6 +80,7 @@ def update_order_status(
             order_no=order_no,
             org_no=org_no,
             kis_response=kis_response,
+            exchange=exchange,
         )
 
 

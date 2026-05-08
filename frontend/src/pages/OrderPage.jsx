@@ -141,14 +141,23 @@ export default function OrderPage({ notify }) {
   }, [activeTab, market, loadOpen, loadExec])
 
   // 체결통보 실시간 수신
+  // notice.exchange 는 useExecutionNotice 가 ord_exg_gb 를 매핑한 라벨(KRX/NXT/SOR-KRX/SOR-NXT).
+  // 토스트에 거래소 아이콘을 prefix 로 표시 — SOR 라우팅 결과를 사용자가 즉시 인지할 수 있도록.
   useExecutionNotice(useCallback((notice) => {
     const sideLabel = notice.side === 'buy' ? '매수' : '매도'
+    const exg = notice.exchange || 'KRX'
+    const exgPrefix =
+      exg === 'KRX' ? '■KRX'
+      : exg === 'NXT' ? '◆NXT'
+      : exg.startsWith('SOR') ? `⚡${exg}`
+      : exg
+    const name = notice.symbol_name || notice.symbol
     if (notice.is_filled === '2') {
-      notify?.(`체결: ${notice.symbol_name || notice.symbol} ${sideLabel} ${notice.filled_qty}주 @ ${Number(notice.filled_price).toLocaleString()}원`, 'success')
+      notify?.(`[${exgPrefix}] 체결: ${name} ${sideLabel} ${notice.filled_qty}주 @ ${Number(notice.filled_price).toLocaleString()}원`, 'success')
     } else if (notice.is_rejected === '1') {
-      notify?.(`거부: ${notice.symbol_name || notice.symbol} ${sideLabel}`, 'error')
+      notify?.(`[${exgPrefix}] 거부: ${name} ${sideLabel}`, 'error')
     } else if (notice.is_accepted === '1') {
-      notify?.(`접수: ${notice.symbol_name || notice.symbol} ${sideLabel} ${notice.order_qty}주`, 'info')
+      notify?.(`[${exgPrefix}] 접수: ${name} ${sideLabel} ${notice.order_qty}주`, 'info')
     }
     // 체결/미체결 자동 갱신
     loadOpen(market)

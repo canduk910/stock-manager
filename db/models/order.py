@@ -28,6 +28,10 @@ class Order(Base):
     filled_at = Column(String)
     updated_at = Column(String, nullable=False)
     kis_response = Column(Text)
+    # KRX+NXT 통합시세 + SOR (2026-05-08): 거래소 코드.
+    # 신규 주문은 SOR/KRX/NXT 중 1, KIS 응답에 따라 SOR-KRX/SOR-NXT로 정밀 갱신.
+    # 기존 행은 NULL → to_dict에서 'KRX'로 폴백.
+    exchange = Column(String(16), nullable=True)
 
     __table_args__ = (
         Index("idx_orders_status", "status"),
@@ -57,6 +61,7 @@ class Order(Base):
             "filled_at": self.filled_at,
             "updated_at": self.updated_at,
             "kis_response": self.kis_response,
+            "exchange": self.exchange or "KRX",
         }
 
 

@@ -7,7 +7,7 @@ KIS API 키 미설정 시 503 반환.
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
-from typing import Optional
+from typing import Literal, Optional
 
 from services.auth_deps import require_admin
 from services import order_service
@@ -31,6 +31,9 @@ class PlaceOrderBody(BaseModel):
     nmpr_type_cd: str = ""      # 호가유형코드 (FNO)
     krx_nmpr_cndt_cd: str = ""  # KRX 호가조건코드 (FNO)
     ord_dvsn_cd: str = ""       # 주문구분코드 (FNO)
+    # KR 거래소 셀렉터 (2026-05-08)
+    # 통합(UN)은 시세 전용 코드 → 주문값으로는 사용 불가. 모의투자에서는 KRX만 허용.
+    exchange: Literal["SOR", "KRX", "NXT"] = "SOR"
 
 
 class ModifyOrderBody(BaseModel):
@@ -92,6 +95,7 @@ def place_order(body: PlaceOrderBody, _user: dict = Depends(require_admin)):
         nmpr_type_cd=body.nmpr_type_cd,
         krx_nmpr_cndt_cd=body.krx_nmpr_cndt_cd,
         ord_dvsn_cd=body.ord_dvsn_cd,
+        exchange=body.exchange,
     )
     return {"order": order, "balance_stale": True}
 

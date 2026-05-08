@@ -15,7 +15,14 @@ logger = logging.getLogger(__name__)
 
 
 @router.websocket("/ws/quote/{symbol}")
-async def quote_ws(websocket: WebSocket, symbol: str, market: str = ""):
+async def quote_ws(websocket: WebSocket, symbol: str, market: str = "", exchange: str = "auto"):
+    """실시간 호가/체결 WebSocket.
+
+    Query params:
+        token: JWT (인증)
+        market: "" / "FNO" — 시장 분기
+        exchange: KR 거래소 — "auto"(기본, 시계 기반 4구간) / "UN" / "KRX" / "NXT"
+    """
     token = websocket.query_params.get("token")
     if not token:
         await websocket.close(code=1008)
@@ -28,11 +35,12 @@ async def quote_ws(websocket: WebSocket, symbol: str, market: str = ""):
         return
     await websocket.accept()
     symbol = symbol.upper()
+    exchange = (exchange or "auto").upper() if exchange.lower() != "auto" else "auto"
     try:
         if market == "FNO" or (not market and is_fno(symbol)):
             await _stream_fno(websocket, symbol)
         elif is_domestic(symbol):
-            await _stream_domestic(websocket, symbol)
+            await _stream_domestic(websocket, symbol, exchange)
         else:
             await _stream_overseas(websocket, symbol)
     except WebSocketDisconnect:
@@ -45,14 +53,15 @@ async def quote_ws(websocket: WebSocket, symbol: str, market: str = ""):
             pass
 
 
-async def _stream_domestic(websocket: WebSocket, symbol: str):
+async def _stream_domestic(websocket: WebSocket, symbol: str, exchange: str = "auto"):
     """KIS WebSocket → FastAPI WebSocket 브릿지 (국내주식).
 
     100ms 창 내 메시지를 병합하여 최신 price/orderbook만 전송.
+    exchange: 'auto'(기본) / 'UN' / 'KRX' / 'NXT' — KISQuoteManager가 시계 기반 분기.
     """
     manager = get_manager()
     queue: asyncio.Queue = asyncio.Queue(maxsize=100)
-    await manager.subscribe(symbol, queue)
+    await manager.subscribe(symbol, queue, exchange=exchange)
     try:
         while True:
             try:
@@ -159,3 +168,41 @@ async def execution_notice_ws(websocket: WebSocket):
         logger.error("[ExecutionNoticeWS] %s", e)
     finally:
         manager.unsubscribe_notice(queue)
+
+
+@router.websocket("/ws/market-status")
+async def market_status_ws(websocket: WebSocket):
+    """장운영정보(H0UNMKO0+H0STMKO0+H0NXMKO0) 통합 멀티플렉스 WebSocket.
+
+    클라이언트(useMarketClock 등)는 KST 시계 기반 4구간 자동 분기를 1차로 쓰되,
+    이 WS 메시지가 도착하면 정밀 trigger(휴장/장개시/장종료)로 override 한다.
+
+    응답 메시지 포맷: `{type: "market_status", exchange: "UN"|"KRX"|"NXT", tr_id, raw}`.
+    """
+    token = websocket.query_params.get("token")
+    if not token:
+        await websocket.close(code=1008)
+        return
+    try:
+        from services.auth_service import verify_token
+        verify_token(token)
+    except Exception:
+        await websocket.close(code=1008)
+        return
+    await websocket.accept()
+    manager = get_manager()
+    queue: asyncio.Queue = asyncio.Queue(maxsize=50)
+    await manager.subscribe_market_status(queue)
+    try:
+        while True:
+            try:
+                msg = await asyncio.wait_for(queue.get(), timeout=30.0)
+                await websocket.send_json(msg)
+            except asyncio.TimeoutError:
+                await websocket.send_json({"type": "ping"})
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        logger.error("[MarketStatusWS] %s", e)
+    finally:
+        manager.unsubscribe_market_status(queue)

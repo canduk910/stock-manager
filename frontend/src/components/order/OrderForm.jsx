@@ -16,6 +16,17 @@ const ORDER_TYPE_OPTIONS = [
   { value: '01', label: '시장가' },
 ]
 
+// KR 거래소 셀렉터 (2026-05-08 사용자 결정 SOR/KRX/NXT 3개, SOR 기본).
+// 통합(UN)은 시세 전용 코드 → 주문값 X.
+// SOR: KIS Smart Order Routing — KRX/NXT 중 가격 유리한 곳 자동 라우팅.
+// KRX: KOSPI/KOSDAQ 단독 (15:30~15:40 동시호가/마감 시간대에 강제).
+// NXT: 넥스트레이드 단독 (08:00~09:00 / 15:40~20:00 시간외).
+const KR_EXCHANGE_OPTIONS = [
+  { value: 'SOR', label: 'SOR', desc: '자동 라우팅 (권장)' },
+  { value: 'KRX', label: 'KRX', desc: 'KOSPI/KOSDAQ' },
+  { value: 'NXT', label: 'NXT', desc: '넥스트레이드' },
+]
+
 // FNO: 4가지 주문유형
 const FNO_ORDER_TYPE_OPTIONS = [
   { value: 'limit',       label: '지정가' },
@@ -54,6 +65,7 @@ export default function OrderForm({
   onConfirm,
   externalPrice = null,
   externalSide = null,
+  isSimulation = false,
 }) {
   const [side, setSide] = useState(defaultValues.side || 'buy')
   const [orderType, setOrderType] = useState('00')
@@ -62,6 +74,13 @@ export default function OrderForm({
   const [price, setPrice] = useState(defaultValues.price || '')
   const [quantity, setQuantity] = useState(defaultValues.quantity || '')
   const [memo, setMemo] = useState('')
+  // KR 거래소 셀렉터 — 모의투자는 KRX 강제(NXT/SOR 미지원)
+  const [exchange, setExchange] = useState(isSimulation ? 'KRX' : 'SOR')
+
+  // 모의투자 환경 감지 시 SOR/NXT 선택 차단
+  useEffect(() => {
+    if (isSimulation && exchange !== 'KRX') setExchange('KRX')
+  }, [isSimulation]) // eslint-disable-line
 
   const { data: buyable, loading: buyableLoading, load: loadBuyable } = useBuyable()
 
@@ -126,6 +145,10 @@ export default function OrderForm({
       body.krx_nmpr_cndt_cd = codes.krx_nmpr_cndt_cd
       body.ord_dvsn_cd = codes.ord_dvsn_cd
     }
+    // KR 거래소 셀렉터 (US/FNO 무시 — 백엔드는 KR 외 시장에서 exchange 컬럼을 NULL 보존)
+    if (market === 'KR') {
+      body.exchange = exchange
+    }
     onConfirm(body)
   }
 
@@ -139,6 +162,47 @@ export default function OrderForm({
         <p className="text-xs text-amber-600 bg-amber-50 rounded px-3 py-2">
           위 검색창에서 종목을 먼저 선택해주세요
         </p>
+      )}
+
+      {/* 거래소 셀렉터 (KR 전용, 2026-05-08) */}
+      {market === 'KR' && (
+        <div>
+          <div className="flex items-center justify-between mb-1">
+            <label className="block text-xs font-medium text-gray-600">거래소</label>
+            {isSimulation && (
+              <span className="text-[10px] text-amber-600">모의투자: KRX만 가능</span>
+            )}
+          </div>
+          <div className="flex rounded border border-gray-300 overflow-hidden">
+            {KR_EXCHANGE_OPTIONS.map((o) => {
+              const disabled = isSimulation && o.value !== 'KRX'
+              const selected = exchange === o.value
+              return (
+                <button
+                  key={o.value}
+                  type="button"
+                  onClick={() => !disabled && setExchange(o.value)}
+                  disabled={disabled}
+                  title={o.desc}
+                  className={`flex-1 py-1.5 text-xs font-medium transition-colors ${
+                    selected
+                      ? 'bg-purple-600 text-white'
+                      : disabled
+                        ? 'text-gray-300 bg-gray-50 cursor-not-allowed'
+                        : 'text-gray-500 hover:bg-gray-50'
+                  }`}
+                >
+                  {o.label}
+                </button>
+              )
+            })}
+          </div>
+          <p className="mt-1 text-[10px] text-gray-400">
+            {exchange === 'SOR' && '⚡ KRX/NXT 중 가격 유리한 곳 자동 라우팅'}
+            {exchange === 'KRX' && '■ KOSPI/KOSDAQ 단독'}
+            {exchange === 'NXT' && '◆ 넥스트레이드 단독 (08~09시 / 15:40~20시)'}
+          </p>
+        </div>
       )}
 
       {/* 매매 방향 */}

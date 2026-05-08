@@ -11,7 +11,7 @@
 | `detail.py` | `/api/detail/*` | 10년 재무 + PER/PBR 히스토리 + 종합 리포트 |
 | `_kis_auth.py` | (내부 모듈) | KIS 인증 공통 (토큰 관리, hashkey 발급). `balance.py`·`order.py` 공용 |
 | `order.py` | `/api/order/*` | 주문 발송/정정/취소/미체결/체결/이력/예약주문 |
-| `quote.py` | `WS /ws/quote/{symbol}`, `WS /ws/execution-notice` | 실시간 호가 WebSocket (KR/FNO/US) + 체결통보 WS |
+| `quote.py` | `WS /ws/quote/{symbol}`, `WS /ws/execution-notice`, `WS /ws/market-status` | 실시간 호가 WebSocket (KR/FNO/US) + 체결통보 WS + **(2026-05-08) 장운영정보 통합 멀티플렉스 WS**(H0UNMKO0/H0STMKO0/H0NXMKO0). `/ws/quote/{symbol}` 에 `exchange=auto\|UN\|KRX\|NXT` 쿼리 추가(기본 `auto` — 백엔드 KISQuoteManager 가 KST 시계 기반 4구간 자동 분기). |
 | `advisory.py` | `/api/advisory/*` | AI자문 종목 관리 + 데이터 수집(+리서치)/조회 + AI 리포트 생성(v3 통합). `POST /research` 수동 리서치 수집. `GET /{code}/analyst-reports` 증권사별 목표가+리포트(KR=네이버/US=yfinance). **`POST /{code}/chat`** 자문보고서 컨텍스트 기반 stateless 챗봇(messages 배열은 클라이언트가 보관, 보고서 본문을 system prompt에 주입, `service_name="advisory_chat"`). **(2026-05-07)** `POST /{code}/analyze` body `AnalyzeBody(user_comment: Optional[str])` + `Body(None)` 백워드 호환 + 1000자 ServiceError(400) — 사용자 가설을 GPT에 전달해 동의/반박 양면 평가(`user_commentary_evaluation`) 트리거. |
 | `search.py` | `GET /api/search` | 종목 검색 (KR=자동완성, US=티커 검증, FNO=마스터 검색) |
 | `market_board.py` | `/api/market-board/*`, `WS /ws/market-board` | 신고가/신저가 + sparkline + 당일 OHLC + 시세판 종목 CRUD + 순서 관리(`GET/PUT /api/market-board/order`) + 실시간 WS(시가/고가/저가 포함) |
@@ -76,7 +76,7 @@ GET  /api/order/fno-price      선물옵션 현재가
 - 주문 발송 → 로컬 `orders.db` 자동 기록 (status: PLACED). 응답에 `balance_stale: true`
 - 취소 → 로컬 DB 즉시 CANCELLED + `local_synced: true`
 - 정정 → 로컬 DB 가격/수량 즉시 반영 + `local_synced: true`
-- `excg_id_dvsn_cd`: `'KRX'`=API 주문(취소 가능), `'SOR'`=HTS/MTS(API 취소 불가)
+- **(2026-05-08 KRX+NXT+SOR)** `PlaceOrderBody.exchange: Literal["SOR","KRX","NXT"] = "SOR"` — KR 거래소 셀렉터(SOR 기본). 통합(UN)은 시세 전용 코드라 주문값 X. 모의투자(`openapivts`)는 KRX 강제(`ServiceError`). 응답 항목에 `exchange` 키(orders.exchange 컬럼 → KRX/NXT/SOR/SOR-KRX/SOR-NXT, NULL 시 'KRX' 폴백). 정정/취소는 원주문 거래소 유지 — `services/order_service.py` 진입부에서 DB orders.exchange 조회 후 `EXCG_ID_DVSN_CD` 주입(`SOR-KRX/SOR-NXT` 는 `KRX/NXT` 로 환원).
 - 주문번호: 10자리 제로패딩 → `_strip_leading_zeros()`로 8자리 변환
 
 ---
@@ -90,11 +90,15 @@ GET  /api/order/fno-price      선물옵션 현재가
 | `TTTS3012R` / `JTTT3012R` | 해외주식 잔고 (주간/야간) |
 | `CTRP6504R` | 기준환율 + KRW 합계 |
 | `CTFO6118R` | 국내선물옵션 잔고 |
-| `TTTC0802U` / `TTTC0801U` | 국내 매수/매도 |
-| `TTTC0803U` | 국내 정정/취소 |
-| `TTTC8036R` | 국내 미체결 조회 |
-| `TTTC8001R` | 국내 당일 체결 |
+| `TTTC0012U` / `TTTC0011U` | 국내 매수/매도 (2026-05-08 신 TR_ID, EXCG_ID_DVSN_CD 지원) |
+| `TTTC0013U` | 국내 정정/취소 (2026-05-08 신 TR_ID, EXCG_ID_DVSN_CD 지원) |
+| `TTTC0084R` | 국내 미체결 조회 (2026-05-08 신 TR_ID, KRX/NXT/SOR 3회 호출 + dedup) |
+| `TTTC0081R` | 국내 당일 체결 (2026-05-08 신 TR_ID, EXCG_ID_DVSN_CD="ALL" 필수) |
 | `TTTC8908R` | 국내 매수가능 |
+| `H0UNCNT0` / `H0UNASP0` | 국내 통합(KRX+NXT) 실시간 체결가/호가 WS (09:00~15:30) |
+| `H0STCNT0` / `H0STASP0` | 국내 KRX 단독 실시간 체결가/호가 WS (15:30~15:40 마감) |
+| `H0NXCNT0` / `H0NXASP0` | 국내 NXT 단독 실시간 체결가/호가 WS (08:00~09:00, 15:40~20:00) |
+| `H0UNMKO0` / `H0STMKO0` / `H0NXMKO0` | 장운영정보 (통합/KRX/NXT) WS — `/ws/market-status` 멀티플렉스 |
 | `JTTT1002U` / `JTTT1006U` | 해외 매수/매도 |
 | `TTTS3018R` | 해외 미체결 |
 | `JTTT3001R` | 해외 당일 체결 |

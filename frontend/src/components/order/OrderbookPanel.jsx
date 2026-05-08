@@ -11,6 +11,7 @@
  */
 import { memo, useMemo } from 'react'
 import { useQuote } from '../../hooks/useQuote'
+import { useMarketClock } from '../../hooks/useMarketClock'
 
 function formatPrice(price, market) {
   if (price == null || price === 0) return '—'
@@ -37,7 +38,11 @@ function OrderbookPanel({ symbol, market = 'KR', onPriceSelect }) {
   const isDomestic = market === 'KR'
   const showOrderbook = market !== 'US'  // KR/FNO 모두 호가창 표시
 
-  const { price, change, changeRate, sign, asks, bids, totalAskVolume, totalBidVolume, connected } = useQuote(symbol, market)
+  // KR 거래소 시계 — 4구간 자동 분기 (08~09 NXT / 09~15:30 UN / 15:30~15:40 KRX / 15:40~20:00 NXT)
+  const clock = useMarketClock()
+  // KR 종목은 'auto'로 백엔드 시간대 분기 위임. FNO/US는 무시.
+  const { price, change, changeRate, sign, asks, bids, totalAskVolume, totalBidVolume, connected } =
+    useQuote(symbol, market, isDomestic ? 'auto' : undefined)
 
   // 가격 등락 색상: sign '2'=상승(빨강), '5'=하락(파랑), '3'=보합(회색)
   const priceColor =
@@ -86,6 +91,25 @@ function OrderbookPanel({ symbol, market = 'KR', onPriceSelect }) {
             </span>
           )}
         </div>
+        {isDomestic && (
+          <span
+            className={`text-[10px] px-2 py-0.5 rounded font-medium ${
+              clock.isClosed
+                ? 'bg-gray-100 text-gray-500'
+                : clock.exchange === 'UN'
+                  ? 'bg-blue-50 text-blue-600'
+                  : clock.exchange === 'NXT'
+                    ? 'bg-green-50 text-green-700'
+                    : 'bg-orange-50 text-orange-600'
+            }`}
+            title={clock.label}
+          >
+            {clock.exchange === 'UN' && '🟦 통합'}
+            {clock.exchange === 'KRX' && '🟧 KRX'}
+            {clock.exchange === 'NXT' && '🟢 NXT'}
+            {clock.isClosed && ' (휴장)'}
+          </span>
+        )}
         {isFNO && (
           <span className="text-xs text-gray-400 bg-gray-50 px-2 py-0.5 rounded">선물옵션</span>
         )}

@@ -1,5 +1,62 @@
 # 변경 이력
 
+## 2026-05-08 — 매매화면 KRX+NXT 통합시세 + SOR 활용 + KIS API 신 TR_ID 일괄 전환
+
+### 배경
+KIS 차세대시스템 출범으로 (1) 신 TR_ID 체계 일괄 도입(구 TR_ID는 사전고지 없이 차단 가능), (2) NXT(넥스트레이드) 대체거래소 정식 가동(08:00~09:00 / 15:40~20:00 시간외), (3) 09:00~15:30 KRX+NXT 통합시세, (4) SOR(Smart Order Routing) 시세·주문 양면 노출. 기존 구현은 KRX 단일 + 구 TR_ID(`TTTC0801U`/`TTTC0802U`/`TTTC0803U`/`TTTC8036R`/`TTTC8001R`) + 호가 WS `H0STCNT0`/`H0STASP0` 고정으로 NXT 시간대(8~9시/15:40~20시) 호가 표시 불가, SOR 가격개선 효과 0, 신 TR_ID 차단 시 매매 중단 위험.
+
+### 사용자 결정 (4개)
+1. 주문 셀렉터: **SOR/KRX/NXT** 3개 (SOR 기본). 통합(UN)은 시세 전용 코드 → 주문값 X.
+2. KIS 신 TR_ID 일괄 전환: 매수 `TTTC0012U` / 매도 `TTTC0011U` / 정정·취소 `TTTC0013U` / 미체결 `TTTC0084R` / 당일체결 `TTTC0081R`(EXCG_ID_DVSN_CD 필수).
+3. 자동 전환: 프론트 KST 시계 4구간 + 백엔드 H0UNMKO0 장운영정보 WS 둘 다 사용. 휴장 자동.
+4. DB·노출: `orders.exchange` 컬럼(alembic 1건) + 미체결/체결 테이블 거래소 배지(■KRX/◆NXT/⚡SOR) + 체결 토스트 거래소 표기.
+
+### 거래소 매트릭스 (시세 WS)
+| 시간대 | exchange | execution | orderbook | levels |
+|---|---|---|---|---|
+| 09:00~15:30 (정규장 통합) | UN | H0UNCNT0 | H0UNASP0 | 10 |
+| 15:30~15:40 (KRX 동시호가/마감) | KRX | H0STCNT0 | H0STASP0 | 10 |
+| 08:00~09:00, 15:40~20:00 (NXT) | NXT | H0NXCNT0 | H0NXASP0 | 10 |
+
+KIS 명세 검증 완료(`docs/kis/09_KR_REALTIME.md`): NXT/통합 호가도 ASKP1~10+RSQN1~10 동일 10호가 구조 → 기존 `_parse_orderbook()`/`_parse_execution()` 재사용 가능.
+
+### 백엔드 변경
+- `services/order_kr.py`: `_KR_TR_IDS` 신 TR_ID 일괄 교체. `place_domestic_order(..., *, exchange="SOR")` body 에 `EXCG_ID_DVSN_CD` 주입. `_validate_ord_dvsn(exchange, order_type)` 검증(KRX 00~24 / NXT 00,03,04,11~16,21~24 / SOR 00,01,03,04,11~16). `_normalize_excg_code(item)` 응답 정규화 헬퍼(KRX/NXT/SOR/SOR-KRX/SOR-NXT, 누락 시 KRX 폴백). `get_domestic_open_orders` TTTC0084R로 KRX/NXT/SOR 3회 호출 + (주문번호, 거래소) dedup. `get_domestic_executions` TTTC0081R + EXCG_ID_DVSN_CD="ALL" 1회 호출. `modify/cancel_domestic_order(..., *, exchange)` 원주문 거래소 유지.
+- `services/order_service.py`: `place_order(..., exchange="SOR")` 시그니처 확장 + `_VALID_EXCHANGES={SOR,KRX,NXT}` 검증 + `_is_simulation()` 모의투자 차단(SOR/NXT 시 ServiceError). PENDING insert 시 exchange 기록 → PLACED 갱신 시 KIS 응답 정밀 거래소(SOR-KRX/SOR-NXT)로 덮어쓰기. `modify_order`/`cancel_order` 진입부에서 DB orders.exchange 조회 → `EXCG_ID_DVSN_CD` 주입(SOR-KRX/SOR-NXT 는 KRX/NXT 로 환원, 거래소 변경 불가).
+- `services/quote_kis.py`: `_KR_TR_MATRIX = {UN/KRX/NXT × execution/orderbook/levels}` 정의. set 멤버십 디스패치 (`_KR_EXECUTION_TR_IDS`/`_KR_ORDERBOOK_TR_IDS`/`_KR_MARKET_STATUS_TR_IDS`). `_resolve_exchange_by_clock(now_kst)` 4구간 분기. `subscribe(..., exchange="auto")` 시그니처 확장. `subscribe_market_status(queue)` 신규 — H0UNMKO0+H0STMKO0+H0NXMKO0 멀티플렉스. `_run_ws` 재연결 시 market-status 자동 재구독.
+- `routers/order.py`: `PlaceOrderBody.exchange: Literal["SOR","KRX","NXT"] = "SOR"` 추가. body.exchange 흐름.
+- `routers/quote.py`: `WS /ws/quote/{symbol}?exchange=auto|UN|KRX|NXT` 쿼리. 신규 `WS /ws/market-status` 엔드포인트.
+- `db/models/order.py`: `Order.exchange = Column(String(16), nullable=True)`. `to_dict()` `exchange or "KRX"` legacy 폴백.
+- `db/repositories/order_repo.py` + `stock/order_store.py`: `insert_order` / `update_order_status` 에 `exchange` 키워드 인자.
+- alembic `f5a6b7c8d9e0_add_orders_exchange.py`: `orders.exchange varchar(16) nullable` 추가(NULL → 'KRX' 폴백, 기존 데이터 unaffected).
+
+### 프론트 변경
+- `frontend/src/hooks/useMarketClock.js` 신규: KST 시계 기반 4구간 + 휴장 판정. 1분 setInterval + `/ws/market-status` 메시지 override. 반환 `{exchange, label, isHoliday, isClosed, phase}`.
+- `frontend/src/hooks/useQuote.js`: `useQuote(symbol, market='KR', exchange='auto')` 3번째 파라미터. buildUrl 에 `&exchange=` 자동 부착.
+- `frontend/src/hooks/useExecutionNotice.js`: `mapOrdExgGb(code)` 헬퍼 + 응답 dict에 `exchange` 필드 자동 enrich(1=KRX/2=NXT/3=SOR-KRX/4=SOR-NXT).
+- `frontend/src/components/order/ExchangeBadge.jsx` 신규: 거래소 5종 배지 공용 컴포넌트(■KRX/◆NXT/⚡SOR/⚡SOR→KRX/⚡SOR→NXT) + size('xs'/'sm').
+- `frontend/src/components/order/OrderForm.jsx`: `KR_EXCHANGE_OPTIONS = [SOR(추천)/KRX/NXT]` 셀렉터(market==='KR'만 노출). `isSimulation` prop 시 SOR/NXT 비활성+안내. body.exchange 자동 포함.
+- `frontend/src/components/order/OrderbookPanel.jsx`: `useMarketClock()` 결합 헤더 거래소 라벨(🟦 통합 / 🟢 NXT / 🟧 KRX / 휴장). `useQuote(symbol, market, 'auto')` — KR 종목은 시간대 자동 분기.
+- `frontend/src/components/order/OpenOrdersTable.jsx` + `ExecutionsTable.jsx`: "거래소" 컬럼 + `ExchangeBadge` 사용. KR 행에서만 렌더.
+- `frontend/src/pages/OrderPage.jsx`: 체결통보 토스트 거래소 prefix 표기(`[⚡SOR-KRX] 체결: 삼성전자 매수 10주 @ 71,500원`).
+
+### KIS API 통합 문서 (docs/kis/)
+- KIS OpenAPI 전체 문서(338개 시트, 1.3MB 엑셀) → 카테고리별 마크다운 23개 파일로 변환.
+- `docs/kis/00_INDEX.md` 인덱스 + 22개 카테고리 파일(OAuth/주문/시세/순위/실시간/선물옵션/해외/채권). 총 337개 API 명세 포함(기본정보+개요+Layout 표+Example).
+- 변환 스크립트: `scripts/kis_excel_to_md.py`. 향후 엑셀 갱신 시 동일 스크립트로 재변환 가능.
+
+### 백워드 호환·실전/모의
+- 모의투자(`openapivts.koreainvestment.com:29443`): SOR/NXT 차단(백엔드 ServiceError + UI 비활성화 이중 방어). KRX 만 허용.
+- 기존 `orders.exchange=NULL` → `to_dict()` 변환 시 `'KRX'` 폴백. 기존 주문 데이터 영향 0.
+- 신용/예약/통합증거금/KRX 시간외(H0STOAA0/H0STOUP0)는 v1 범위 외, v2.
+
+### 검증
+- 회귀: `pytest tests/unit tests/api -q` → **919 passed / 0 failed / 6 skipped** (baseline 680 → +239 신규 PASS).
+- 단위 신규 5: `test_order_repo_exchange.py` (7) + `test_order_kr_exchange.py` (16) + `test_quote_kis_exchange.py` (17) + `test_order_service_exchange.py` (11) + `test_order_place_exchange.py` (4) + `test_quote_ws_exchange.py` (5).
+- frontend build: 856 modules transformed OK (이전 854 → +useMarketClock + ExchangeBadge).
+
+---
+
 ## 2026-05-08 — 시세판/호가창/체결통보 가격 갱신 안 되는 버그 수정 (WS URL stale token)
 
 ### 배경

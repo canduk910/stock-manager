@@ -381,14 +381,16 @@ KIS 실전계좌 주문 발송·정정·취소·미체결·체결 내역·이력
   "order_type": "00",
   "price": 70000,
   "quantity": 1,
-  "memo": ""
+  "memo": "",
+  "exchange": "SOR"
 }
 ```
 
-- `market`: `KR` / `US`
+- `market`: `KR` / `US` / `FNO`
 - `side`: `buy` / `sell`
 - `order_type`: `00`(지정가) / `01`(시장가)
 - `price`: 시장가 주문 시 `0`
+- `exchange` (KR 전용, 2026-05-08): `"SOR"`(기본, 자동 라우팅) / `"KRX"`(KOSPI/KOSDAQ) / `"NXT"`(넥스트레이드). 통합(UN)은 시세 전용 코드라 주문값 X. 모의투자(`openapivts`)에서는 KRX만 허용(SOR/NXT 시 400 ServiceError). 응답 항목에 `exchange` 키 포함(KIS 라우팅 결과로 `SOR-KRX`/`SOR-NXT` 정밀 거래소가 채워질 수 있음).
 
 **응답** `201`:
 ```json
@@ -659,6 +661,19 @@ KIS 당일 체결 내역과 로컬 DB 대사(Reconciliation). 로컬 `PLACED`/`P
 
 ## 실시간 호가 — `routers/quote.py`
 
+### `WS /ws/market-status` (2026-05-08 신규)
+
+장운영정보 통합 멀티플렉스 WebSocket. KIS `H0UNMKO0`(통합) + `H0STMKO0`(KRX) + `H0NXMKO0`(NXT) 3개 TR_ID 를 한 번에 구독.
+
+**Query**:
+- `token` — JWT (인증)
+
+**메시지**: `{"type":"market_status", "exchange":"UN"|"KRX"|"NXT", "tr_id":"H0UN/ST/NXMKO0", "raw":"..."}`
+
+**용도**: 프론트 `useMarketClock` 훅이 KST 시계 기반 4구간 자동 분기를 하다가 이 WS 메시지가 오면 정밀 trigger(휴장/장개시/장종료) 로 override. 휴장일 자동 처리.
+
+---
+
 ### `WS /ws/quote/{symbol}`
 
 실시간 현재가 + 호가 WebSocket 스트림.
@@ -667,8 +682,9 @@ KIS 당일 체결 내역과 로컬 DB 대사(Reconciliation). 로컬 `PLACED`/`P
 |---------|------|--------|------|
 | `symbol` | path | - | 종목코드 또는 FNO 단축코드 |
 | `market` | query | `KR` | `KR` / `US` / `FNO` |
+| `exchange` | query | `auto` | (KR 전용, 2026-05-08) `auto`(기본, KST 시계 기반 4구간 자동) / `UN`(통합) / `KRX` / `NXT`. FNO/US는 무시. |
 
-- **국내(`market=KR`)**: KIS WebSocket(`ws://ops.koreainvestment.com:21000`) 브릿지. `H0STCNT0`(체결가) + `H0STASP0`(호가) 실시간 수신. 10호가. KIS Approval Key 자동 발급 및 캐시.
+- **국내(`market=KR`)**: KIS WebSocket(`ws://ops.koreainvestment.com:21000`) 브릿지. **(2026-05-08 KRX+NXT 통합)** 시간대 자동 분기 — 09:00~15:30 = `H0UNCNT0`(통합)+`H0UNASP0`, 15:30~15:40 = `H0STCNT0`(KRX)+`H0STASP0`, 08:00~09:00 / 15:40~20:00 = `H0NXCNT0`(NXT)+`H0NXASP0`. `exchange` 명시(`UN`/`KRX`/`NXT`) 시 시계와 무관하게 강제. `auto`(기본) 시 `KISQuoteManager._resolve_exchange_by_clock()` + `H0UNMKO0` WS override. NXT/통합 호가도 ASKP1~10/RSQN1~10 동일 10호가 구조.
 - **선물옵션(`market=FNO`)**: KIS WebSocket FNO 채널 브릿지. `_resolve_fno_type(symbol)`으로 TR_ID 자동 선택. 지수선물(1xxx): `H0IFCNT0`(체결)+`H0IFASP0`(5레벨 호가), 지수옵션(2xxx): `H0IOCNT0`+`H0IOASP0`, 주식선물(3xxx): `H0ZFCNT0`+`H0ZFASP0`(10레벨), 주식옵션(3xxx): `H0ZOCNT0`+`H0ZOASP0`. `_stream_fno()` 핸들러로 분기.
 - **해외(`market=US`)**: yfinance `Ticker.fast_info` 2초 주기 polling. 체결가만 (호가 미지원).
 - KIS 키 미설정 시 연결은 수락되나 데이터 없음(ping만 수신).

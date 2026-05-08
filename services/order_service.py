@@ -48,6 +48,7 @@ from services.order_kr import (
     modify_domestic_order,
     cancel_domestic_order,
     place_domestic_order,
+    _normalize_excg_code,
 )
 from services.order_us import (
     get_overseas_buyable,
@@ -73,6 +74,18 @@ _US_EXCHANGE_CODE = "NASD"
 
 # place_order 디스패치 및 get_buyable 등에서 진입부 시장 코드 검증에 사용
 _VALID_MARKETS = {"KR", "US", "FNO"}
+
+# 거래소 셀렉터 허용 값 (사용자 결정: SOR 기본, 통합 UN은 시세 전용이므로 주문값 X)
+_VALID_EXCHANGES = {"SOR", "KRX", "NXT"}
+
+
+def _is_simulation() -> bool:
+    """모의투자 환경 여부.
+
+    KIS 모의투자 도메인은 `https://openapivts.koreainvestment.com:29443`이며,
+    NXT/SOR/통합시세를 모두 미지원한다. 사용자가 SOR/NXT 선택 시 명시적으로 차단한다.
+    """
+    return BASE_URL.startswith("https://openapivts")
 
 
 def _validate_market(market: str) -> str:
@@ -124,6 +137,7 @@ def place_order(
     nmpr_type_cd: str = "",
     krx_nmpr_cndt_cd: str = "",
     ord_dvsn_cd: str = "",
+    exchange: str = "SOR",
 ) -> dict:
     """주문 발송 (매수/매도).
 
@@ -141,21 +155,32 @@ def place_order(
         nmpr_type_cd: [FNO] 호가유형코드
         krx_nmpr_cndt_cd: [FNO] KRX 호가조건코드
         ord_dvsn_cd: [FNO] 주문구분코드
+        exchange: [KR] SOR(기본) / KRX / NXT. 모의투자에서는 KRX만 허용.
 
     Returns:
         로컬 DB에 저장된 주문 dict
     """
+    # KR 시장의 거래소 셀렉터 검증
+    exchange = (exchange or "SOR").upper()
+    if market == "KR":
+        if exchange not in _VALID_EXCHANGES:
+            raise ServiceError(f"지원하지 않는 거래소입니다: {exchange} (SOR/KRX/NXT)")
+        if _is_simulation() and exchange != "KRX":
+            raise ServiceError("모의투자에서는 KRX만 지원됩니다. (NXT/SOR은 실전 한정)")
+
     app_key, app_secret, acnt_no, acnt_prdt_cd, acnt_prdt_cd_fno = get_kis_credentials()
     token = get_access_token()
 
     # 1단계: PENDING 선행 기록 (Write-Ahead)
     currency = "KRW" if market in ("KR", "FNO") else "USD"
     ot = order_type if market != "FNO" else "fno"
+    # KR 외 시장은 거래소 컬럼을 NULL 보존 (US=NASD/FNO=KRX 단일이므로 의미 없음)
+    pending_exchange = exchange if market == "KR" else None
     pending = order_store.insert_order(
         symbol=symbol, symbol_name=symbol_name, market=market,
         side=side, order_type=ot, price=float(price),
         quantity=quantity, currency=currency, memo=memo,
-        status="PENDING",
+        status="PENDING", exchange=pending_exchange,
     )
     pending_id = pending["id"]
 
@@ -165,6 +190,7 @@ def place_order(
             result = place_domestic_order(
                 token, app_key, app_secret, acnt_no, acnt_prdt_cd,
                 symbol, side, order_type, price, quantity,
+                exchange=exchange,
             )
         elif market == "FNO":
             if not acnt_prdt_cd_fno:
@@ -185,10 +211,16 @@ def place_order(
         raise
 
     # 3단계: PENDING → PLACED
+    # KR 응답에 정밀 거래소(SOR-KRX/SOR-NXT)가 들어오면 덮어씀.
+    # KIS가 즉시 반영하지 않을 수 있으므로 입력값(exchange)을 baseline 으로 보존.
+    placed_exchange = result.get("exchange") if market == "KR" else None
+    if market == "KR" and not placed_exchange:
+        placed_exchange = exchange
     return order_store.update_order_status(
         pending_id, "PLACED",
         order_no=result["order_no"], org_no=result.get("org_no", ""),
         kis_response=result.get("kis_response", ""),
+        exchange=placed_exchange,
     )
 
 
@@ -245,9 +277,21 @@ def modify_order(
     token = get_access_token()
 
     if market == "KR":
+        # 원주문 거래소 유지 (거래소 변경 불가). 로컬 DB 누락 시 KRX 폴백.
+        local_exchange = "KRX"
+        try:
+            local = order_store.get_order_by_order_no(order_no, market)
+            if local and local.get("exchange"):
+                local_exchange = local["exchange"]
+        except Exception as e:
+            logger.warning("정정 시 원주문 거래소 조회 실패 (order_no=%s): %s", order_no, e)
+        # SOR-KRX/SOR-NXT 라우팅 결과가 저장된 경우 → 정정/취소 EXCG 코드는 'KRX'/'NXT'로 환원
+        if local_exchange.startswith("SOR-"):
+            local_exchange = local_exchange.split("-", 1)[1]
         result = modify_domestic_order(
             token, app_key, app_secret, acnt_no, acnt_prdt_cd,
             order_no, org_no, order_type, price, quantity, total,
+            exchange=local_exchange,
         )
     elif market == "FNO":
         if not acnt_prdt_cd_fno:
@@ -291,9 +335,20 @@ def cancel_order(
     token = get_access_token()
 
     if market == "KR":
+        # 원주문 거래소 유지 (거래소 변경 불가). 로컬 DB 누락 시 KRX 폴백.
+        local_exchange = "KRX"
+        try:
+            local = order_store.get_order_by_order_no(order_no, market)
+            if local and local.get("exchange"):
+                local_exchange = local["exchange"]
+        except Exception as e:
+            logger.warning("취소 시 원주문 거래소 조회 실패 (order_no=%s): %s", order_no, e)
+        if local_exchange.startswith("SOR-"):
+            local_exchange = local_exchange.split("-", 1)[1]
         result = cancel_domestic_order(
             token, app_key, app_secret, acnt_no, acnt_prdt_cd,
             order_no, org_no, order_type, quantity, total,
+            exchange=local_exchange,
         )
     elif market == "FNO":
         if not acnt_prdt_cd_fno:

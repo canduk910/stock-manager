@@ -1,16 +1,22 @@
 """KIS WebSocket 단일 연결 관리 + 심볼별 asyncio.Queue 브로드캐스트.
 
-국내(KR): H0STCNT0 체결가 + H0STASP0 호가 실시간 수신
-         WS 끊김 시 KIS REST FHKST01010100 3초 폴링 자동 전환
+국내(KR): KIS 차세대시스템 출범으로 거래소별 시세 분기 (2026-05-08).
+  - 통합(UN, 09:00~15:30): H0UNCNT0 + H0UNASP0 (KRX+NXT 통합시세)
+  - KRX(15:30~15:40, 마감 동시호가): H0STCNT0 + H0STASP0
+  - NXT(08:00~09:00, 15:40~20:00): H0NXCNT0 + H0NXASP0
+  WS 끊김 시 KIS REST FHKST01010100 3초 폴링 자동 전환.
 선물옵션(FNO): H0IFASP0/H0IFCNT0(지수) H0IOASP0/H0IOCNT0(지수옵션)
               H0ZFASP0/H0ZFCNT0(주식선물) H0ZOASP0/H0ZOCNT0(주식옵션)
               동일 WS 연결, 5레벨(지수) 또는 10레벨(주식) 호가
 체결통보(H0STCNI0): KIS_HTS_ID 설정 시 AES-CBC 복호화
+                   ORD_EXG_GB 토큰(1=KRX/2=NXT/3=SOR-KRX/4=SOR-NXT) 포함.
+장운영정보 WS: H0UNMKO0(통합) + H0STMKO0(KRX) + H0NXMKO0(NXT) — subscribe_market_status.
 """
 import asyncio
 import json
 import logging
 import time
+from datetime import datetime, timedelta, timezone
 
 import requests
 import websockets
@@ -20,8 +26,54 @@ from config import KIS_APP_KEY, KIS_APP_SECRET, KIS_BASE_URL, KIS_HTS_ID
 from routers._kis_auth import get_access_token_safe, clear_token_cache
 
 KIS_WS_URL = "ws://ops.koreainvestment.com:21000"
+KST = timezone(timedelta(hours=9))
 
 logger = logging.getLogger(__name__)
+
+
+# ── KR 거래소-인식 TR_ID 매트릭스 (KRX+NXT 통합시세, 2026-05-08) ──────────────
+
+# 시간대 기반 자동 분기 (KST):
+#   08:00~09:00 + 15:40~20:00 → NXT (대체거래소)
+#   09:00~15:30                → UN  (KRX+NXT 통합시세)
+#   15:30~15:40                → KRX (마감 동시호가는 KRX 단독)
+_KR_TR_MATRIX: dict[str, dict] = {
+    "UN":  {"orderbook": "H0UNASP0", "execution": "H0UNCNT0", "levels": 10},
+    "KRX": {"orderbook": "H0STASP0", "execution": "H0STCNT0", "levels": 10},
+    "NXT": {"orderbook": "H0NXASP0", "execution": "H0NXCNT0", "levels": 10},
+}
+_KR_EXECUTION_TR_IDS: set[str] = {
+    info["execution"] for info in _KR_TR_MATRIX.values()
+}
+_KR_ORDERBOOK_TR_IDS: set[str] = {
+    info["orderbook"] for info in _KR_TR_MATRIX.values()
+}
+
+# 장운영정보 TR_ID (시장 상태 정밀 트리거)
+_KR_MARKET_STATUS_TR_IDS: set[str] = {"H0UNMKO0", "H0STMKO0", "H0NXMKO0"}
+
+
+def _resolve_exchange_by_clock(now_kst: datetime) -> str:
+    """KST 시계 기반 거래소 분기 헬퍼.
+
+    Returns:
+        'UN' | 'KRX' | 'NXT' | 'CLOSED'
+    """
+    # 주말 → CLOSED (공휴일 처리는 호출자/프론트 책임)
+    if now_kst.weekday() >= 5:  # 5=토, 6=일
+        return "CLOSED"
+
+    minutes = now_kst.hour * 60 + now_kst.minute
+    # 08:00 = 480, 09:00 = 540, 15:30 = 930, 15:40 = 940, 20:00 = 1200
+    if 480 <= minutes < 540:
+        return "NXT"
+    if 540 <= minutes < 930:
+        return "UN"
+    if 930 <= minutes < 940:
+        return "KRX"
+    if 940 <= minutes < 1200:
+        return "NXT"
+    return "CLOSED"
 
 # ── FNO WS TR_ID 상수 ──────────────────────────────────────────────────────────
 
@@ -80,6 +132,16 @@ class KISQuoteManager:
         self._aes_key: str | None = None
         self._aes_iv: str | None = None
         self._notice_subscribers: set[asyncio.Queue] = set()
+        # KR 거래소-인식 구독 (2026-05-08)
+        # symbol → 'auto'|'UN'|'KRX'|'NXT' (auto는 시계 기반 자동 분기)
+        self._kr_exchange_pref: dict[str, str] = {}
+        # symbol → 현재 활성화된 실제 거래소 (auto의 경우 시점별 변동)
+        self._kr_active_exchange: dict[str, str] = {}
+        # 1분 주기 시간대 경계 reconcile 태스크
+        self._clock_resync_task: asyncio.Task | None = None
+        # 장운영정보 구독자 (subscribe_market_status로 등록)
+        self._market_status_subscribers: set[asyncio.Queue] = set()
+        self._market_status_subscribed: bool = False
 
     # ── lifecycle ──────────────────────────────────────────────────
 
@@ -89,6 +151,8 @@ class KISQuoteManager:
             return
         self._running = True
         self._task = asyncio.create_task(self._connect_loop())
+        # 1분 주기 시간대 경계 reconcile 시작 (KRX+NXT 통합시세)
+        self._clock_resync_task = asyncio.create_task(self._clock_resync_loop())
         logger.info("[QuoteService] KIS WebSocket 관리자 시작")
 
     async def stop(self):
@@ -111,14 +175,36 @@ class KISQuoteManager:
                 await self._fallback_task
             except asyncio.CancelledError:
                 pass
+        if self._clock_resync_task:
+            self._clock_resync_task.cancel()
+            try:
+                await self._clock_resync_task
+            except asyncio.CancelledError:
+                pass
         logger.info("[QuoteService] KIS WebSocket 관리자 종료")
 
     # ── pub/sub ────────────────────────────────────────────────────
 
-    async def subscribe(self, symbol: str, queue: asyncio.Queue, is_fno: bool = False):
+    async def subscribe(
+        self,
+        symbol: str,
+        queue: asyncio.Queue,
+        is_fno: bool = False,
+        *,
+        exchange: str = "auto",
+    ):
+        """심볼 구독.
+
+        Args:
+            exchange: KR 전용. 'auto'(기본, 시계 기반) / 'UN' / 'KRX' / 'NXT'.
+                      FNO는 무시.
+        """
         self._subscribers[symbol].add(queue)
         if is_fno:
             self._fno_symbols.add(symbol)
+        else:
+            # KR 종목: 거래소 선호도 저장 (clock_resync_loop가 사용)
+            self._kr_exchange_pref[symbol] = (exchange or "auto").upper()
         if symbol not in self._subscribed_symbols and self._ws:
             try:
                 if symbol in self._fno_symbols:
@@ -140,6 +226,8 @@ class KISQuoteManager:
             self._subscribed_symbols.discard(symbol)
             self._fno_symbols.discard(symbol)
             self._fno_types.pop(symbol, None)
+            self._kr_exchange_pref.pop(symbol, None)
+            self._kr_active_exchange.pop(symbol, None)
 
     async def subscribe_notice(self, queue: asyncio.Queue):
         """체결통보(H0STCNI0) 구독."""
@@ -147,6 +235,23 @@ class KISQuoteManager:
 
     def unsubscribe_notice(self, queue: asyncio.Queue):
         self._notice_subscribers.discard(queue)
+
+    async def subscribe_market_status(self, queue: asyncio.Queue):
+        """장운영정보(H0UNMKO0+H0STMKO0+H0NXMKO0) 통합 구독.
+
+        첫 번째 구독자가 등록될 때 KIS WS에 3개 TR_ID를 한 번 등록한다.
+        2개 이상의 구독자(시세판/주문 페이지 등)는 같은 broadcast 큐를 공유한다.
+        """
+        first = not self._market_status_subscribers
+        self._market_status_subscribers.add(queue)
+        if first and self._ws:
+            try:
+                await self._send_subscribe_market_status()
+            except Exception as e:
+                logger.warning("[QuoteService] market-status 구독 등록 실패: %s", e)
+
+    def unsubscribe_market_status(self, queue: asyncio.Queue):
+        self._market_status_subscribers.discard(queue)
 
     # ── 초기 가격 push ─────────────────────────────────────────────
 
@@ -187,9 +292,29 @@ class KISQuoteManager:
 
     # ── 내부 메서드 ────────────────────────────────────────────────
 
+    def _resolve_kr_exchange(self, symbol: str) -> str:
+        """심볼의 활성 거래소 결정.
+
+        선호도가 'auto'면 시계 기반 4구간 분기. 명시값(UN/KRX/NXT)이면 그대로.
+        CLOSED 시간대도 명시값을 우선(개발/테스트 편의), auto+CLOSED는 None.
+        """
+        pref = self._kr_exchange_pref.get(symbol, "auto")
+        if pref in ("UN", "KRX", "NXT"):
+            return pref
+        # auto: 시계 기반
+        now = datetime.now(KST).replace(tzinfo=None)
+        resolved = _resolve_exchange_by_clock(now)
+        if resolved == "CLOSED":
+            # CLOSED 시간대는 UN(통합)을 디폴트로 — 비개장일 yfinance 폴백 등에서 무해
+            return "UN"
+        return resolved
+
     async def _send_subscribe(self, symbol: str):
+        """KR 종목 구독. 거래소(_resolve_kr_exchange)별 TR_ID 분기."""
         approval_key = self._get_approval_key()
-        for tr_id in ["H0STCNT0", "H0STASP0"]:
+        exchange = self._resolve_kr_exchange(symbol)
+        tr_info = _KR_TR_MATRIX[exchange]
+        for tr_id in [tr_info["execution"], tr_info["orderbook"]]:
             msg = {
                 "header": {
                     "approval_key": approval_key,
@@ -202,7 +327,32 @@ class KISQuoteManager:
             }
             await self._ws.send(json.dumps(msg))
         self._subscribed_symbols.add(symbol)
-        logger.debug("[QuoteService] 구독 등록: %s", symbol)
+        self._kr_active_exchange[symbol] = exchange
+        logger.debug("[QuoteService] 구독 등록: %s (exchange=%s)", symbol, exchange)
+
+    async def _send_unsubscribe(self, symbol: str, exchange: str):
+        """KR 종목 구독 해제. 시간대 경계 변경 시 reconcile 용도."""
+        if not self._ws:
+            return
+        approval_key = self._get_approval_key()
+        tr_info = _KR_TR_MATRIX.get(exchange)
+        if not tr_info:
+            return
+        for tr_id in [tr_info["execution"], tr_info["orderbook"]]:
+            msg = {
+                "header": {
+                    "approval_key": approval_key,
+                    "personalseckey": "1",
+                    "custtype": "P",
+                    "tr_type": "2",  # 2=해제
+                    "content-type": "utf-8",
+                },
+                "body": {"input": {"tr_id": tr_id, "tr_key": symbol}},
+            }
+            try:
+                await self._ws.send(json.dumps(msg))
+            except Exception as e:
+                logger.debug("[QuoteService] unsubscribe 전송 실패 %s/%s: %s", symbol, tr_id, e)
 
     async def _send_subscribe_fno(self, symbol: str):
         fno_type = _resolve_fno_type(symbol)
@@ -223,6 +373,38 @@ class KISQuoteManager:
             await self._ws.send(json.dumps(msg))
         self._subscribed_symbols.add(symbol)
         logger.debug("[QuoteService] FNO 구독 등록: %s (%s)", symbol, fno_type)
+
+    async def _send_subscribe_market_status(self):
+        """H0UNMKO0/H0STMKO0/H0NXMKO0 장운영정보 3개 동시 구독."""
+        if not self._ws:
+            return
+        approval_key = self._get_approval_key()
+        for tr_id in ("H0UNMKO0", "H0STMKO0", "H0NXMKO0"):
+            msg = {
+                "header": {
+                    "approval_key": approval_key,
+                    "personalseckey": "1",
+                    "custtype": "P",
+                    "tr_type": "1",
+                    "content-type": "utf-8",
+                },
+                # 장운영정보는 거래소(시장) 단위 — tr_key는 빈 문자열 또는 시장 코드
+                "body": {"input": {"tr_id": tr_id, "tr_key": ""}},
+            }
+            try:
+                await self._ws.send(json.dumps(msg))
+            except Exception as e:
+                logger.debug("[QuoteService] market-status 등록 실패 %s: %s", tr_id, e)
+        logger.info("[QuoteService] 장운영정보(H0UNMKO0/H0STMKO0/H0NXMKO0) 구독 등록")
+
+    async def _broadcast_market_status(self, message: dict):
+        """장운영정보 메시지를 모든 market_status 구독자에게 broadcast."""
+        for q in list(self._market_status_subscribers):
+            try:
+                q.put_nowait(message)
+            except asyncio.QueueFull:
+                # market_status는 빈도가 낮으므로 drop 시 다음 메시지에서 자연 복원
+                pass
 
     async def _send_subscribe_notice(self):
         """H0STCNI0 체결통보 구독 등록."""
@@ -295,6 +477,9 @@ class KISQuoteManager:
                     await self._send_subscribe(symbol)
             # 체결통보 구독
             await self._send_subscribe_notice()
+            # 장운영정보 구독자가 있으면 재연결 시 자동 재구독
+            if self._market_status_subscribers:
+                await self._send_subscribe_market_status()
             async for message in ws:
                 if not self._running:
                     break
@@ -309,14 +494,24 @@ class KISQuoteManager:
             if len(tokens) < 4:
                 return
             tr_id = tokens[1]
-            if tr_id == "H0STCNT0":
+            # KR 종목: 통합(H0UN*) / KRX(H0ST*) / NXT(H0NX*) 모두 동일 파서 재사용
+            if tr_id in _KR_EXECUTION_TR_IDS:
                 parsed = self._parse_execution(tokens[3])
                 if parsed:
                     await self._broadcast(parsed["symbol"], {"type": "price", **parsed})
-            elif tr_id == "H0STASP0":
+            elif tr_id in _KR_ORDERBOOK_TR_IDS:
                 parsed = self._parse_orderbook(tokens[3])
                 if parsed:
                     await self._broadcast(parsed["symbol"], {"type": "orderbook", **parsed})
+            elif tr_id in _KR_MARKET_STATUS_TR_IDS:
+                # H0UNMKO0/H0STMKO0/H0NXMKO0 — 장운영정보. tr_id 자체가 거래소 식별자.
+                exchange = {"H0UNMKO0": "UN", "H0STMKO0": "KRX", "H0NXMKO0": "NXT"}.get(tr_id, "UN")
+                await self._broadcast_market_status({
+                    "type": "market_status",
+                    "exchange": exchange,
+                    "tr_id": tr_id,
+                    "raw": tokens[3],
+                })
             elif tr_id in _FNO_EXECUTION_TR_IDS:
                 parsed = self._parse_fno_execution(tokens[3])
                 if parsed:

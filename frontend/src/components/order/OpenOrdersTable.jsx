@@ -3,6 +3,7 @@
  */
 import { useState } from 'react'
 import ModifyOrderModal from './ModifyOrderModal'
+import ExchangeBadge from './ExchangeBadge'
 
 function SideBadge({ side }) {
   const isBuy = side === 'buy'
@@ -31,6 +32,7 @@ export default function OpenOrdersTable({ orders, onRefresh, onCancel, onModify 
 
   const COLS = [
     { label: '시장',    align: 'left'  },
+    { label: '거래소',  align: 'left'  },
     { label: '종목',    align: 'left'  },
     { label: '매매',    align: 'left'  },
     { label: '유형',    align: 'left'  },
@@ -62,6 +64,11 @@ export default function OpenOrdersTable({ orders, onRefresh, onCancel, onModify 
             {orders.map((order) => (
               <tr key={order.order_no} className="hover:bg-gray-50">
                 <td className="px-3 py-2 text-xs text-gray-500">{order.market}</td>
+                <td className="px-3 py-2">
+                  {order.market === 'KR' && (
+                    <ExchangeBadge exchange={order.exchange || order.excg_id_dvsn_cd} size="xs" />
+                  )}
+                </td>
                 <td className="px-3 py-2">
                   <div className="font-medium text-gray-900">{order.symbol_name || order.symbol}</div>
                   <div className="text-xs text-gray-400">{order.symbol}</div>

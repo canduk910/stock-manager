@@ -22,7 +22,7 @@ const EMPTY_STATE = {
   connected: false,
 }
 
-export function useQuote(symbol, market = 'KR') {
+export function useQuote(symbol, market = 'KR', exchange = 'auto') {
   const [state, setState] = useState(EMPTY_STATE)
 
   // rAF throttle refs
@@ -71,13 +71,22 @@ export function useQuote(symbol, market = 'KR') {
   }, [])
 
   // url 빌더는 매 connect 시점마다 lazy 평가되어 갱신된 access_token 반영
-  // (stale-token 무한 백오프 방지). symbol/market 변경 시 함수 인스턴스가 갱신되어
-  // useWebSocket 의 useEffect 가 재연결을 트리거.
+  // (stale-token 무한 백오프 방지). symbol/market/exchange 변경 시 함수 인스턴스가
+  // 갱신되어 useWebSocket 의 useEffect 가 재연결을 트리거.
+  // KR 거래소 셀렉터(2026-05-08): exchange ∈ {'auto','UN','KRX','NXT'}.
+  // 'auto' 기본 — 백엔드(KISQuoteManager)가 KST 4구간으로 자동 분기.
   const buildUrl = useCallback(() => {
     if (!symbol) return null
     const base = buildWsUrl(`/ws/quote/${symbol}`)
-    return market === 'FNO' ? `${base}?market=FNO` : base
-  }, [symbol, market])
+    const params = []
+    if (market === 'FNO') params.push('market=FNO')
+    if (market !== 'FNO' && exchange && exchange !== 'auto') {
+      params.push(`exchange=${encodeURIComponent(exchange)}`)
+    } else if (market !== 'FNO' && exchange === 'auto') {
+      params.push('exchange=auto')
+    }
+    return params.length ? `${base}?${params.join('&')}` : base
+  }, [symbol, market, exchange])
 
   const { connected } = useWebSocket(buildUrl, { onMessage })
 
