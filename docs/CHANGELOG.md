@@ -1,5 +1,42 @@
 # 변경 이력
 
+## 2026-05-08 — 시세판/호가창/체결통보 가격 갱신 안 되는 버그 수정 (WS URL stale token)
+
+### 배경
+사용자 보고: "시세판 메뉴가 제대로 작동하지 않고 있어. 가격 갱신이 안됨." 운영 환경(dkstock.cloud)에서 시세판 진입 시 헤더의 연결 표시가 회색("연결 중") 상태로 머물고 카드 가격이 갱신되지 않음. F5 전체 새로고침 후에도 회복 불가.
+
+### 근본 원인
+WS URL의 stale access_token + 인증 처리 비대칭. 사용자가 공유한 WS handshake URL의 JWT를 디코드한 결과 `exp = 2026-05-07 17:20:04 KST`로 이미 만료. 시퀀스:
+1. `useMarketBoardWS.js:9`의 `const WS_URL = buildWsUrl(...)`가 **모듈 로드 시점에 1회만** 평가되어 `localStorage.access_token`을 즉시 URL에 박음.
+2. 동시에 React 마운트 → REST API 호출 → 401 → `api/client.js:35~46`이 자동 refresh → 새 토큰 저장.
+3. 하지만 WS는 **이미 stale URL로 시도** → 백엔드(`routers/market_board.py:128~137`)가 `verify_token` 실패 → `code=1008` close.
+4. `useWebSocket.js:71~80`이 **동일 stale URL**로 무한 백오프(500ms→10s) 재시도 → 회복 불가.
+
+REST는 401 인터셉터로 자동 갱신되지만 WS 경로엔 동등한 인터셉터가 없는 것이 본질. F5 해도 모듈 const 평가가 401 refresh보다 빨라 같은 시퀀스 반복.
+
+동일 패턴이 `useExecutionNotice.js:18`(체결통보), `useQuote.js:73~77`(호가창)에도 존재하여 토큰 만료 후 호가창·체결통보도 회복 불가했던 잠재 버그.
+
+### 변경 (4개 파일, 백엔드 0)
+
+#### A안: `useWebSocket` lazy URL 평가 (사용자 승인)
+- **`frontend/src/hooks/useWebSocket.js`**: `url` 인자 타입 확장 — `string | null | (() => string|null)`. `connect()` 안에서 `const currentUrl = typeof url === 'function' ? url() : url`로 lazy 평가. 1008 close 후 다음 백오프 재시도 시 자동으로 갱신된 access_token을 읽어 자기치유. jsdoc 갱신.
+- **`frontend/src/hooks/useMarketBoardWS.js`**: 모듈 const `WS_URL = buildWsUrl(...)` 폐기 → 모듈 함수 `buildMarketBoardUrl = () => buildWsUrl('/ws/market-board')` (안정 reference). `useWebSocket(buildMarketBoardUrl, ...)`.
+- **`frontend/src/hooks/useExecutionNotice.js`**: 동일 패턴 — 모듈 함수 `buildExecutionNoticeUrl` 정의 후 전달.
+- **`frontend/src/hooks/useQuote.js`**: `useMemo` string url → `useCallback([symbol, market])` url 빌더 함수. symbol/market 변경 시 함수 인스턴스 갱신 → useWebSocket 재연결 트리거 유지.
+
+### 백엔드/DB/도메인 영향
+백엔드(`routers/market_board.py`, `services/quote_kis.py`), nginx(`infra/nginx/app.conf`), 인증 흐름은 모두 정상 — 클라이언트 측 단일 버그. **DB 마이그레이션 0건**.
+
+### 자기치유 흐름
+stale token으로 첫 시도 → 1008 close → 백오프(최대 10초) → connect 재진입 시 url 함수 다시 호출 → REST가 그동안 refresh한 새 토큰이 박힌 URL로 정상 연결.
+
+### 검증
+- frontend 빌드 OK (854 modules transformed).
+- 회귀: 백엔드 변경 0건이므로 기존 테스트 회귀 0.
+- 수동: 운영 배포 후 시세판/호가창/체결통보 모두 토큰 만료 사이클 후에도 자동 회복 확인 필요.
+
+---
+
 ## 2026-05-07 — AI 자문 입력데이터 패널 사업 개요/부문 크래시 버그 수정 + 객체 통째 렌더 방어망
 
 ### 배경

@@ -45,7 +45,7 @@ frontend/
       useDetail.js        useDetailReport
       useOrder.js         useOrderPlace / useBuyable(load(symbol,market,price,orderType,side)) / useOpenOrders / useExecutions / useOrderHistory / useOrderSync / useReservations
       useNotification.js  토스트 상태 관리 + 브라우저 Notification API 래퍼
-      useWebSocket.js     공용 WebSocket 훅. 연결 수명주기 + 지수 백오프 재연결(500ms→10초) + visibilitychange. { connected, sendMessage }. buildWsUrl(path) 헬퍼 export.
+      useWebSocket.js     공용 WebSocket 훅. 연결 수명주기 + 지수 백오프 재연결(500ms→10초) + visibilitychange. { connected, sendMessage }. buildWsUrl(path) 헬퍼 export. **(2026-05-08 stale-token fix)** url 인자에 함수형 추가 — `connect()` 안에서 `typeof url === 'function' ? url() : url` lazy 평가. 1008 close 후 백오프 재시도 시점에 자동으로 신선한 access_token 반영(stale-token 무한 백오프 방지). 호출자는 함수 인스턴스를 모듈 const 또는 useCallback로 안정화 필수.
       useQuote.js         실시간 호가 WebSocket 훅 (useWebSocket 기반). useQuote(symbol, market='KR'). rAF throttle 자체 관리.
       useExecutionNotice.js  체결통보(H0STCNI0) WS 수신 훅 (useWebSocket 기반). /ws/execution-notice 연결. execution_notice 메시지 콜백.
       useMarketBoard.js   useMarketBoard (신고가/신저가 + sparkline + ohlc) + useDisplayStocks (관심종목+별도등록 종목 병합+순서+reorder)

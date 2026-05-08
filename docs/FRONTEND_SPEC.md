@@ -77,7 +77,7 @@ frontend/
 | `useDetail.js` | `useDetailReport()` | `{ data, loading, error, load }` — `load(symbol, years)` |
 | `useOrder.js` | `useOrderPlace()`, `useBuyable()`, `useOpenOrders()`, `useExecutions()`, `useOrderHistory()`, `useOrderSync()`, `useReservations()` | 각각 `{ loading, error, ... }` + 액션 함수 |
 | `useNotification.js` | `useNotification()` | `{ toasts, notify, dismiss }` — 토스트 상태 + 브라우저 Notification API |
-| `useWebSocket.js` | `useWebSocket(url, { onMessage, onOpen })` | `{ connected, sendMessage }` — 공용 WS 연결 수명주기. 지수 백오프 재연결(500ms→10초), visibilitychange 탭 복귀 재연결. url=null이면 연결 안 함. `buildWsUrl(path)` 헬퍼도 export. |
+| `useWebSocket.js` | `useWebSocket(url, { onMessage, onOpen })` | `{ connected, sendMessage }` — 공용 WS 연결 수명주기. 지수 백오프 재연결(500ms→10초), visibilitychange 탭 복귀 재연결. url=null이면 연결 안 함. `buildWsUrl(path)` 헬퍼도 export. **(2026-05-08 stale-token fix)** `url`이 `string \| null \| (() => string\|null)` — 함수형이면 매 connect 시도마다 lazy 평가하여 1008 close 후 백오프 재시도 시 갱신된 access_token을 자동 반영. REST `/api/auth/refresh` 인터셉터(`api/client.js`)와 비대칭이던 stale-token 무한 백오프 버그를 자기치유. 호출자는 함수 reference를 모듈 const 또는 useCallback으로 안정화. |
 | `useQuote.js` | `useQuote(symbol, market='KR')` | `{ price, change, changeRate, sign, asks, bids, totalAskVolume, totalBidVolume, connected }` — `useWebSocket` 기반. `market` 파라미터를 WS URL `?market=` 쿼리로 전달 (`KR`/`FNO`/`US`). 자체 rAF throttle(pendingRef + rafRef)으로 60fps 렌더링 제어. symbol 변경 시 state 초기화. |
 | `useAdvisory.js` | `useAdvisoryStocks()` | `{ stocks, loading, error, load, add, remove }` — 자문종목 목록 CRUD |
 | | `useAdvisoryData()` | `{ data, loading, error, load, refresh }` — 분석 데이터 조회/새로고침. `refresh(code, market, name)` |

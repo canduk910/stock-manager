@@ -4,7 +4,10 @@
  * - visibilitychange 탭 복귀 시 즉시 재연결
  * - 정상 종료(1000) 시 재연결 안 함
  *
- * @param {string|null} url - WebSocket URL (null이면 연결 안 함)
+ * @param {string|null|(() => string|null)} url - WebSocket URL 또는 매 connect 시
+ *   lazy 평가될 함수. 함수형은 401/1008 close 후 백오프 재시도 시점에 최신 token이
+ *   박힌 URL을 다시 만들어 stale token으로 무한 재시도되는 문제를 자기치유한다.
+ *   호출자는 함수 인스턴스를 안정화(모듈 const 또는 useCallback)해야 매번 재연결되지 않는다.
  * @param {object} options
  * @param {(msg: any) => void} options.onMessage - 파싱된 JSON 메시지 핸들러
  * @param {(ws: WebSocket) => void} [options.onOpen] - 연결 성공 콜백
@@ -33,6 +36,9 @@ export function useWebSocket(url, { onMessage, onOpen } = {}) {
 
   const connect = useCallback(() => {
     if (!url) return
+    // url 이 함수면 매 connect 시도마다 lazy 평가 → localStorage 의 최신 access_token 반영.
+    const currentUrl = typeof url === 'function' ? url() : url
+    if (!currentUrl) return
 
     // 이전 WS 정리
     if (wsRef.current) {
@@ -45,7 +51,7 @@ export function useWebSocket(url, { onMessage, onOpen } = {}) {
       retryRef.current = null
     }
 
-    const ws = new WebSocket(url)
+    const ws = new WebSocket(currentUrl)
     wsRef.current = ws
 
     ws.onopen = () => {
@@ -84,12 +90,11 @@ export function useWebSocket(url, { onMessage, onOpen } = {}) {
   // visibilitychange: 탭 복귀 시 즉시 재연결
   useEffect(() => {
     const handleVisibility = () => {
-      if (document.visibilityState === 'visible' && url) {
-        const ws = wsRef.current
-        if (!ws || ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) {
-          backoffRef.current = 500
-          connect()
-        }
+      if (document.visibilityState !== 'visible' || !url) return
+      const ws = wsRef.current
+      if (!ws || ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) {
+        backoffRef.current = 500
+        connect()
       }
     }
     document.addEventListener('visibilitychange', handleVisibility)

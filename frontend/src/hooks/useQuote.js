@@ -7,7 +7,7 @@
  * 비정상 종료 시 지수 백오프 재연결 (500ms → 최대 10초).
  * rAF throttle로 고빈도 리렌더링 방지.
  */
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useWebSocket, buildWsUrl } from './useWebSocket'
 
 const EMPTY_STATE = {
@@ -70,13 +70,16 @@ export function useQuote(symbol, market = 'KR') {
     }
   }, [])
 
-  const url = useMemo(() => {
+  // url 빌더는 매 connect 시점마다 lazy 평가되어 갱신된 access_token 반영
+  // (stale-token 무한 백오프 방지). symbol/market 변경 시 함수 인스턴스가 갱신되어
+  // useWebSocket 의 useEffect 가 재연결을 트리거.
+  const buildUrl = useCallback(() => {
     if (!symbol) return null
     const base = buildWsUrl(`/ws/quote/${symbol}`)
     return market === 'FNO' ? `${base}?market=FNO` : base
   }, [symbol, market])
 
-  const { connected } = useWebSocket(url, { onMessage })
+  const { connected } = useWebSocket(buildUrl, { onMessage })
 
   // symbol 변경 시 state 초기화
   useEffect(() => {

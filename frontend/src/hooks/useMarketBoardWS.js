@@ -6,7 +6,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useWebSocket, buildWsUrl } from './useWebSocket'
 
-const WS_URL = buildWsUrl('/ws/market-board')
+// 함수 인스턴스는 모듈 스코프에 한 번만 생성(안정 reference) — 매 connect 시점마다 lazy 평가되어
+// localStorage 의 갱신된 access_token 을 자동 반영한다(stale-token 무한 백오프 방지).
+const buildMarketBoardUrl = () => buildWsUrl('/ws/market-board')
 
 export function useMarketBoardWS() {
   const [prices, setPrices] = useState({})
@@ -50,7 +52,7 @@ export function useMarketBoardWS() {
     }
   }, [])
 
-  const { connected, sendMessage } = useWebSocket(WS_URL, { onMessage, onOpen })
+  const { connected, sendMessage } = useWebSocket(buildMarketBoardUrl, { onMessage, onOpen })
 
   const subscribe = useCallback((symbols) => {
     if (!symbols || symbols.length === 0) return
