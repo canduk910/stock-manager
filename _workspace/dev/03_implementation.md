@@ -1,175 +1,122 @@
-# Step 1~3 GREEN 구현 산출
+# GREEN 단계 — 구현 결과
 
-## Step 1 — REQ-WS-01 KIS WS 호가 채널 통합
+작성일: 2026-05-09
+작성자: BackendDev (개발팀장 위임)
 
-### 변경 파일
+## 변경/신규 파일 목록
 
-**`services/quote_overseas.py`** (+220 lines)
+### 코드 변경 (6 파일)
 
-#### 신규 클래스: `KISOverseasOrderbookWS`
+| 파일 | 변경 유형 | 라인 증감 | 요건 |
+|------|----------|----------|------|
+| `db/repositories/backtest_repo.py` | 수정 | +35 / -3 | REQ-FIX-01 |
+| `services/backtest_service.py` | 수정 | +85 / -10 | REQ-FIX-01/04/05/06 |
+| `services/local_backtest/data_loader.py` | 전면 재작성 | +100 / -65 | REQ-FIX-02 |
+| `services/local_backtest/engine.py` | 수정 | +75 / -8 | REQ-FIX-03/04 |
+| `routers/backtest.py` | 수정 | +50 / -10 | REQ-FIX-06 |
+| `main.py` | 수정 | +35 / -3 | REQ-FIX-01/06 |
 
-```python
-class KISOverseasOrderbookWS:
-    """KIS 해외 호가(HDFSASP0) WebSocket 클라이언트."""
+### 테스트 신규 (6 파일, 25 케이스)
 
-    KIS_OVERSEAS_WS_URL = "ws://ops.koreainvestment.com:21000"
-
-    def __init__(self, on_orderbook=None, on_disconnect=None, on_reconnect=None): ...
-    async def start(self): ...      # approval_key 발급 → ws connect → 메시지 루프
-    async def stop(self): ...
-    async def subscribe(self, rsym: str): ...
-    async def unsubscribe(self, rsym: str): ...
-    @property
-    def is_connected(self) -> bool: ...
-```
-
-**핵심 동작**:
-- `_issue_approval_key()` — `routers/_kis_auth.get_kis_credentials(None)` 운영자 키 → KIS `/oauth2/Approval` 호출
-- `_connect_loop()` — 지수 백오프 1→2→4→8→16→30s 캡 (KIS rate limit 준수, OrderAdvisor 자문 반영)
-- `_run_ws()` — websockets.connect + 모든 토픽 재등록 + `on_reconnect` 콜백
-- `_send_subscribe(rsym, register=True/False)` — `tr_id="HDFSASP0"`, `tr_type="1"(등록)/"2"(해지)`, `tr_key=rsym`
-- `_handle_message(data)` — `0|HDFSASP0|N|<payload>` 파싱 (wrapper.parse_overseas_orderbook 재사용) + PINGPONG 자동 응답
-- 텔레메트리: `quote_overseas.kis_orderbook_ws.{connect,disconnect,reconnect_attempt,topic_subscribe,topic_unsubscribe,message,start,stop}`
-
-#### `OverseasQuoteManager` 통합
-
-| 변경점 | 동작 |
-|--------|------|
-| `__init__` | `_kis_ob_ws`, `_kis_ob_symbols: dict[str, str]` 추가 |
-| `start()` | `KISOverseasOrderbookWS()` 생성 + start. 실패 시 `_kis_ob_ws=None` graceful (REST 폴백) |
-| `stop()` | WS stop + 폴러 cancel + 캐시 정리 |
-| `subscribe()` | 호가 라인을 `_subscribe_orderbook(symbol)`로 분기 |
-| `_subscribe_orderbook()` | WS 정상 → 토픽 등록 / 비정상 → REST 폴러 시작 |
-| `unsubscribe()` | WS 토픽 해제 + REST 폴러 cancel |
-| `_on_kis_orderbook_ws_message()` | broadcast (shape 보존) + 해당 종목 REST 폴러 cancel(중복 방지) |
-| `_on_kis_ob_ws_disconnect()` | 모든 구독 종목 REST 폴링 자동 시작 |
-| `_on_kis_ob_ws_reconnect()` | 토픽 재등록 + 모든 REST 폴러 cancel |
-| `_build_kis_topic_async()` | `_resolve_exchange()` executor 호출 → `f"D{excd}{symbol}"` |
-
-### Broadcast Shape (불변)
-
-```python
-{
-  "type": "orderbook",
-  "symbol": "AAPL",
-  "asks": [{"price": 200.10, "volume": 100}, ...],
-  "bids": [...],
-  "total_ask_volume": 5500,
-  "total_bid_volume": 6700,
-}
-```
-→ 프론트 `useQuote` 변경 0건.
-
-### GREEN 결과
-- `tests/unit/test_quote_overseas_kis_ws_orderbook.py` 6/6 PASS
-- 회귀: `tests/unit/test_quote_overseas_kis_orderbook.py` 3/3 PASS, `test_quote_overseas_kis_first.py` 4/4 PASS
-
----
-
-## Step 2 — REQ-FE-02 useUsMarketClock 공휴일
-
-### 변경 파일
-
-**`frontend/src/hooks/useUsMarketClock.js`** (+90 lines)
-
-#### 신규 export
-
-```js
-export const US_HOLIDAYS_ET = new Set([
-  // 2026: 10일 (NewYear/MLK/Pres/GoodFri/Memorial/Juneteenth/IndepDay observed/Labor/Thanks/Christmas)
-  '2026-01-01', '2026-01-19', '2026-02-16', '2026-04-03', '2026-05-25',
-  '2026-06-19', '2026-07-03', '2026-09-07', '2026-11-26', '2026-12-25',
-  // 2027: 10일 (observed 보정 포함)
-  '2027-01-01', '2027-01-18', '2027-02-15', '2027-03-26', '2027-05-31',
-  '2027-06-18', '2027-07-05', '2027-09-06', '2027-11-25', '2027-12-24',
-  // 2028: 10일
-  '2028-01-03', '2028-01-17', '2028-02-21', '2028-04-14', '2028-05-29',
-  '2028-06-19', '2028-07-04', '2028-09-04', '2028-11-23', '2028-12-25',
-])
-
-export function isUsHoliday(input) { ... }  // Date | 'YYYY-MM-DD' → boolean
-```
-
-#### `resolveUsPhaseByClock` 분기 추가
-
-```js
-// 주말 → closed
-if (weekday === 'Sat' || weekday === 'Sun') {
-  return { phase: 'closed', etTime, kstTime, holiday: null }
-}
-// 공휴일 → closed (REQ-FE-02 신규)
-const etDate = _etDateStr(now)
-if (US_HOLIDAYS_ET.has(etDate)) {
-  return { phase: 'closed', etTime, kstTime, holiday: etDate }
-}
-```
-
-#### 라벨 빌더
-
-```js
-function _buildLabel(r) {
-  if (r.phase === 'closed' && r.holiday) {
-    return `${PHASE_LABELS.closed} 휴장 (${r.holiday})`
-  }
-  return `${PHASE_LABELS[r.phase]} (ET ${r.etTime} / KST ${r.kstTime})`
-}
-```
-
-훅 반환에 `holiday: 'YYYY-MM-DD' | null` 필드 추가 (백워드 호환 — 옵셔널).
-
-### GREEN 결과
-- `tests/unit/test_us_market_clock_holidays.py` 4/4 PASS
-- `npm run build` ✓ built in 4.64s (1,472KB JS / 58KB CSS, 회귀 없음)
-
----
-
-## Step 3 — REQ-INT-03 실키 통합 테스트
-
-### 변경 파일
-
-| 파일 | 변경 |
+| 파일 | 라인 |
 |------|------|
-| `tests/integration/test_kis_overseas_live.py` | 신규 (145 lines) |
-| `pytest.ini` | `live` 마커 등록 |
-| `_workspace/dev/05_live_test_runbook.md` | 신규 (사용자 런북) |
+| `tests/unit/test_backtest_local_alembic_safe.py` | 152 |
+| `tests/unit/test_local_backtest_data_loader_cache.py` | 116 |
+| `tests/unit/test_local_backtest_engine_datetime.py` | 132 |
+| `tests/unit/test_local_backtest_jsonable.py` | 75 |
+| `tests/unit/test_backtest_mcp_vps_error.py` | 90 |
+| `tests/unit/test_backtest_router_logging.py` | 130 |
 
-### 가드
+## 핵심 구현 요약
 
-```python
-pytestmark = [
-    pytest.mark.live,
-    pytest.mark.skipif(not os.getenv("KIS_LIVE_TEST"), reason="..."),
-]
-```
+### REQ-FIX-01: alembic 안전화 (1순위, 가장 유력)
 
-WS 테스트는 추가로 `_is_us_market_open_now()` (ET 09:30~16:00 평일) 가드 — 시간외 자동 skip.
+**`db/repositories/backtest_repo.py`**:
+- `_is_symbols_column_missing(err)` 헬퍼: PostgreSQL/SQLite/MySQL 메시지 패턴 매칭
+- `BacktestRepository.create_job()`: `OperationalError`/`ProgrammingError` 캐치 후
+  `symbols` 컬럼 부재 패턴이면 페이로드에서 제외하고 1회 재시도
+- 다른 SQL 에러는 그대로 raise → 상위에서 ServiceError 변환
 
-### 검증 항목
+**`services/backtest_service.py:run_local_backtest`**:
+- `save_backtest_job` 호출을 try/except로 감싸 `ServiceError("백테스트 작업 등록 실패 ...")` 변환
+- raw 500 → 400 ServiceError로 변환 (사용자 친화)
 
-1. **HHDFS76200100**: AAPL 호가 → asks/bids 비어있지 않음 + 가격 > 0
-2. **HHDFS76200200**: AAPL 상세 → open/high/low/last/prev_close/high_52w/low_52w 모두 > 0
-3. **HDFSASP0 WS**: AAPL 구독 → 5초 내 메시지 수신 + 파싱 결과 비어있지 않음
+**`main.py:lifespan`**:
+- `alembic upgrade head` 후 `script.get_current_head()` vs `MigrationContext.get_current_revision()`
+  비교 → 불일치 시 `print("[오류] alembic 미적용 감지: current=... head=...")` 명확 알림
+- 부팅은 막지 않음 (graceful 운영)
 
-각 실패 메시지에 응답 필드명 보정 위치(예: `_normalize_orderbook_response`의 `pask{i}`/`vask{i}` 매핑)를 명시.
+### REQ-FIX-02: data_loader 캐시
 
-### CI 회귀 0
-- `KIS_LIVE_TEST` 미설정 → 3/3 SKIP
+**`services/local_backtest/data_loader.py`** 전면 재작성:
+- 캐시 값을 `(df, ts)` 튜플로 변경
+- `_cache_get(key)`: `time.time() - ts > 600` (10분) 시 stale 판정
+- `load()`: 1차 None 시 `time.sleep(5)` 후 1회 재시도
+- 최종 None은 캐시 미저장 (다음 호출 재시도 가능)
+- `logger.warning("[REQ-FIX-02] data_loader 미스 ...")` 가시화
 
----
+### REQ-FIX-03: engine datetime normalize
 
-## 신규/수정 라인 합계
+**`services/local_backtest/engine.py`**:
+- 종목별 OHLCV fetch 직후: `df.index.tz_localize(None).normalize()` 통일
+- `_idx_for(df, d)`: `pd.Timestamp(d).normalize()` 검색
+- 매칭 실패 시 `logger.debug("[REQ-FIX-03] _idx_for 매칭 실패 ...")` (silent skip 가시화)
 
-| 파일 | 변경량 |
-|------|--------|
-| `services/quote_overseas.py` | +220 lines (KIS WS 클래스 + Manager 통합) |
-| `frontend/src/hooks/useUsMarketClock.js` | +90 lines (공휴일 30개 + 분기 + 라벨) |
-| `tests/unit/test_quote_overseas_kis_ws_orderbook.py` | +290 lines (신규) |
-| `tests/unit/test_us_market_clock_holidays.py` | +75 lines (신규) |
-| `tests/integration/test_kis_overseas_live.py` | +145 lines (신규) |
-| `pytest.ini` | +1 line (live 마커) |
-| `_workspace/dev/02_test_red.md` | 신규 |
-| `_workspace/dev/03_implementation.md` | 신규 |
-| `_workspace/dev/04_qa_report.md` | 신규 |
-| `_workspace/dev/05_live_test_runbook.md` | 신규 (160 lines) |
+### REQ-FIX-04: JSON 직렬화 안전화
 
-**총 +820 lines (코드/테스트), +0 DB 변경, +0 프론트 컴포넌트 변경**.
+**`services/local_backtest/engine.py:_to_jsonable(obj)`** 신규:
+- numpy float* / int* / bool_ / ndarray → Python native
+- pd.Timestamp / datetime / date → ISO 문자열
+- NaN / Inf → None (JSON spec 호환)
+- dict / list / tuple → 재귀 변환
+- numpy import 실패 시 graceful (try/except ImportError)
+
+**`services/backtest_service.py:run_local_backtest`**:
+- `_to_jsonable(result_json)` + `_to_jsonable(sim.metrics)` 응답 직전 적용 (이중 안전망)
+- 직렬화 실패 시 `ExternalAPIError("결과 직렬화 실패: ...")` + telemetry `backtest.local.fail.serialize`
+
+### REQ-FIX-05: MCP 'vps' 친화 메시지
+
+**`services/backtest_service.py:_extract_mcp_content`**:
+- `_DATA_PREP_FAILURE_PATTERNS = ("vps", "데이터 준비 실패", "data preparation failed")`
+- `_is_data_prep_failure(error_msg)` 패턴 매칭 헬퍼
+- success=false 분기에서 패턴 일치 시:
+  - 사용자: "백테스트 데이터 조회 실패: 종목 코드를 확인하거나 다른 날짜 범위로 재시도하세요. (외부 backtester 데이터 준비 실패)"
+  - 운영: `logger.warning("MCP backtester data preparation error: %s", error_msg)` 보존
+- `# TODO: backtester 'vps' 키 누락 fix 필요 (open-trading-api/backtester)` 코멘트
+
+### REQ-FIX-06: 라우터 로깅 + error_id + telemetry
+
+**`services/backtest_service.py`**:
+- `_classify_local_failure(exc)` — db_error/serialize/timeout/data_load/unknown 분류
+- `run_local_backtest` 진입부 entry 로그 + 모든 except에서 `_tel.record_event("backtest.local.fail.{cause}")` 증가
+- 정상 종료 시 `_tel.record_event("backtest.local.success")` + `_tel.observe("backtest.local.duration_ms", ...)` + exit 로그
+
+**`routers/backtest.py`**:
+- `run_local`/`run_preset`/`run_custom`/`run_batch` 4개 핸들러에 entry/exit 로그
+  (preset, len(symbols), market, dates, user_id / job_id, status)
+
+**`main.py:service_error_handler`**:
+- `error_id = uuid.uuid4().hex[:8]` 발행
+- 응답 본문에 `error_id` 추가 (기존 `detail` 보존, 후방 호환 100%)
+- `logger.error("[%s] ServiceError ...", error_id, exc_info=True)` — 운영 stack trace 매칭용
+
+## 도메인 자문 (OrderAdvisor) 검토
+
+1. **symbols 컬럼 NULL 시 데이터 무결성**
+   - `BacktestJob.symbols`는 `nullable=True` JSON 컬럼 — NULL 허용
+   - `to_dict()` 정상 NULL 반환
+   - 후속 조회/리스트는 `symbols` 미참조
+   - 응답 `result_json` 내 `symbols` 리스트는 별도 저장 → 사용자 화면 영향 없음
+   - **결론: 데이터 무결성 영향 없음**
+
+2. **MCP 'vps' 친화 메시지의 사용자 의사결정 충분성**
+   - 행동 가이드 2개: 종목 코드 확인 / 날짜 범위 변경
+   - 'vps' 단어는 의미 불명 → 노출 차단 정당
+   - 운영 디버깅: `docker logs`에 원본 보존
+   - **결론: 충분**
+
+## REQ-OPS-07 (CloudWatch) — 미실행
+
+본 phase 범위 외. Terraform 변경 + IAM 역할 별도 phase 권고. 본 작업에서
+`docker-compose.prod.yml` 미터치.

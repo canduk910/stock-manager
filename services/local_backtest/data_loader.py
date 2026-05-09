@@ -1,14 +1,26 @@
-"""yfinance 일봉 fetch + 단일 백테스트 내 캐시 (KR 전용 MVP)."""
+"""yfinance 일봉 fetch + 단일 백테스트 내 캐시 (KR 전용 MVP).
+
+REQ-FIX-02 (2026-05-09):
+- yfinance None/empty 영구 캐시 버그 수정 → 미저장 + 다음 호출 재시도 가능
+- 단일 load 내 1회 즉시 재시도 (5초 대기) — rate limit 일시 실패 대응
+- TTL 10분 (`time.time()` 기반) — 영구 캐시 안 함
+"""
 
 from __future__ import annotations
 
 import logging
+import time
 from datetime import date, timedelta
 from typing import Optional
 
 import pandas as pd
 
 logger = logging.getLogger(__name__)
+
+
+# REQ-FIX-02: 캐시 TTL (초) — 단일 백테스트 실행 내 동일 종목 재조회 방어용.
+_CACHE_TTL_SEC = 600  # 10분
+_RETRY_SLEEP_SEC = 5  # 1차 None 시 재시도 대기
 
 
 def _resolve_kr_ticker(code: str) -> Optional[str]:
@@ -80,21 +92,61 @@ def fetch_daily_ohlcv(
 
 
 class DataLoader:
-    """단일 백테스트 실행 내 캐시. 동일 종목 OHLCV 1회 fetch."""
+    """단일 백테스트 실행 내 캐시. 동일 종목 OHLCV 1회 fetch.
+
+    REQ-FIX-02: None 영구화 버그 수정 + 재시도 + TTL.
+    """
 
     def __init__(self, market: str = "KR") -> None:
         self.market = market.upper()
-        self._cache: dict[str, Optional[pd.DataFrame]] = {}
+        # value: (df, ts) — ts 는 캐시 저장 시각 (`time.time()`)
+        self._cache: dict[str, tuple[Optional[pd.DataFrame], float]] = {}
+
+    def _cache_get(self, key: str) -> tuple[bool, Optional[pd.DataFrame]]:
+        """캐시 조회 — (hit, df). TTL 만료 시 (False, None)."""
+        item = self._cache.get(key)
+        if item is None:
+            return False, None
+        df, ts = item
+        if (time.time() - ts) > _CACHE_TTL_SEC:
+            return False, None
+        return True, df
 
     def load(
         self, code: str, start: date, end: date, history_buffer_days: int = 80
     ) -> Optional[pd.DataFrame]:
-        """code 일봉을 [start - buffer, end] 범위로 반환. 캐시 활용."""
+        """code 일봉을 [start - buffer, end] 범위로 반환. 캐시 활용.
+
+        REQ-FIX-02:
+        - None 결과는 캐시에 저장하지 않음 (다음 호출에서 재시도 가능)
+        - 1차 None 시 1회 즉시 재시도(`_RETRY_SLEEP_SEC` 대기)
+        - TTL 10분 — 만료 시 재조회
+        """
         key = code
-        if key in self._cache:
-            return self._cache[key]
+        hit, cached = self._cache_get(key)
+        if hit:
+            return cached
+
         # 시그널 계산용 버퍼 추가 (donchian_swing required_history=65 + 여유)
         fetch_start = start - timedelta(days=history_buffer_days)
         df = fetch_daily_ohlcv(code, fetch_start, end, market=self.market)
-        self._cache[key] = df
+
+        # 1차 None → 5초 대기 후 재시도 (일시 rate limit 대응)
+        if df is None or (isinstance(df, pd.DataFrame) and df.empty):
+            try:
+                time.sleep(_RETRY_SLEEP_SEC)
+            except Exception:
+                pass
+            df = fetch_daily_ohlcv(code, fetch_start, end, market=self.market)
+
+        if df is None or (isinstance(df, pd.DataFrame) and df.empty):
+            # REQ-FIX-02 핵심: None은 캐시에 저장하지 않음 → 다음 호출 재시도 가능
+            logger.warning(
+                "[REQ-FIX-02] data_loader 미스 (캐시 미저장) code=%s start=%s end=%s",
+                code, start, end,
+            )
+            return None
+
+        # 정상 데이터만 캐시에 저장 (TS 동봉)
+        self._cache[key] = (df, time.time())
         return df

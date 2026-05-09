@@ -250,6 +250,8 @@ KIS AI Extensions MCP 서버 연동. `KIS_MCP_ENABLED=true` + MCP 서버 실행 
 
 > 백테스트는 서버에서 실행되므로 다른 페이지로 이동해도 작업이 중단되지 않습니다. 돌아오면 이력에서 결과를 확인할 수 있습니다.
 
+> **(2026-05-09 운영 안정화)** MCP 응답 에러 분류 개선 — `'vps'` 키 누락(KIS yaml 모의투자 섹션) 시 운영자 가이드 메시지 자동 노출. 일반 데이터 준비 실패 시 종목/날짜 가이드 노출. ServiceError 응답 본문에 `error_id`(8자리 hex) 추가로 사용자 보고 시 stack trace 즉시 매칭 가능. 라우터 entry/exit 로그 + telemetry `backtest.local.{success,fail.cause}` 카운터로 운영 가시성 강화. backtester EC2 yaml은 SSM Parameter Store(SecureString)에 영속화되어 EC2 재생성 시 자동 복구.
+
 #### 로컬 프리셋 모드 (자체 Python 일봉 엔진)
 **MCP 무관** — `KIS_MCP_ENABLED=false`여도 동작. KR 종목만 지원.
 

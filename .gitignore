@@ -44,3 +44,9 @@ infra/.terraform.lock.hcl
 
 # Excel 참고 문서
 docs/*.xlsx
+
+# AWS pem
+scripts/*.pem
+
+# Claude Code 개인 권한 설정
+.claude/settings.local.json

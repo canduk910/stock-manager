@@ -56,6 +56,32 @@ resource "aws_iam_role_policy" "ssm_params" {
   })
 }
 
+# ── CloudWatch Logs (REQ-OPS-07, 2026-05-09) ────────────────
+resource "aws_cloudwatch_log_group" "main" {
+  name              = "/${var.project_name}/prod"
+  retention_in_days = var.log_retention_days
+
+  tags = { Name = "${var.project_name}-logs" }
+}
+
+resource "aws_iam_role_policy" "cloudwatch_logs" {
+  name = "${var.project_name}-cloudwatch-logs"
+  role = aws_iam_role.ec2.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = [
+        "logs:CreateLogStream",
+        "logs:PutLogEvents",
+        "logs:DescribeLogStreams"
+      ]
+      Resource = "${aws_cloudwatch_log_group.main.arn}:*"
+    }]
+  })
+}
+
 resource "aws_iam_instance_profile" "ec2" {
   name = "${var.project_name}-ec2-profile"
   role = aws_iam_role.ec2.name
@@ -97,6 +123,14 @@ output "instance_id" {
   value = aws_instance.main.id
 }
 
+output "log_group_name" {
+  value = aws_cloudwatch_log_group.main.name
+}
+
+output "log_group_arn" {
+  value = aws_cloudwatch_log_group.main.arn
+}
+
 # ── Variables ───────────────────────────────────────────────
 variable "project_name" {
   type = string
@@ -120,4 +154,10 @@ variable "key_pair_name" {
 
 variable "ec2_instance_type" {
   type = string
+}
+
+variable "log_retention_days" {
+  type        = number
+  default     = 14
+  description = "CloudWatch Logs retention in days (REQ-OPS-07)"
 }

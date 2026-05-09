@@ -39,15 +39,28 @@ resource "aws_iam_role_policy" "backtester_ssm_params" {
 
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [{
-      Effect = "Allow"
-      Action = [
-        "ssm:GetParametersByPath",
-        "ssm:GetParameter",
-        "ssm:GetParameters"
-      ]
-      Resource = "arn:aws:ssm:*:*:parameter/${var.project_name}/*"
-    }]
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "ssm:GetParametersByPath",
+          "ssm:GetParameter",
+          "ssm:GetParameters"
+        ]
+        Resource = "arn:aws:ssm:*:*:parameter/${var.project_name}/*"
+      },
+      {
+        # 2026-05-09: backtester EC2 가 자기 kis_devlp.yaml 을 SSM 에 영속화하기 위함.
+        # 자격증명 회전 시 EC2 안에서 put-parameter 실행 → CloudTrail 에 명령만 남고
+        # 자격증명 본문은 EC2 외부로 유출되지 않음.
+        # 대상 파라미터를 1개로 좁혀 최소 권한 유지.
+        Effect = "Allow"
+        Action = [
+          "ssm:PutParameter"
+        ]
+        Resource = "arn:aws:ssm:*:*:parameter/${var.project_name}/prod/kis_devlp_yaml"
+      }
+    ]
   })
 }
 

@@ -100,7 +100,11 @@ def get_indicators(_user: dict = Depends(get_current_user)):
 @router.post("/run/preset")
 def run_preset(body: PresetBacktestBody, user: dict = Depends(get_current_user)):
     """프리셋 전략 백테스트 실행."""
-    return backtest_service.run_preset_backtest(
+    logger.info(
+        "[backtest.preset.entry] preset=%s symbol=%s market=%s start=%s end=%s user_id=%s",
+        body.preset, body.symbol, body.market, body.start_date, body.end_date, user["id"],
+    )
+    out = backtest_service.run_preset_backtest(
         preset=body.preset,
         symbol=body.symbol,
         market=body.market,
@@ -114,12 +118,22 @@ def run_preset(body: PresetBacktestBody, user: dict = Depends(get_current_user))
         slippage=body.slippage,
         user_id=user["id"],
     )
+    logger.info(
+        "[backtest.preset.exit] job_id=%s status=%s",
+        out.get("job_id") if isinstance(out, dict) else None,
+        out.get("status") if isinstance(out, dict) else None,
+    )
+    return out
 
 
 @router.post("/run/custom")
 def run_custom(body: CustomBacktestBody, user: dict = Depends(get_current_user)):
     """커스텀 YAML 전략 백테스트 실행."""
-    return backtest_service.run_custom_backtest(
+    logger.info(
+        "[backtest.custom.entry] symbol=%s market=%s start=%s end=%s user_id=%s",
+        body.symbol, body.market, body.start_date, body.end_date, user["id"],
+    )
+    out = backtest_service.run_custom_backtest(
         yaml_content=body.yaml_content,
         symbol=body.symbol,
         market=body.market,
@@ -133,12 +147,22 @@ def run_custom(body: CustomBacktestBody, user: dict = Depends(get_current_user))
         builder_state=body.builder_state,
         user_id=user["id"],
     )
+    logger.info(
+        "[backtest.custom.exit] job_id=%s status=%s",
+        out.get("job_id") if isinstance(out, dict) else None,
+        out.get("status") if isinstance(out, dict) else None,
+    )
+    return out
 
 
 @router.post("/run/batch")
 def run_batch(body: BatchBacktestBody, _user: dict = Depends(get_current_user)):
     """배치 비교 (여러 전략)."""
-    return backtest_service.run_batch_backtest(
+    logger.info(
+        "[backtest.batch.entry] presets=%s symbol=%s market=%s",
+        body.presets, body.symbol, body.market,
+    )
+    out = backtest_service.run_batch_backtest(
         presets=body.presets,
         symbol=body.symbol,
         market=body.market,
@@ -146,6 +170,11 @@ def run_batch(body: BatchBacktestBody, _user: dict = Depends(get_current_user)):
         end_date=body.end_date,
         initial_cash=body.initial_cash,
     )
+    logger.info(
+        "[backtest.batch.exit] symbol=%s presets=%d",
+        body.symbol, len(body.presets),
+    )
+    return out
 
 
 # ── 로컬 백테스트 (services/local_backtest 패키지, MCP 미사용) ──────────────────
@@ -163,7 +192,11 @@ def get_local_presets(_user: dict = Depends(get_current_user)):
 @router.post("/run/local")
 def run_local(body: LocalBacktestBody, user: dict = Depends(get_current_user)):
     """로컬 4개 전략 + 균등 배분 포트폴리오 일봉 백테스트 (KR 전용 MVP)."""
-    return backtest_service.run_local_backtest(
+    logger.info(
+        "[backtest.local.router_entry] preset=%s symbols_n=%d market=%s start=%s end=%s user_id=%s",
+        body.preset, len(body.symbols), body.market, body.start_date, body.end_date, user["id"],
+    )
+    out = backtest_service.run_local_backtest(
         preset=body.preset,
         symbols=body.symbols,
         market=body.market,
@@ -176,6 +209,12 @@ def run_local(body: LocalBacktestBody, user: dict = Depends(get_current_user)):
         params=body.params,
         user_id=user["id"],
     )
+    logger.info(
+        "[backtest.local.router_exit] job_id=%s status=%s",
+        out.get("job_id") if isinstance(out, dict) else None,
+        out.get("status") if isinstance(out, dict) else None,
+    )
+    return out
 
 
 @router.get("/result/{job_id}")

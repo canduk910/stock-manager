@@ -1,5 +1,96 @@
 # 변경 이력
 
+## 2026-05-09 — 백테스트 500 두 갈래 픽스 + 운영 가시성(CloudWatch + error_id) + KIS yaml SSM 영속화
+
+### 배경
+운영(dkstock.cloud)에서 두 종류 백테스트 오류 보고:
+1. **MCP 단일 종목**: `오류: MCP 백테스트 실패: 백테스트 실패: 데이터 준비 실패: 'vps'`
+2. **로컬 포트폴리오 (2종목 이상)**: 본문 메시지 없이 raw HTTP 500, 종목 무관 100% 재현
+
+### 진단 (SSM Send-Command, 자격증명 본문 미노출)
+**Bug A — MCP 'vps' KeyError**: backtester EC2 (`i-05c673384e1093d61`)의 `~/KIS/config/kis_devlp.yaml`에서 KIS 모의투자 모드 식별자 키가 누락. 필수 5개 키(`my_agent`/`prod`/`vps`/`ops`/`vops`) 중 `vps:`만 `vts:`로 잘못 작성됨. KIS MCP 코드 `kis_backtest/providers/kis/auth.py:158`의 `svr = "vps" if is_paper else "prod"`가 dict 접근 시 KeyError → `RuntimeError: 데이터 준비 실패: 'vps'` 전파. **stock-manager 호출 양식 회귀 아님** — backtester EC2 yaml 휴먼 에러.
+
+**Bug B — 로컬 포트폴리오 raw 500**: 종목 무관 100% 재현 = 입력 독립 = 인프라 레이어 패턴. 4 후보 식별:
+1. alembic `BacktestJob.symbols` 컬럼 부재 SQL 에러 → ServiceError 변환 회피 → raw 500
+2. `data_loader.py` yfinance None 응답 영구 캐시
+3. `engine.py` datetime 미스매치 (`pd.Timestamp(date_obj)` vs DataFrame index)
+4. `result_json` numpy/Timestamp JSON 직렬화 실패
+
+### 즉시 복구 (SSM Send-Command)
+```bash
+# yaml rename + MCP 재기동
+sudo -u ec2-user sed -i 's/^vts:/vps:/' /home/ec2-user/KIS/config/kis_devlp.yaml
+# 결과: OK_my_agent / OK_prod / OK_vps ← 핵심 / OK_ops / OK_vops, VTS_REMOVED
+# MCP 재기동 → PID 1411983 health {"status":"ok","version":"0.1.0"}
+```
+
+### 변경 (코드 6 + 인프라 4 + 테스트 6 + 문서 2)
+
+#### Backend (코드 6)
+- **`services/backtest_service.py`**: `_classify_local_failure(exc)` 분류 헬퍼(db_error/serialize/timeout/data_load/unknown) + `_classify_backtester_error(error_msg)` MCP 응답 분류(`vps_key_missing`/`data_prep`/None). `'vps'` 패턴 우선순위 > `데이터 준비 실패`. `_VPS_KEY_FRIENDLY_MESSAGE`(yaml 가이드) + `_DATA_PREP_FRIENDLY_MESSAGE`(종목/날짜 가이드). save_backtest_job try/except → ServiceError 변환. `_to_jsonable` 응답 직렬화 안전화. 원본 error는 logger.warning 보존.
+- **`services/local_backtest/data_loader.py`**: yfinance None 영구 캐시 회피(조기 return) + 1회 재시도(5초 대기) + `_cache` TTL 10분.
+- **`services/local_backtest/engine.py`**: 모든 종목 DataFrame `df.index = df.index.normalize().tz_localize(None) if df.index.tz else df.index.normalize()` 통일. `_idx_for()` None 시 `logger.debug` silent skip 가시화. `_to_jsonable(obj)` 재귀 헬퍼 — numpy float64/int64 → Python native, pd.Timestamp → ISO 문자열.
+- **`db/repositories/backtest_repo.py`**: `create_job(..., symbols=...)` `OperationalError` 자동 감지 → INSERT 페이로드에서 `symbols` 자동 누락 후 재시도(graceful, 마이그레이션 미적용 환경에서도 동작).
+- **`routers/backtest.py`**: `run_local`/`run_preset`/`run_custom`/`run_batch` 4 핸들러 entry/exit 로그 — entry: preset/symbols 길이/market/dates/user_id, exit: job_id/duration_ms/status. telemetry `backtest.local.{success,fail.cause}` 카운터.
+- **`main.py`**: ServiceError handler에 `error_id = uuid.uuid4().hex[:8]` 추가 + 응답 본문 `error_id` 필드 + `logger.error(f"[{error_id}] {e}", exc_info=True)`로 매칭. lifespan에 `alembic_command.current()` vs `head` 비교 + 불일치 시 `logger.error("alembic 미적용: current={}, head={}")` 부팅 알림.
+
+#### Infra (4)
+- **`infra/modules/backtester/main.tf`**: `aws_iam_role_policy.backtester_ssm_params`에 `ssm:PutParameter` 권한 추가(`kis_devlp_yaml` 한정) — 자격증명 회전 시 EC2가 자기 yaml을 SSM에 갱신.
+- **`infra/modules/backtester/user_data.sh`**: KIS 설정 디렉토리 준비 직후 `aws ssm get-parameter --name /stock-manager/prod/kis_devlp_yaml --with-decryption`로 yaml 자동 다운로드 + chmod 600 + chown ec2-user + 필수 5개 키 검증(자격증명 본문 미노출, 키 라벨만 출력) + 미등록 시 WARNING + 수동 작성 fallback.
+- **`infra/modules/compute/main.tf`**: `aws_cloudwatch_log_group.main` (`/stock-manager/prod` retention 14일) + `aws_iam_role_policy.cloudwatch_logs`(CreateLogStream/PutLogEvents/DescribeLogStreams) + `log_retention_days` 변수(기본 14) + outputs 2건(log_group_name/log_group_arn).
+- **`docker-compose.cloudwatch.yml` (신규)**: docker-compose.prod.yml override — app/nginx 서비스에 `awslogs` 드라이버. `awslogs-group: /stock-manager/prod`, region 환경변수, stream-prefix 분리(app/nginx), `awslogs-create-group: false`(Terraform 생성 가정).
+- **`.github/workflows/deploy.yml`**: `CLOUDWATCH_LOGS: ${{ vars.CLOUDWATCH_LOGS || 'false' }}` env 토글 + SCP source에 cloudwatch override 포함 + staging 복사 + 배포 분기(`if CLOUDWATCH_LOGS=true → -f docker-compose.cloudwatch.yml 추가`).
+
+#### 신규 테스트 (6 모듈, 25 케이스 + 9 케이스 갱신)
+- `test_backtest_local_alembic_safe.py` (4) — symbols 컬럼 부재 mock graceful
+- `test_local_backtest_data_loader_cache.py` (4) — None 미저장/재시도/TTL
+- `test_local_backtest_engine_datetime.py` (3) — tz-aware/naive normalize
+- `test_local_backtest_jsonable.py` (5) — numpy/Timestamp 재귀 변환
+- `test_backtest_mcp_vps_error.py` (9, 갱신) — `_classify_backtester_error` 단위 3 + 메시지 매핑 + caplog
+- `test_backtest_router_logging.py` (3) — entry/exit 로그 + telemetry + error_id
+
+### 운영 영속화: KIS yaml SSM Parameter Store
+
+Console에서 SecureString 등록 완료:
+```
+Name      = /stock-manager/prod/kis_devlp_yaml
+Type      = SecureString
+Version   = 1
+LastModifiedDate = 2026-05-09T10:30:31+09:00
+SSM bytes = 1110, EC2 yaml bytes = 1110, diff = MATCHED
+```
+
+EC2 재생성 시 user_data.sh가 자동 다운로드 → 휴먼 에러(`vts:` 같은 오타) 차단. 자격증명 본문은 KMS `alias/aws/ssm` 암호화 저장. 비용 무료(Standard tier 4KB 미만).
+
+### 사용자 친화 메시지 분리
+
+| 패턴 | 메시지 |
+|------|--------|
+| `'vps'` 단독 또는 혼합 | "백테스트 인증 설정 오류: backtester 서버의 ~/KIS/config/kis_devlp.yaml 에 KIS 모의투자(`vps:`) 섹션이 누락되었습니다. 운영자 조치 필요. (임시: 로컬 백테스트 사용 권고)" |
+| `'vps'` 없는 `데이터 준비 실패`/`data preparation failed` | "백테스트 데이터 조회 실패: 종목 코드를 확인하거나 다른 날짜 범위로 재시도하세요. (외부 backtester 데이터 준비 실패)" |
+| 그 외 | 기존 `f"MCP 백테스트 실패: {error_msg}"` 유지 |
+
+### 회귀 가드
+- 기존 MCP 백테스트(preset/custom/batch) 4종 흐름 미터치 — 메시지 변환 한 줄만 추가
+- DB 스키마 변경 0건 (alembic 마이그레이션 적용 자동화만)
+- 도메인 알고리즘(safety_grade/macro_regime) 무영향
+- 프론트 변경 0건 (BacktestPage 응답 dict shape 보존)
+- KIS_MCP_ENABLED=false 환경 무영향 (로컬 백테스트 단독 동작)
+- alembic 적용 환경 후방 호환 100%
+- `CLOUDWATCH_LOGS` 미설정 시 기존 json-file 그대로 (운영 영향 0)
+- 단위 회귀: **874 PASS / 0 FAIL** (베이스라인 849 + 신규 25, 회귀 0). 17 ERROR는 PostgreSQL 의존 통합 테스트 환경 제약(변경 무관).
+
+### 도메인 자문 (OrderAdvisor)
+- symbols 컬럼 NULL graceful → 데이터 무결성 영향 없음 (BacktestJob 후속 조회/이력 표시 모두 NULL 허용)
+- 'vps' 친화 메시지 → 사용자 의사결정 충분 (yaml 가이드 + 로컬 백테스트 권고)
+
+### 잔여 (별도 phase 권고)
+- backtester 레포(`open-trading-api/backtester`) 측 `'vps'` 키 누락 fix — 외부 레포, stock-manager 권한 영역 외
+- terraform apply (admin 자격증명 + tfvars 필요) — 다음 인프라 변경 사이클에 동기화 (`stock_manager_remote`는 `iam:PutRolePolicy` 부재로 자동 실행 불가)
+- GitHub Actions Variables `CLOUDWATCH_LOGS=true` 설정 + Terraform apply 후 awslogs 활성화
+
+---
+
 ## 2026-05-09 — 해외매매화면 후속: KIS WS 호가 채널 실제 통합 + 미국 공휴일 휴장 + 실 키 통합 테스트
 
 ### 배경

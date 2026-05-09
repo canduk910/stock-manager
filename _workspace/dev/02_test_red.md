@@ -1,39 +1,68 @@
-# Step 1~3 RED 산출
+# RED 단계 — 테스트 선행 작성 결과
 
-## Step 1 — REQ-WS-01 RED
+작성일: 2026-05-09
+작성자: TestEngineer (개발팀장 위임)
 
-**파일**: `tests/unit/test_quote_overseas_kis_ws_orderbook.py` (신규, 290 lines)
+## 신규 테스트 파일 6개 (25 케이스)
 
-**테스트 6건**:
-1. `test_ws_connected_subscribe_does_not_start_rest_orderbook_poller` — WS 연결 정상 시 토픽 등록 + REST 폴러 미시작
-2. `test_ws_message_broadcasts_orderbook_with_correct_shape` — WS 메시지 도달 → broadcast shape 보존
-3. `test_ws_disconnect_starts_rest_orderbook_polling_for_all_subs` — WS 끊김 → 모든 구독 종목 REST 폴링 자동 시작
-4. `test_ws_reconnect_stops_rest_orderbook_polling` — 재연결 → REST 폴러 자동 중단
-5. `test_ws_construction_failure_falls_back_to_rest_polling` — `KISOverseasOrderbookWS()` 생성 실패 → REST 폴백
-6. `test_ws_start_failure_falls_back_to_rest_polling` — `start()` 예외 → REST 폴백
+| 파일 | 케이스 수 | 요건 ID |
+|------|----------|---------|
+| `tests/unit/test_backtest_local_alembic_safe.py` | 4 | REQ-FIX-01 |
+| `tests/unit/test_local_backtest_data_loader_cache.py` | 4 | REQ-FIX-02 |
+| `tests/unit/test_local_backtest_engine_datetime.py` | 3 | REQ-FIX-03 |
+| `tests/unit/test_local_backtest_jsonable.py` | 5 | REQ-FIX-04 |
+| `tests/unit/test_backtest_mcp_vps_error.py` | 6 | REQ-FIX-05 |
+| `tests/unit/test_backtest_router_logging.py` | 3 | REQ-FIX-06 |
+| **합계** | **25** | — |
 
-**RED 결과**: 6/6 FAIL — `services.quote_overseas` 모듈에 `KISOverseasOrderbookWS` 미정의 (`AttributeError`).
+## 케이스 상세
 
-## Step 2 — REQ-FE-02 RED
+### REQ-FIX-01 (alembic 안전화)
+- (a) symbols 컬럼 존재 → 정상 저장
+- (b) symbols 컬럼 부재 (mock OperationalError) → graceful 재시도 + symbols 누락 INSERT
+- (c) 다른 SQL 에러 (NULL 위반 등) → 그대로 raise (graceful 미적용)
+- (d) `run_local_backtest` save 단계 SQL 에러 → ServiceError 변환 (raw 500 방지)
 
-**파일**: `tests/unit/test_us_market_clock_holidays.py` (신규, 75 lines)
+### REQ-FIX-02 (data_loader 캐시)
+- (a) 정상 → 캐시 적중 (외부 호출 1회)
+- (b) None → 캐시 미저장 → 두번째 호출 재시도 발생
+- (c) 1차 None → 즉시 재시도 → 2차 성공 → 정상 데이터 반환
+- (d) TTL 10분 경과 → 캐시 무효화 → 재조회
 
-**테스트 4건** (Vitest 미설정 환경 — 정적 검증):
-1. `test_hook_exposes_us_holidays_constant` — `US_HOLIDAYS_ET` 상수 정의
-2. `test_hook_holiday_list_includes_2026_core_dates` — 2026 핵심 10일 포함
-3. `test_hook_holiday_list_includes_2027_2028_years` — 2027/2028 핵심일 포함
-4. `test_resolve_phase_by_clock_handles_holiday_branch` — `resolveUsPhaseByClock`에 공휴일 분기
+### REQ-FIX-03 (engine datetime)
+- (a) tz-aware (Asia/Seoul) + 시간 포함 → entry/exit 신호 실행 (trades > 0)
+- (b) naive + 시간 포함 → 매칭 성공
+- (c) `_idx_for` 매칭 실패 시 silent skip (logger.debug)
 
-**RED 결과**: 4/4 FAIL.
+### REQ-FIX-04 (`_to_jsonable`)
+- (a) numpy float64/int64 → Python native + json.dumps 통과
+- (b) pd.Timestamp → ISO 문자열
+- (c) 중첩 dict/list 재귀
+- (d) NaN/Inf → None
+- (e) Python native passthrough
 
-## Step 3 — REQ-INT-03 RED
+### REQ-FIX-05 (MCP 'vps' 친화 메시지)
+- (a) 'vps' 패턴 → 친화 메시지 변환
+- (b) 'data preparation failed' → 친화 메시지
+- (b-2) '데이터 준비 실패' (한글) → 친화 메시지
+- (c) 매칭 안되는 패턴 → 기존 메시지 유지
+- (d) success=true → 변경 없음
+- (e) 친화 변환 시 원본 error_msg 는 logger.warning 보존
 
-**파일**: `tests/integration/test_kis_overseas_live.py` (신규, 145 lines)
-**파일**: `pytest.ini` (live 마커 추가)
+### REQ-FIX-06 (라우터 로깅 + error_id + telemetry)
+- (a) run_local 정상 → telemetry `backtest.local.success` 증가
+- (b) save SQL 에러 → telemetry `backtest.local.fail.{cause}` 증가
+- (c) ServiceError 응답 본문에 `error_id` 8자리 hex 포함
 
-**테스트 3건**:
-1. `test_live_kis_orderbook_rest_aapl_returns_non_empty_levels` — HHDFS76200100 응답 검증
-2. `test_live_kis_price_detail_rest_aapl_returns_full_fields` — HHDFS76200200 응답 검증
-3. `test_live_kis_ws_orderbook_aapl_receives_message_within_5s` — HDFSASP0 WS 메시지 5s 수신 검증
+## RED 확인 (구현 전)
 
-**RED 결과**: CI 환경에서는 `KIS_LIVE_TEST` 미설정 → 3/3 SKIP (회귀 0). 실 키로는 실제 검증.
+```
+test_backtest_local_alembic_safe.py: 1 fail / 3 error (PostgreSQL 의존)
+test_local_backtest_data_loader_cache.py: 3 fail / 1 pass
+test_local_backtest_engine_datetime.py: 2 fail / 1 pass
+test_local_backtest_jsonable.py: collection error (`_to_jsonable` 미존재)
+test_backtest_mcp_vps_error.py: 4 fail / 2 pass
+test_backtest_router_logging.py: 2 fail / 1 error
+```
+
+이후 GREEN 단계로 구현 완료.

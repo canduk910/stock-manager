@@ -14,8 +14,8 @@ from __future__ import annotations
 import logging
 import math
 from dataclasses import dataclass, field
-from datetime import date
-from typing import Optional
+from datetime import date, datetime
+from typing import Any, Optional
 
 import pandas as pd
 
@@ -55,6 +55,63 @@ def _apply_sell_costs(
 ) -> float:
     """매도 단가 보정: target × (1-slippage). 수수료/세금은 proceeds에서 별도 차감."""
     return target_price * (1.0 - slippage)
+
+
+def _to_jsonable(obj: Any) -> Any:
+    """numpy/pandas 타입을 Python native 로 재귀 변환.
+
+    REQ-FIX-04 — FastAPI JSON 인코딩 단계 실패 → raw 500 방지.
+
+    - numpy float* → Python float (NaN/Inf → None, JSON spec 호환)
+    - numpy int*   → Python int
+    - numpy bool_  → Python bool
+    - numpy.ndarray → list (재귀)
+    - pd.Timestamp / datetime → ISO 문자열
+    - dict / list / tuple → 재귀
+    - 그 외 (str/int/float/bool/None) → 그대로
+    """
+    # NaN/Inf 차단 (JSON 표준 비호환)
+    if isinstance(obj, float):
+        if math.isnan(obj) or math.isinf(obj):
+            return None
+        return obj
+
+    # numpy scalar
+    try:
+        import numpy as _np
+        if isinstance(obj, _np.floating):
+            f = float(obj)
+            if math.isnan(f) or math.isinf(f):
+                return None
+            return f
+        if isinstance(obj, _np.integer):
+            return int(obj)
+        if isinstance(obj, _np.bool_):
+            return bool(obj)
+        if isinstance(obj, _np.ndarray):
+            return [_to_jsonable(x) for x in obj.tolist()]
+    except ImportError:
+        pass
+
+    # pandas Timestamp / datetime / date
+    if isinstance(obj, pd.Timestamp):
+        try:
+            return obj.isoformat()
+        except Exception:
+            return str(obj)
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    if isinstance(obj, date):
+        return obj.isoformat()
+
+    # 컨테이너 — 재귀
+    if isinstance(obj, dict):
+        return {k: _to_jsonable(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_to_jsonable(x) for x in obj]
+
+    # native — 그대로
+    return obj
 
 
 def _date_of(idx: int, df: pd.DataFrame) -> date:
@@ -103,6 +160,14 @@ def simulate(
         if df is None or df.empty:
             failures.append(sym)
             continue
+        # REQ-FIX-03: tz/시간 컴포넌트 정규화 — 모든 인덱스를 naive midnight 으로 통일.
+        # 외부 mock/직접 주입 데이터(시간 포함, tz-aware) 들어와도 _idx_for() 가 안전하게 매칭.
+        try:
+            if df.index.tz is not None:
+                df.index = df.index.tz_localize(None)
+            df.index = df.index.normalize()
+        except Exception as e:
+            logger.debug("[REQ-FIX-03] index normalize 실패 sym=%s err=%s", sym, e)
         symbol_data[sym] = df
 
     if not symbol_data:
@@ -150,13 +215,16 @@ def simulate(
     }
 
     # 종목별 idx 추적 (trading day → df 행 매핑)
+    # REQ-FIX-03: pd.Timestamp(d).normalize() 로 검색 + None 반환 시 debug 로그 (silent skip 가시화)
     def _idx_for(df: pd.DataFrame, d: date) -> Optional[int]:
         try:
-            ts = pd.Timestamp(d)
+            ts = pd.Timestamp(d).normalize()
             if ts in df.index:
                 return df.index.get_loc(ts)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("[REQ-FIX-03] _idx_for 예외 d=%s err=%s", d, e)
+            return None
+        logger.debug("[REQ-FIX-03] _idx_for 매칭 실패 d=%s (skip)", d)
         return None
 
     for d in trading_days:

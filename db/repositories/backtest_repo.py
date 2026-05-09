@@ -1,11 +1,30 @@
 """BacktestRepository — BacktestJob + Strategy CRUD."""
 
+import logging
 from typing import Optional
 
+from sqlalchemy.exc import OperationalError, ProgrammingError
 from sqlalchemy.orm import Session
 
 from db.models.backtest import BacktestJob, Strategy
 from db.utils import now_kst_iso
+
+logger = logging.getLogger(__name__)
+
+
+def _is_symbols_column_missing(err: Exception) -> bool:
+    """SQL 에러 메시지에서 `symbols` 컬럼 부재 패턴 식별.
+
+    PostgreSQL: 'column "symbols" of relation "backtest_jobs" does not exist'
+    SQLite:     'no such column: backtest_jobs.symbols'
+    MySQL:      "Unknown column 'symbols'"
+    """
+    msg = str(err).lower()
+    return "symbols" in msg and (
+        "does not exist" in msg
+        or "no such column" in msg
+        or "unknown column" in msg
+    )
 
 
 class BacktestRepository:
@@ -27,21 +46,42 @@ class BacktestRepository:
         strategy_display_name: str | None = None,
         symbols: list[str] | None = None,
     ) -> dict:
-        job = BacktestJob(
-            user_id=user_id,
-            job_id=job_id,
-            strategy_name=strategy_name,
-            strategy_display_name=strategy_display_name,
-            symbol=symbol.upper(),
-            symbols=[s.upper() for s in symbols] if symbols else None,
-            market=market.upper(),
-            strategy_type=strategy_type,
-            status="submitted",
-            submitted_at=submitted_at,
-            params_json=params,
-        )
+        symbols_payload = [s.upper() for s in symbols] if symbols else None
+
+        def _build(include_symbols: bool) -> BacktestJob:
+            return BacktestJob(
+                user_id=user_id,
+                job_id=job_id,
+                strategy_name=strategy_name,
+                strategy_display_name=strategy_display_name,
+                symbol=symbol.upper(),
+                # graceful 모드: symbols 키 자체를 제외 (alembic 미적용 호환)
+                symbols=symbols_payload if include_symbols else None,
+                market=market.upper(),
+                strategy_type=strategy_type,
+                status="submitted",
+                submitted_at=submitted_at,
+                params_json=params,
+            )
+
+        job = _build(include_symbols=True)
         self.db.add(job)
-        self.db.flush()
+        try:
+            self.db.flush()
+        except (OperationalError, ProgrammingError) as e:
+            # alembic 미적용 환경: `symbols` 컬럼 부재 시 그것만 제외하고 재시도.
+            # 이외 SQL 오류는 그대로 raise → 상위에서 ServiceError 변환.
+            if not _is_symbols_column_missing(e):
+                raise
+            logger.error(
+                "[REQ-FIX-01] backtest_jobs.symbols 컬럼 부재 (alembic 미적용 추정) "
+                "— symbols 제외하고 재시도. err=%s",
+                e,
+            )
+            self.db.rollback()
+            job = _build(include_symbols=False)
+            self.db.add(job)
+            self.db.flush()
         return job.to_dict()
 
     def update_job_result(

@@ -41,11 +41,66 @@ from typing import Optional
 
 from config import KIS_MCP_ENABLED
 from db.utils import now_kst_iso
+from services import _telemetry as _tel
 from services.exceptions import ExternalAPIError, NotFoundError, ServiceError
 from services.mcp_client import get_mcp_client
 from stock import strategy_store
 
 logger = logging.getLogger(__name__)
+
+
+def _classify_local_failure(exc: Exception) -> str:
+    """REQ-FIX-06: 로컬 백테스트 실패 원인 분류 → telemetry suffix."""
+    name = type(exc).__name__.lower()
+    msg = str(exc).lower()
+    if "operationalerror" in name or "programmingerror" in name or "integrityerror" in name:
+        return "db_error"
+    if "json" in msg or "encode" in msg or "serializ" in msg:
+        return "serialize"
+    if "timeout" in msg:
+        return "timeout"
+    if "data" in msg or "load" in msg or "yfinance" in msg or "ticker" in msg:
+        return "data_load"
+    return "unknown"
+
+
+# REQ-FIX-05: 외부 backtester 에러 메시지를 사용자 친화 메시지로 변환.
+# 진단 결과(2026-05-09): 'vps' KeyError 는 backtester EC2 의
+#   ~/KIS/config/kis_devlp.yaml 에서 KIS 모의투자 모드 식별자(`vps:` 섹션) 가
+#   누락되었거나 다른 키(예: `vts:`)로 잘못 작성되어 KIS 인증 단계에서 발생.
+# - kis_backtest/providers/kis/auth.py:158 → svr = "vps" if is_paper else "prod"
+# - 사용자 측 fix: `sed -i 's/^vts:/vps:/' ~/KIS/config/kis_devlp.yaml` 후 MCP 재기동
+#
+# 'vps' 단독 패턴은 yaml 설정 가이드를 노출, 그 외 데이터 준비 실패는 종목/날짜 가이드.
+_VPS_KEY_PATTERN = "'vps'"
+_DATA_PREP_PATTERNS = ("데이터 준비 실패", "data preparation failed")
+_VPS_KEY_FRIENDLY_MESSAGE = (
+    "백테스트 인증 설정 오류: backtester 서버의 ~/KIS/config/kis_devlp.yaml 에 "
+    "KIS 모의투자(`vps:`) 섹션이 누락되었습니다. 운영자 조치 필요. "
+    "(임시: 로컬 백테스트 사용 권고)"
+)
+_DATA_PREP_FRIENDLY_MESSAGE = (
+    "백테스트 데이터 조회 실패: 종목 코드를 확인하거나 다른 날짜 범위로 재시도하세요. "
+    "(외부 backtester 데이터 준비 실패)"
+)
+
+
+def _classify_backtester_error(error_msg: str) -> Optional[str]:
+    """외부 backtester error 메시지를 분류.
+
+    Returns:
+        "vps_key_missing" — KIS yaml `vps:` 섹션 누락(인증 단계 KeyError)
+        "data_prep"       — 그 외 데이터 준비 실패(종목/날짜 가이드)
+        None              — 분류 불가, 원본 메시지 노출
+    """
+    if not error_msg:
+        return None
+    if _VPS_KEY_PATTERN in error_msg:
+        return "vps_key_missing"
+    low = error_msg.lower()
+    if any(p.lower() in low for p in _DATA_PREP_PATTERNS):
+        return "data_prep"
+    return None
 
 
 def _extract_mcp_content(result: dict | list) -> any:
@@ -65,6 +120,21 @@ def _extract_mcp_content(result: dict | list) -> any:
                         # success: false → 에러 raise (data 유무 무관)
                         if parsed.get("success") is False:
                             error_msg = parsed.get("error", "알 수 없는 오류")
+                            # REQ-FIX-05: 패턴 분류 후 사용자 친화 메시지 매핑.
+                            # 원본은 logger.warning 으로 보존(운영 디버깅).
+                            kind = _classify_backtester_error(error_msg)
+                            if kind == "vps_key_missing":
+                                logger.warning(
+                                    "MCP backtester yaml `vps:` key missing: %s",
+                                    error_msg,
+                                )
+                                raise ExternalAPIError(_VPS_KEY_FRIENDLY_MESSAGE)
+                            if kind == "data_prep":
+                                logger.warning(
+                                    "MCP backtester data preparation error: %s",
+                                    error_msg,
+                                )
+                                raise ExternalAPIError(_DATA_PREP_FRIENDLY_MESSAGE)
                             raise ExternalAPIError(f"MCP 백테스트 실패: {error_msg}")
                         # {"success": true, "data": [...]} 구조면 data만 반환
                         if "data" in parsed:
@@ -530,19 +600,37 @@ def run_local_backtest(
 
     job_id = str(uuid.uuid4())
 
-    # Write-Ahead 저장
-    strategy_store.save_backtest_job(
-        user_id=user_id,
-        job_id=job_id,
-        strategy_name=preset,
-        symbol=deduped[0],
-        symbols=deduped,
-        market="KR",
-        strategy_type="local",
-        submitted_at=now_kst_iso(),
-        params=params,
-        strategy_display_name=preset_meta.get("name"),
+    # REQ-FIX-06: entry 로그
+    logger.info(
+        "[backtest.local.entry] preset=%s symbols=%s market=%s start=%s end=%s user_id=%s job_id=%s",
+        preset, deduped, "KR", sd.isoformat(), ed.isoformat(), user_id, job_id,
     )
+    import time as _t
+    _t0 = _t.perf_counter()
+
+    # Write-Ahead 저장 (REQ-FIX-01: SQL 에러 → ServiceError 변환, raw 500 회피)
+    try:
+        strategy_store.save_backtest_job(
+            user_id=user_id,
+            job_id=job_id,
+            strategy_name=preset,
+            symbol=deduped[0],
+            symbols=deduped,
+            market="KR",
+            strategy_type="local",
+            submitted_at=now_kst_iso(),
+            params=params,
+            strategy_display_name=preset_meta.get("name"),
+        )
+    except ServiceError as e:
+        _tel.record_event(f"backtest.local.fail.{_classify_local_failure(e)}")
+        raise
+    except Exception as e:
+        logger.error("[REQ-FIX-01] save_backtest_job 실패: %s", e, exc_info=True)
+        _tel.record_event(f"backtest.local.fail.{_classify_local_failure(e)}")
+        raise ServiceError(
+            f"백테스트 작업 등록 실패 (DB 마이그레이션 필요할 수 있음): {e}"
+        )
 
     try:
         sim = _simulate(
@@ -559,10 +647,12 @@ def run_local_backtest(
         )
     except ValueError as e:
         strategy_store.update_job_status(job_id, "failed")
+        _tel.record_event("backtest.local.fail.data_load")
         raise ServiceError(str(e))
     except Exception as e:
         strategy_store.update_job_status(job_id, "failed")
         logger.error("로컬 백테스트 실패: %s", e, exc_info=True)
+        _tel.record_event(f"backtest.local.fail.{_classify_local_failure(e)}")
         raise ExternalAPIError(f"로컬 백테스트 실패: {e}")
 
     result_json = {
@@ -598,10 +688,28 @@ def run_local_backtest(
         },
     }
 
+    # REQ-FIX-04: numpy/pandas 잔재 한 번 더 정제 (FastAPI JSON 인코딩 안전망)
+    from services.local_backtest.engine import _to_jsonable
+    try:
+        result_json = _to_jsonable(result_json)
+    except Exception as e:
+        _tel.record_event("backtest.local.fail.serialize")
+        logger.error("[REQ-FIX-04] 결과 직렬화 실패: %s", e, exc_info=True)
+        raise ExternalAPIError(f"결과 직렬화 실패: {e}")
+
     strategy_store.save_backtest_result(
         job_id=job_id,
-        metrics=sim.metrics,
+        metrics=_to_jsonable(sim.metrics),
         result_json=result_json,
         completed_at=now_kst_iso(),
+    )
+
+    # REQ-FIX-06: success telemetry + exit 로그
+    _tel.record_event("backtest.local.success")
+    _duration_ms = (_t.perf_counter() - _t0) * 1000.0
+    _tel.observe("backtest.local.duration_ms", _duration_ms)
+    logger.info(
+        "[backtest.local.exit] job_id=%s status=completed duration_ms=%.1f trades=%d",
+        job_id, _duration_ms, len(sim.trades) if sim.trades else 0,
     )
     return {"job_id": job_id, "status": "completed", "result": result_json}

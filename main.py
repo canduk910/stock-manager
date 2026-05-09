@@ -31,10 +31,28 @@ async def lifespan(app: FastAPI):
         try:
             from alembic.config import Config as AlembicConfig
             from alembic import command as alembic_command
+            from alembic.script import ScriptDirectory
+            from alembic.runtime.migration import MigrationContext
             alembic_cfg = AlembicConfig(os.path.join(os.path.dirname(__file__), "alembic.ini"))
             alembic_cfg.set_main_option("script_location", os.path.join(os.path.dirname(__file__), "alembic"))
             alembic_command.upgrade(alembic_cfg, "head")
             print("[정보] DB 마이그레이션 완료 (alembic upgrade head)")
+            # REQ-FIX-01: 적용 후 head 일치 검증 (불일치 시 명확 알림 — 부팅은 막지 않음)
+            try:
+                script = ScriptDirectory.from_config(alembic_cfg)
+                head_rev = script.get_current_head()
+                with engine.connect() as conn:
+                    ctx = MigrationContext.configure(conn)
+                    current_rev = ctx.get_current_revision()
+                if current_rev != head_rev:
+                    print(
+                        f"[오류] alembic 미적용 감지: current={current_rev} head={head_rev} "
+                        f"— 일부 컬럼이 누락될 수 있습니다."
+                    )
+                else:
+                    print(f"[정보] alembic head 일치: {current_rev}")
+            except Exception as ve:
+                print(f"[경고] alembic head 검증 실패(무시): {ve}")
         except Exception as e:
             print(f"[경고] DB 마이그레이션 실패: {e}")
 
@@ -122,10 +140,32 @@ def health_check():
 
 # ServiceError → HTTP 응답 변환 (서비스 레이어에서 HTTPException 직접 사용 제거)
 from services.exceptions import ServiceError  # noqa: E402
+import logging as _logging  # noqa: E402
+import uuid as _uuid  # noqa: E402
+
+_svc_err_logger = _logging.getLogger("service_error")
+
 
 @app.exception_handler(ServiceError)
 async def service_error_handler(request: Request, exc: ServiceError):
-    return JSONResponse(status_code=exc.status_code, content={"detail": exc.message})
+    """REQ-FIX-06: 응답 본문에 `error_id` 8자리 hex 추가 — 운영 stack trace 매칭용.
+
+    후방호환: 기존 `detail` 필드 보존, `error_id` 만 추가.
+    """
+    error_id = _uuid.uuid4().hex[:8]
+    _svc_err_logger.error(
+        "[%s] ServiceError %s %s status=%d msg=%s",
+        error_id,
+        request.method,
+        request.url.path,
+        exc.status_code,
+        exc.message,
+        exc_info=True,
+    )
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.message, "error_id": error_id},
+    )
 
 
 # ── Phase 4 단계 5 (C): 페이지뷰 통계 미들웨어 ─────────────────────────────

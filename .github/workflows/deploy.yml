@@ -6,6 +6,10 @@ on:
 
 env:
   AWS_REGION: ap-northeast-2
+  # REQ-OPS-07 (2026-05-09): CloudWatch Logs 통합 토글.
+  # GitHub Actions Variables/Secrets 에 CLOUDWATCH_LOGS=true 설정 시 docker-compose.cloudwatch.yml 적용.
+  # 사전 조건: terraform apply (infra/modules/compute) 로 aws_cloudwatch_log_group + IAM 정책 활성화 완료.
+  CLOUDWATCH_LOGS: ${{ vars.CLOUDWATCH_LOGS || 'false' }}
 
 jobs:
   ci:
@@ -71,7 +75,7 @@ jobs:
           host: ${{ secrets.EC2_HOST }}
           username: ec2-user
           key: ${{ secrets.EC2_SSH_KEY }}
-          source: "infra/nginx/app.conf,docker-compose.prod.yml"
+          source: "infra/nginx/app.conf,docker-compose.prod.yml,docker-compose.cloudwatch.yml"
           target: "/opt/stock-manager/_staging"
           strip_components: 0
 
@@ -81,14 +85,17 @@ jobs:
           host: ${{ secrets.EC2_HOST }}
           username: ec2-user
           key: ${{ secrets.EC2_SSH_KEY }}
-          envs: AWS_REGION
+          envs: AWS_REGION,CLOUDWATCH_LOGS
           command_timeout: 5m
           script: |
             set -euo pipefail
             REGION="${AWS_REGION}"
             ECR_REPO="${{ steps.ecr-login.outputs.registry }}/stock-manager"
             IMAGE_TAG="${{ github.sha }}"
-            export ECR_REPO IMAGE_TAG
+            # CloudWatch Logs 통합 (REQ-OPS-07): GitHub Actions vars/secrets 의 CLOUDWATCH_LOGS=true 시 활성
+            # 사전 조건: terraform apply 로 aws_cloudwatch_log_group + IAM 정책 적용 완료
+            CLOUDWATCH_LOGS="${CLOUDWATCH_LOGS:-false}"
+            export ECR_REPO IMAGE_TAG AWS_REGION="$REGION"
 
             echo "[1/6] ECR 로그인..."
             aws ecr get-login-password --region "$REGION" | \
@@ -121,6 +128,7 @@ jobs:
             # SCP staging 디렉토리에서 파일 가져오기 (단일 source of truth: infra/nginx/app.conf)
             cp _staging/infra/nginx/app.conf nginx/app.conf
             cp _staging/docker-compose.prod.yml docker-compose.prod.yml
+            cp _staging/docker-compose.cloudwatch.yml docker-compose.cloudwatch.yml
             rm -rf _staging
 
             # nginx 문법 검증
@@ -138,14 +146,21 @@ jobs:
               }
 
             echo "[5/6] 컨테이너 시작..."
-            docker compose -f docker-compose.prod.yml up -d --remove-orphans
+            # CloudWatch Logs 활성 시 cloudwatch override 추가 적용 (REQ-OPS-07)
+            if [ "$CLOUDWATCH_LOGS" = "true" ]; then
+              echo "  → CloudWatch Logs 활성: docker-compose.cloudwatch.yml override 적용"
+              COMPOSE_FILES="-f docker-compose.prod.yml -f docker-compose.cloudwatch.yml"
+            else
+              COMPOSE_FILES="-f docker-compose.prod.yml"
+            fi
+            docker compose $COMPOSE_FILES up -d --remove-orphans
 
             # nginx 설정 파일은 volume mount 라 docker compose up 만으로 reload 되지 않음.
             # 새 설정을 적용하려면 명시적 reload 필요.
             if docker ps --format '{{.Names}}' | grep -q '^stock-nginx$'; then
               docker exec stock-nginx nginx -s reload && echo "nginx reload OK" || {
                 echo "WARNING: nginx reload 실패, 컨테이너 재시작 시도"
-                docker compose -f docker-compose.prod.yml restart nginx
+                docker compose $COMPOSE_FILES restart nginx
               }
             fi
 

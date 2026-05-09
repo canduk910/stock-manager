@@ -1,0 +1,32 @@
+# CloudWatch Logs 통합 override (REQ-OPS-07, 2026-05-09)
+#
+# 사용법:
+#   1) terraform apply 로 aws_cloudwatch_log_group.main + IAM 정책 적용 (infra/modules/compute)
+#   2) EC2에 배포 시:
+#        docker compose -f docker-compose.prod.yml -f docker-compose.cloudwatch.yml up -d
+#      (deploy.yml 또는 ec2-deploy.sh 에서 -f 추가)
+#
+# IAM 권한 없는 환경에서 awslogs 드라이버 사용 시 컨테이너 부팅 실패하므로,
+# 본 override 는 Terraform 적용 완료된 환경에만 적용한다.
+# Terraform 미적용 환경은 docker-compose.prod.yml 단독으로 json-file 그대로 동작.
+
+services:
+  app:
+    logging:
+      driver: awslogs
+      options:
+        awslogs-region: ${AWS_REGION:-ap-northeast-2}
+        awslogs-group: /stock-manager/prod
+        awslogs-stream-prefix: app
+        awslogs-create-group: "false"
+        tag: "{{.Name}}/{{.ID}}"
+
+  nginx:
+    logging:
+      driver: awslogs
+      options:
+        awslogs-region: ${AWS_REGION:-ap-northeast-2}
+        awslogs-group: /stock-manager/prod
+        awslogs-stream-prefix: nginx
+        awslogs-create-group: "false"
+        tag: "{{.Name}}/{{.ID}}"
