@@ -1,5 +1,33 @@
 # 변경 이력
 
+## 2026-05-09 — 작업 유형별 모델 라우팅 + 부서장 기본 진입 명시
+
+### 운영 정책 신규
+- **모델 라우팅 정책** — Claude Code의 작업 유형 기반 자동 모델 라우팅은 표준 기능 부재(공식 문서 확인). 유일한 실용 방법인 **서브에이전트 frontmatter `model:` 필드** 분기로 정책 적용:
+  - **Opus 4.7** (계획·검증·자문·감사) — `department-head`/`dev-lead`/`domain-lead`/`qa-inspector`/`refactor-engineer` + 도메인 전문가 4명(`macro-sentinel`/`value-screener`/`margin-analyst`/`order-advisor`).
+  - **Sonnet** (일반 구현) — `backend-dev`/`frontend-dev`/`test-engineer`.
+  - **Haiku** (명령어 작성) — 사용자 정의 에이전트에 해당 없음. 빌트인 `statusline-setup`이 자연 매핑되나 frontmatter 수정 불가 → `/model haiku` 수동 전환.
+
+### 기본 라우팅 (필수, CLAUDE.md 하네스 섹션 신규)
+- **모든 비-사소 요청은 `department-head` 에이전트를 단일 진입점으로 사용**:
+  1. `asset-dev` 스킬 호출 (표준 진입점, 유형 A/B/C/D 자동 분류)
+  2. 또는 `Agent(subagent_type="department-head", ...)` 직접 호출
+- **메인 직접 처리 가능 예외** — 정보 질문, 코드 설명, 환경변수·로컬 설정 조회, 운영 진단 read-only, 사용자 명시적 우회 지시.
+- **금지** — 메인 에이전트가 12명 하위 에이전트(backend-dev/frontend-dev/도메인 전문가 등)를 부서장 우회로 직접 호출. 라우팅 책임자는 부서장.
+
+### 변경
+- **`.claude/agents/backend-dev.md`** / **`.claude/agents/frontend-dev.md`** / **`.claude/agents/test-engineer.md`**: frontmatter `model: opus` → `model: sonnet`.
+- 나머지 9개 에이전트(department-head/dev-lead/domain-lead/qa-inspector/refactor-engineer + 도메인 전문가 4명) `model: opus` 유지.
+- **`CLAUDE.md`**: 하네스 섹션에 「기본 라우팅 (필수)」 항목 신규 — 부서장 단일 진입점 + 직접 처리 예외 4종 + 금지 사항 + 모델 라우팅 정책 명시.
+- **`README.md`**: 「모델 라우팅 정책」 섹션 신규 — 외부 독자용 카테고리 매핑 표.
+
+### 회귀 가드
+- 코드 변경 0건(에이전트 정의 frontmatter + 문서만).
+- 도메인/DB/테스트 영향 0.
+- 기존 `asset-dev` 스킬의 유형 A/B/C/D 자동 라우팅 100% 보존.
+
+---
+
 ## 2026-05-09 — 백테스트 fire-and-poll 패턴 도입 (504 + "이력에 결과 보존" 동시 해소)
 
 ### 진단
