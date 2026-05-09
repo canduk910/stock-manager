@@ -1,18 +1,25 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { useAsyncState } from './useAsyncState'
 import {
   fetchAdvisoryStocks,
   addAdvisoryStock,
   removeAdvisoryStock,
   refreshAdvisoryData,
+  refreshAdvisoryDataAsync,
   fetchAdvisoryData,
   generateReport,
+  generateReportAsync,
+  pollAdvisoryJob,
   fetchReport,
   fetchReportHistory,
   fetchReportById,
   fetchAdvisoryOhlcv,
   collectResearchData,
 } from '../api/advisory'
+
+// fire-and-poll 폴링 설정
+const POLL_INTERVAL_MS = 3000
+const MAX_POLL_DURATION_MS = 5 * 60 * 1000  // 5분 상한 (refresh + analyze 합산 여유)
 
 /** 자문종목 목록 + CRUD */
 export function useAdvisoryStocks() {
@@ -34,9 +41,17 @@ export function useAdvisoryStocks() {
   return { stocks, loading, error, load, add, remove }
 }
 
-/** 분석 데이터 새로고침 + 조회 */
+/** 분석 데이터 새로고침 + 조회 (fire-and-poll 적용 — 504 회피, 진행 메시지) */
 export function useAdvisoryData() {
   const { data, setData, loading, error, run } = useAsyncState()
+  const [progressMessage, setProgressMessage] = useState(null)
+  const cancelledRef = useRef(false)
+
+  // 컴포넌트 언마운트/탭 전환 시 진행 중인 폴링 중단
+  useEffect(() => {
+    cancelledRef.current = false
+    return () => { cancelledRef.current = true }
+  }, [])
 
   const load = useCallback(async (code, market) => {
     try {
@@ -46,12 +61,46 @@ export function useAdvisoryData() {
     }
   }, [run, setData])
 
-  const refresh = useCallback(
-    (code, market, name = null) => run(() => refreshAdvisoryData(code, market, name)).catch(() => {}),
-    [run]
-  )
+  // fire-and-poll: 즉시 job_id + status 받고 3초 폴링. 504 회피 + 진행 메시지 표시.
+  const refresh = useCallback(async (code, market, name = null) => {
+    setProgressMessage('데이터 수집 시작 중...')
+    try {
+      const job = await refreshAdvisoryDataAsync(code, market, name)
+      setProgressMessage(job.message || '데이터 수집 중...')
 
-  return { data, loading, error, load, refresh }
+      const startedAt = Date.now()
+      const jobId = job.job_id
+
+      // 폴링 루프
+      while (!cancelledRef.current) {
+        if (Date.now() - startedAt > MAX_POLL_DURATION_MS) {
+          setProgressMessage(null)
+          throw new Error('데이터 수집이 5분을 초과했습니다. 잠시 후 다시 시도해주세요.')
+        }
+        await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS))
+        const poll = await pollAdvisoryJob(jobId).catch(() => null)
+        if (!poll || cancelledRef.current) continue
+        if (poll.status === 'running') {
+          setProgressMessage(poll.message || `데이터 수집 중... (${poll.elapsed_seconds || 0}초 경과)`)
+          continue
+        }
+        if (poll.status === 'failed') {
+          setProgressMessage(null)
+          throw new Error(poll.error_message || '데이터 수집 실패')
+        }
+        if (poll.status === 'completed') {
+          setProgressMessage(null)
+          setData(poll.result)
+          return poll.result
+        }
+      }
+    } catch (e) {
+      setProgressMessage(null)
+      throw e
+    }
+  }, [setData])
+
+  return { data, loading, error, load, refresh, progressMessage }
 }
 
 /** AI 리포트 생성 + 조회 + 히스토리 */
@@ -84,11 +133,42 @@ export function useAdvisoryReport() {
     }
   }, [])
 
+  // fire-and-poll: 504 회피 + 진행 메시지. progressMessage state로 UI 노출.
+  const [progressMessage, setProgressMessage] = useState(null)
+
   const generate = useCallback(async (code, market, userComment = null) => {
     setLoading(true)
     setError(null)
+    setProgressMessage('AI 보고서 생성 시작 중...')
     try {
-      const result = await generateReport(code, market, userComment)
+      // fire-and-poll 모드 — 즉시 job_id 반환 + 3초 폴링
+      const job = await generateReportAsync(code, market, userComment)
+      setProgressMessage(job.message || 'AI 보고서 생성 중...')
+
+      const startedAt = Date.now()
+      const jobId = job.job_id
+
+      let result = null
+      while (true) {
+        if (Date.now() - startedAt > MAX_POLL_DURATION_MS) {
+          throw new Error('AI 보고서 생성이 5분을 초과했습니다. 잠시 후 다시 시도해주세요.')
+        }
+        await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS))
+        const poll = await pollAdvisoryJob(jobId).catch(() => null)
+        if (!poll) continue
+        if (poll.status === 'running') {
+          setProgressMessage(poll.message || `AI 보고서 생성 중... (${poll.elapsed_seconds || 0}초 경과)`)
+          continue
+        }
+        if (poll.status === 'failed') {
+          throw new Error(poll.error_message || 'AI 보고서 생성 실패')
+        }
+        if (poll.status === 'completed') {
+          result = poll.result
+          break
+        }
+      }
+
       setReport(result)
       // 히스토리 갱신
       const h = await fetchReportHistory(code, market)
@@ -98,6 +178,7 @@ export function useAdvisoryReport() {
       setError(e.message)
       try { window.dispatchEvent(new Event('ai-usage-changed')) } catch (_) {}
     } finally {
+      setProgressMessage(null)
       setLoading(false)
     }
   }, [])
@@ -115,7 +196,7 @@ export function useAdvisoryReport() {
     }
   }, [])
 
-  return { report, history, loading, error, load, generate, loadById }
+  return { report, history, loading, error, load, generate, loadById, progressMessage }
 }
 
 /** 리서치 데이터 수집 (입력정보 획득) */

@@ -17,10 +17,19 @@ export const removeAdvisoryStock = (code, market = 'KR') =>
     method: 'DELETE',
   })
 
-// ── 데이터 새로고침 ────────────────────────────────────────────────────────
+// ── 데이터 새로고침 (동기 — 백워드 호환, 30초+ 시 504 위험) ───────────────
 export const refreshAdvisoryData = (code, market = 'KR', name = null) => {
   const q = name ? `&name=${encodeURIComponent(name)}` : ''
   return apiFetch(`/api/advisory/${encodeURIComponent(code)}/refresh?market=${market}${q}`, {
+    method: 'POST',
+  })
+}
+
+// ── 데이터 새로고침 (비동기 — fire-and-poll, 504 회피) ────────────────────
+// 즉시 {job_id, status:"running", message} 반환. 결과는 pollAdvisoryJob() 폴링.
+export const refreshAdvisoryDataAsync = (code, market = 'KR', name = null) => {
+  const q = name ? `&name=${encodeURIComponent(name)}` : ''
+  return apiFetch(`/api/advisory/${encodeURIComponent(code)}/refresh?market=${market}&async=true${q}`, {
     method: 'POST',
   })
 }
@@ -29,7 +38,7 @@ export const refreshAdvisoryData = (code, market = 'KR', name = null) => {
 export const fetchAdvisoryData = (code, market = 'KR') =>
   apiFetch(`/api/advisory/${encodeURIComponent(code)}/data?market=${market}`)
 
-// ── AI 리포트 생성 ─────────────────────────────────────────────────────────
+// ── AI 리포트 생성 (동기 — 백워드 호환, 10초+ 시 504 위험) ────────────────
 // userComment(2026-05-07): 사용자 가설을 백엔드에 전달, 양면 평가(user_commentary_evaluation) 트리거
 export const generateReport = (code, market = 'KR', userComment = null) => {
   const cmt = (userComment || '').trim()
@@ -40,6 +49,22 @@ export const generateReport = (code, market = 'KR', userComment = null) => {
     body: body ? JSON.stringify(body) : undefined,
   })
 }
+
+// ── AI 리포트 생성 (비동기 — fire-and-poll) ────────────────────────────────
+export const generateReportAsync = (code, market = 'KR', userComment = null) => {
+  const cmt = (userComment || '').trim()
+  const body = cmt ? { user_comment: cmt } : null
+  return apiFetch(`/api/advisory/${encodeURIComponent(code)}/analyze?market=${market}&async=true`, {
+    method: 'POST',
+    headers: body ? { 'Content-Type': 'application/json' } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  })
+}
+
+// ── fire-and-poll 작업 폴링 ────────────────────────────────────────────────
+// 응답: {status:"running"|"completed"|"failed", elapsed_seconds, message, result|error_message}
+export const pollAdvisoryJob = (jobId) =>
+  apiFetch(`/api/advisory/jobs/${encodeURIComponent(jobId)}`)
 
 // ── AI 리포트 히스토리 목록 ────────────────────────────────────────────────
 export const fetchReportHistory = (code, market = 'KR', limit = 20) =>

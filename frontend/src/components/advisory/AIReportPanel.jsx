@@ -139,6 +139,7 @@ export default function AIReportPanel({
   report,
   history = [],
   loading,
+  progressMessage = null,
   error,
   onGenerate,
   onSelectHistory,
@@ -275,9 +276,10 @@ export default function AIReportPanel({
       )}
 
       {loading && (
-        <div className="text-center py-10 text-gray-400 text-sm">
-          <div className="animate-spin inline-block w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full mb-2" />
-          <p>GPT가 분석 중입니다... (10~30초 소요)</p>
+        <div className="text-center py-12 text-gray-600">
+          <div className="animate-spin inline-block w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full mb-3" />
+          <p className="text-sm font-medium">{progressMessage || 'GPT가 분석 중입니다...'}</p>
+          <p className="text-xs text-gray-400 mt-2">완료까지 1~3분 소요. 페이지를 떠나도 백엔드는 계속 진행하니 잠시 후 다시 들어오세요. <strong>중복 클릭하지 마세요.</strong></p>
         </div>
       )}
 

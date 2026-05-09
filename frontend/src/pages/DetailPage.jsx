@@ -63,8 +63,11 @@ export default function DetailPage() {
   const [userComment, setUserComment] = useState('')
   const { data, loading, error, load } = useDetailReport()
 
-  const { data: advData, loading: advLoading, error: advError, load: loadAdvData, refresh: refreshAdvData } = useAdvisoryData()
-  const { report, history: reportHistory, loading: reportLoading, error: reportError, load: loadReport, generate, loadById: loadReportById } = useAdvisoryReport()
+  const { data: advData, loading: advLoading, error: advError, load: loadAdvData, refresh: refreshAdvData, progressMessage: advProgressMsg } = useAdvisoryData()
+  const { report, history: reportHistory, loading: reportLoading, error: reportError, load: loadReport, generate, loadById: loadReportById, progressMessage: reportProgressMsg } = useAdvisoryReport()
+  // fire-and-poll: progressMessage 또는 loading 중 하나라도 있으면 진행 중. 504 회피 + 명확한 진행 표시.
+  const isAdvWorking = advLoading || !!advProgressMsg
+  const isReportWorking = reportLoading || !!reportProgressMsg
   // advisory 데이터 lazy load: 종합리포트 탭 + cagr 외 서브탭 최초 진입 시
   const advLoadedRef = useRef(false)
 
@@ -174,18 +177,18 @@ export default function DetailPage() {
                     <div className="ml-auto flex gap-2 py-1">
                       <button
                         onClick={handleRefresh}
-                        disabled={advLoading}
+                        disabled={isAdvWorking}
                         className="px-3 py-1.5 text-xs font-medium rounded border border-gray-300 text-gray-600 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
                       >
-                        {advLoading ? '수집 중...' : '새로고침'}
+                        {isAdvWorking ? '수집 중...' : '새로고침'}
                       </button>
                       {subTab === 'ai' && (
                         <button
                           onClick={handleGenerate}
-                          disabled={reportLoading}
+                          disabled={isReportWorking}
                           className="px-3 py-1.5 text-xs font-medium rounded bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
-                          {reportLoading ? 'AI 분석 중...' : 'AI분석 생성'}
+                          {isReportWorking ? 'AI 분석 중...' : 'AI분석 생성'}
                         </button>
                       )}
                     </div>
@@ -205,42 +208,44 @@ export default function DetailPage() {
                 )}
                 {subTab === 'fundamental' && (
                   <div className="bg-white rounded-xl border border-gray-200 p-5">
-                    {advLoading && (
-                      <div className="flex items-center gap-3 py-8 justify-center text-gray-500">
-                        <div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-                        <span className="text-sm">데이터 수집 중...</span>
+                    {isAdvWorking && (
+                      <div className="flex flex-col items-center gap-3 py-12 text-gray-600">
+                        <div className="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+                        <span className="text-sm font-medium">{advProgressMsg || '데이터 수집 중...'}</span>
+                        <span className="text-xs text-gray-400">완료까지 30초~3분 소요. 페이지를 떠나도 백엔드는 계속 진행하니 잠시 후 새로고침하면 결과를 볼 수 있습니다.</span>
                       </div>
                     )}
-                    {!advLoading && advError && (
+                    {!isAdvWorking && advError && (
                       <p className="text-sm text-red-500 text-center py-8">{advError}</p>
                     )}
-                    {!advLoading && !advData && !advError && (
+                    {!isAdvWorking && !advData && !advError && (
                       <p className="text-sm text-gray-400 text-center py-8">
-                        [새로고침] 버튼을 눌러 데이터를 수집해주세요. (30초+ 소요)
+                        [새로고침] 버튼을 눌러 데이터를 수집해주세요. (30초~3분 소요)
                       </p>
                     )}
-                    {!advLoading && advData && (
+                    {!isAdvWorking && advData && (
                       <FundamentalPanel data={advData} market={market} code={symbol} />
                     )}
                   </div>
                 )}
                 {subTab === 'technical' && (
                   <div className="bg-white rounded-xl border border-gray-200 p-5">
-                    {advLoading && (
-                      <div className="flex items-center gap-3 py-8 justify-center text-gray-500">
-                        <div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-                        <span className="text-sm">데이터 수집 중...</span>
+                    {isAdvWorking && (
+                      <div className="flex flex-col items-center gap-3 py-12 text-gray-600">
+                        <div className="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+                        <span className="text-sm font-medium">{advProgressMsg || '데이터 수집 중...'}</span>
+                        <span className="text-xs text-gray-400">완료까지 30초~3분 소요. 페이지를 떠나도 백엔드는 계속 진행합니다.</span>
                       </div>
                     )}
-                    {!advLoading && advError && (
+                    {!isAdvWorking && advError && (
                       <p className="text-sm text-red-500 text-center py-8">{advError}</p>
                     )}
-                    {!advLoading && !advData && !advError && (
+                    {!isAdvWorking && !advData && !advError && (
                       <p className="text-sm text-gray-400 text-center py-8">
-                        [새로고침] 버튼을 눌러 데이터를 수집해주세요. (30초+ 소요)
+                        [새로고침] 버튼을 눌러 데이터를 수집해주세요. (30초~3분 소요)
                       </p>
                     )}
-                    {!advLoading && advData && (
+                    {!isAdvWorking && advData && (
                       <TechnicalPanel data={advData} symbol={symbol} market={market} />
                     )}
                   </div>
@@ -257,7 +262,8 @@ export default function DetailPage() {
                     <AIReportPanel
                       report={report}
                       history={reportHistory}
-                      loading={reportLoading}
+                      loading={isReportWorking}
+                      progressMessage={reportProgressMsg}
                       error={reportError}
                       onGenerate={handleGenerate}
                       onSelectHistory={(id) => loadReportById(symbol, id, market)}

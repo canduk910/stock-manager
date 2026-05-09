@@ -9,7 +9,7 @@ from fastapi import APIRouter, Body, Depends, Query
 from pydantic import BaseModel
 
 from services.auth_deps import get_current_user
-from services import advisory_service
+from services import advisory_service, advisory_jobs
 from services.exceptions import ServiceError, NotFoundError, ConflictError
 from stock import advisory_store
 from stock.utils import is_domestic
@@ -105,17 +105,35 @@ def remove_stock(code: str, market: str = Query("KR"), user: dict = Depends(get_
 
 
 @router.post("/{code}/refresh")
-def refresh_data(code: str, market: str = Query("KR"), name: str = Query(None), user: dict = Depends(get_current_user)):
-    """데이터 새로고침 (30초+ 소요). 기본적/기술적 분석 전체 수집.
+def refresh_data(
+    code: str,
+    market: str = Query("KR"),
+    name: str = Query(None),
+    async_mode: bool = Query(False, alias="async"),
+    user: dict = Depends(get_current_user),
+):
+    """데이터 새로고침 (30초~3분 소요). 기본적/기술적 분석 전체 수집.
 
     advisory_stocks 미등록 종목도 허용 (DetailPage에서 직접 호출 가능).
     name 파라미터로 종목명 전달 가능; 미등록 & name 없으면 code를 사용.
+
+    Query:
+        async=true → fire-and-poll 모드. 즉시 {job_id, status:"running", message}
+                      반환 후 백그라운드 실행. 결과는 GET /jobs/{job_id} 폴링.
+                      nginx 90s 타임아웃/HTTP 504 회피용. 기본 false (백워드 호환).
     """
     code = code.upper()
     market = market.upper()
 
     stock = advisory_store.get_stock(user["id"], code, market)
     stock_name = stock["name"] if stock else (name or code)
+
+    if async_mode is True:  # 정확한 True만 (직접 호출 test의 Query 객체 default 회피)
+        return advisory_jobs.submit_job(
+            "refresh", code, market, user["id"],
+            advisory_service.refresh_stock_data,
+            code, market, stock_name, user_id=user["id"],
+        )
 
     result = advisory_service.refresh_stock_data(code, market, stock_name, user_id=user["id"])
     return result
@@ -135,15 +153,21 @@ def analyze(
     code: str,
     body: Optional[AnalyzeBody] = Body(None),
     market: str = Query("KR"),
+    async_mode: bool = Query(False, alias="async"),
     user: dict = Depends(get_current_user),
 ):
-    """OpenAI GPT-5.4 리포트 생성 (10~30초 소요).
+    """OpenAI GPT-5.4 리포트 생성 (10초~3분 소요).
 
     OPENAI_API_KEY 미설정 시 503 반환.
     캐시 없을 시 404 반환.
 
     body는 백워드 호환을 위해 Optional. user_comment(1000자 상한, 2026-05-07) 전달 시
     GPT 응답에 user_commentary_evaluation 섹션이 포함됨.
+
+    Query:
+        async=true → fire-and-poll. 즉시 {job_id, status:"running"} 반환,
+                      백그라운드 GPT 호출. 결과는 GET /jobs/{job_id} 폴링.
+                      nginx 90s 타임아웃/HTTP 504 회피용.
     """
     code = code.upper()
     market = market.upper()
@@ -157,10 +181,33 @@ def analyze(
     stock = advisory_store.get_stock(user["id"], code, market)
     name = stock["name"] if stock else code
 
+    if async_mode is True:  # 정확한 True만 (직접 호출 test의 Query 객체 default 회피)
+        return advisory_jobs.submit_job(
+            "analyze", code, market, user["id"],
+            advisory_service.generate_ai_report,
+            code, market, name, user_id=user["id"], user_comment=user_comment,
+        )
+
     result = advisory_service.generate_ai_report(
         code, market, name, user_id=user["id"], user_comment=user_comment,
     )
     return result
+
+
+@router.get("/jobs/{job_id}")
+def get_job(job_id: str, user: dict = Depends(get_current_user)):
+    """fire-and-poll 작업 상태 폴링.
+
+    응답:
+        running:   {job_id, status:"running", elapsed_seconds, message, ...}
+        completed: {job_id, status:"completed", result, ...}
+        failed:    {job_id, status:"failed", error_message, ...}
+    HTTP 404: job_id 없음 (만료 1시간 또는 잘못된 ID).
+
+    프론트엔드는 3초 폴링으로 status 변화 감지. 실패 시 error_message 표시,
+    완료 시 result로 캐시/리포트 반영. 504 회피 + 재호출 오해 차단 핵심 패턴.
+    """
+    return advisory_jobs.poll_job(job_id, user_id=user["id"])
 
 
 class ChatMessage(BaseModel):
