@@ -218,13 +218,18 @@ def _match_account(nm: str, pattern: re.Pattern) -> bool:
     return bool(pattern.search(nm.replace(" ", "")))
 
 # IS/CIS 핵심 계정 (매출/영업이익/순이익 요약)
+# revenue: 보험업은 매출액 대신 `보험영업수익`/`보험수익`(IFRS17 2023~) 사용.
+#          ValueScreener 자문(2026-05-09): `보험(영업)?수익` 정규식으로 일반·보험 양쪽 매칭.
 _ACCOUNT_REGEX = {
-    "revenue":          re.compile(r"^(매출액|수익\(매출액\)|영업수익|매출)$"),
+    "revenue":          re.compile(r"^(매출액|수익\(매출액\)|영업수익|매출|보험(영업)?수익)$"),
     "operating_income": re.compile(r"^영업(이익|손실)(\(손실\))?$"),
     "net_income":       re.compile(r"^(연결)?(당기순)(이익|손익|손실)(\(손실\))?$"),
 }
 
 # BS/CBS 대차대조표
+# insurance_*: 보험업 전용 추가 필드 (Optional). 일반 제조업은 None으로 통과.
+#              total_liabilities/total_equity 등 표준 키는 그대로 재사용 — safety_grade 무영향
+#              (ValueScreener 자문 2026-05-09: 백워드 호환 동일 키 재사용 권고).
 _BS_REGEX = {
     "total_assets":            re.compile(r"^자산총계$"),
     "current_assets":          re.compile(r"^유동자산$"),
@@ -241,7 +246,28 @@ _BS_REGEX = {
     "long_term_debt":          re.compile(r"^장기차입금(및사채)?$"),
     "total_equity":            re.compile(r"^자본총계$"),
     "retained_earnings":       re.compile(r"^(이익잉여금|결손금)$"),
+    # 보험업 전용 (있으면 추출, 없으면 None)
+    "insurance_liabilities":   re.compile(r"^(보험계약부채|책임준비금)$"),
+    "insurance_assets":        re.compile(r"^(보험계약자산|재보험계약자산)$"),
 }
+
+# 보험업 자동 감지 힌트 — `보험계약부채`/`책임준비금`/`보험계약자산` 중 하나라도
+# 항목에 존재하면 보험업으로 판정 (DART induty_code별도 호출 회피, 회계과목 패턴 직접 감지).
+# ValueScreener 자문(2026-05-09) 권고 패턴.
+_INSURANCE_HINT_REGEX = re.compile(r"^(보험계약부채|책임준비금|보험계약자산)$")
+
+
+def is_insurance_company(items: list[dict]) -> bool:
+    """DART 응답 항목 패턴으로 보험업 자동 감지.
+
+    `보험계약부채`/`책임준비금`/`보험계약자산` 중 하나 이상 존재 시 보험업.
+    호출자에서 보험업 분기 정책(safety_grade의 별도 등급 산출 등)에 활용.
+    """
+    for item in items:
+        nm = (item.get("account_nm") or "").strip().replace(" ", "")
+        if _INSURANCE_HINT_REGEX.match(nm):
+            return True
+    return False
 
 # CF/CCF 현금흐름표
 _CF_REGEX = {
@@ -255,7 +281,7 @@ _CF_REGEX = {
 
 # IS/CIS 세부 손익계산서 (매출원가, SGA, EPS 등 포함)
 _IS_DETAIL_REGEX = {
-    "revenue":          re.compile(r"^(매출액|수익\(매출액\)|영업수익|매출)$"),
+    "revenue":          re.compile(r"^(매출액|수익\(매출액\)|영업수익|매출|보험(영업)?수익)$"),
     "cogs":             re.compile(r"^매출원가$"),
     "gross_profit":     re.compile(r"^매출총이익$"),
     "sga":              re.compile(r"^판매비(와|및)관리비$"),
