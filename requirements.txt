@@ -22,3 +22,4 @@ pyyaml
 bcrypt
 python-jose[cryptography]
 cryptography>=42
+pycryptodome>=3.20

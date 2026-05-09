@@ -1,5 +1,36 @@
 # 변경 이력
 
+## 2026-05-09 — 배포 실패 5건 누적 원인 해소 (pycryptodome 누락)
+
+### 진단 (사용자 후속 보고 "DB손해보험 재무내역 여전히 안 됨, 캐시 문제인지?" 추적)
+
+사용자 의문은 캐시였으나, 운영 진단 결과 **새 코드 자체가 5건 연속 배포 실패로 운영에 미반영**된 상태. 실제 캐시 무관:
+
+- 운영 컨테이너 이미지 태그 `02d76aab...` (5건 전 커밋)
+- 컨테이너 내부 `_resolve_yf_code` 0회 매칭, `corp_code` 0회 매칭 — 새 코드 모두 미반영
+- GitHub Actions Deploy 워크플로우 직전 5건(`b71ddf1`/`010c8b7`/`4970ce3`/`2f0a414`/`0c96fb5`) 모두 `failure`
+- 각 워크플로우 `CI / Backend Tests` step의 "Run tests"에서 동일 실패: `tests/unit/test_wrapper_overseas_*.py` 4 모듈 collection error → `wrapper.py:16: from Crypto.Cipher import AES` → `ModuleNotFoundError: No module named 'Crypto'`
+- 운영 컨테이너에서도 `python -c "import Crypto"` → `ModuleNotFoundError`. wrapper.py 자체가 import 실패. routers/services는 lazy import(`stock/kis_overseas_client.py:71`, `services/quote_overseas.py:419`)로 우회 — KIS 미국 시세 KIS-우선 경로가 항상 None → yfinance fallback로만 동작 중(graceful 흡수돼 표면화 안 됨)
+
+### 변경
+
+- **`requirements.txt`**: `pycryptodome>=3.20` 추가. CLAUDE.md에 "미포함, 별도 설치"로 명시되어 있던 항목이 실제로는 `wrapper.py` 모듈 레벨 import이라 누락 시 (1) CI test collection error → 배포 차단, (2) 운영 wrapper.py import 실패로 KIS 체결통보(H0STCNI0)·KIS 미국 시세 정상 경로 무력화. 운영 이미지에 누락된 상태로 5건 누적된 것이 본질적 회귀 미감지의 원인.
+- **`CLAUDE.md`**: "미포함" 표현 제거 → `requirements.txt` 포함 항목으로 갱신 + "누락 시 wrapper.py import 자체가 ModuleNotFoundError로 실패해 CI/배포 차단" 명시.
+
+### 영향 (배포 성공 후)
+
+- 5건 누적 변경(KR 자문 데이터 수집 결함 2건 / 한글화 / CLAUDE.md 압축 / 모델 라우팅 정책 / 백테스트 fire-and-poll / 백테스트 504 nginx fix / 매크로 GPT 캐시 cleanup)이 한 번에 운영 반영됨
+- DB손해보험 005830 재무내역·자문 데이터 정상 회복 (별도 캐시 작업 불필요 — 새 코드 캐시 키가 자동 분리되어 raw 코드 빈 응답 캐시는 자연 우회)
+- KIS 체결통보 AES 복호화 + KIS 미국 시세 KIS-우선 경로도 동시 회복 (사이드 이득)
+
+### 회귀 가드
+
+- `pycryptodome` 의존성 추가 외 코드 변경 0건
+- `wrapper.py:16` import 패턴은 기존 그대로 유지 (의존성 충족만 확보)
+- 향후 동일 회귀 차단: CLAUDE.md에 명시적 경고 추가 — "pycryptodome 누락 시 wrapper import 자체 실패"
+
+---
+
 ## 2026-05-09 — KR 자문 데이터 수집 인프라 결함 2건 근본 수정 + 로그인/회원가입 한글화 + CLAUDE.md 6개 압축
 
 ### 진단 (DB손해보험 005830 재무 수집 실패 — 운영 SSM 라이브 분석)
