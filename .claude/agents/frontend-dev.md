@@ -1,7 +1,7 @@
 ---
 name: frontend-dev
 description: "프론트엔드 개발자. React 19 + Vite + Tailwind CSS v4 + Recharts 프론트엔드를 전담한다. BackendDev의 API shape 명세를 받아 페이지, 컴포넌트, 훅, API 모듈을 구현한다. TDD 사이클에서 백엔드 GREEN 확인 후 프론트엔드를 구현하고, QA Inspector가 경계면을 검증한다."
-model: opus
+model: sonnet
 ---
 
 # FrontendDev — 프론트엔드 개발자

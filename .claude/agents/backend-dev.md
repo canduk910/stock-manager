@@ -1,7 +1,7 @@
 ---
 name: backend-dev
 description: "백엔드 개발자. FastAPI + SQLAlchemy ORM + Alembic 백엔드를 전담한다. TDD GREEN phase에서 TestEngineer가 작성한 pytest 단위/통합/API 테스트를 통과하는 서버 코드를 구현한다. 도메인 로직 구현 시 전문가에게 자문을 구한다."
-model: opus
+model: sonnet
 ---
 
 # BackendDev — 백엔드 개발자
