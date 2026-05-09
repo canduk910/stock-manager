@@ -327,8 +327,104 @@ function CashflowChart({ rows, market }) {
   )
 }
 
-// ── 사업 개요 (키워드 + 파이차트 + 사업설명) ─────────────────────────────
-function BusinessOverview({ segments, description, keywords }) {
+// ── 매출비중 5년 추이 (Phase 1A, ValueScreener 자문 2026-05-10) ──────────
+// Stacked Bar 100% + 테이블 병기. AI 추정 면책 의무. composite_score 미반영.
+function SegmentsHistoryChart({ history, highlights, source }) {
+  if (!Array.isArray(history) || history.length < 2) return null
+
+  // 모든 segment 명칭 수집 (연도 간 합집합)
+  const allSegments = []
+  history.forEach(year => {
+    (year.segments || []).forEach(s => {
+      if (s.segment && !allSegments.includes(s.segment)) allSegments.push(s.segment)
+    })
+  })
+
+  // Recharts BarChart용 data: [{year, segA: 50, segB: 30, ...}, ...]
+  const chartData = history.map(year => {
+    const row = { year: String(year.year) }
+    const map = Object.fromEntries(
+      (year.segments || []).map(s => [s.segment, s.revenue_pct])
+    )
+    allSegments.forEach(seg => { row[seg] = map[seg] || 0 })
+    return row
+  })
+
+  const isAiEstimate = source === 'gpt_inference'
+  const growing = highlights?.growing || []
+  const shrinking = highlights?.shrinking || []
+
+  return (
+    <div className="mt-4 space-y-3 border-t border-gray-100 pt-4">
+      <div className="flex items-center gap-2 flex-wrap">
+        <h4 className="text-xs font-semibold text-gray-700">매출비중 {history.length}년 추이</h4>
+        {isAiEstimate && (
+          <span className="inline-block text-[11px] bg-yellow-100 text-yellow-700 border border-yellow-300 rounded px-1.5 py-0.5">
+            AI 추정 · 추세는 참고용
+          </span>
+        )}
+        {growing.length > 0 && growing.map((g, i) => (
+          <span key={`g-${i}`} className="inline-block text-[11px] bg-green-50 text-green-700 border border-green-200 rounded px-1.5 py-0.5">
+            ↑ {g.segment} +{g.delta_pct.toFixed(1)}%p
+          </span>
+        ))}
+        {shrinking.length > 0 && shrinking.map((s, i) => (
+          <span key={`s-${i}`} className="inline-block text-[11px] bg-red-50 text-red-700 border border-red-200 rounded px-1.5 py-0.5">
+            ↓ {s.segment} {s.delta_pct.toFixed(1)}%p
+          </span>
+        ))}
+      </div>
+
+      {/* Stacked Bar Chart 100% */}
+      <ResponsiveContainer width="100%" height={220}>
+        <BarChart data={chartData} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
+          <XAxis dataKey="year" tick={{ fontSize: 10 }} />
+          <YAxis domain={[0, 100]} tick={{ fontSize: 10 }} tickFormatter={v => `${v}%`} />
+          <Tooltip formatter={(v) => `${Number(v).toFixed(1)}%`} />
+          <Legend wrapperStyle={{ fontSize: 11 }} />
+          {allSegments.map((seg, i) => (
+            <Bar
+              key={seg}
+              dataKey={seg}
+              stackId="a"
+              fill={PIE_COLORS[i % PIE_COLORS.length]}
+            />
+          ))}
+        </BarChart>
+      </ResponsiveContainer>
+
+      {/* 정밀 수치 테이블 (행=부문, 열=연도) */}
+      <div className="overflow-x-auto">
+        <table className="w-full border border-gray-200 rounded">
+          <thead>
+            <tr>
+              <Th>사업부문</Th>
+              {history.map(y => <Th key={y.year} right>{y.year}</Th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {allSegments.map((seg, idx) => (
+              <tr key={seg} className={idx % 2 === 1 ? 'bg-gray-50' : ''}>
+                <Td>
+                  <span className="inline-block w-2.5 h-2.5 rounded-sm mr-1.5 align-middle" style={{ background: PIE_COLORS[idx % PIE_COLORS.length] }} />
+                  {seg}
+                </Td>
+                {chartData.map(row => (
+                  <Td key={`${seg}-${row.year}`} right>
+                    {row[seg] > 0 ? `${row[seg].toFixed(1)}%` : '-'}
+                  </Td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+// ── 사업 개요 (키워드 + 파이차트 + 사업설명 + 5년 추이) ──────────────────
+function BusinessOverview({ segments, description, keywords, segmentsHistory, segmentsHighlights, segmentsHistorySource }) {
   const hasSegments = segments?.length > 0
   const isAiEstimate = segments?.some(s => s.note === 'AI추정')
 
@@ -397,6 +493,13 @@ function BusinessOverview({ segments, description, keywords }) {
           </div>
         </div>
       )}
+
+      {/* 5년 추이 (Stacked Bar + 테이블) — Phase 1A */}
+      <SegmentsHistoryChart
+        history={segmentsHistory}
+        highlights={segmentsHighlights}
+        source={segmentsHistorySource}
+      />
     </div>
   )
 }
@@ -542,6 +645,10 @@ export default function FundamentalPanel({ data, market, code }) {
   const businessKeywords = fundamental.business_keywords || []
   const businessModel = fundamental.business_model || null
   const forwardEstimates = fundamental.forward_estimates || null
+  // Phase 1A: 5년 매출비중 추이 (KR 한정, GPT 추정)
+  const segmentsHistory = fundamental.segments_history || []
+  const segmentsHighlights = fundamental.segments_highlights || null
+  const segmentsHistorySource = fundamental.segments_history_source || null
 
   const hasBizModel = businessModel && Object.values(businessModel).some(
     v => v && String(v).trim().length > 0
@@ -555,6 +662,9 @@ export default function FundamentalPanel({ data, market, code }) {
         segments={segments}
         description={businessDescription}
         keywords={businessKeywords}
+        segmentsHistory={segmentsHistory}
+        segmentsHighlights={segmentsHighlights}
+        segmentsHistorySource={segmentsHistorySource}
       />
 
       {/* 비즈니스 모델 — 매출 흐름 / 현금 창출 / R&D 투자 */}

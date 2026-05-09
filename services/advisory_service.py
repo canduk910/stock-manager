@@ -273,7 +273,7 @@ def _collect_fundamental_kr(code: str, name: str, user_id: int = 1) -> dict:
     from stock.market import fetch_market_metrics
     from stock.yf_client import fetch_forward_estimates_yf
 
-    with ThreadPoolExecutor(max_workers=7) as pool:
+    with ThreadPoolExecutor(max_workers=8) as pool:
         f_income = pool.submit(dart_fin.fetch_income_detail_annual, code, 10)
         f_bs_cf = pool.submit(dart_fin.fetch_bs_cf_annual, code, 10)
         f_metrics = pool.submit(fetch_market_metrics, code)
@@ -281,6 +281,8 @@ def _collect_fundamental_kr(code: str, name: str, user_id: int = 1) -> dict:
         f_forward = pool.submit(fetch_forward_estimates_yf, code, True)
         f_val_stats = pool.submit(advisory_fetcher.fetch_valuation_stats, code, "KR")
         f_quarterly = pool.submit(dart_fin.fetch_quarterly_financials, code, 8)
+        # Phase 1A (2026-05-10): 5년치 매출비중 추이. GPT 1회 통합. 표시 한정.
+        f_segments_history = pool.submit(advisory_fetcher.fetch_segments_history_kr, code, name, user_id=user_id)
 
         income_stmt = f_income.result()
         bs_cf = f_bs_cf.result()
@@ -292,6 +294,7 @@ def _collect_fundamental_kr(code: str, name: str, user_id: int = 1) -> dict:
         forward_estimates = f_forward.result()
         valuation_stats = f_val_stats.result()
         quarterly = f_quarterly.result()
+        segments_history_data = f_segments_history.result()
 
     # 하위호환: 구 캐시가 list일 수 있음
     if isinstance(segments_data, dict):
@@ -322,6 +325,10 @@ def _collect_fundamental_kr(code: str, name: str, user_id: int = 1) -> dict:
         "forward_estimates": forward_estimates,
         "valuation_stats": valuation_stats,  # Phase 2-2
         "quarterly": quarterly,              # Phase 2-3
+        # Phase 1A (2026-05-10): 5년치 매출비중 추이 — 표시 전용. composite_score 미반영.
+        "segments_history": segments_history_data.get("years_data", []) if isinstance(segments_history_data, dict) else [],
+        "segments_highlights": segments_history_data.get("highlights") if isinstance(segments_history_data, dict) else None,
+        "segments_history_source": segments_history_data.get("source") if isinstance(segments_history_data, dict) else None,
     }
 
 
@@ -391,6 +398,10 @@ def _collect_fundamental_us(code: str, name: str = "", user_id: int = 1) -> dict
         "forward_estimates": forward_estimates,
         "valuation_stats": valuation_stats,  # Phase 2-2
         "quarterly": quarterly,              # Phase 2-3
+        # Phase 1A: US는 yfinance 한계로 segments_history 미지원. 빈 배열 반환(프론트 분기 단순화).
+        "segments_history": [],
+        "segments_highlights": None,
+        "segments_history_source": None,
     }
 
 

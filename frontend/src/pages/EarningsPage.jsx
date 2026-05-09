@@ -5,6 +5,19 @@ import LoadingSpinner from '../components/common/LoadingSpinner'
 import ErrorAlert from '../components/common/ErrorAlert'
 import EmptyState from '../components/common/EmptyState'
 
+// DART pblntf_ty 카테고리 — ValueScreener 자문(2026-05-10) 기반
+// Default ON 4종 (가치투자 안전마진 평가 필수): A 정기 + B 주요사항 + D 지분 + F 외부감사
+const CATEGORY_OPTIONS = [
+  { code: 'A', label: '정기공시', defaultOn: true,  hint: '사업/반기/분기' },
+  { code: 'B', label: '주요사항보고', defaultOn: true, hint: '유증·CB·자사주·합병·감자' },
+  { code: 'D', label: '지분공시', defaultOn: true, hint: '5%룰·임원·주요주주' },
+  { code: 'F', label: '외부감사관련', defaultOn: true, hint: '감사의견 — Value Trap 신호' },
+  { code: 'C', label: '발행공시', defaultOn: false, hint: '증권신고서' },
+  { code: 'E', label: '기타공시', defaultOn: false, hint: '정관변경·분할' },
+  { code: 'I', label: '거래소공시', defaultOn: false, hint: '단일판매·공급계약·배당' },
+]
+const DEFAULT_ON = CATEGORY_OPTIONS.filter(c => c.defaultOn).map(c => c.code)
+
 function localDateStr(d = new Date()) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
@@ -23,17 +36,24 @@ export default function EarningsPage() {
   const [endDate, setEndDate] = useState(todayStr())
   const [filterText, setFilterText] = useState('')
   const [market, setMarket] = useState('KR')
+  const [categories, setCategories] = useState(DEFAULT_ON)
   const { data, loading, error, load } = useEarnings()
 
   useEffect(() => {
     const today = todayStr().replace(/-/g, '')
-    load(today, today, 'KR')
-  }, []) // 첫 마운트 시 오늘 날짜로 조회
+    load(today, today, 'KR', DEFAULT_ON)
+  }, []) // 첫 마운트 시 오늘 날짜 + default ON 카테고리로 조회
 
   const handleSearch = () => {
     setFilterText('')
-    load(startDate.replace(/-/g, ''), endDate.replace(/-/g, ''), market)
+    const cats = market === 'KR' ? categories : null  // US는 카테고리 무시
+    load(startDate.replace(/-/g, ''), endDate.replace(/-/g, ''), market, cats)
   }
+
+  const toggleCategory = (code) => {
+    setCategories(prev => prev.includes(code) ? prev.filter(c => c !== code) : [...prev, code])
+  }
+  const restoreDefaults = () => setCategories(DEFAULT_ON)
 
   const filteredFilings = () => {
     if (!data?.filings) return []
@@ -145,6 +165,53 @@ export default function EarningsPage() {
           <p className="text-xs text-gray-400">
             미국 SEC EDGAR에서 10-K (연간보고서) 및 10-Q (분기보고서)를 조회합니다.
           </p>
+        )}
+
+        {/* KR 한정: 카테고리 다중 체크박스 (Phase 2A, ValueScreener 자문) */}
+        {market === 'KR' && (
+          <div className="border-t border-gray-100 pt-3 space-y-2">
+            <div className="flex items-center gap-3">
+              <span className="text-xs font-medium text-gray-500">공시 카테고리</span>
+              <button
+                onClick={restoreDefaults}
+                className="text-xs text-gray-400 hover:text-blue-600"
+              >
+                기본값 복원 (A·B·D·F)
+              </button>
+              <span className="ml-auto text-xs text-gray-400">
+                선택 {categories.length} / {CATEGORY_OPTIONS.length}
+              </span>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {CATEGORY_OPTIONS.map(({ code, label, hint, defaultOn }) => {
+                const active = categories.includes(code)
+                return (
+                  <label
+                    key={code}
+                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs cursor-pointer border transition-colors ${
+                      active
+                        ? 'bg-blue-50 border-blue-300 text-blue-700'
+                        : 'bg-white border-gray-200 text-gray-500 hover:border-gray-300'
+                    }`}
+                    title={hint}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={active}
+                      onChange={() => toggleCategory(code)}
+                      className="w-3.5 h-3.5 accent-blue-600"
+                    />
+                    <span className="font-medium">{label}</span>
+                    {defaultOn && <span className="text-[10px] text-blue-500">★</span>}
+                  </label>
+                )
+              })}
+            </div>
+            <p className="text-[11px] text-gray-400">
+              ★ ValueScreener 권고: 정기공시·주요사항·지분·외부감사는 안전마진 평가에 필수.
+              발행/기타/거래소 공시는 의도 시 추가 선택.
+            </p>
+          </div>
         )}
       </div>
 

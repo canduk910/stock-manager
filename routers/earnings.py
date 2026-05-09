@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from services.auth_deps import get_current_user
 from services.exceptions import ExternalAPIError
-from screener.dart import fetch_filings
+from screener.dart import fetch_filings, ALLOWED_CATEGORIES, DEFAULT_CATEGORIES
 from screener.service import ScreenerValidationError, normalize_date
 from stock.dart_fin import fetch_financials
 from stock.market import fetch_period_returns
@@ -12,6 +12,23 @@ from stock.sec_filings import fetch_sec_filings
 from stock.yf_client import fetch_period_returns_yf
 
 router = APIRouter(prefix="/api/earnings", tags=["earnings"])
+
+
+def _parse_category_csv(raw: str | None) -> list[str] | None:
+    """CSV 카테고리 문자열 → 검증된 코드 리스트. 무효 시 422.
+
+    Phase 2A (2026-05-10): None → 기존 동작(['A'] 단독, 백워드 호환).
+    """
+    if not raw:
+        return None
+    parts = [p.strip().upper() for p in raw.split(",") if p.strip()]
+    invalid = [p for p in parts if p not in ALLOWED_CATEGORIES]
+    if invalid:
+        raise HTTPException(
+            status_code=422,
+            detail=f"알 수 없는 공시 카테고리 코드: {','.join(invalid)}. 허용: {','.join(sorted(ALLOWED_CATEGORIES))}",
+        )
+    return parts or None
 
 
 @router.get("/filings")
@@ -23,12 +40,23 @@ def get_filings(
     ),
     start_date: str | None = Query(None, description="시작 날짜 (YYYYMMDD 또는 YYYY-MM-DD)"),
     end_date: str | None = Query(None, description="종료 날짜 (YYYYMMDD 또는 YYYY-MM-DD)"),
+    categories: str | None = Query(
+        None,
+        description=(
+            "공시 카테고리 CSV (예: A,B,D,F). DART pblntf_ty 코드. 미지정 시 A(정기공시)만. "
+            "ValueScreener 권고 default: A/B/D/F. KR 한정. US는 무시."
+        ),
+    ),
+    details: str | None = Query(
+        None,
+        description="세부 카테고리(pblntf_detail_ty) CSV. Phase 2B 활용 예정.",
+    ),
     _user: dict = Depends(get_current_user),
 ):
-    """기간별 정기보고서 제출 목록 조회.
+    """기간별 공시 제출 목록 조회 — 카테고리 다중 필터 지원.
 
-    - market=KR: 국내 DART (사업/반기/분기보고서)
-    - market=US: 미국 SEC EDGAR (10-K / 10-Q)
+    - market=KR: 국내 DART (categories 미지정 시 정기공시 A만, 백워드 호환)
+    - market=US: 미국 SEC EDGAR (10-K / 10-Q, categories 무시)
     - start_date + end_date: 기간 조회
     - date: 단일 날짜 조회 (start_date = end_date = date)
     - 모두 생략: 오늘 날짜
@@ -54,16 +82,32 @@ def get_filings(
     except ValueError:
         raise HTTPException(status_code=422, detail="날짜 형식이 올바르지 않습니다.")
 
+    cat_list = _parse_category_csv(categories)
+    det_list = _parse_category_csv(details) if False else (
+        [d.strip() for d in details.split(",") if d.strip()] if details else None
+    )
+
     if market.upper() == "US":
+        # SEC EDGAR는 form type 별도 체계 — 카테고리 무시 (Phase 2B 확장 가능)
         return _get_filings_us(s, e)
     else:
-        return _get_filings_kr(s, e)
+        return _get_filings_kr(s, e, pblntf_types=cat_list, detail_types=det_list)
 
 
-def _get_filings_kr(s: str, e: str) -> dict:
-    """국내 DART 공시 조회."""
+def _get_filings_kr(
+    s: str,
+    e: str,
+    *,
+    pblntf_types: list[str] | None = None,
+    detail_types: list[str] | None = None,
+) -> dict:
+    """국내 DART 공시 조회. pblntf_types 미지정 시 기존 동작(A 단독)."""
     try:
-        filings = fetch_filings(s, e)
+        filings = fetch_filings(
+            s, e,
+            pblntf_types=pblntf_types,
+            detail_types=detail_types,
+        )
     except RuntimeError as ex:
         raise ExternalAPIError(str(ex))
 

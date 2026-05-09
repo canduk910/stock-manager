@@ -469,6 +469,159 @@ def fetch_segments_kr(code: str, name: str, user_id=None) -> dict:
         return empty
 
 
+# ── 사업부문 매출비중 5년 추이 (KR — OpenAI 통합 추론, Phase 1A 2026-05-10) ──
+# ValueScreener 자문(2026-05-10): GPT 통합 추론 + "AI 추정" 면책 의무 + composite_score 미반영.
+# DART 사업보고서 본문 파싱(Phase B)은 차후. 5년치(Graham "지속성" 원칙 정합).
+
+_SEGMENTS_HISTORY_HIGHLIGHT_THRESHOLD_PCT = 5.0  # 첫·끝 연도 ±5%p 임계
+
+
+def _compute_segments_highlights(years_data: list) -> dict:
+    """첫 연도 vs 끝 연도 비교로 신사업/축소사업 식별.
+
+    ±5%p 임계 (ValueScreener 권고). Graham "사양 사업 위장 성장" Value Trap 식별용.
+    """
+    if not years_data or len(years_data) < 2:
+        return {"growing": [], "shrinking": []}
+    first = years_data[0].get("segments") or []
+    last = years_data[-1].get("segments") or []
+    first_pct = {s.get("segment"): float(s.get("revenue_pct") or 0) for s in first if s.get("segment")}
+    last_pct = {s.get("segment"): float(s.get("revenue_pct") or 0) for s in last if s.get("segment")}
+    all_segments = set(first_pct) | set(last_pct)
+    growing, shrinking = [], []
+    for seg in all_segments:
+        delta = last_pct.get(seg, 0) - first_pct.get(seg, 0)
+        if delta >= _SEGMENTS_HISTORY_HIGHLIGHT_THRESHOLD_PCT:
+            growing.append({"segment": seg, "delta_pct": round(delta, 1)})
+        elif delta <= -_SEGMENTS_HISTORY_HIGHLIGHT_THRESHOLD_PCT:
+            shrinking.append({"segment": seg, "delta_pct": round(delta, 1)})
+    growing.sort(key=lambda x: -x["delta_pct"])
+    shrinking.sort(key=lambda x: x["delta_pct"])
+    return {"growing": growing, "shrinking": shrinking}
+
+
+def fetch_segments_history_kr(
+    code: str, name: str, *, years: int = 5, user_id=None
+) -> dict:
+    """KR 사업부문 매출비중 N년치 추이. GPT 1회 통합 추론.
+
+    캐시 키: advisor:segments_history_kr:{code}:{years}, TTL 168h(7일).
+    `service_name="segments_history_kr"` (AI 게이트웨이 쿼터 추적).
+
+    반환:
+        {
+            "years_data": [{"year": int, "segments": [{segment, revenue_pct, note:"AI추정"}]}, ...],
+            "highlights": {"growing": [{segment, delta_pct}], "shrinking": [...]},
+            "confidence": "low",  # GPT 단독 추정
+            "source": "gpt_inference",
+        }
+    OPENAI_API_KEY 미설정/실패 시 years_data=[].
+
+    Phase B(DART 본문 파싱)에서 source="dart_parsed" + confidence="high"로 교체 예정.
+    """
+    from stock.cache import get_cached, set_cached
+    from datetime import date
+
+    empty = {"years_data": [], "highlights": {"growing": [], "shrinking": []},
+             "confidence": "low", "source": "gpt_inference"}
+
+    cache_key = f"advisor:segments_history_kr:{code}:{years}"
+    cached = get_cached(cache_key)
+    if cached is not None:
+        return cached
+
+    if not OPENAI_API_KEY:
+        return empty
+
+    try:
+        from services.ai_gateway import call_openai_chat
+
+        latest_year = date.today().year - 1  # 사업보고서 공시 주기 반영
+        start_year = latest_year - years + 1
+
+        system_prompt = (
+            "당신은 한국 가치투자 자문 시스템의 사업부문 추적 보조다. "
+            "공시 자료(DART 사업보고서)에 한정한 추정만 제공하고, 불확실 시 추정값을 "
+            "표시하되 'AI추정' 임을 명시한다. 연도 간 동일 사업은 일관된 명칭을 유지한다."
+        )
+
+        user_prompt = (
+            f"{name}(종목코드: {code})의 최근 {years}년({start_year}~{latest_year}) "
+            f"사업부문별 매출비중을 JSON으로 알려주세요.\n"
+            f"형식: {{\"years_data\": [{{\"year\": {latest_year}, \"segments\": "
+            f"[{{\"segment\": \"부문명\", \"revenue_pct\": 숫자}}]}}, ...]}}\n"
+            f"규칙:\n"
+            f"- 각 연도 segments 합계는 100\n"
+            f"- 상위 4개 부문만\n"
+            f"- 연도 간 동일 사업 부문 명칭 통일 (변화 추적 위해)\n"
+            f"- 사업 신규 진출/철수도 0% 또는 등장으로 반영\n"
+            f"- 불확실해도 최선의 추정값 (공시 한정)"
+        )
+
+        resp = call_openai_chat(
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            user_id=user_id,
+            service_name="segments_history_kr",
+            max_completion_tokens=1500,
+            response_format={"type": "json_object"},
+        )
+
+        content = resp.choices[0].message.content or "{}"
+        data = json.loads(content)
+
+        raw_years = data.get("years_data") or data.get("years") or []
+        if not isinstance(raw_years, list):
+            return empty
+
+        years_data = []
+        for entry in raw_years:
+            if not isinstance(entry, dict):
+                continue
+            year = entry.get("year")
+            try:
+                year = int(year)
+            except (TypeError, ValueError):
+                continue
+            raw_segs = entry.get("segments") or []
+            if not isinstance(raw_segs, list):
+                continue
+            segs = []
+            for s in raw_segs[:4]:
+                if not isinstance(s, dict):
+                    continue
+                seg_name = s.get("segment") or s.get("name") or ""
+                pct = s.get("revenue_pct") or s.get("pct") or s.get("percentage") or 0
+                if seg_name:
+                    try:
+                        segs.append({
+                            "segment": str(seg_name),
+                            "revenue_pct": float(pct),
+                            "note": "AI추정",
+                        })
+                    except (TypeError, ValueError):
+                        continue
+            if segs:
+                years_data.append({"year": year, "segments": segs})
+
+        years_data.sort(key=lambda x: x["year"])
+        if not years_data:
+            return empty
+
+        result = {
+            "years_data": years_data,
+            "highlights": _compute_segments_highlights(years_data),
+            "confidence": "low",
+            "source": "gpt_inference",
+        }
+        set_cached(cache_key, result, ttl_hours=24 * 7)
+        return result
+    except Exception:
+        return empty
+
+
 # ── 비즈니스 모델 narrative (KR/US 공통, 도메인 자문 적용) ────────────────────
 
 _BUSINESS_MODEL_SYSTEM_PROMPT = (

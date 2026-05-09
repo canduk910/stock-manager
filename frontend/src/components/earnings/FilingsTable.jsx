@@ -58,6 +58,35 @@ const REPORT_TYPE_COLORS_US = {
   '10-Q': 'bg-teal-100 text-teal-700',
 }
 
+// DART 카테고리 코드별 배지 색상 (Phase 2A, ValueScreener 자문 2026-05-10)
+const CATEGORY_COLORS = {
+  A: 'bg-purple-50 text-purple-700 ring-purple-200',
+  B: 'bg-red-50 text-red-700 ring-red-200',          // 주요사항 — 자본 변동 강조
+  C: 'bg-indigo-50 text-indigo-700 ring-indigo-200',
+  D: 'bg-orange-50 text-orange-700 ring-orange-200',
+  E: 'bg-teal-50 text-teal-700 ring-teal-200',
+  F: 'bg-rose-50 text-rose-700 ring-rose-200',        // 외부감사 — Value Trap 신호
+  I: 'bg-blue-50 text-blue-700 ring-blue-200',
+}
+
+// F 카테고리 + 감사의견 부정 키워드 매칭 → ⚠ 강조
+const _AUDIT_RISK_KEYWORDS = ['한정', '부적정', '부인', '의견거절']
+
+function CategoryCell({ row }) {
+  const code = row.category_code
+  const label = row.category
+  if (!code) return <span className="text-gray-400 text-xs">-</span>
+  const cls = CATEGORY_COLORS[code] || 'bg-gray-100 text-gray-700'
+  const reportName = row.report_name || ''
+  const auditRisk = code === 'F' && _AUDIT_RISK_KEYWORDS.some(k => reportName.includes(k))
+  return (
+    <span className="inline-flex items-center gap-1">
+      <span className={`px-1.5 py-0.5 rounded text-xs font-medium ring-1 ${cls}`}>{label}</span>
+      {auditRisk && <span className="text-[11px] text-red-600 font-bold" title="감사의견 한정/부적정/부인 — Value Trap 강력 신호">⚠</span>}
+    </span>
+  )
+}
+
 function makeColumns(market, watchlistSet) {
   const isUS = market === 'US'
   return [
@@ -76,6 +105,14 @@ function makeColumns(market, watchlistSet) {
     },
     { key: 'stock_code', label: isUS ? '티커' : '종목코드', align: 'center' },
     { key: 'corp_name', label: '종목명', align: 'left' },
+    // KR 한정: DART 카테고리 배지 (Phase 2A)
+    ...(!isUS ? [{
+      key: 'category',
+      label: '카테고리',
+      align: 'center',
+      sortable: false,
+      render: (_, row) => <CategoryCell row={row} />,
+    }] : []),
     { key: 'change_pct', label: '당일',   align: 'right', render: (v) => <ReturnCell value={v} /> },
     { key: 'return_3m',  label: '3개월', align: 'right', render: (v) => <ReturnCell value={v} /> },
     { key: 'return_6m',  label: '6개월', align: 'right', render: (v) => <ReturnCell value={v} /> },
