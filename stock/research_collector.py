@@ -190,12 +190,27 @@ def _collect_capital_actions(code: str, market: str, name: str) -> dict:
     if is_domestic(code):
         try:
             from screener.dart import fetch_filings
-            all_filings = fetch_filings(start_date, end_date)
-            # 해당 종목만 필터
-            result["filings"] = [
-                f for f in all_filings
-                if f.get("stock_code") == code
-            ][:20]
+            from stock.dart_fin import _fetch_corp_code
+
+            corp_code = None
+            try:
+                corp_code = _fetch_corp_code(code)
+            except Exception as e:
+                logger.warning("DART corp_code 조회 실패 %s: %s", code, e)
+
+            if corp_code:
+                # corp_code 있으면 DART 정책상 검색기간 무제한 + 단일 회사만 반환
+                all_filings = fetch_filings(start_date, end_date, corp_code=corp_code)
+                result["filings"] = all_filings[:20]
+            else:
+                # corp_code 매핑 실패 시: DART는 전종목 조회 시 3개월 초과를
+                # 거부하므로(status=100), 90일로 단축 후 클라이언트 필터.
+                short_start = (date.today() - timedelta(days=90)).strftime("%Y%m%d")
+                all_filings = fetch_filings(short_start, end_date)
+                result["filings"] = [
+                    f for f in all_filings
+                    if f.get("stock_code") == code
+                ][:20]
         except Exception as e:
             logger.warning("DART 공시 수집 실패 %s: %s", code, e)
     else:

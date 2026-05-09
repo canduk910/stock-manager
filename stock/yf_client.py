@@ -34,6 +34,33 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def _resolve_yf_code(code: str) -> str:
+    """yfinance ticker 정규화. 6자리 숫자 KR 코드면 .KS/.KQ 자동 부착.
+
+    - 이미 suffix(`.KS`/`.KQ`) 또는 알파벳 포함 → 그대로 반환 (US/매크로 심볼)
+    - 6자리 숫자 KR 코드 → `_kr_yf_ticker_str()`로 KOSPI/KOSDAQ 식별 후 변환
+    - 변환 실패 시 raw code 반환 (yfinance가 404 처리, 호출자 graceful)
+
+    이 가드는 `_ticker()` 진입부에서 자동 적용되어, KR 코드를 raw로 yfinance에
+    넘기던 모든 경로(fetch_earnings_dates / fetch_company_officers /
+    fetch_major_holders / fetch_sector_peers 등)를 일괄 보호한다.
+    """
+    if not code:
+        return code
+    upper = code.upper().strip()
+    if "." in upper or not upper.isdigit():
+        return upper
+    if len(upper) == 6:
+        try:
+            from stock.market import _kr_yf_ticker_str
+            resolved = _kr_yf_ticker_str(upper)
+            if resolved:
+                return resolved
+        except Exception:
+            pass
+    return upper
+
+
 def _ticker_uncached(code: str):
     """yfinance Ticker 객체 반환 (LRU 캐시로 중복 생성 방지).
 
@@ -58,7 +85,9 @@ def _ticker(code: str):
 
     `cache_info()`의 hits/misses 차이로 hit/miss 판정.
     종목별 호출 횟수도 누적(eviction 검증용).
+    KR raw code(6자리 숫자)는 `_resolve_yf_code()`로 자동 .KS/.KQ 부착.
     """
+    code = _resolve_yf_code(code)
     try:
         from services import _telemetry as _tel
         prev = _ticker_cached.cache_info()
@@ -101,6 +130,7 @@ def _safe_int(v) -> Optional[int]:
 
 def validate_ticker(code: str) -> Optional[dict]:
     """ticker가 유효한지 확인하고 기본 정보를 반환. 없으면 None."""
+    code = _resolve_yf_code(code)
     key = f"yf:validate:{code.upper()}"
     cached = get_cached(key)
     if cached is not None:
@@ -1165,6 +1195,7 @@ def fetch_quarterly_financials_yf(code: str, quarters: int = 4) -> list[dict]:
 
 def fetch_company_officers(code: str) -> list[dict]:
     """경영진 목록 (이름/직위/보수). yfinance info의 companyOfficers 활용."""
+    code = _resolve_yf_code(code)
     key = f"yf:officers:{code.upper()}"
     cached = get_cached(key)
     if cached is not None:
@@ -1189,6 +1220,7 @@ def fetch_company_officers(code: str) -> list[dict]:
 
 def fetch_major_holders(code: str) -> dict:
     """최대주주/기관 보유 현황."""
+    code = _resolve_yf_code(code)
     key = f"yf:major_holders:{code.upper()}"
     cached = get_cached(key)
     if cached is not None:
@@ -1233,6 +1265,7 @@ def fetch_major_holders(code: str) -> dict:
 
 def fetch_earnings_dates(code: str, limit: int = 12) -> list[dict]:
     """실적 발표일 + EPS actual/estimate. 최근 limit개."""
+    code = _resolve_yf_code(code)
     key = f"yf:earnings_dates:{code.upper()}:{limit}"
     cached = get_cached(key)
     if cached is not None:
@@ -1316,6 +1349,7 @@ def fetch_macro_indicators() -> dict:
 
 def fetch_sector_peers(code: str, max_peers: int = 5) -> list[dict]:
     """동일 섹터 경쟁사 목록 + 기본 밸류에이션. yfinance info 활용."""
+    code = _resolve_yf_code(code)
     key = f"yf:sector_peers:{code.upper()}"
     cached = get_cached(key)
     if cached is not None:

@@ -1,5 +1,76 @@
 # 변경 이력
 
+## 2026-05-09 — KR 자문 데이터 수집 인프라 결함 2건 근본 수정 + 로그인/회원가입 한글화 + CLAUDE.md 6개 압축
+
+### 진단 (DB손해보험 005830 재무 수집 실패 — 운영 SSM 라이브 분석)
+
+사용자 보고는 단일 종목 이슈처럼 보였으나, 운영 EC2 SSM Send-Command 로그 분석 결과 **두 가지 별개의 인프라 결함이 005830에서 동시 노출**된 것으로 확인:
+
+1. `WARNI [stock.research_collector] DART 공시 수집 실패 005830: DART API 오류 (100): corp_code가 없는 경우 검색기간은 3개월만 가능합니다.`
+2. `ERROR [yfinance] HTTP Error 404: Quote not found for symbol: 005830` / `possibly delisted; no price data found  (period=10y)` / `No earnings dates found`
+
+**확인된 근본 원인** (운영 라이브 검증):
+- **결함 #1 (yfinance)**: KR 6자리 raw 코드(`005830`)가 yfinance에 그대로 전달되어 404. 라이브 검증 — `yf.Ticker("005830")` → `last_price: None`, 404 "Quote not found"; `yf.Ticker("005830.KS")` → `last_price: 164,600원`, `market_cap: 9.98조원` 정상. `_collect_management`처럼 `_kr_yf_ticker_str()` 거치는 경로는 보호됐으나, `_collect_valuation_band`(`fetch_earnings_dates(code, limit=12)`)는 raw code 직접 전달로 노출.
+- **결함 #2 (DART)**: `screener/dart.py:fetch_filings()`이 `corp_code` 인자 없이 365일 호출 → DART 정책 강화로 거부. 라이브 검증 — `corp_code=None + 365일` → `status=100`; `corp_code='00159102' + 365일` → `status=000`, **6건 정상 응답**. `_load_corp_map()` 매핑 크기 3,963개 정상 — 005830 corp_code(`'00159102'`)는 항상 존재했고, 이전 코드가 lookup 자체를 안 한 것이 본질. 모든 KR 종목이 동일 영향(005830만의 문제 아님).
+
+### 변경 (백엔드 — 결함 #1, KR raw 코드 가드)
+
+- **`stock/yf_client.py`**: `_resolve_yf_code(code)` 헬퍼 신규 — 6자리 숫자 KR 코드면 `_kr_yf_ticker_str()`로 `.KS`/`.KQ` 자동 부착. 이미 변환된 ticker(`005830.KS`)/매크로 심볼(`^TNX`)/US 알파벳(`AAPL`)/빈 입력은 그대로 통과(무한 재귀 방지). `_ticker()` 진입부에서 자동 적용 → 모든 yfinance 호출이 일괄 보호됨.
+- **`stock/yf_client.py`**: `validate_ticker`/`fetch_company_officers`/`fetch_major_holders`/`fetch_earnings_dates`/`fetch_sector_peers` 5개 함수 진입부에 `code = _resolve_yf_code(code)` 명시적 가드 추가 — 캐시 키 일관성(이전 raw 코드 빈 응답 캐시 24h~7일 락-인 방지). 변환 실패 시 raw 반환(yfinance 404 graceful, 호출자 try/except 흡수).
+
+### 변경 (백엔드 — 결함 #2, DART corp_code 활용)
+
+- **`screener/dart.py`**: `fetch_filings(start_date, end_date, *, corp_code=None)` 시그니처 키워드 인자 확장(백워드 호환 100%). `corp_code` 있으면 DART API params에 포함되어 단일 회사 + 무제한 기간 조회. 캐시 키도 `corp_code` 별 분리(`dart_filings:{start}:{end}:{corp_code}`).
+- **`stock/research_collector.py`**: `_collect_capital_actions`에서 `_fetch_corp_code(code)` lookup 후 365일 호출. 매핑 실패 시(corpCode.xml 다운로드 실패/신규 상장 직후 미반영 등 매우 예외적) 90일로 자동 단축 + 클라이언트 필터(DART 정책 준수). 일반 상장 종목엔 절대 발동 안 함.
+
+### 변경 (프론트엔드 — 로그인/회원가입 한글화)
+
+- **`frontend/src/pages/LoginPage.jsx`**: 부제목 "Investment Management System" → "투자 관리 시스템", 라벨/placeholder/버튼/링크/에러 한글화. 회원가입 직후 진입 시 success 안내 추가("회원가입이 완료되었습니다. 로그인해 주세요." — `useLocation` state.registered 활용).
+- **`frontend/src/pages/RegisterPage.jsx`**: 부제목 "Create Account" → "계정 만들기", 4개 입력 필드(아이디/이름/비밀번호/비밀번호 확인) 라벨/placeholder/검증 에러("비밀번호가 일치하지 않습니다", "비밀번호는 4자 이상이어야 합니다")/버튼/링크 한글화.
+- **백엔드 `services/auth_service.py`**: 모든 사용자 노출 메시지가 이미 한글이므로 변경 없음("아이디 또는 비밀번호가 올바르지 않습니다" 등).
+
+### 변경 (문서 — CLAUDE.md 6개 일괄 압축)
+
+전체 CLAUDE.md 6개 파일에 누적된 phase 단위 변경 이력(셀에 내장된 dated 주석)이 docs/CHANGELOG.md와 100% 중복되어 메인 CLAUDE.md 36,981 토큰까지 비대해진 상태. 모듈/컴포넌트 책임 기반 기술로 환원하고 변경 이력은 CHANGELOG로 위임:
+
+- **루트 `CLAUDE.md`**: 402행 → 246행 (-39%), **토큰 ~37K → ~5K (-87%)**. 변경 이력 표(50여 행, 각 행이 phase 단위 수천 토큰) 통째 제거 → CHANGELOG 포인터 1줄. 환경변수 표 24행 → 기능 그룹별 9줄 요약. 하네스 섹션 에이전트 12명 상세 → 한 줄 요약(`.claude/agents/<name>.md` 단일 출처). DB 시스템 16행 표 → 그룹별 항목.
+- **`stock/CLAUDE.md`**: 16178 → 11270 bytes (-30%)
+- **`services/CLAUDE.md`**: 31105 → 14167 bytes (-54%)
+- **`routers/CLAUDE.md`**: 13251 → 11554 bytes (-13%)
+- **`frontend/CLAUDE.md`**: 31862 → 15587 bytes (-51%)
+- **`screener/CLAUDE.md`**: 1962 bytes (이미 간결, 변경 없음)
+- 전체 약 **-50% bytes / -65% 토큰** 절감. 영구 규칙(TR_ID 매핑/캐시 TTL/UI 색상/컬럼 순서/도메인 자문 3중 일관성 등)은 100% 보존.
+
+### 도메인 자문 (MarginAnalyst)
+
+- 등급/Value Trap/Graham Number 산출은 `safety_grade.py`에 이미 graceful 처리 보유 → **데이터 인프라 수정만으로 충분, 등급 코드 변경 불필요**.
+- 평가 가능 항목 < 4개면 "등급 평가 불가" 표시(현행 정책 유지). best-effort + 누락 표시. Value Trap 2개 이상 "판정 불가"면 종합 판정 보류. Graham EPS·BPS 둘 다 양수 필수 정책 유지.
+
+### 라이브 검증 (운영 EC2 SSM Send-Command)
+
+| 항목 | 결과 |
+|------|------|
+| `_load_corp_map()` 매핑 크기 | 3,963개 정상 |
+| `_fetch_corp_code("005830")` | `'00159102'` ✅ |
+| `_kr_yf_ticker_str("005830")` | `'005830.KS'` ✅ |
+| corp_code 전달 + 365일 DART 호출 | `status=000`, 6건 ✅ |
+| corp_code 없이 + 365일 DART 호출 | `status=100`, "검색기간은 3개월만" ❌ (이전 코드 실패 재현) |
+| `005830.KS` yfinance 호출 | `last_price=164600`, `market_cap=9.98조` ✅ |
+| `005830` raw yfinance 호출 | `last_price=None`, 404 ❌ (이전 코드 실패 재현) |
+
+### 회귀 가드
+
+- 단위 테스트 신규 14건 PASS (`test_yf_client_resolve_yf_code.py` 10건 + `test_dart_filings_corp_code.py` 4건)
+- 단위 전체 908 PASS / 0 신규 fail (17 ERROR는 PostgreSQL CI 의존, 변경 무관 베이스라인)
+- yf_client KIS-first 회귀 10건 전체 PASS
+- DB/도메인/주문/스크리너 알고리즘 무영향
+- 기존 `fetch_filings(start, end)` 호출자 4곳(routers/earnings, routers/screener, screener/cli ×2) 모두 키워드 인자 미사용 → 백워드 호환
+- 005830 외에도 동일 패턴(suffix 미부착 호출 / corp_code 없는 365일 DART 호출)을 가진 모든 KR 종목 자동 회복
+- frontend 빌드 OK (vite 6.4.1 / 857 modules / 4.86s / 0 error)
+- CLAUDE.md 압축은 코드 변경 0건 — 문서 컨텍스트 비대화 해소만
+
+---
+
 ## 2026-05-09 — 작업 유형별 모델 라우팅 + 부서장 기본 진입 명시
 
 ### 운영 정책 신규

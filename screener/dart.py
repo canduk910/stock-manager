@@ -58,7 +58,12 @@ def _classify_report(report_nm: str) -> str | None:
     return None
 
 
-def fetch_filings(start_date: str, end_date: str) -> list[dict]:
+def fetch_filings(
+    start_date: str,
+    end_date: str,
+    *,
+    corp_code: str | None = None,
+) -> list[dict]:
     """기간별 정기보고서 제출 목록 조회.
 
     pblntf_ty=A(정기공시)로 단일 쿼리 후 report_nm 기준으로 분류한다.
@@ -67,6 +72,10 @@ def fetch_filings(start_date: str, end_date: str) -> list[dict]:
     Args:
         start_date: YYYYMMDD 형식 시작 날짜
         end_date:   YYYYMMDD 형식 종료 날짜
+        corp_code: DART 회사 고유번호(8자리). 지정 시 해당 회사만 조회 +
+                   검색기간 무제한. None이면 전종목 조회(DART 정책상 3개월
+                   초과 시 거부됨 — 호출자 책임). 단일 종목 분석은 corp_code
+                   를 전달해야 1년 등 긴 범위가 가능하다.
 
     Returns:
         list of dict with keys:
@@ -79,7 +88,8 @@ def fetch_filings(start_date: str, end_date: str) -> list[dict]:
     # end_date가 오늘 이상이면 당일 공시가 추가될 수 있으므로 캐시 사용 안 함
     use_cache = end_date < today_str
 
-    cache_key = f"dart_filings:{start_date}:{end_date}"
+    cache_suffix = f":{corp_code}" if corp_code else ""
+    cache_key = f"dart_filings:{start_date}:{end_date}{cache_suffix}"
     if use_cache:
         cached = get_cached(cache_key)
         if cached is not None:
@@ -99,6 +109,8 @@ def fetch_filings(start_date: str, end_date: str) -> list[dict]:
             "page_no": page_no,
             "page_count": 100,
         }
+        if corp_code:
+            params["corp_code"] = corp_code
 
         try:
             resp = _dart_get(_DART_LIST_URL, params=params, timeout=30)

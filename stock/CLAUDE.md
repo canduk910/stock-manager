@@ -1,37 +1,39 @@
 # stock/ — 관심종목 패키지
 
-CLI와 API 라우터 양쪽에서 공용으로 사용한다. 비즈니스 데이터는 SQLAlchemy ORM(`db/` 패키지)으로 `~/stock-watchlist/app.db`에 저장. 캐시(`cache.py`)만 raw SQLite(`cache.db`) 유지.
+CLI와 API 라우터 양쪽에서 공용. 비즈니스 데이터는 SQLAlchemy ORM(`db/`)으로 `~/stock-watchlist/app.db` 저장. 캐시(`cache.py`)만 raw SQLite(`cache.db`).
+
+> 변경 이력은 `docs/CHANGELOG.md`가 단일 출처. 본 문서는 모듈 책임과 영구 규칙만 기술.
 
 ## 모듈 목록
 
 | 파일 | 역할 |
 |------|------|
-| `db_base.py` | SQLite 캐시 전용 유틸. `connect(db_name, init_fn)` contextmanager. WAL 모드 + timeout 10s. `cache.py` 공용. KST 헬퍼는 `db/utils.py`에서 re-export (기존 caller 호환). |
-| `store.py` | 관심종목 CRUD + 순서 관리. `db/repositories/watchlist_repo.py` 위임 래퍼. 기존 함수 시그니처 100% 유지. |
-| `order_store.py` | 주문 이력 + 예약주문 CRUD. `db/repositories/order_repo.py` 위임 래퍼. 기존 함수 시그니처 100% 유지. |
-| `advisory_store.py` | AI자문 CRUD. `db/repositories/advisory_repo.py` 위임 래퍼. `save_cache(research_data=)` + `save_research_data()` 추가. |
-| `research_collector.py` | **리서치 데이터 6카테고리 수집**. 거시지표/밸류에이션밴드/경영진/공시/뉴스/**증권사 컨센서스** ThreadPoolExecutor 병렬. `collect_all_research()`. 컨센서스: KR=`naver_research`+`analyst_pdf` 요약+`AnalystRepository` 영속 + 중앙값/dispersion/upside/momentum_signal/consensus_overheated 산출. US=`fetch_upgrades_downgrades` 메타데이터만. |
-| `advisory_fetcher.py` | AI자문 OHLCV 수집 + 사업부문 추론 + **`fetch_valuation_stats()`**(PER/PBR 5년 통계) + **`fetch_business_model(code, name, market, segments_dict, financial_dict, user_id)`**(비즈니스 모델 narrative — revenue_model/cash_generation/rd_strategy 3 키, GPT 1회 + JSON object, MarginAnalyst·ValueScreener 도메인 가이드 시스템 프롬프트 내장, 캐시 키 `advisor:business_model:{market}:{code}` TTL 7일, `service_name="advisory_business_model"`). 기술지표 계산은 indicators.py 위임. KIS 1분봉 4시간대 병렬 수집(ThreadPoolExecutor). **(2026-05-08 KIS 15분봉 우선)** `fetch_15min_ohlcv_us`가 `kis_overseas_client.get_kis_ohlcv_15min` 우선 호출 + yfinance fallback. `_normalize_kis_15min_to_advisory` 헬퍼로 OHLCV 형식 통일(time/open/high/low/close/volume), 정렬 과거→최신, max 300봉. |
-| `stock_info_store.py` | 종목 정보 영속 캐시. `db/repositories/stock_info_repo.py` 위임 래퍼. 시세/지표/재무/수익률 영역별 TTL. write-through 패턴. |
-| `indicators.py` | 기술적 지표 순수 계산 (MACD/RSI/Stochastic/BB/MA/ATR/**volume_signal**/**bb_position**). 외부 의존 없음. |
-| `utils.py` | `is_domestic(code)` — 6자리 숫자=국내. `is_fno(code)` — FNO 단축코드 판별. |
-| `symbol_map.py` | 종목코드↔종목명 매핑 (7일 캐시). `code_to_name()`. |
-| `market.py` | yfinance 기반 시세/시가총액/PER/PBR/배당수익률. |
+| `db_base.py` | SQLite 캐시 전용 유틸. `connect(db_name, init_fn)` contextmanager. WAL + timeout 10s. KST 헬퍼는 `db/utils.py`에서 re-export (caller 호환). |
+| `store.py` | 관심종목 CRUD + 순서 관리. `db/repositories/watchlist_repo.py` 위임 래퍼. |
+| `order_store.py` | 주문 이력 + 예약주문 CRUD. `db/repositories/order_repo.py` 위임 래퍼. |
+| `advisory_store.py` | AI자문 CRUD. `db/repositories/advisory_repo.py` 위임 래퍼. `save_cache(research_data=)` + `save_research_data()` + `get_report_by_id(report_id, user_id=None)`. |
+| `research_collector.py` | 리서치 6카테고리 ThreadPool 병렬 수집: 거시지표/밸류에이션밴드/경영진/공시/뉴스/증권사 컨센서스. `collect_all_research()`. KR 컨센서스: `naver_research`+`analyst_pdf` 요약+영속 + 중앙값/dispersion/upside/momentum_signal/consensus_overheated. US: `fetch_upgrades_downgrades` 메타데이터. |
+| `advisory_fetcher.py` | AI자문 OHLCV 수집 + 사업부문 추론 + `fetch_valuation_stats()`(PER/PBR 5년) + `fetch_business_model()`(GPT 1회 JSON, MarginAnalyst+ValueScreener 도메인 가이드 시스템 프롬프트, 캐시 7일, `service_name="advisory_business_model"`). 기술지표 계산은 `indicators.py` 위임. KIS 1분봉 4시간대 ThreadPool 병렬. `fetch_15min_ohlcv_us`는 `kis_overseas_client.get_kis_ohlcv_15min` 우선 + yfinance fallback (`_normalize_kis_15min_to_advisory` 통일). |
+| `stock_info_store.py` | 종목 정보 영속 캐시. `db/repositories/stock_info_repo.py` 위임 래퍼. 영역별 TTL + write-through 패턴. |
+| `indicators.py` | 기술 지표 순수 계산 (MACD/RSI Wilder/Stochastic/BB/MA/ATR/`volume_signal`/`bb_position`). 외부 의존 없음. `calc_technical_indicators(ohlcv)` 최대 300봉. |
+| `utils.py` | `is_domestic(code)` 6자리 숫자=국내 / `is_fno(code)` FNO 단축코드 판별. |
+| `symbol_map.py` | 종목코드↔종목명 매핑 (7일 캐시). `code_to_name()`. pykrx 실패 시 DART corpCode.xml fallback. |
+| `market.py` | yfinance 기반 KR 시세/시총/PER/PBR/배당/섹터. `_kr_yf_ticker_str(code)` `.KS/.KQ` suffix 자동 (score≥1 검증). PER/PBR/ROE는 yfinance 1차 실패 시 income_stmt/대차/분기 TTM으로 직접 계산. |
 | `market_board.py` | 시세판: 신고가/신저가 탐지 + sparkline + 당일 OHLC 배치 조회. |
-| `market_board_store.py` | 시세판 별도 등록 종목 CRUD + 순서 관리. `db/repositories/market_board_repo.py` 위임 래퍼. |
-| `dart_fin.py` | OpenDart 재무제표 조회 (최대 10년) + **`fetch_quarterly_financials()`**(DART 누계→분기 환산). **`calc_interest_coverage()`** 이자보상배율 계산 헬퍼. `fetch_financials_multi_year()`: 연도별 API 호출로 각 연도 고유 `rcept_no`(DART 보고서 링크) 보장. |
-| `yf_client.py` | yfinance 기반 해외주식 데이터. EPS/Graham Number 지표 제공. 매출추정 3단계 fallback. **`fetch_quarterly_financials_yf()`**(분기 실적). **`fetch_upgrades_downgrades()`**(증권사 등급 변경 이력). **리서치용**: `fetch_company_officers()`/`fetch_major_holders()`/`fetch_earnings_dates()`/`fetch_macro_indicators()`/`fetch_sector_peers()`. **(2026-05-08 KIS 시세 우선)** `fetch_price_yf`/`fetch_detail_yf`/`fetch_period_returns_yf`가 미국 종목에 대해 KIS 시세(`stock.kis_overseas_client`) 우선 + yfinance fallback. 함수 시그니처/반환 dict 키 보존(후방호환). `fetch_detail_yf`는 가격 필드만 KIS로 덮어쓰고 PER/PBR/52주/배당/sector 등은 yfinance 그대로(KIS 미제공). 한국 종목(`is_domestic`)은 영향 없음. |
-| `kis_overseas_client.py` | **KIS 해외 시세 단일 게이트웨이** (신규 2026-05-08). wrapper.py 직접 호출은 이 모듈에서만. Public 함수: `get_kis_price`/`get_kis_ohlcv_daily`/`get_kis_ohlcv_15min`/`get_kis_orderbook`/`get_kis_price_detail`. 내부: `_resolve_exchange(symbol)` — `stock_info.exchange`(NAS/NYS/AMS) 캐시 우선 → 미스 시 NAS→NYS→AMS 순회로 식별 후 영속. 인증은 `routers/_kis_auth.get_kis_credentials(user_id)` 재사용(사용자 키 우선/운영자 키 폴백). 외부 호출 실패(타임아웃/5xx/거래소 미상/응답 비정상) 시 None 반환(fallback hook 패턴). ConfigError(KIS 키 부재)는 그대로 raise. 텔레메트리 `kis_overseas.{resolve_exchange,get_kis_price,get_kis_ohlcv_daily,get_kis_ohlcv_15min,get_kis_orderbook,get_kis_price_detail}.{success,fail}`. |
-| `naver_research.py` | 네이버 증권 리서치 스크래핑. 증권사별 최신 목표가+투자의견+리포트 제목+PDF 링크 수집. `fetch_analyst_reports()`. 캐시 6시간. |
-| `analyst_pdf.py` | 증권사 PDF 본문 추출+요약 (신규). `pdfplumber` 첫 5페이지 → gpt-5.4 JSON 6항목(catalyst 2/risk 2/TP 근거/EPS 변경) → 300자 결합. 다운로드 10MB·15s 한도, Content-Type 검증, 모든 예외 흡수. 캐시 키 `analyst:summary:{md5(pdf_url)}` 영구. `summarize_one(pdf_url)`. `ai_gateway` 시스템 호출(`user_id=None`, `service_name="analyst_summary"`, 유저 쿼터 미차감). |
-| `fno_master.py` | KIS 선물옵션 마스터파일 다운로드/파싱/검색. 인메모리 캐시(24h) → cache.db(7일) → ZIP 3단계. main.py에서 pre-warm. |
-| `sec_filings.py` | SEC EDGAR 미국 10-K/10-Q 공시 조회. |
-| `macro_fetcher.py` | 매크로 분석 데이터 수집: yfinance 지수/VIX/버핏/공포탐욕 + **금리곡선(^IRX/^FVX/^TNX/^TYX)/신용스프레드(FRED HY OAS+IG OAS, **HYG/LQD ETF 폐기 2026-05-05**)/환율(4쌍)/원자재(5종)/섹터ETF(US 11종+**KR 13종**)/국면입력**. feedparser RSS(다중 피드+중복제거). 캐시 키 `macro:*`. `fetch_sector_returns()`/`fetch_sector_returns_kr()`: 3년 히스토리 기반 1M/3M/6M/1Y/**3Y** 수익률 수집. **(2026-05-04 HY OAS 전면 개편)** `_fetch_fred_oas()`: FRED HY OAS(BAMLH0A0HYM2) **전 기간(1996-12~) baseline** + 5년 시각화 시계열. `_compute_oas_stats()`/`_classify_oas_sentiment()`/`_percentile_from_sorted()` 신규 — **백분위 5단계 sentiment**(extreme_greed/greed/normal/fear/extreme_fear) + OAS>10% 절대 극단공포 안전장치. 응답에 `oas_stats{p10..p95,max,mean,median,std}` / `oas_percentile` / `oas_zscore` / `oas_history_5y` 추가. `_fetch_fred_ig_oas()` 신규(FRED `BAMLC0A0CM` Investment Grade OAS). `fetch_credit_spread()` 응답에 `ig_current` / `ig_history_5y` / `hy_ig_spread` / `partial_failure` 추가. 캐시 24h(일일). **(2026-05-05 R1 안정화)** `_http_get_fred_csv()` Mozilla UA + timeout 25s + Content-Type 검증 + 1회 재시도. `_fetch_fred_via_api(series_id)` 신규 — FRED 공식 JSON API(`api.stlouisfed.org/fred/series/observations`) 폴백, `FRED_API_KEY` 필요. CSV 실패 → JSON API → 7일 stale 캐시 순. **(2026-05-05 R3 산점도 헬퍼)** `_compute_sma20_trend_days(closes)` (SMA20 cross 경과일, 부호 ±365 cap), `_compute_intensity_zscore(returns_1y)` (±3 cap, std=0/n<2 시 0). `fetch_sector_returns()` / `fetch_sector_returns_kr()` 응답에 `trend_days` + `intensity_z` 추가, 캐시 키 v2→v3. **(2026-05-05 후속)** yfinance period `3y → 5y`로 확장(거래일 ~755 → ~1260) — `_calc_return(closes, 756)`이 항상 None 반환하던 3Y 수익률 버그 해소, 캐시 키 v3→v4. **(2026-05-05 HYG/LQD 폐기)** `fetch_credit_spread()`에서 yfinance HYG/LQD 호출 블록 + `hyg_yield/lqd_yield/spread/spread_direction/history` 응답 필드 제거(의미 약화). 캐시 키 v4→v5. 매크로 사이클 입력의 `credit_direction`은 `oas_momentum_6m` 부호 기반(>0.5 widening / <-0.5 narrowing) 으로 대체. |
-| `report_store.py` | 보고서 CRUD (추천 이력/체제 이력/일일 보고서). `db/repositories/report_repo.py` 위임 래퍼. 다른 6개 store와 동일 패턴. |
-| `macro_store.py` | 매크로 GPT 결과 일일 캐시. `db/repositories/macro_repo.py` 위임 래퍼. `get_today()`/`save_today()`/`cleanup_old(days=30)`/`delete_today(category)`/**`delete_before_today()`** (2026-05-09 신규 — 오늘(KST) 이전 모든 row 일괄 삭제, 일일 자정 cleanup 정책. cache.db `macro:*` TTL 캐시는 미터치). |
-| `strategy_store.py` | 백테스트/전략 CRUD. `db/repositories/backtest_repo.py` 위임 래퍼. Job: `save_backtest_job()`/`save_backtest_result()`/`update_job_status()`/`delete_job()`/`get_latest_backtest_metrics()`/`get_job_history()`. Strategy: `save_strategy()`/`list_strategies()`/`get_strategy()`/`delete_strategy()` (전략빌더 저장/로드/삭제, builder_state_json 포함). |
-| `tax_store.py` | 양도세 매매내역/계산/FIFO lot CRUD. `db/repositories/tax_repo.py` 위임 래퍼. `insert_transaction()`/`list_transactions()`/`insert_calculation()`/`list_calculations()`/`insert_fifo_lot()`/`list_fifo_lots()`/`delete_fifo_lots_by_year()`. |
-| `cache.py` | SQLite TTL 캐시. `cache.db`. NaN/Inf → None 자동 sanitize. |
+| `market_board_store.py` | 시세판 별도 등록 종목 CRUD. `db/repositories/market_board_repo.py` 위임. |
+| `dart_fin.py` | OpenDart 재무제표 (최대 10년) + `fetch_quarterly_financials()`(누계→분기) + `calc_interest_coverage()`. 연도별 API 호출로 각 연도 고유 `rcept_no`(보고서 링크) 보장. |
+| `yf_client.py` | yfinance 해외 데이터. EPS/Graham. 매출추정 3단계 fallback. `fetch_quarterly_financials_yf()` / `fetch_upgrades_downgrades()` / `fetch_company_officers()` / `fetch_major_holders()` / `fetch_earnings_dates()` / `fetch_macro_indicators()` / `fetch_sector_peers()`. 미국 종목 시세(`fetch_price_yf`/`fetch_detail_yf`/`fetch_period_returns_yf`)는 KIS(`stock.kis_overseas_client`) 우선 + yfinance fallback. `fetch_detail_yf`는 가격 필드만 KIS로 덮어쓰고 PER/PBR/52주/배당/sector는 yfinance 그대로(KIS 미제공). 한국 종목은 영향 없음. **KR raw 코드 가드**: `_resolve_yf_code(code)` 헬퍼 + `_ticker()` 진입부 자동 변환 — 6자리 숫자 KR 코드(`005830` 등)는 `_kr_yf_ticker_str()`로 `.KS`/`.KQ` 자동 부착 후 yfinance 호출(이미 변환된 ticker/매크로 심볼/US 알파벳은 그대로 통과). `validate_ticker`/`fetch_company_officers`/`fetch_major_holders`/`fetch_earnings_dates`/`fetch_sector_peers` 진입부에도 명시적 가드(캐시 키 일관성). 변환 실패 시 raw 반환(yfinance 404 graceful). |
+| `kis_overseas_client.py` | **KIS 해외 시세 단일 게이트웨이**. wrapper.py 직접 호출은 이 모듈에서만. Public: `get_kis_price` / `get_kis_ohlcv_daily` / `get_kis_ohlcv_15min` / `get_kis_orderbook` / `get_kis_price_detail`. `_resolve_exchange(symbol)` — `stock_info.exchange`(NAS/NYS/AMS) 캐시 우선 → 미스 시 NAS→NYS→AMS 순회 후 영속. 인증은 `routers/_kis_auth.get_kis_credentials(user_id)` 재사용. 외부 호출 실패 시 None(fallback hook), `ConfigError`(키 부재)는 raise. 텔레메트리 `kis_overseas.{*}.{success,fail}`. |
+| `naver_research.py` | 네이버 증권 리서치 스크래핑. 증권사별 목표가+의견+리포트+PDF 링크. `fetch_analyst_reports()`. 캐시 6h. |
+| `analyst_pdf.py` | 증권사 PDF 본문 추출+요약. `pdfplumber` 첫 5p → gpt-5.4 JSON 6항목 → 300자 결합. 다운로드 10MB·15s 한도. 캐시 키 `analyst:summary:{md5(pdf_url)}` 영구. `ai_gateway` 시스템 호출(`user_id=None`, `service_name="analyst_summary"`). |
+| `fno_master.py` | KIS 선물옵션 마스터파일. 인메모리(24h) → cache.db(7d) → ZIP 3단계. main.py에서 pre-warm. 파이프 구분자, CP949 인코딩, SSL 검증 우회. |
+| `sec_filings.py` | SEC EDGAR 미국 10-K/10-Q. |
+| `macro_fetcher.py` | 매크로 데이터: yfinance 지수/VIX/버핏/F&G + 금리곡선(^IRX/^FVX/^TNX/^TYX) + FRED HY OAS(BAMLH0A0HYM2) + IG OAS(BAMLC0A0CM) + 환율 4쌍 + 원자재 5종 + 섹터 ETF(US 11+KR 13). FRED CSV 실패 → JSON API(`FRED_API_KEY`) → 7일 stale 순. **HY OAS 백분위 5단계** (extreme_greed/greed/normal/fear/extreme_fear) + OAS>10% 절대 안전장치. 응답 `oas_stats{p10..p95}` / `oas_percentile` / `oas_zscore` / `oas_history_5y` / `ig_current` / `ig_history_5y` / `hy_ig_spread` / `partial_failure`. 캐시 24h. `_compute_sma20_trend_days()` / `_compute_intensity_zscore(±3 cap)` 산점도 헬퍼. yfinance period 5y(거래일 ~1260)로 3Y 안전. credit `direction`은 `oas_momentum_6m` 부호 기반 (HYG/LQD ETF 폐기). |
+| `report_store.py` | 보고서 CRUD. `db/repositories/report_repo.py` 위임. |
+| `macro_store.py` | 매크로 GPT 일일 캐시. `db/repositories/macro_repo.py` 위임. `get_today` / `save_today` / `cleanup_old(days=30)` / `delete_today(category)` / `delete_before_today()` (자정 cleanup, cache.db `macro:*` 미터치). |
+| `strategy_store.py` | 백테스트/전략 CRUD. `db/repositories/backtest_repo.py` 위임. Job: `save_backtest_job/result/update_job_status/delete_job/get_latest_backtest_metrics/get_job_history` + `set_mcp_job_id` + `update_job_failed`. Strategy: `save_strategy/list_strategies/get_strategy/delete_strategy` (builder_state_json 포함). |
+| `tax_store.py` | 양도세 매매내역/계산/FIFO lot CRUD. `db/repositories/tax_repo.py` 위임. |
+| `cache.py` | SQLite TTL 캐시 (`cache.db`). NaN/Inf → None 자동 sanitize. |
 | `display.py` | Rich 테이블 출력 + CSV 내보내기. |
 | `cli.py` | Click CLI. `stock watch add/remove/list/memo/dashboard/info`. |
 
@@ -41,79 +43,67 @@ CLI와 API 라우터 양쪽에서 공용으로 사용한다. 비즈니스 데이
 
 | 파일 | 위치 | 용도 | 엔진 |
 |------|------|------|------|
-| `app.db` | `~/stock-watchlist/` | 비즈니스 데이터 통합 (12 테이블) | SQLAlchemy ORM |
+| `app.db` | `~/stock-watchlist/` | 비즈니스 데이터 통합 | SQLAlchemy ORM |
 | `cache.db` | `~/stock-watchlist/` | TTL 캐시 (시세/재무/종목코드 등) | raw SQLite |
 
-> 기존 watchlist.db, orders.db, advisory.db, market_board.db, stock_info.db, macro.db는 app.db로 통합됨.
-> `scripts/migrate_sqlite_data.py`로 기존 데이터 이관 가능. `DATABASE_URL` 환경변수로 PostgreSQL/Oracle 전환.
+> 기존 watchlist.db, orders.db, advisory.db, market_board.db, stock_info.db, macro.db는 app.db로 통합.
+> `scripts/migrate_sqlite_data.py`로 이관. `DATABASE_URL` 환경변수로 PostgreSQL/Oracle 전환.
 
 ---
 
 ## 핵심 규칙 및 Gotcha
 
-### db_base.py
-- **cache.py 전용**: `connect()` contextmanager는 cache.py에서만 사용. 비즈니스 store는 `db/session.py` 사용.
-- **KST 헬퍼**: `db/utils.py`에서 re-export. `from stock.db_base import now_kst_iso` 형태로 기존 caller 호환.
-- **WAL 모드**: `PRAGMA journal_mode=WAL` + timeout 10초. 읽기-쓰기 동시성 보장.
-- `_initialized` set으로 DB init 중복 방지.
-
 ### Store 래퍼 패턴 (Adapter)
-- 7개 store 모듈(`store.py`, `order_store.py`, `report_store.py` 등)은 `db/repositories/` Repository에 위임하는 래퍼.
-- 기존 함수 시그니처 100% 유지 — services/, routers/ 변경 없음.
-- Session 관리: `db/session.py`의 `get_session()` contextmanager 사용 (commit+rollback+close 자동).
+- `store.py` 등 위임 래퍼 7개는 `db/repositories/`에 위임. 기존 시그니처 100% 유지 — services/, routers/ 변경 없음.
+- Session: `db/session.py`의 `get_session()` contextmanager (commit+rollback+close 자동).
+- `store.py` 마이그레이션: `ALTER TABLE ... ADD COLUMN market TEXT NOT NULL DEFAULT 'KR'` 자동.
 
-### store.py
-- **마이그레이션**: `ALTER TABLE ... ADD COLUMN market TEXT NOT NULL DEFAULT 'KR'` 자동 실행. 기존 데이터는 모두 `KR`.
+### db_base.py
+- **cache.py 전용** — 비즈니스 store는 `db/session.py` 사용
+- KST 헬퍼는 `db/utils.py`에서 re-export (`from stock.db_base import now_kst_iso` 호환)
+- WAL + timeout 10s. `_initialized` set으로 init 중복 방지
 
-### market.py — yfinance 기반 (중요)
-- 2026-02 KRX 서버 변경으로 pykrx 전면 yfinance 전환.
-- `_kr_yf_ticker_str(code)`: `.KS`(KOSPI)/`.KQ`(KOSDAQ) suffix 자동 선택 (7일 캐시). score ≥ 1 필수 (mktcap 또는 shares 1개 이상). score=0(price만 존재)은 잘못된 suffix로 판정.
-- `fetch_market_metrics(code)`: 시가총액·PER·PBR·ROE·배당수익률·주당배당금·52주고가·52주저가·**섹터** (6시간 캐시). PER fallback: `trailingPE` None 시 연간 `income_stmt` 순이익 기반 직접 계산 (`forwardPE` 사용 안함). PBR fallback: `priceToBook` None 시 대차대조표 자본총계/주식수로 직접 계산. ROE fallback: `returnOnEquity` None 시 분기 TTM순이익/자기자본으로 직접 계산.
+### market.py — yfinance 기반
+- 2026-02 KRX 서버 변경으로 pykrx → yfinance 전환
+- `fetch_market_metrics(code)`: 시총·PER·PBR·ROE·배당·52주·섹터 (장중 1h / 장외 12h)
+- PER fallback: `trailingPE` None 시 연간 income_stmt 직접 계산 (`forwardPE` 사용 안 함)
+- PBR/ROE fallback: priceToBook/returnOnEquity None 시 분기 TTM 직접 계산
 
-### 배당수익률 우선순위 (중요)
-1. `dividendYield` — 이미 % 형태 (0.4, 1.3). KR/US 공통. **우선 사용**
-2. `trailingAnnualDividendYield × 100` — 소수점(0.004=0.4%). ADR 환율 오류 가능 (NVO 사례: 30.3% 잘못됨)
-3. `dividendRate / 현재가 × 100` — 연간 주당배당금 기반 (0 < result < 50% sanity check)
+### 배당수익률 우선순위
+1. `dividendYield` — 이미 % (0.4, 1.3). KR/US 공통. **우선**
+2. `trailingAnnualDividendYield × 100` — ADR 환율 오류 가능 (NVO 30.3% 사례)
+3. `dividendRate / 현재가 × 100` — sanity check 0 < r < 50%
 
-적용 파일: `market.py`(`fetch_market_metrics`), `yf_client.py`(`fetch_detail_yf`)
+적용: `market.py:fetch_market_metrics`, `yf_client.py:fetch_detail_yf`
 
 ### symbol_map.py
-- `_build_map()`: pykrx 실패 시 DART corpCode.xml fallback 추가 (빈 결과 캐시 방지).
-- `_find_latest_trading_day()`: 최근 10거래일 역순 탐색.
-- `code_to_name()`: 맵 빌드 실패 시 `get_market_ticker_name()` 직접 호출 fallback.
-- 종목명이 코드로 저장되는 현상 → 이 fallback 경로 확인할 것.
+- `_build_map()`: pykrx 실패 시 DART corpCode.xml fallback (빈 결과 캐시 방지)
+- `_find_latest_trading_day()`: 최근 10거래일 역순 탐색
+- 종목명이 코드로 저장되는 현상 → fallback 경로 확인할 것
 
 ### advisory_fetcher.py
-- **KIS 토큰**: `routers/_kis_auth.get_access_token_safe()` 사용 (모듈 내 자체 캐시 제거됨).
-- **yfinance interval 제한**: `15m` max 60d, `60m` max 2y, `1d`/`1wk` max 10y.
-- 기술지표 계산은 `indicators.py`의 `calc_technical_indicators()`에 위임. `fetch_ohlcv_by_interval()`에서 자동 호출.
-- `fetch_segments_kr(code, name)` → `dict` 반환: `{"segments": [...], "description": "사업설명", "keywords": ["테마1", ...]}`  (GPT 1회 호출로 매출비중+설명+키워드 통합 추론)
-
-### indicators.py
-- 순수 계산 함수 8개: `_ema`, `_sma`, `_rsi`, `_stoch`, `_bollinger`, `_atr`, `_safe_val`, `calc_technical_indicators`
-- 외부 의존성 없음 (`math`, `typing.Optional`만 사용)
-- `calc_technical_indicators(ohlcv)`: MACD/RSI(Wilder)/Stochastic/BB/MA/ATR/MA배열/변동성돌파 목표가 + **`volume_signal`**(최신/5일평균 비율) + **`bb_position`**(BB밴드 내 위치 0~100). 최대 300봉.
-- `advisory_fetcher.py`의 `fetch_ohlcv_by_interval()`에서 자동 호출
+- KIS 토큰: `routers/_kis_auth.get_access_token_safe()` (모듈 자체 캐시 제거됨)
+- yfinance interval 제한: `15m` max 60d, `60m` max 2y, `1d`/`1wk` max 10y
+- `fetch_segments_kr(code, name)` → `dict`: `{segments, description, keywords}` (GPT 1회 통합 추론)
 
 ### dart_fin.py
-- **`latest_year = today.year - 1`** (월 경계 제거) — 3월에도 전년도 보고서 조회.
-- **첫 배치 fallback**: 빈 결과 시 `anchor-1`로 재시도 (최신연도 미공시 기업 대응).
-- **전체 정규식 매칭**: `_ACCOUNT_REGEX`/`_BS_REGEX`/`_CF_REGEX`/`_IS_DETAIL_REGEX` 4개 딕셔너리 + `_match_account()` 공용 함수. 공백·조사·접미사 변형 자동 대응.
+- `latest_year = today.year - 1` (월 경계 제거) — 3월에도 전년도 보고서
+- 첫 배치 fallback: 빈 결과 시 `anchor-1` 재시도 (최신연도 미공시 기업)
+- 전체 정규식 매칭: `_ACCOUNT_REGEX`/`_BS_REGEX`/`_CF_REGEX`/`_IS_DETAIL_REGEX` 4개 + `_match_account()` 공용
 
 ### yf_client.py
-- **제약**: 시세 15분 지연, 재무 최대 4년, 종목 검색 불가.
-- `fetch_price_yf()`: `fast_info.last_price or previous_close` — 비개장일 직전 종가 반환.
-- `fetch_financials_multi_year_yf`: 캐시에 전체 연도 저장, 반환 시 슬라이싱 (부분 캐시 버그 방지).
-- `fetch_segments_yf(code)` → `dict` 반환: `{"segments": [...], "description": "longBusinessSummary(300자)", "keywords": ["sector", "industry"]}` (캐시키: `yf:segments_v2:`)
-- NaN → None 자동 정제.
+- 제약: 시세 15분 지연, 재무 최대 4년, 종목 검색 불가
+- `fetch_price_yf()`: `fast_info.last_price or previous_close` (비개장일 직전 종가)
+- `fetch_financials_multi_year_yf`: 캐시에 전체 연도 저장 후 슬라이싱 (부분 캐시 버그 방지)
+- `fetch_segments_yf(code)` → `dict`: `{segments, description, keywords}` (캐시키 `yf:segments_v2:`)
+- NaN → None 자동 정제
 
-### fno_master.py
-- 파이프(`|`) 구분자, CP949 인코딩, SSL 검증 우회.
-- 캐시 7일.
+### dart.py — 캐시 주의 (참고: screener에 있음)
+- `end_date < today`인 경우만 캐시 사용. 당일 빈 결과 캐시되면 이후 제출 공시 미노출 (골프존 사례)
 
 ### cache.py
-- **NaN 처리**: `_sanitize()`가 get/set 양쪽에서 NaN → None 변환 보장.
-- **시작 시 초기화**: `entrypoint.sh`에서 `cache.db` 전체 삭제 (구버전 캐시 방지). `watchlist.db` 등 다른 DB는 영향 없음.
+- NaN: `_sanitize()`가 get/set 양쪽에서 NaN → None
+- 시작 시 초기화: `entrypoint.sh` 기본 보존, `CACHE_PURGE_ON_START=1` 시 삭제
 
 ### 캐시 TTL
 
@@ -121,21 +111,20 @@ CLI와 API 라우터 양쪽에서 공용으로 사용한다. 비즈니스 데이
 |---------|-----|
 | `corpCode.xml` | 30일 |
 | `symbol_map` | 7일 |
-| `dart:fin*` / `dart:income*` / `dart:bs*` / `dart:cf*` | **7일 (168시간)** |
-| `valuation_stats:{market}:{code}` | 24시간 |
-| `dart:quarterly:{code}` | 7일 |
-| `advisor:52w:{market}:{code}` | 6시간 |
-| `market:metrics:` | 장중 1시간 / 장외 12시간 |
-| `market:period_returns:` | 장중 15분 / 장외 6시간 |
-| `market:price:` | 장중 6분 / 장외 6시간 |
-| `yf:*` | 1~24시간 (장중/장외 분리) |
-| `yf:forward:` | 6시간 |
-| `market_board:intraday_ohlc:` | 장중 6분 / 장외 6시간 |
+| `dart:fin*` / `dart:income*` / `dart:bs*` / `dart:cf*` / `dart:quarterly:` | 7일 |
+| `valuation_stats:{market}:{code}` | 24h |
+| `advisor:52w:{market}:{code}` | 6h |
+| `market:metrics:` | 장중 1h / 장외 12h |
+| `market:period_returns:` | 장중 15m / 장외 6h |
+| `market:price:` | 장중 6m / 장외 6h |
+| `yf:*` | 1~24h (장중/장외 분리), `yf:forward:` 6h |
+| `market_board:intraday_ohlc:` | 장중 6m / 장외 6h |
+| `analyst:summary:` | 영구 |
 
 ### stock_info_store.py (영속 캐시)
-- **Docker 재시작에도 유지**: `stock_info.db`는 `entrypoint.sh`에서 초기화하지 않음
-- **영역별 TTL**: price(10분/6시간), metrics(2시간/12시간), financials(7일), returns(30분/6시간)
-- **write-through**: `market.py`, `dart_fin.py`, `yf_client.py`의 fetch 함수가 결과를 자동 저장
-- **대시보드 우선 조회**: `watchlist_service.py`에서 stock_info 먼저 조회, stale 시에만 외부 API 호출
+- Docker 재시작에도 유지 (entrypoint.sh 미초기화)
+- 영역별 TTL: price (장중 10m / 장외 12h), metrics (장중 6h / 장외 24h), financials (7일), returns (장중 30m / 장외 12h)
+- write-through: `market.py`/`dart_fin.py`/`yf_client.py`의 fetch 함수가 결과 자동 저장
+- 대시보드 우선 조회: `watchlist_service.py`에서 stock_info 먼저 → stale 시에만 외부 API
 
 > 함수 시그니처 상세 → `docs/STOCK_PACKAGE.md`

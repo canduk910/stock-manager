@@ -19,11 +19,11 @@ export default function RegisterPage() {
     e.preventDefault()
     setError('')
     if (form.password !== form.confirm) {
-      setError('Passwords do not match.')
+      setError('비밀번호가 일치하지 않습니다.')
       return
     }
     if (form.password.length < 4) {
-      setError('Password must be at least 4 characters.')
+      setError('비밀번호는 4자 이상이어야 합니다.')
       return
     }
     setLoading(true)
@@ -31,7 +31,7 @@ export default function RegisterPage() {
       await register(form.username, form.name, form.password)
       navigate('/login', { state: { registered: true } })
     } catch (err) {
-      setError(err.message || 'Registration failed.')
+      setError(err.message || '회원가입에 실패했습니다.')
     } finally {
       setLoading(false)
     }
@@ -47,52 +47,56 @@ export default function RegisterPage() {
         <div className="bg-white/90 backdrop-blur-sm rounded-2xl shadow-2xl p-8">
           <div className="text-center mb-8">
             <h1 className="text-3xl font-bold text-gray-900 tracking-tight">DK STOCK</h1>
-            <p className="text-sm text-gray-500 mt-1">Create Account</p>
+            <p className="text-sm text-gray-500 mt-1">계정 만들기</p>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">ID</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">아이디</label>
               <input
                 type="text"
                 name="username"
                 value={form.username}
                 onChange={handleChange}
                 className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
+                placeholder="사용할 아이디를 입력하세요"
                 required
                 autoFocus
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">이름</label>
               <input
                 type="text"
                 name="name"
                 value={form.name}
                 onChange={handleChange}
                 className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
+                placeholder="이름을 입력하세요"
                 required
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">비밀번호</label>
               <input
                 type="password"
                 name="password"
                 value={form.password}
                 onChange={handleChange}
                 className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
+                placeholder="4자 이상 입력하세요"
                 required
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Confirm Password</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">비밀번호 확인</label>
               <input
                 type="password"
                 name="confirm"
                 value={form.confirm}
                 onChange={handleChange}
                 className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
+                placeholder="비밀번호를 한 번 더 입력하세요"
                 required
               />
             </div>
@@ -108,13 +112,13 @@ export default function RegisterPage() {
               disabled={loading}
               className="w-full py-2.5 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {loading ? '...' : 'Register'}
+              {loading ? '가입 중...' : '회원가입'}
             </button>
           </form>
 
           <div className="mt-6 text-center">
             <Link to="/login" className="text-sm text-blue-600 hover:text-blue-700 hover:underline">
-              Already have an account? Login
+              이미 계정이 있으신가요? 로그인
             </Link>
           </div>
         </div>
