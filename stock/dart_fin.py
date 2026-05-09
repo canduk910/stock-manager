@@ -283,6 +283,10 @@ _CF_REGEX = {
 }
 
 # IS/CIS 세부 손익계산서 (매출원가, SGA, EPS 등 포함)
+# 보험사 보강 (2026-05-09 진단):
+#   pretax_income: 일반 `법인세비용차감전순이익` + 보험 `법인세차감전순이익` (`비용` 생략형)
+#   interest_expense: 일반 `이자비용` + 보험 `금융부채의이자비용`
+#   eps: 일반 `기본주당이익` + 보험 `보통주기본주당이익(손실)`
 _IS_DETAIL_REGEX = {
     "revenue":          re.compile(r"^(매출액|수익\(매출액\)|영업수익|매출|보험(영업)?수익)$"),
     "cogs":             re.compile(r"^매출원가$"),
@@ -290,11 +294,11 @@ _IS_DETAIL_REGEX = {
     "sga":              re.compile(r"^판매비(와|및)관리비$"),
     "operating_income": re.compile(r"^영업(이익|손실)(\(손실\))?$"),
     "interest_income":  re.compile(r"^이자(수익|수입)$"),
-    "interest_expense": re.compile(r"^이자비용$"),
-    "pretax_income":    re.compile(r"^(법인세비용차감전(계속영업)?순이익|세전(계속영업)?이익|법인세비용차감전순이익\(손실\))$"),
+    "interest_expense": re.compile(r"^(금융부채의)?이자비용$"),
+    "pretax_income":    re.compile(r"^(법인세(비용)?차감전(계속영업)?순?이익(\(?손실\)?)?|세전(계속영업)?이익)$"),
     "tax_expense":      re.compile(r"^법인세비용(\(수익\))?$"),
     "net_income":       re.compile(r"^(연결)?(당기순)(이익|손익|손실)(\(손실\))?$"),
-    "eps":              re.compile(r"^(기본주당)(이익|손익|순이익|순손익)(\(손실\))?$"),
+    "eps":              re.compile(r"^(보통주)?(기본주당)(이익|손익|순이익|순손익)(\(?손실\)?)?$"),
 }
 
 

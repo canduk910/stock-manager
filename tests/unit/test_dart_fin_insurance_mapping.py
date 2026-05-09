@@ -163,3 +163,46 @@ def test_extract_accounts_legacy_manufacturing_unchanged():
     ]
     result = dart_fin._extract_accounts(items)
     assert result["revenue"] == 5000000000
+
+
+# ── IS_DETAIL 보험사 추가 매핑 (2026-05-09 진단) ──
+
+def test_pretax_income_matches_insurance_short_form():
+    """보험사 `법인세차감전순이익` (`비용` 생략) 매칭."""
+    pat = dart_fin._IS_DETAIL_REGEX["pretax_income"]
+    assert pat.match("법인세차감전순이익")
+
+
+def test_pretax_income_matches_legacy_long_form():
+    """일반 제조업 `법인세비용차감전순이익` 회귀."""
+    pat = dart_fin._IS_DETAIL_REGEX["pretax_income"]
+    assert pat.match("법인세비용차감전순이익")
+    assert pat.match("법인세비용차감전계속영업순이익")
+
+
+def test_interest_expense_matches_insurance_form():
+    """보험사 `금융부채의이자비용` (공백 제거 후) 매칭."""
+    pat = dart_fin._IS_DETAIL_REGEX["interest_expense"]
+    assert pat.match("금융부채의이자비용")
+
+
+def test_interest_expense_matches_legacy_form():
+    """일반 제조업 `이자비용` 회귀."""
+    pat = dart_fin._IS_DETAIL_REGEX["interest_expense"]
+    assert pat.match("이자비용")
+
+
+def test_eps_matches_insurance_form():
+    """보험사 `보통주기본주당이익(손실)` 매칭."""
+    pat = dart_fin._IS_DETAIL_REGEX["eps"]
+    # 공백 제거 후 비교 (실제 _match_account 로직)
+    assert pat.match("보통주기본주당이익(손실)")
+    assert pat.match("보통주기본주당이익")
+
+
+def test_eps_matches_legacy_form():
+    """일반 제조업 `기본주당순이익` 회귀."""
+    pat = dart_fin._IS_DETAIL_REGEX["eps"]
+    assert pat.match("기본주당순이익")
+    assert pat.match("기본주당이익")
+    assert pat.match("기본주당이익(손실)")
