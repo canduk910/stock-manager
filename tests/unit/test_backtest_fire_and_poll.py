@@ -161,7 +161,7 @@ def test_poll_running_with_mcp_progress_keeps_running():
     with patch.object(backtest_service, "KIS_MCP_ENABLED", True), \
          patch.object(backtest_service, "get_mcp_client", return_value=client), \
          patch.object(backtest_service.strategy_store, "get_job", return_value=running_job):
-        out = backtest_service.poll_backtest_job("j-2", _user_id=1)
+        out = backtest_service.poll_backtest_job("j-2", user_id=1)
 
     assert out["status"] == "running"
     # MCP wait=False 호출이 정확히 1회 발생
@@ -183,7 +183,7 @@ def test_poll_running_with_mcp_completed_persists_metrics():
          patch.object(backtest_service, "get_mcp_client", return_value=client), \
          patch.object(backtest_service.strategy_store, "get_job", side_effect=[running_job, completed_job]), \
          patch.object(backtest_service.strategy_store, "save_backtest_result", return_value=True) as save_res:
-        out = backtest_service.poll_backtest_job("j-3", _user_id=1)
+        out = backtest_service.poll_backtest_job("j-3", user_id=1)
 
     save_res.assert_called_once()
     saved_kwargs = save_res.call_args.kwargs
@@ -204,7 +204,7 @@ def test_poll_running_with_mcp_failure_classifies_friendly_message():
          patch.object(backtest_service, "get_mcp_client", return_value=client), \
          patch.object(backtest_service.strategy_store, "get_job", side_effect=[running_job, failed_job]), \
          patch.object(backtest_service.strategy_store, "update_job_failed", return_value=True) as set_failed:
-        out = backtest_service.poll_backtest_job("j-4", _user_id=1)
+        out = backtest_service.poll_backtest_job("j-4", user_id=1)
 
     set_failed.assert_called_once()
     args = set_failed.call_args.args
@@ -224,7 +224,7 @@ def test_poll_running_no_mcp_job_id_returns_db_row():
     running_job = {"job_id": "j-5", "status": "running", "mcp_job_id": None}
     with patch.object(backtest_service.strategy_store, "get_job", return_value=running_job), \
          patch.object(backtest_service, "get_mcp_client") as mc:
-        out = backtest_service.poll_backtest_job("j-5", _user_id=1)
+        out = backtest_service.poll_backtest_job("j-5", user_id=1)
     assert out["status"] == "running"
     mc.assert_not_called()
 
@@ -234,7 +234,7 @@ def test_poll_running_mcp_disabled_returns_db_row():
     with patch.object(backtest_service, "KIS_MCP_ENABLED", False), \
          patch.object(backtest_service.strategy_store, "get_job", return_value=running_job), \
          patch.object(backtest_service, "get_mcp_client") as mc:
-        out = backtest_service.poll_backtest_job("j-6", _user_id=1)
+        out = backtest_service.poll_backtest_job("j-6", user_id=1)
     assert out["status"] == "running"
     mc.assert_not_called()
 
@@ -249,7 +249,7 @@ def test_poll_mcp_transient_error_keeps_running():
          patch.object(backtest_service, "get_mcp_client", return_value=client), \
          patch.object(backtest_service.strategy_store, "get_job", return_value=running_job), \
          patch.object(backtest_service.strategy_store, "update_job_failed") as set_failed:
-        out = backtest_service.poll_backtest_job("j-7", _user_id=1)
+        out = backtest_service.poll_backtest_job("j-7", user_id=1)
 
     # 일시 오류는 failed 마킹하지 않음 (다음 폴링에서 재시도)
     set_failed.assert_not_called()
