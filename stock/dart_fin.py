@@ -271,9 +271,12 @@ def is_insurance_company(items: list[dict]) -> bool:
 
 # CF/CCF 현금흐름표
 _CF_REGEX = {
-    "operating_cf":  re.compile(r"^영업활동(으로인한)?현금흐름$"),
-    "investing_cf":  re.compile(r"^투자활동(으로인한)?현금흐름$"),
-    "financing_cf":  re.compile(r"^재무활동(으로인한)?현금흐름$"),
+    # `(순)?` 옵션: 보험사·금융업은 `영업활동순현금흐름` 표기 사용 (DB손해보험 등).
+    # 일반 제조업의 `영업활동현금흐름` (삼성전자 등) 백워드 호환.
+    # 진단(2026-05-09): 005830 39개 CF 항목 모두 `순` 자 포함 → 매칭 실패로 CF 0년.
+    "operating_cf":  re.compile(r"^영업활동(으로인한)?(순)?현금흐름$"),
+    "investing_cf":  re.compile(r"^투자활동(으로인한)?(순)?현금흐름$"),
+    "financing_cf":  re.compile(r"^재무활동(으로인한)?(순)?현금흐름$"),
     "capex":         re.compile(r"^유형자산(의)?취득$"),
     "depreciation":  re.compile(r"^감가상각비(에대한조정)?$"),
     "cash_change":   re.compile(r"^현금및현금성자산(의)?(순)?(증가|증감|증가\(?감소\)?)$"),
