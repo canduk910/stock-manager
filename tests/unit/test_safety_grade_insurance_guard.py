@@ -1,19 +1,17 @@
-"""safety_grade.compute_grade_7point 보험업 진입 가드 회귀 테스트.
+"""safety_grade.compute_grade_7point 보험업 라우팅 회귀 테스트.
 
-2026-05-09 Phase B-1: dart_fin이 추출한 insurance_* BS 필드 존재 시
-일반 7점 등급 평가를 건너뛰고 진입 금지(grade=D, valid_entry=False)
-+ details.reason으로 보험업 임을 명시.
+2026-05-09 Phase B-1: 보험업 감지 시 일반 7점 우회 (단순 D 가드).
+2026-05-10 Phase B-2: 가드 → compute_insurance_grade(D안 4지표 12점) 위임으로 진화.
 
-근거: MarginAnalyst 자문(2026-05-09) — 보험사는 책임준비금이 부채에 포함되어
-일반 임계값 적용 시 부채비율 800~1500%로 우량 보험사도 D 양산. Phase B-2는
-별도 작업으로 보험사 전용 12점(ROE/자기자본비율/매출성장률/배당안정성) 도입.
+본 테스트는 "보험업 BS는 일반 7점 흐름을 우회한다" 영구 의도를 검증하며,
+B-1/B-2 응답 차이(D 강제 → 정식 등급)는 industry_hint + method 키로 식별.
 """
 
 from services.safety_grade import compute_grade_7point
 
 
-def test_insurance_company_returns_d_with_reason():
-    """BS에 insurance_liabilities 존재 시 grade=D + reason."""
+def test_insurance_company_routes_to_insurance_grade():
+    """BS에 insurance_liabilities 존재 시 일반 7점 우회 + D안 위임."""
     balance_sheet = [{
         "year": 2024,
         "total_assets": 50_000_000_000_000,
@@ -26,15 +24,16 @@ def test_insurance_company_returns_d_with_reason():
         cashflow=[],
         income_stmt=[],
     )
-    assert result["grade"] == "D"
-    assert result["score"] == 0
-    assert result["valid_entry"] is False
-    assert result["grade_factor"] == 0.0
-    assert "보험업" in result["details"]["reason"]
-    assert result["details"]["industry_hint"] == "insurance"
+    # B-2 D안 위임 확인 — industry_hint + method 명시
+    assert result["details"].get("industry_hint") == "insurance"
+    assert result["details"].get("method") == "insurance_4metric_12point"
+    # 일반 7점 키(`debt_ratio`/`pbr` 등)는 응답에 없음
+    assert "debt_ratio" not in result["details"]
+    # 응답 shape는 일반과 호환
+    assert "grade" in result and "score" in result and "valid_entry" in result
 
 
-def test_insurance_assets_alone_triggers_guard():
+def test_insurance_assets_alone_triggers_routing():
     """insurance_assets만 있어도 보험업 감지 (재보험계약자산 등)."""
     balance_sheet = [{
         "year": 2024,
@@ -44,8 +43,8 @@ def test_insurance_assets_alone_triggers_guard():
     result = compute_grade_7point(
         metrics={}, balance_sheet=balance_sheet, cashflow=[], income_stmt=[],
     )
-    assert result["grade"] == "D"
-    assert result["details"]["industry_hint"] == "insurance"
+    assert result["details"].get("industry_hint") == "insurance"
+    assert result["details"].get("method") == "insurance_4metric_12point"
 
 
 def test_insurance_zero_value_still_treated_as_general():

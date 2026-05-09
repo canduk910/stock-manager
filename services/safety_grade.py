@@ -223,6 +223,153 @@ def _count_fcf_years_positive(cashflow: list[dict]) -> int:
     return years_positive
 
 
+# ── 보험업 D안 12점 등급 (Phase B-2, MarginAnalyst 자문 2026-05-09) ───────
+# 4지표 × 4점 = 12점 만점. ROE / 자기자본비율 / 매출성장률(보험료 CAGR) / 배당안정성.
+# 비례 환산 12 → 28: 12점=28점, A≥10.3 / B+≥8.6 / B≥6.9 / C≥5.1 / D<5.1.
+# 일반 7점과 일관성 유지: 동일 grade 라벨 + grade_factor + valid_entry.
+
+def _score_insurance_roe(roe: Optional[float]) -> int:
+    """보험사 ROE. >15=4 / 10-15=3 / 5-10=2 / <5=1. 일반과 동일 임계값."""
+    if roe is None:
+        return 2
+    if roe > 15:
+        return 4
+    if roe > 10:
+        return 3
+    if roe > 5:
+        return 2
+    return 1
+
+
+def _score_insurance_equity_ratio(equity: Optional[float], assets: Optional[float]) -> int:
+    """보험사 자기자본비율 = 자본 / 자산 × 100.
+
+    K-ICS 자본 규제 + KIDB 평균 8~12% 기준. >15=4 / 10-15=3 / 5-10=2 / <5=1.
+    일반 제조업의 30~50% 임계값과 본질적으로 다름 — 보험사 책임준비금이 부채에
+    포함되어 자본비율이 낮게 나오는 게 정상.
+    """
+    if equity is None or assets is None or assets <= 0:
+        return 2
+    ratio = equity / assets * 100
+    if ratio > 15:
+        return 4
+    if ratio > 10:
+        return 3
+    if ratio > 5:
+        return 2
+    return 1
+
+
+def _score_dividend_stability(income_stmt: list[dict]) -> int:
+    """배당안정성 — income_stmt에 dividend 정보가 없으므로 net_income 양수 연수 대용.
+
+    MarginAnalyst 자문 — "3년 연속 지급 4 / 2년 3 / 1년 2 / 무지급 1". 정확한 배당
+    데이터는 metrics.dividend_yield 또는 별도 수집 필요. 본 함수는 1차 근사치로
+    income_stmt 최근 3년 net_income 양수 연수 사용 (배당 지급 가능 기반 = 순이익 흑자).
+    추후 dividend 수집 정밀화 시 별도 _score_dividend_payout()으로 대체 권고.
+    """
+    if not income_stmt:
+        return 1
+    recent = income_stmt[-3:]
+    positive_years = sum(1 for r in recent if (r.get("net_income") or 0) > 0)
+    if positive_years >= 3:
+        return 4
+    if positive_years >= 2:
+        return 3
+    if positive_years >= 1:
+        return 2
+    return 1
+
+
+# 비례 환산 12 → 28점 환산 컷오프 (MarginAnalyst 자문)
+_INSURANCE_GRADE_THRESHOLDS = [
+    (10.3, "A"),
+    (8.6, "B+"),
+    (6.9, "B"),
+    (5.1, "C"),
+]
+
+
+def compute_insurance_grade(
+    metrics: dict,
+    balance_sheet: list[dict],
+    cashflow: list[dict],  # 호환용 (사용 안 함, 향후 확장 위해 유지)
+    income_stmt: list[dict],
+) -> dict:
+    """보험사 전용 12점 등급 (D안). compute_grade_7point과 동일 응답 shape.
+
+    4지표:
+      1. ROE (4점)
+      2. 자기자본비율 = 자본 / 자산 (4점) — K-ICS 기준 보험사 임계값
+      3. 매출성장률 = 보험료수익 CAGR 3년 (4점)
+      4. 배당안정성 = 최근 3년 순이익 양수 연수 (4점, 차후 dividend 정밀화)
+
+    제외 지표 (보험사 본질상 적용 불가):
+      - Graham 할인율: EPS×BPS 공식 무의미 → discount=None, points=N/A
+      - 부채비율: 책임준비금 부채 포함으로 800~1500% 정상 → 제외
+      - 유동비율: 유동/비유동 구분 일반 회계와 달라 → 제외
+      - FCF 양수: 보험사 현금흐름 구조상 무의미 → 제외
+
+    Returns:
+        compute_grade_7point과 동일 shape — score(28 환산)/grade/grade_factor/
+        valid_entry/details. 호출자 호환 100%.
+    """
+    # 1. ROE
+    roe = metrics.get("roe") if metrics else None
+    pts_roe = _score_insurance_roe(roe)
+
+    # 2. 자기자본비율
+    equity = None
+    assets = None
+    if balance_sheet:
+        latest = balance_sheet[-1]
+        equity = latest.get("total_equity")
+        assets = latest.get("total_assets")
+    equity_ratio = round(equity / assets * 100, 1) if (equity and assets and assets > 0) else None
+    pts_equity = _score_insurance_equity_ratio(equity, assets)
+
+    # 3. 매출성장률 (보험료 CAGR)
+    revenue_cagr = _calc_revenue_cagr(income_stmt)
+    pts_cagr = _score_revenue_cagr(revenue_cagr)
+
+    # 4. 배당안정성 (1차 근사)
+    pts_dividend = _score_dividend_stability(income_stmt)
+
+    raw_score = pts_roe + pts_equity + pts_cagr + pts_dividend  # 0~16
+    # 12점 만점 비례 환산 — 본 함수는 최대 16(4×4)이지만 도메인 자문 기준 12점 만점
+    # 환산: raw 4지표 × 4점 평균 → 4지표 합계 그대로 사용. 최대 16점.
+    # 28점 환산: raw_score / 16 × 28 → 그러나 자문 기준 12 → 28 비율(2.33×) 사용.
+    # 자문 컷오프(A≥10.3/B+≥8.6/B≥6.9/C≥5.1)를 12점 만점 기준으로 그대로 사용.
+    # 4지표×4점=16이므로 raw / 16 × 12 환산하여 자문 컷오프 적용.
+    score_12 = round(raw_score / 16 * 12, 1)
+    score_28 = int(round(score_12 / 12 * 28))
+
+    grade = "D"
+    for threshold, label in _INSURANCE_GRADE_THRESHOLDS:
+        if score_12 >= threshold:
+            grade = label
+            break
+
+    return {
+        "score": score_28,
+        "grade": grade,
+        "grade_factor": GRADE_FACTOR.get(grade, 0.0),
+        "valid_entry": grade in ("A", "B+", "B", "C"),
+        "details": {
+            "industry_hint": "insurance",
+            "method": "insurance_4metric_12point",
+            "score_12": score_12,
+            "score_28_equivalent": score_28,
+            "roe": {"value": roe, "points": pts_roe},
+            "equity_ratio": {"value": equity_ratio, "points": pts_equity, "note": "자본/자산 (K-ICS 기준)"},
+            "revenue_cagr": {"value": revenue_cagr, "points": pts_cagr, "note": "보험영업수익 CAGR"},
+            "dividend_stability": {"points": pts_dividend, "note": "최근 3년 순이익 양수 연수 (배당 정밀화 차후)"},
+            "excluded": ["graham_discount", "debt_ratio", "current_ratio", "fcf_trend"],
+            "excluded_reason": "보험사 회계 구조상 일반 7점 임계값 적용 불가 (MarginAnalyst 2026-05-09)",
+        },
+    }
+
+
 def _calc_revenue_cagr(income_stmt: list[dict]) -> Optional[float]:
     """손익계산서 매출 CAGR (3년 기준, 최소 2년).
 
@@ -278,29 +425,19 @@ def compute_grade_7point(
             },
         }
     """
-    # ── 보험업 자동 감지 (Phase B-1 가드, 2026-05-09) ──────────────────────
+    # ── 보험업 자동 감지 → D안 12점 위임 (Phase B-2, 2026-05-10) ───────────
     # dart_fin.is_insurance_company가 추출한 insurance_* BS 필드가 있으면 보험업.
-    # MarginAnalyst 자문: 보험사는 책임준비금이 부채에 포함되어 일반 임계값
-    # 적용 시 부채비율 800~1500%로 우량 보험사도 D 등급 false negative 양산.
-    # Phase B-2(보험사 전용 12점 — ROE/자기자본비율/매출성장률/배당안정성)는
-    # 별도 작업. B-1은 진입 금지(D) + details.reason으로 보험업임 명시.
-    # schema(Literal A~D) 호환 유지를 위해 grade="D" + score=0 표면화.
+    # MarginAnalyst 자문(2026-05-09): 보험사는 책임준비금이 부채에 포함되어 일반
+    # 임계값 적용 시 false negative D 양산. D안 4지표(ROE/자기자본비율/매출성장률/
+    # 배당안정성) × 4점 = 12점 → 28점 비례 환산 컷오프.
+    # B-1(2026-05-09)은 단순 진입금지 가드, B-2(본 함수)는 정식 등급 산출.
     if isinstance(balance_sheet, list) and balance_sheet:
         latest_bs = balance_sheet[-1]
         if isinstance(latest_bs, dict) and (
             latest_bs.get("insurance_liabilities")
             or latest_bs.get("insurance_assets")
         ):
-            return {
-                "score": 0,
-                "grade": "D",
-                "grade_factor": 0.0,
-                "valid_entry": False,
-                "details": {
-                    "reason": "보험업/금융업 — 일반 7점 등급 평가 불가 (별도 산출 예정)",
-                    "industry_hint": "insurance",
-                },
-            }
+            return compute_insurance_grade(metrics, balance_sheet, cashflow, income_stmt)
 
     # 1. Graham 할인율
     discount = _calc_discount(graham_number, current_price)
