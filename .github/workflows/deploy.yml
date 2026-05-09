@@ -113,14 +113,18 @@ jobs:
             docker pull "$ECR_REPO:$IMAGE_TAG"
 
             echo "[3/6] SSM에서 환경변수 로드..."
+            # docker compose .env parser는 값에 따옴표/백슬래시/줄바꿈 포함 시 거부.
+            # 이전 패턴(`--output text` 후 `echo $name=$value`)은 raw 그대로 출력해
+            # 시크릿 내부 `"`가 escape 안 된 채 다음 줄로 흘러 변수명에 혼입되던 결함.
+            # jq @json 필터로 큰따옴표 wrapping + 내부 \, ", newline 자동 escape.
+            command -v jq >/dev/null 2>&1 || sudo yum install -y jq
             aws ssm get-parameters-by-path \
               --path "/stock-manager/prod/" \
               --with-decryption \
               --region "$REGION" \
-              --query "Parameters[*].[Name,Value]" \
-              --output text | while IFS=$'\t' read -r name value; do
-                echo "$(basename "$name")=$value"
-            done > /opt/stock-manager/.env
+              --output json | \
+              jq -r '.Parameters[] | "\(.Name | split("/") | last)=\(.Value | @json)"' \
+              > /opt/stock-manager/.env
 
             echo "[4/6] nginx 설정 + compose 파일 배치 (SCP staging → 운영 위치)..."
             cd /opt/stock-manager
