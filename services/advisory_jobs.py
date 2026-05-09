@@ -78,19 +78,25 @@ def submit_job(
     market: str,
     user_id: int,
     func: Callable[..., Any],
+    /,
     *args,
     **kwargs,
 ) -> dict:
     """백그라운드 작업 제출. 즉시 job dict 반환.
 
     Args:
-        kind: 'refresh' | 'analyze' (구분용 메타)
-        code/market/user_id: 컨텍스트 메타
-        func: 실행할 함수 (`refresh_stock_data` 또는 `generate_ai_report`)
-        *args, **kwargs: func에 그대로 전달
+        kind/code/market/user_id/func: positional-only (`/` 이전).
+                                       호출자가 user_id를 keyword로 func에 전달해도
+                                       submit_job 자체 시그니처와 충돌 없음.
+        *args, **kwargs: func에 그대로 전달 (kwargs에 user_id 있어도 OK)
 
     Returns:
         {job_id, kind, code, market, status:"running", started_at, ...}
+
+    Note:
+        2026-05-10 결함 — `/` 없을 때 호출자의 user_id keyword가 submit_job의
+        positional user_id와 충돌해 TypeError → HTTP 500. positional-only로
+        분리해 충돌 차단.
     """
     if kind not in ("refresh", "analyze"):
         raise ServiceError(f"알 수 없는 작업 유형: {kind}")

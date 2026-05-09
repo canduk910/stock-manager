@@ -145,3 +145,42 @@ def test_get_job_count_reports_status_breakdown():
     assert "running" in count
     assert "completed" in count
     assert "failed" in count
+
+
+# ── positional-only 시그니처 회귀 (2026-05-10 결함) ────────────
+
+def test_submit_job_accepts_user_id_kwarg_for_func():
+    """호출자가 user_id를 keyword로 func에 전달해도 submit_job 자체 시그니처와
+    충돌 없음 (positional-only `/` 분리 가드).
+
+    routers/advisory.py 의 실제 호출 패턴:
+        submit_job("analyze", code, market, user["id"], gen_func,
+                   code, market, name, user_id=user["id"], user_comment=...)
+
+    이전 결함(2026-05-10): user_id keyword가 submit_job positional user_id와
+    충돌해 TypeError → HTTP 500.
+    """
+    captured = {}
+
+    def fake_func(*args, **kwargs):
+        captured["args"] = args
+        captured["kwargs"] = kwargs
+        return {"ok": True}
+
+    job = advisory_jobs.submit_job(
+        "analyze", "005830", "KR", 1,    # positional 5개 (job 메타)
+        fake_func,
+        "005830", "KR", "DB손해보험",      # *args (func 에 전달)
+        user_id=1, user_comment="가설",   # **kwargs (func 에 전달, user_id 키워드 허용)
+    )
+    assert job["status"] == "running"
+    # 백그라운드 thread 완료 대기
+    for _ in range(20):
+        time.sleep(0.05)
+        poll = advisory_jobs.poll_job(job["job_id"], user_id=1)
+        if poll["status"] == "completed":
+            break
+    assert poll["status"] == "completed"
+    # func 호출이 정상적으로 args/kwargs를 받음
+    assert captured["args"] == ("005830", "KR", "DB손해보험")
+    assert captured["kwargs"] == {"user_id": 1, "user_comment": "가설"}
