@@ -15,9 +15,11 @@ class BacktestJob(Base):
     strategy_name = Column(String, nullable=False)
     symbol = Column(String, nullable=False)
     market = Column(String, nullable=False, default="KR")
-    strategy_type = Column(String, nullable=False)  # preset/custom
+    strategy_type = Column(String, nullable=False)  # preset/custom/local/builder
     status = Column(String, nullable=False, default="submitted")
     submitted_at = Column(String, nullable=False)
+    # MCP backtester 측 job_id (fire-and-poll 폴링용). 로컬 백테스트는 NULL.
+    mcp_job_id = Column(String, nullable=True)
     completed_at = Column(String, nullable=True)
     total_return_pct = Column(Float, nullable=True)
     cagr = Column(Float, nullable=True)
@@ -44,6 +46,7 @@ class BacktestJob(Base):
             "market": self.market,
             "strategy_type": self.strategy_type,
             "status": self.status,
+            "mcp_job_id": self.mcp_job_id,
             "submitted_at": self.submitted_at,
             "completed_at": self.completed_at,
             "total_return_pct": self.total_return_pct,

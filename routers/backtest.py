@@ -156,7 +156,7 @@ def run_custom(body: CustomBacktestBody, user: dict = Depends(get_current_user))
 
 
 @router.post("/run/batch")
-def run_batch(body: BatchBacktestBody, _user: dict = Depends(get_current_user)):
+def run_batch(body: BatchBacktestBody, user: dict = Depends(get_current_user)):
     """배치 비교 (여러 전략)."""
     logger.info(
         "[backtest.batch.entry] presets=%s symbol=%s market=%s",
@@ -169,6 +169,7 @@ def run_batch(body: BatchBacktestBody, _user: dict = Depends(get_current_user)):
         start_date=body.start_date,
         end_date=body.end_date,
         initial_cash=body.initial_cash,
+        user_id=user["id"],
     )
     logger.info(
         "[backtest.batch.exit] symbol=%s presets=%d",
@@ -218,9 +219,13 @@ def run_local(body: LocalBacktestBody, user: dict = Depends(get_current_user)):
 
 
 @router.get("/result/{job_id}")
-def get_result(job_id: str, _user: dict = Depends(get_current_user)):
-    """백테스트 결과 조회."""
-    return backtest_service.get_backtest_result(job_id)
+def get_result(job_id: str, user: dict = Depends(get_current_user)):
+    """백테스트 결과 조회 — fire-and-poll lazy MCP 폴링 트리거.
+
+    DB 행이 running/submitted면 MCP `get_backtest_result_tool(wait=False)` 1회 조회 후
+    완료/실패 시 DB 갱신. 프론트가 3초 간격으로 호출하면 자연스럽게 진행 상태가 갱신됨.
+    """
+    return backtest_service.poll_backtest_job(job_id, user_id=user["id"])
 
 
 @router.get("/history")

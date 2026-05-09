@@ -173,27 +173,60 @@ def _extract_metrics(data: dict) -> dict:
 
 
 def _run_and_wait(client, tool_name: str, params: dict, timeout: int = 280) -> dict:
-    """MCP 비동기 2단계 실행: 도구 호출 → job_id 획득 → 결과 대기.
+    """MCP 비동기 2단계 실행 (동기 대기) — `get_strategy_signals`/`run_batch_backtest` 전용.
 
-    1단계: tool_name 호출 → 즉시 job_id 반환
-    2단계: get_backtest_result_tool(job_id, wait=true) → 완료 대기
+    fire-and-poll로 전환되지 않은 흐름(짧은 신호 도출/배치)에서만 사용.
+    POST /run/preset, /run/custom 은 `_submit_mcp_job` + `poll_backtest_job` 으로 분리됨.
     """
-    # 1단계: 백테스트 제출 → job_id
+    mcp_job_id = _submit_mcp_job(client, tool_name, params)
+    result2 = client.call_tool("get_backtest_result_tool", {
+        "job_id": mcp_job_id,
+        "wait": True,
+        "timeout": timeout,
+    })
+    return _extract_mcp_content(result2)
+
+
+def _submit_mcp_job(client, tool_name: str, params: dict) -> str:
+    """MCP 1단계만 호출 — `tool_name` 제출 후 즉시 mcp_job_id 반환.
+
+    fire-and-poll 패턴: POST 진입점에서 호출, 결과 대기는 `poll_backtest_job` 위임.
+    """
     result1 = client.call_tool(tool_name, params)
     data1 = _extract_mcp_content(result1)
     if not isinstance(data1, dict) or "job_id" not in data1:
         raise ExternalAPIError(f"MCP 응답에서 job_id를 찾을 수 없습니다: {data1}")
     mcp_job_id = data1["job_id"]
     logger.info("MCP 백테스트 제출 완료: %s (MCP job: %s)", tool_name, mcp_job_id)
+    return mcp_job_id
 
-    # 2단계: 결과 대기
-    result2 = client.call_tool("get_backtest_result_tool", {
+
+def _fetch_mcp_result_nowait(client, mcp_job_id: str) -> Optional[dict]:
+    """MCP 결과 즉시 조회 (wait=False, timeout=0). 미완료면 None 반환.
+
+    완료(`status: "completed"` 또는 result 존재) → dict 반환.
+    실패(`success: false`) → ExternalAPIError raise (메시지 분류 후 친화 변환).
+    진행 중 → None.
+    """
+    res = client.call_tool("get_backtest_result_tool", {
         "job_id": mcp_job_id,
-        "wait": True,
-        "timeout": timeout,
+        "wait": False,
+        "timeout": 0,
     })
-    data2 = _extract_mcp_content(result2)
-    return data2
+    data = _extract_mcp_content(res)
+    if not isinstance(data, dict):
+        return None
+    # MCP 응답 status 필드 — backtester 정의에 따라 progress/running/completed 등
+    status = data.get("status") or (data.get("result") or {}).get("status")
+    if status in ("running", "submitted", "pending", "queued", "in_progress"):
+        return None
+    # result 페이로드가 명시적으로 존재하면 완료로 간주
+    if "result" in data or "metrics" in data:
+        return data
+    # status 미정인데 metrics 없음 → 진행 중으로 보수 처리
+    if status is None:
+        return None
+    return data
 
 
 def list_presets() -> list:
@@ -224,16 +257,16 @@ def run_preset_backtest(
     slippage: Optional[float] = None,
     user_id: int = 1,
 ) -> dict:
-    """프리셋 전략 백테스트 실행.
+    """프리셋 전략 백테스트 — fire-and-poll 즉시 반환.
 
-    비동기 2단계:
-    1) run_preset_backtest_tool → 즉시 MCP job_id 반환
-    2) get_backtest_result_tool(wait=true) → 완료 대기 후 결과
+    1) BacktestJob status='running' Write-Ahead
+    2) MCP run_preset_backtest_tool 제출 → mcp_job_id 받아서 DB에 영속
+    3) 즉시 {job_id, status:'running', mcp_job_id} 반환 (결과 대기 없음)
+    4) 클라이언트가 GET /api/backtest/result/{job_id} 로 폴링 → poll_backtest_job 트리거
     """
     client = get_mcp_client()
     job_id = str(uuid.uuid4())
 
-    # DB에 작업 기록 (Write-Ahead)
     strategy_store.save_backtest_job(
         user_id=user_id,
         job_id=job_id,
@@ -245,6 +278,7 @@ def run_preset_backtest(
         params=params,
         strategy_display_name=preset_name,
     )
+    strategy_store.update_job_status(job_id, "running")
 
     mcp_params = {
         "strategy_id": preset,
@@ -265,16 +299,16 @@ def run_preset_backtest(
         mcp_params["slippage"] = slippage
 
     try:
-        data = _run_and_wait(client, "run_preset_backtest_tool", mcp_params)
-        _save_completed(job_id, data)
-        return {"job_id": job_id, "status": "completed", "result": data}
-    except ExternalAPIError:
-        strategy_store.update_job_status(job_id, "failed")
+        mcp_job_id = _submit_mcp_job(client, "run_preset_backtest_tool", mcp_params)
+        strategy_store.set_mcp_job_id(job_id, mcp_job_id)
+        return {"job_id": job_id, "status": "running", "mcp_job_id": mcp_job_id}
+    except ExternalAPIError as e:
+        strategy_store.update_job_failed(job_id, str(e))
         raise
     except Exception as e:
-        strategy_store.update_job_status(job_id, "failed")
-        logger.error("백테스트 실행 실패: %s", e)
-        raise ExternalAPIError(f"백테스트 실행 실패: {e}")
+        strategy_store.update_job_failed(job_id, f"백테스트 제출 실패: {e}")
+        logger.error("백테스트 제출 실패: %s", e, exc_info=True)
+        raise ExternalAPIError(f"백테스트 제출 실패: {e}")
 
 
 def run_custom_backtest(
@@ -348,25 +382,82 @@ def run_custom_backtest(
     if slippage is not None:
         params["slippage"] = slippage
 
+    strategy_store.update_job_status(job_id, "running")
     try:
-        data = _run_and_wait(client, "run_backtest_tool", params)
-        _save_completed(job_id, data)
-        return {"job_id": job_id, "status": "completed", "result": data}
-    except ExternalAPIError:
-        strategy_store.update_job_status(job_id, "failed")
+        mcp_job_id = _submit_mcp_job(client, "run_backtest_tool", params)
+        strategy_store.set_mcp_job_id(job_id, mcp_job_id)
+        return {"job_id": job_id, "status": "running", "mcp_job_id": mcp_job_id}
+    except ExternalAPIError as e:
+        strategy_store.update_job_failed(job_id, str(e))
         raise
     except Exception as e:
-        strategy_store.update_job_status(job_id, "failed")
-        logger.error("커스텀 백테스트 실행 실패: %s", e)
-        raise ExternalAPIError(f"커스텀 백테스트 실행 실패: {e}")
+        strategy_store.update_job_failed(job_id, f"커스텀 백테스트 제출 실패: {e}")
+        logger.error("커스텀 백테스트 제출 실패: %s", e, exc_info=True)
+        raise ExternalAPIError(f"커스텀 백테스트 제출 실패: {e}")
 
 
 def get_backtest_result(job_id: str) -> dict:
-    """백테스트 결과 조회."""
+    """백테스트 결과 조회 — fire-and-poll lazy MCP polling 트리거.
+
+    DB 행 status가 'running'/'submitted'면 MCP 측에 wait=False로 1회 조회 후
+    완료/실패 시 DB 갱신. 그 외(completed/failed)는 DB 행 그대로 반환.
+    """
+    return poll_backtest_job(job_id)
+
+
+def _surface_error(job: dict) -> dict:
+    """failed 상태 행의 result_json.error_message를 top-level `error`로 expose.
+
+    프론트 `useBacktest.js`가 `res.error`를 직접 사용하기 때문.
+    """
+    if (job.get("status") or "").lower() == "failed":
+        rj = job.get("result_json") if isinstance(job.get("result_json"), dict) else {}
+        msg = (rj or {}).get("error_message")
+        if msg and "error" not in job:
+            job = {**job, "error": msg}
+    return job
+
+
+def poll_backtest_job(job_id: str, _user_id: Optional[int] = None) -> dict:
+    """fire-and-poll 진입점. DB 행 + MCP lazy poll로 상태/결과 회수.
+
+    상태별 동작:
+    - completed/failed: DB 행 그대로 반환 (MCP 호출 안 함)
+    - running/submitted + mcp_job_id 존재 + MCP 활성: MCP wait=False 1회 조회
+        - MCP 완료 → save_backtest_result + status="completed"
+        - MCP 실패 → update_job_failed + 친화 메시지
+        - MCP 진행 중 → DB 행 그대로 반환 (status="running")
+    - running + mcp_job_id 부재(alembic 미적용 환경): DB 행 그대로 반환 (graceful)
+    """
     job = strategy_store.get_job(job_id)
     if not job:
         raise NotFoundError(f"백테스트 작업을 찾을 수 없습니다: {job_id}")
-    return job
+
+    status = (job.get("status") or "").lower()
+    if status in ("completed", "failed"):
+        return _surface_error(job)
+    if status not in ("running", "submitted"):
+        return _surface_error(job)
+
+    mcp_job_id = job.get("mcp_job_id")
+    if not mcp_job_id or not KIS_MCP_ENABLED:
+        return job
+
+    try:
+        client = get_mcp_client()
+        data = _fetch_mcp_result_nowait(client, mcp_job_id)
+    except ExternalAPIError as e:
+        strategy_store.update_job_failed(job_id, str(e))
+        return _surface_error(strategy_store.get_job(job_id) or job)
+    except Exception as e:
+        logger.warning("MCP 폴링 일시 실패 — 상태 유지(다음 폴링 재시도): %s", e)
+        return job
+
+    if data is None:
+        return job
+
+    _save_completed(job_id, data)
+    return _surface_error(strategy_store.get_job(job_id) or job)
 
 
 def run_batch_backtest(
@@ -376,22 +467,45 @@ def run_batch_backtest(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     initial_cash: int = 10_000_000,
+    user_id: int = 1,
 ) -> dict:
-    """배치 비교 (여러 전략). 내부적으로 순차 실행."""
+    """배치 비교 (여러 전략). 내부 동기 흐름 — 전체 결과를 한 응답에 묶어 반환.
+
+    fire-and-poll 적용 외 — `run_preset_backtest`가 즉시 반환으로 바뀌었으므로
+    batch는 `_run_and_wait`을 직접 호출해 동기 결과 회수. nginx 310s 가드 유지.
+    """
+    client = get_mcp_client()
     results = {}
     for preset in presets:
+        job_id = str(uuid.uuid4())
         try:
-            result = run_preset_backtest(
-                preset=preset,
+            strategy_store.save_backtest_job(
+                user_id=user_id,
+                job_id=job_id,
+                strategy_name=preset,
                 symbol=symbol,
                 market=market,
-                start_date=start_date,
-                end_date=end_date,
-                initial_cash=initial_cash,
+                strategy_type="preset",
+                submitted_at=now_kst_iso(),
             )
-            results[preset] = result
+            mcp_params = {
+                "strategy_id": preset,
+                "symbols": [symbol],
+                "initial_capital": initial_cash,
+            }
+            if start_date:
+                mcp_params["start_date"] = start_date
+            if end_date:
+                mcp_params["end_date"] = end_date
+            data = _run_and_wait(client, "run_preset_backtest_tool", mcp_params)
+            _save_completed(job_id, data)
+            results[preset] = {"job_id": job_id, "status": "completed", "result": data}
+        except ExternalAPIError as e:
+            strategy_store.update_job_failed(job_id, str(e))
+            results[preset] = {"job_id": job_id, "error": str(e)}
         except Exception as e:
-            results[preset] = {"error": str(e)}
+            strategy_store.update_job_failed(job_id, f"배치 실행 실패: {e}")
+            results[preset] = {"job_id": job_id, "error": str(e)}
     return {"symbol": symbol, "market": market, "results": results}
 
 

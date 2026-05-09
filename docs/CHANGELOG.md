@@ -1,5 +1,58 @@
 # 변경 이력
 
+## 2026-05-09 — 백테스트 fire-and-poll 패턴 도입 (504 + "이력에 결과 보존" 동시 해소)
+
+### 진단
+- backtester EC2(`i-05c673384e1093d61`) MCP 로그 분석(SSM Send-Command):
+  - MCP 정상 가동(PID 1411983, port 3846), yaml 5개 키 모두 OK → 사용자 의문(yaml `vts:`→`vps:` fix가 모드를 잘못 바꿨는지) 해소: `vps`는 KIS 공식 용어 Virtual Paper Session(모의), 원래 의도대로의 설정.
+  - 단일 005930 sma_crossover 1년 백테스트 정상 완료(Lean 27.5초). backtester 자체는 작동.
+  - 실패 케이스는 KIS 모의투자 인증 서버(`openapivts.koreainvestment.com:29443/oauth2/tokenP`) 응답 빈 JSON / SSL EOF / Connection refused 또는 EGW00201 rate limit. 캐시 없는 종목은 RuntimeError로 실패.
+- 504와 별개로 "504 후 이력에서도 실패 처리"가 진짜 문제 — backtester가 백그라운드로 작업 진행해도 stock-manager가 동기 대기에서 끊겨 결과 회수 안 됨.
+
+### 변경 (백엔드, fire-and-poll)
+- **`db/models/backtest.py`**: `BacktestJob.mcp_job_id: String nullable` 추가 + `to_dict()` 노출.
+- **`alembic/versions/a9b8c7d6e5f4_add_mcp_job_id_to_backtest_jobs.py`**: 신규 마이그레이션 — 다중 head(`e4f5a6b7c8d9` stock_info.exchange + `f5a6b7c8d9e0` orders.exchange) merge.
+- **`db/repositories/backtest_repo.py`**: `set_mcp_job_id(job_id, mcp_job_id)`, `update_job_failed(job_id, error_message)` 신규. alembic 미적용 환경 graceful(`_is_mcp_job_id_column_missing`) — 컬럼 부재 시 silent skip(폴링 비활성화 + 동기 폴백).
+- **`stock/strategy_store.py`**: `set_mcp_job_id` / `update_job_failed` 위임 래퍼 추가.
+- **`services/backtest_service.py`**:
+  - `_submit_mcp_job(client, tool_name, params)` 신규 — MCP 1단계만 호출 후 mcp_job_id 즉시 반환(wait 없음).
+  - `_fetch_mcp_result_nowait(client, mcp_job_id)` 신규 — `get_backtest_result_tool(wait=False, timeout=0)` 1회 조회. 진행 중 → None / 완료 → dict / 실패 → ExternalAPIError.
+  - `run_preset_backtest` / `run_custom_backtest`: 동기 `_run_and_wait` → fire-and-poll. status="running" Write-Ahead 후 `_submit_mcp_job` → `set_mcp_job_id` → 즉시 `{job_id, status:"running", mcp_job_id}` 반환.
+  - `poll_backtest_job(job_id, _user_id=None)` 신규 — fire-and-poll 진입점. completed/failed면 DB 행 반환, running이면 mcp_job_id로 lazy MCP 폴링 → 완료 시 `_save_completed`, 실패 시 `update_job_failed`(친화 메시지). 일시 네트워크 오류는 status 유지(다음 폴링 재시도).
+  - `_surface_error(job)` 신규 — 프론트 `useBacktest.js`가 `res.error` 직접 사용하므로 `result_json.error_message` 를 top-level `error` 로 expose.
+  - `get_backtest_result(job_id)` → `poll_backtest_job` 위임.
+  - `run_batch_backtest`: `run_preset_backtest`가 fire-and-poll로 바뀌어 동기 결과를 못 받게 되므로 batch 내부에서 `_run_and_wait` 직접 호출(동기 흐름 유지). `user_id` 시그니처 추가.
+- **`routers/backtest.py`**:
+  - `POST /run/preset`/`/run/custom`/`/run/batch`: 코드 변경 없이 응답이 자동으로 `{job_id, status:"running"}`로 변경(서비스 계층 변경의 자연 효과).
+  - `GET /result/{job_id}`: `backtest_service.get_backtest_result(job_id)` → `backtest_service.poll_backtest_job(job_id, user_id=user["id"])`. 프론트 3초 폴링이 자연스럽게 진행 상태 트리거.
+
+### 프론트 변경 (0건 — 이미 인프라 갖춰짐)
+- `frontend/src/hooks/useBacktest.js`: 3초 × 200회(10분) 폴링 인프라 이미 구현. `runPreset`/`runCustom` 응답 받으면 `startPolling(job_id)` 자동. status `running` 받으면 그대로 폴링 지속.
+- `frontend/src/components/backtest/BacktestResultPanel.jsx`: `result.metrics` / `result.result?.metrics` / `result.result_json?.result?.metrics` 3 fallback 체인이 이미 들어있어 동기/비동기 응답 shape 모두 호환.
+
+### 검증
+- 신규 단위 18 케이스(`tests/unit/test_backtest_fire_and_poll.py`):
+  - `_submit_mcp_job`: get_backtest_result_tool 호출되지 않음 / job_id 부재 시 ExternalAPIError
+  - `_fetch_mcp_result_nowait`: running/in_progress → None, completed → dict, failed → ExternalAPIError
+  - `run_preset_backtest`: 즉시 `{status:"running", mcp_job_id}` 반환 + Write-Ahead + `set_mcp_job_id` / 제출 실패 시 `update_job_failed` + raise
+  - `poll_backtest_job`: completed → MCP 호출 없이 DB 반환 / running + 진행중 → DB 그대로 / running + 완료 → `save_backtest_result` / running + 실패 → `update_job_failed` 친화 메시지 / mcp_job_id 부재 → graceful / KIS_MCP_ENABLED=false → graceful / 일시 네트워크 오류 → running 유지(failed 마킹 안 함) / not found → NotFoundError
+  - `_surface_error`: failed 행의 `result_json.error_message` 를 top-level `error` 로 expose
+- 단위 회귀: **894 PASS / 0 FAIL** (베이스라인 877 + 신규 18 - merge 1 = 894). 17 ERROR는 PostgreSQL 로컬 미가동 의존(CI에서 통과).
+
+### 회귀 가드
+- `get_strategy_signals` 미터치 (단기 신호 도출은 `_run_and_wait` 동기 흐름 유지).
+- 로컬 백테스트(`run_local_backtest`) 미터치 (in-process 동기, 빠름).
+- DB 마이그레이션 후방호환: `mcp_job_id` 부재 환경(alembic 미적용) graceful — 폴링 비활성화되지만 에러 없음.
+- 프론트 0건 변경, 백엔드 응답 shape `result_json.result.metrics` 호환 체인이 이미 존재.
+- 이전 commit(`0c96fb5` nginx /api/backtest/run/ 310s)도 그대로 유지 — 로컬 백테스트 + 배치 + 안전 가드.
+
+### 배포 후 동작
+- 사용자가 백테스트 실행 → POST 즉시 200 OK + `{job_id, status:"running"}` 반환 → 프론트가 자동 폴링 시작 → 30초~5분 사이 결과 또는 실패 메시지 표시.
+- 504 자체 소멸 (POST는 즉시 응답, GET 폴링은 90s 내 끝남).
+- backtester 측 KIS 인증 실패 / rate limit / vps yaml 누락 등 어떤 실패도 BacktestJob row의 `result_json.error_message`에 보존 → 이력 페이지에서 사유 확인 가능.
+
+---
+
 ## 2026-05-09 — 백테스트 504 픽스 (nginx `/api/backtest/run/` location 분리)
 
 ### 버그 수정

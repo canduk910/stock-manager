@@ -50,6 +50,18 @@ def update_job_status(job_id: str, status: str) -> bool:
         return BacktestRepository(db).update_job_status(job_id, status)
 
 
+def set_mcp_job_id(job_id: str, mcp_job_id: str) -> bool:
+    """fire-and-poll: MCP 측 job_id 영속화. alembic 미적용 환경 graceful."""
+    with get_session() as db:
+        return BacktestRepository(db).set_mcp_job_id(job_id, mcp_job_id)
+
+
+def update_job_failed(job_id: str, error_message: str) -> bool:
+    """실패 시 status='failed' + result_json.error_message 저장."""
+    with get_session() as db:
+        return BacktestRepository(db).update_job_failed(job_id, error_message)
+
+
 def get_job(job_id: str) -> Optional[dict]:
     """작업 조회."""
     with get_session() as db:

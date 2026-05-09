@@ -27,6 +27,16 @@ def _is_symbols_column_missing(err: Exception) -> bool:
     )
 
 
+def _is_mcp_job_id_column_missing(err: Exception) -> bool:
+    """SQL 에러 메시지에서 `mcp_job_id` 컬럼 부재 패턴 식별 (alembic 미적용 환경)."""
+    msg = str(err).lower()
+    return "mcp_job_id" in msg and (
+        "does not exist" in msg
+        or "no such column" in msg
+        or "unknown column" in msg
+    )
+
+
 class BacktestRepository:
     def __init__(self, db: Session):
         self.db = db
@@ -114,6 +124,43 @@ class BacktestRepository:
         job.status = status
         if status in ("completed", "failed"):
             job.completed_at = now_kst_iso()
+        return True
+
+    def set_mcp_job_id(self, job_id: str, mcp_job_id: str) -> bool:
+        """fire-and-poll: MCP 측 job_id를 DB 행에 기록.
+
+        alembic 미적용 환경에서 mcp_job_id 컬럼 부재 시 silent skip
+        (graceful degrade — 폴링은 동작 안 하지만 동기 응답으로 폴백 가능).
+        """
+        try:
+            job = self.db.query(BacktestJob).filter_by(job_id=job_id).first()
+            if not job:
+                return False
+            job.mcp_job_id = mcp_job_id
+            self.db.flush()
+            return True
+        except (OperationalError, ProgrammingError) as e:
+            if not _is_mcp_job_id_column_missing(e):
+                raise
+            logger.error(
+                "backtest_jobs.mcp_job_id 컬럼 부재 (alembic 미적용 추정) — "
+                "fire-and-poll 비활성화 (동기 응답 폴백). err=%s",
+                e,
+            )
+            self.db.rollback()
+            return False
+
+    def update_job_failed(self, job_id: str, error_message: str) -> bool:
+        """실패 시 status="failed" + result_json.error_message 저장."""
+        job = self.db.query(BacktestJob).filter_by(job_id=job_id).first()
+        if not job:
+            return False
+        job.status = "failed"
+        job.completed_at = now_kst_iso()
+        existing = job.result_json if isinstance(job.result_json, dict) else {}
+        existing = dict(existing)
+        existing["error_message"] = error_message
+        job.result_json = existing
         return True
 
     def get_job(self, job_id: str) -> Optional[dict]:
