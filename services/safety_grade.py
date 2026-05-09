@@ -278,6 +278,30 @@ def compute_grade_7point(
             },
         }
     """
+    # ── 보험업 자동 감지 (Phase B-1 가드, 2026-05-09) ──────────────────────
+    # dart_fin.is_insurance_company가 추출한 insurance_* BS 필드가 있으면 보험업.
+    # MarginAnalyst 자문: 보험사는 책임준비금이 부채에 포함되어 일반 임계값
+    # 적용 시 부채비율 800~1500%로 우량 보험사도 D 등급 false negative 양산.
+    # Phase B-2(보험사 전용 12점 — ROE/자기자본비율/매출성장률/배당안정성)는
+    # 별도 작업. B-1은 진입 금지(D) + details.reason으로 보험업임 명시.
+    # schema(Literal A~D) 호환 유지를 위해 grade="D" + score=0 표면화.
+    if isinstance(balance_sheet, list) and balance_sheet:
+        latest_bs = balance_sheet[-1]
+        if isinstance(latest_bs, dict) and (
+            latest_bs.get("insurance_liabilities")
+            or latest_bs.get("insurance_assets")
+        ):
+            return {
+                "score": 0,
+                "grade": "D",
+                "grade_factor": 0.0,
+                "valid_entry": False,
+                "details": {
+                    "reason": "보험업/금융업 — 일반 7점 등급 평가 불가 (별도 산출 예정)",
+                    "industry_hint": "insurance",
+                },
+            }
+
     # 1. Graham 할인율
     discount = _calc_discount(graham_number, current_price)
     pts_discount = _score_discount(discount)
