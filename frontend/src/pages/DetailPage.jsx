@@ -63,8 +63,8 @@ export default function DetailPage() {
   const [userComment, setUserComment] = useState('')
   const { data, loading, error, load } = useDetailReport()
 
-  const { data: advData, loading: advLoading, error: advError, load: loadAdvData, refresh: refreshAdvData, progressMessage: advProgressMsg } = useAdvisoryData()
-  const { report, history: reportHistory, loading: reportLoading, error: reportError, load: loadReport, generate, loadById: loadReportById, progressMessage: reportProgressMsg } = useAdvisoryReport()
+  const { data: advData, loading: advLoading, error: advError, load: loadAdvData, refresh: refreshAdvData, resumeIfActive: resumeAdvJob, progressMessage: advProgressMsg } = useAdvisoryData()
+  const { report, history: reportHistory, loading: reportLoading, error: reportError, load: loadReport, generate, loadById: loadReportById, resumeIfActive: resumeReportJob, progressMessage: reportProgressMsg } = useAdvisoryReport()
   // fire-and-poll: progressMessage 또는 loading 중 하나라도 있으면 진행 중. 504 회피 + 명확한 진행 표시.
   const isAdvWorking = advLoading || !!advProgressMsg
   const isReportWorking = reportLoading || !!reportProgressMsg
@@ -81,6 +81,9 @@ export default function DetailPage() {
       advLoadedRef.current = true
       loadAdvData(symbol, market)
       loadReport(symbol, market)
+      // fire-and-poll 진행 중 작업 복원: 페이지 이동 후 돌아오면 폴링 재개 + "자문 응답 대기중"
+      resumeAdvJob(symbol, market)
+      resumeReportJob(symbol, market)
     }
   }, [activeTab, subTab, symbol]) // eslint-disable-line
 
