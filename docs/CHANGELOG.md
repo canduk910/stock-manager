@@ -1,5 +1,42 @@
 # 변경 이력
 
+## 2026-05-09 — 백테스트 504 픽스 (nginx `/api/backtest/run/` location 분리)
+
+### 버그 수정
+- **운영 dkstock.cloud 백테스트 HTTP 504 지속 발생** — 사용자 의문(외부 backtester yaml fix `vts:`→`vps:`가 모드를 잘못 바꿨는지)은 해소: `vps`는 KIS 공식 용어 Virtual Paper Session(모의)로 원래 의도대로의 설정. stock-manager → MCP 호출엔 paper/prod 플래그가 없고 backtester EC2 yaml에서 자동 판정.
+- **진짜 원인 — 타임아웃 매트릭스 불일치**: `infra/nginx/app.conf:79` 의 `location /api/` 가 `proxy_read_timeout 90s` 인데, `services/mcp_client.py:52` httpx read=300s + `services/backtest_service.py:175-196` MCP wait=280s. 백테스트 실행이 90초 넘는 순간 nginx가 504로 잘라버림(stock-manager는 still-waiting). 2026-05-03 Phase 1 nginx 분리 시 백테스트 long-running 케이스 누락.
+
+### 변경
+- **`infra/nginx/app.conf`**: `^~ /api/backtest/run/` location 신규 추가(`/api/` 위), `proxy_read_timeout 310s` (MCP 280s + httpx 300s 보다 길게). `^~` prefix로 우선 매칭. 다른 `/api/*` 90s 그대로 유지(다른 백엔드 hang이 nginx 워커 무한 점유 방지).
+
+### 매트릭스 정합화 (변경 후)
+| 레이어 | 타임아웃 |
+|--------|---------|
+| nginx `/api/backtest/run/` | **310s** |
+| stock-manager httpx read | 300s |
+| MCP wait | 280s |
+
+→ 280s 안에 응답 → 정상 200 / 280s 초과 → stock-manager가 `MCP 서버 응답 시간 초과` ExternalAPIError(502) 반환. 어느 경로든 504 없음.
+
+### 회귀 가드
+- 다른 `/api/*` 엔드포인트 90s 보존(백엔드 hang 방어 효과 유지)
+- 백테스트 4개 흐름(`/run/preset`/`/run/custom`/`/run/batch`/`/run/local`) 모두 새 location 매칭
+- 코드 변경 0건(서비스/라우터/DB/프론트 미터치)
+- 도메인 알고리즘 무영향
+- KIS_MCP_ENABLED=false 환경 무영향(로컬 백테스트도 동일 prefix)
+
+### 검증 (배포 후)
+```bash
+sudo docker exec nginx nginx -t                           # syntax ok
+sudo docker exec nginx cat /etc/nginx/conf.d/app.conf | grep -A2 "/api/backtest/run/"  # 310s 확인
+# Long-running 다종목 10년 백테스트 → 200 (이전 504)
+```
+
+### 후속 (선택, 별도 phase)
+- 비동기 fire-and-poll 패턴 도입 — POST 즉시 job_id 반환 + 프론트 폴링. nginx 90s 그대로 가능. 변경 6+파일 범위로 별도 phase 권고.
+
+---
+
 ## 2026-05-09 — 매크로 GPT 캐시 일일 자정 cleanup + 헤더 sticky
 
 ### 운영 정책 신규
