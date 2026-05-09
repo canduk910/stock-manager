@@ -1,5 +1,36 @@
 # 변경 이력
 
+## 2026-05-09 — 매크로 GPT 캐시 일일 자정 cleanup + 헤더 sticky
+
+### 운영 정책 신규
+- **매크로 GPT 캐시 일일 자정 정리** — `macro_gpt_cache` 테이블에 무한 누적되던 데이터를 매일 KST 00:05 cleanup. 매크로 정보는 당일치만 유지(어제 이전 row 자동 삭제).
+  - 사용자 보고: `cleanup_old(days=30)` 함수는 있었으나 어디서도 호출되지 않는 상태 발견.
+  - 사용자 결정: ① 대상 = `macro_gpt_cache` 테이블만 (cache.db `macro:*` TTL 캐시 미터치 — 1년 스파크라인/5년 OAS 등 장기 시계열 보호), ② 트리거 = APScheduler 자정 KST 00:05 cron(자정 정각 race 회피로 5분 여유).
+
+### 변경
+- **`db/repositories/macro_repo.py`**: `delete_before_today()` 신규 — `DELETE FROM macro_gpt_cache WHERE date_kst < today_kst`, 삭제 건수 반환. 기존 `cleanup_old(days=30)`/`delete_today(category)`와 별개.
+- **`stock/macro_store.py`**: 위임 래퍼 `delete_before_today()` 추가.
+- **`services/scheduler_service.py`**: `_run_macro_cleanup_job()` 잡 + APScheduler `CronTrigger(hour=0, minute=5)` 등록(replace_existing=True). `setup_scheduler()` 시작 로그에 `00:05 매크로 cleanup` 추가. main.py lifespan 통합으로 EC2 재기동 시 다음 KST 00:05에 자동 실행.
+- **`tests/integration/test_macro_repo.py`**: `TestMacroDeleteBeforeToday` 3 케이스 — (a) yesterday+older 일괄 삭제 / (b) 빈 테이블 0 반환 / (c) today 보존.
+
+### UI 개선
+- **`frontend/src/components/layout/Header.jsx`**: `<header>` 루트 className 에 `sticky top-0 z-40` 추가. 스크롤 시 메뉴바가 viewport 상단에 고정 유지(`position: sticky`, fixed와 달리 페이지 흐름 유지). 모달/드롭다운(z-50+)이 헤더 위에 표시되어 가림 없음.
+
+### 회귀 가드
+- 도메인 알고리즘(macro_regime/macro_cycle) 무영향
+- 기존 `save_today` / `get_today` / `cleanup_old(days=30)` / `delete_today(category)` 100% 보존
+- cache.db `macro:*` TTL 캐시 미터치(장기 시계열 보호)
+- 일반 페이지 콘텐츠 레이아웃 변경 0 (sticky는 fixed와 달리 콘텐츠 점프 없음)
+- 백엔드/DB/프론트 모달·드롭다운 스택 무영향
+- 단위 회귀: **877 PASS / 0 FAIL** (베이스라인 874 + 신규 통합 3건). 17 ERROR는 PostgreSQL CI 의존 환경(변경 무관).
+
+### 검증 (사용자 측)
+- 운영 배포 후: `curl -sf https://dkstock.cloud/api/pipeline/status | jq '.jobs[] | select(.id=="macro_cleanup")'` → 다음 실행 시각 확인
+- 다음 KST 00:05 직후 docker logs 에서 `[스케줄러] 매크로 캐시 cleanup 완료: N건 삭제` 확인
+- 브라우저: 페이지 스크롤 시 헤더 고정 유지
+
+---
+
 ## 2026-05-09 — 백테스트 500 두 갈래 픽스 + 운영 가시성(CloudWatch + error_id) + KIS yaml SSM 영속화
 
 ### 배경

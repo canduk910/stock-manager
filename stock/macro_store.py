@@ -32,6 +32,15 @@ def cleanup_old(days: int = 30) -> int:
         return MacroRepository(db).cleanup_old(days)
 
 
+def delete_before_today() -> int:
+    """오늘(KST) 이전 매크로 GPT 캐시 일괄 삭제 — 일일 자정 cleanup.
+
+    스케줄러(KST 00:05)에서 호출. 삭제 건수 반환.
+    """
+    with get_session() as db:
+        return MacroRepository(db).delete_before_today()
+
+
 def delete_today(category: str) -> int:
     """오늘자 캐시 강제 삭제 (외부 키 갱신/장애 복구용)."""
     with get_session() as db:

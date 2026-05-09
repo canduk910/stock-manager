@@ -309,7 +309,7 @@ export default function Header({ widthKey, onWidthChange, maxCls }) {
   const closeMobile = () => setMobileOpen(false)
 
   return (
-    <header className="bg-gray-900 text-white shadow-lg">
+    <header className="sticky top-0 z-40 bg-gray-900 text-white shadow-lg">
       <div className={`${maxCls} px-4 py-3 flex items-center gap-4 md:gap-8`}>
         <NavLink to="/" className="font-bold text-lg tracking-tight hover:text-blue-400 transition-colors">
           DK STOCK

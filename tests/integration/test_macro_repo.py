@@ -91,3 +91,57 @@ class TestMacroCleanup:
         assert deleted == 0
         with _patch_today("2026-04-19"):
             assert repo.get_today("news_kr") is not None
+
+
+class TestMacroDeleteBeforeToday:
+    """2026-05-09: 일일 자정 cleanup — date_kst < today 인 모든 row 삭제."""
+
+    def test_delete_yesterday_and_older(self, db_session):
+        """오늘 이전 (어제 + 1주 전 + 30일 전) 모두 삭제, 오늘은 보존."""
+        from db.models.macro import MacroGptCache
+        repo = MacroRepository(db_session)
+
+        # 30일 전, 1주 전, 어제, 오늘 데이터 삽입
+        for date_kst in ["2026-04-19", "2026-05-12", "2026-05-18"]:
+            db_session.add(MacroGptCache(
+                category=f"cat_{date_kst}",
+                date_kst=date_kst,
+                result={"d": date_kst},
+                created_at=f"{date_kst}T12:00:00",
+            ))
+        db_session.commit()
+
+        with _patch_today("2026-05-19"):
+            repo.save_today("today_cat", {"v": "today"})
+            db_session.commit()
+
+            deleted = repo.delete_before_today()
+        db_session.commit()
+
+        assert deleted == 3  # 어제 이전 3건만 삭제
+        with _patch_today("2026-05-19"):
+            assert repo.get_today("today_cat") is not None  # 오늘은 보존
+        # 어제 데이터는 삭제됨
+        assert db_session.query(MacroGptCache).filter_by(date_kst="2026-05-18").count() == 0
+
+    def test_delete_before_today_empty_table(self, db_session):
+        """빈 테이블에서 0 반환."""
+        repo = MacroRepository(db_session)
+        with _patch_today("2026-05-19"):
+            deleted = repo.delete_before_today()
+        assert deleted == 0
+
+    def test_delete_keeps_today(self, db_session):
+        """오늘자 row만 있을 때 삭제 0건."""
+        repo = MacroRepository(db_session)
+        with _patch_today("2026-05-19"):
+            repo.save_today("a", {"v": 1})
+            repo.save_today("b", {"v": 2})
+            db_session.commit()
+
+            deleted = repo.delete_before_today()
+        db_session.commit()
+
+        assert deleted == 0
+        from db.models.macro import MacroGptCache
+        assert db_session.query(MacroGptCache).count() == 2

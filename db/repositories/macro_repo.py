@@ -20,10 +20,22 @@ class MacroRepository:
         self.db = db
 
     def cleanup_old(self, days: int = 30) -> int:
-        """30일 이전 캐시 삭제. 삭제 건수 반환."""
+        """N일 이전 캐시 삭제. 삭제 건수 반환."""
         cutoff = (now_kst() - timedelta(days=days)).strftime("%Y-%m-%d")
         return self.db.query(MacroGptCache).filter(
             MacroGptCache.date_kst < cutoff
+        ).delete()
+
+    def delete_before_today(self) -> int:
+        """오늘(KST) 이전 모든 매크로 GPT 캐시 삭제 — 일일 자정 cleanup 정책.
+
+        2026-05-09: 매크로 정보는 당일치만 유지. 자정 KST 이후 어제 이전
+        모든 row 삭제 (`scheduler_service._run_macro_cleanup_job` 호출).
+        삭제 건수 반환.
+        """
+        today = _today_kst()
+        return self.db.query(MacroGptCache).filter(
+            MacroGptCache.date_kst < today
         ).delete()
 
     def get_today(self, category: str) -> Optional[any]:

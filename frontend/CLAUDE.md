@@ -60,7 +60,7 @@ frontend/
       useTax.js           양도세 훅. useTaxSummary / useTaxTransactions(sync/add/remove) / useTaxCalculations(recalc) / useTaxSimulation(loadHoldings/simulate). FIFO 전용.
       useAiUsage.jsx      **(신규 2026-05-06)** AI 사용량 전역 Context Provider. `fetchMyAiUsage()` 호출 + `'ai-usage-changed'` window 이벤트 자동 갱신(폴링 없음). 로그아웃 시 usage=null 클리어. `useAiUsage()`로 `{ usage, loading, refresh }` 접근.
     components/
-      layout/Header.jsx   네비게이션 바 (5개 탑레벨: 시세판|관심종목|분석▼|포트폴리오|매매▼, 그룹 구분선, 드롭다운 hover+click). 모바일: 햄버거 메뉴(md:hidden) + 세로 네비게이션 패널. **(2026-05-06)** 우측 너비 토글 좌측에 `<AiUsageGauge />` 마운트.
+      layout/Header.jsx   네비게이션 바 (5개 탑레벨: 시세판|관심종목|분석▼|포트폴리오|매매▼, 그룹 구분선, 드롭다운 hover+click). 모바일: 햄버거 메뉴(md:hidden) + 세로 네비게이션 패널. **(2026-05-06)** 우측 너비 토글 좌측에 `<AiUsageGauge />` 마운트. **(2026-05-09)** `<header>` 루트에 `sticky top-0 z-40` 적용 — 스크롤 시 viewport 상단 고정 유지. 모달/드롭다운(z-50+)이 헤더 위에 표시되어 가림 없음.
       common/             LoadingSpinner, ErrorAlert, EmptyState, DataTable, ToastNotification
                           WatchlistButton (code/market/alreadyAdded props, ★/+ 버튼, StockTable·FilingsTable 공용)
                           CandlestickChart (ohlcv/indicators props, 캔들+MA5/20/60+BB+거래량, PriceChartPanel·TechnicalPanel 공용)

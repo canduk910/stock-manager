@@ -24,6 +24,20 @@ def _run_pipeline_job(market: str):
         logger.error(f"[스케줄러] {market} 파이프라인 실패: {e}", exc_info=True)
 
 
+def _run_macro_cleanup_job():
+    """일일 자정 매크로 GPT 캐시 cleanup (2026-05-09 신규).
+
+    KST 00:05 매일 실행. macro_gpt_cache 테이블에서 오늘 이전 모든 row 삭제 →
+    매크로 정보는 당일치만 유지. cache.db 의 macro:* TTL 캐시는 미터치.
+    """
+    from stock import macro_store
+    try:
+        deleted = macro_store.delete_before_today()
+        logger.info(f"[스케줄러] 매크로 캐시 cleanup 완료: {deleted}건 삭제")
+    except Exception as e:
+        logger.error(f"[스케줄러] 매크로 캐시 cleanup 실패: {e}", exc_info=True)
+
+
 def setup_scheduler():
     """APScheduler 시작 (08:00 KR / 16:00 US KST)."""
     global _scheduler
@@ -48,8 +62,17 @@ def setup_scheduler():
             name="US 투자 파이프라인 (16:00)",
             replace_existing=True,
         )
+        # 2026-05-09: 매크로 GPT 캐시 일일 cleanup (KST 00:05).
+        # 자정 직후 5분 여유로 자정 경계 race 방지(00:00 정각 호출은 일부 환경에서 누락).
+        _scheduler.add_job(
+            _run_macro_cleanup_job,
+            CronTrigger(hour=0, minute=5),
+            id="macro_cleanup",
+            name="매크로 GPT 캐시 cleanup (00:05)",
+            replace_existing=True,
+        )
         _scheduler.start()
-        logger.info("[스케줄러] 투자 파이프라인 스케줄러 시작 (08:00 KR / 16:00 US)")
+        logger.info("[스케줄러] 스케줄러 시작 (08:00 KR / 16:00 US / 00:05 매크로 cleanup)")
     except ImportError:
         logger.warning("[스케줄러] apscheduler 미설치 — 스케줄러 비활성화")
     except Exception as e:
