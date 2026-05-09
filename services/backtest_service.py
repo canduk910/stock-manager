@@ -418,7 +418,7 @@ def _surface_error(job: dict) -> dict:
     return job
 
 
-def poll_backtest_job(job_id: str, _user_id: Optional[int] = None) -> dict:
+def poll_backtest_job(job_id: str, user_id: Optional[int] = None) -> dict:
     """fire-and-poll 진입점. DB 행 + MCP lazy poll로 상태/결과 회수.
 
     상태별 동작:
