@@ -69,8 +69,9 @@ const CATEGORY_COLORS = {
   I: 'bg-blue-50 text-blue-700 ring-blue-200',
 }
 
-// F 카테고리 + 감사의견 부정 키워드 매칭 → ⚠ 강조
-const _AUDIT_RISK_KEYWORDS = ['한정', '부적정', '부인', '의견거절']
+// F 카테고리 + 감사의견 부정 패턴 매칭 → ⚠ 강조 (정규식, 띄어쓰기 변형 흡수)
+// CLAUDE.md "키워드 검색은 정규식" 지침 준수.
+const _AUDIT_RISK_PATTERN = /한\s*정|부\s*적\s*정|부\s*인|의견\s*거절/
 
 function CategoryCell({ row }) {
   const code = row.category_code
@@ -78,7 +79,7 @@ function CategoryCell({ row }) {
   if (!code) return <span className="text-gray-400 text-xs">-</span>
   const cls = CATEGORY_COLORS[code] || 'bg-gray-100 text-gray-700'
   const reportName = row.report_name || ''
-  const auditRisk = code === 'F' && _AUDIT_RISK_KEYWORDS.some(k => reportName.includes(k))
+  const auditRisk = code === 'F' && _AUDIT_RISK_PATTERN.test(reportName)
   return (
     <span className="inline-flex items-center gap-1">
       <span className={`px-1.5 py-0.5 rounded text-xs font-medium ring-1 ${cls}`}>{label}</span>

@@ -33,11 +33,14 @@ def _clear_cache():
 # ── 섹션/표 추출 헬퍼 ────────────────────────────────────────────
 
 def test_extract_revenue_section_finds_header():
-    """'영업의 현황' 헤더 매칭 + 다음 큰 섹션 헤더까지 추출."""
+    """헤더 매칭 + 종료 헤더까지 추출. 목차/본문 분리(2000자 가드)는 별도 검증."""
+    # 본문 섹션 본문이 충분히 길어 다음 섹션 헤더가 2000자 이상 떨어진 상태
+    long_body = "본문 매출 데이터 " * 500  # 약 5000자
     xml = (
         "<DOCUMENT>...prefix..."
         "<TITLE>2. 영업의 현황</TITLE>"
         "<TABLE>매출 데이터 표</TABLE>"
+        + long_body +
         "<TITLE>III. 재무에 관한 사항</TITLE>"
         "...suffix..."
         "</DOCUMENT>"
@@ -46,8 +49,30 @@ def test_extract_revenue_section_finds_header():
     assert section is not None
     assert "영업의 현황" in section
     assert "매출 데이터 표" in section
-    # 다음 섹션 헤더는 제외
-    assert "재무에 관한 사항" not in section
+    # 다음 섹션 헤더는 제외 (충분히 떨어져 있어 종료 헤더로 인식)
+    assert "III. 재무에 관한 사항" not in section
+
+
+def test_extract_revenue_section_skips_toc_when_body_far():
+    """목차의 헤더 + 본문의 헤더 중 본문 우선(rfind 가장 마지막 매칭)."""
+    xml = (
+        "<DOCUMENT>"
+        # 목차 (짧게 등장)
+        "<TITLE>II. 사업의 내용</TITLE>"
+        "<TITLE>III. 재무에 관한 사항</TITLE>"
+        + "...목차 내용 짧음..." +
+        # 본문 실체 (멀리)
+        "X" * 30000 +
+        "<TITLE>II. 사업의 내용</TITLE>"
+        "<TABLE>실제 매출 표</TABLE>"
+        + "본문 데이터 " * 500 +
+        "<TITLE>III. 재무에 관한 사항</TITLE>"
+        "</DOCUMENT>"
+    )
+    section = dart_segments._extract_revenue_section(xml)
+    assert section is not None
+    # 본문 매출 표 포함 (목차의 짧은 섹션 회피)
+    assert "실제 매출 표" in section
 
 
 def test_extract_revenue_section_returns_none_when_no_header():
@@ -184,22 +209,37 @@ def test_fetch_segments_history_dart_no_corp_code():
     assert result["source"] == "dart_parsed"
 
 
-def test_fetch_segments_history_dart_partial_success():
-    """일부 연도만 DART 파싱 성공 → covered_years 정확."""
-    def fake_single(corp_code, name, year, user_id=None):
+def test_fetch_segments_history_dart_unified_flow():
+    """5년치 통합 정규화 — _normalize_history_unified 1회 호출 (사용자 결정 2026-05-10)."""
+    def fake_extract(corp_code, year):
         if year >= 2023:
-            return [{"segment": "장기보험", "revenue_pct": 60, "raw_amount": None, "note": "DART실측"}]
-        return None  # 과거 연도 실패
+            return [f"### {year}년 표 텍스트"]
+        return []
+
+    normalized = {
+        "years": {
+            2023: [{"segment": "주력", "revenue_pct": 100, "raw_amount": None, "note": "DART실측"}],
+            2024: [{"segment": "주력", "revenue_pct": 100, "raw_amount": None, "note": "DART실측"}],
+            2025: [{"segment": "주력", "revenue_pct": 100, "raw_amount": None, "note": "DART실측"}],
+        },
+        "description": "테스트 회사 사업 설명",
+        "keywords": ["테스트", "주력사업"],
+    }
 
     with patch("stock.dart_segments.get_cached", return_value=None), \
          patch("stock.dart_segments.set_cached"), \
          patch("stock.dart_segments._fetch_corp_code", return_value="00159102"), \
-         patch("stock.dart_segments.fetch_segments_dart_single", side_effect=fake_single):
+         patch("stock.dart_segments._extract_year_tables", side_effect=fake_extract), \
+         patch("stock.dart_segments._normalize_history_unified", return_value=normalized) as norm_mock:
         result = dart_segments.fetch_segments_history_dart("005830", "DB손해보험", years=5)
 
-    assert result["covered_years"] >= 1
+    assert norm_mock.call_count == 1  # 통합 정규화 정확히 1회
+    assert result["covered_years"] == 3
     assert all(y["year"] >= 2023 for y in result["years_data"])
     assert result["source"] == "dart_parsed"
+    # 사업 개요 + 키워드 포함 (2026-05-10 통합 응답)
+    assert result["description"] == "테스트 회사 사업 설명"
+    assert "주력사업" in result["keywords"]
 
 
 # ── advisory_fetcher 흐름 통합 (Phase A → Phase B 우선) ───────────
@@ -226,23 +266,79 @@ def test_advisory_fetcher_uses_dart_first_when_available():
     gpt_mock.assert_not_called()
 
 
-def test_advisory_fetcher_falls_back_to_gpt_on_dart_failure():
-    """DART 파싱 실패 (years_data 빈 배열) → GPT fallback."""
+def test_advisory_fetcher_no_gpt_fallback_when_dart_fails():
+    """2026-05-10: DART 실패 시 GPT fallback 제거. 빈 결과 반환 + GPT 호출 0건."""
     from stock import advisory_fetcher
 
     dart_empty = {"years_data": [], "highlights": {"growing": [], "shrinking": []},
                   "confidence": "high", "source": "dart_parsed", "covered_years": 0}
-    gpt_json = json.dumps({"years_data": [
-        {"year": 2024, "segments": [{"segment": "주력", "revenue_pct": 100}]}
-    ]})
 
     with patch("stock.cache.get_cached", return_value=None), \
          patch("stock.cache.set_cached"), \
          patch("stock.dart_segments.fetch_segments_history_dart", return_value=dart_empty), \
-         patch("stock.advisory_fetcher.OPENAI_API_KEY", "sk-test"), \
-         patch("services.ai_gateway.call_openai_chat", return_value=_mock_chat_response(gpt_json)):
+         patch("services.ai_gateway.call_openai_chat") as gpt_mock:
         result = advisory_fetcher.fetch_segments_history_kr("005830", "DB손해보험", years=5)
 
-    assert result["source"] == "gpt_inference"
-    assert result["confidence"] == "low"
-    assert len(result["years_data"]) == 1
+    assert result["years_data"] == []
+    assert result["source"] == "dart_parsed"  # fallback 제거 — 항상 DART
+    gpt_mock.assert_not_called()  # GPT 호출 0건
+
+
+def test_normalize_history_unified_calls_gpt_once():
+    """5년치 표를 1회 GPT 호출로 통합 정규화 (연도별 명칭 일관성 강제)."""
+    from stock import dart_segments
+
+    tables_per_year = {
+        2022: ["사업부문 | 매출액\n경유 | 100\n무연휘발유 | 50"],
+        2023: ["사업부문 | 매출액\n석유사업 | 150"],
+        2025: ["사업부문 | 매출액\n석유사업 | 160"],
+    }
+
+    gpt_response = json.dumps({
+        "years_data": [
+            {"year": 2022, "segments": [{"segment": "석유사업", "revenue_pct": 100}]},
+            {"year": 2023, "segments": [{"segment": "석유사업", "revenue_pct": 100}]},
+            {"year": 2025, "segments": [{"segment": "석유사업", "revenue_pct": 100}]},
+        ],
+        "description": "SK이노베이션은 정유 사업을 영위.",
+        "keywords": ["정유", "에너지"],
+    })
+
+    with patch("stock.dart_segments.OPENAI_API_KEY", "sk-test"), \
+         patch("services.ai_gateway.call_openai_chat", return_value=_mock_chat_response(gpt_response)) as gpt_mock:
+        result = dart_segments._normalize_history_unified(tables_per_year, "SK이노베이션", user_id=1)
+
+    # GPT 정확히 1회 호출 (5년치 통합 + description + keywords)
+    assert gpt_mock.call_count == 1
+    # 모든 연도가 동일한 부문명 ("석유사업")
+    assert result["years"][2022][0]["segment"] == "석유사업"
+    assert result["years"][2023][0]["segment"] == "석유사업"
+    assert result["years"][2025][0]["segment"] == "석유사업"
+    # description/keywords 포함
+    assert "정유" in result["description"]
+    assert "정유" in result["keywords"]
+
+
+def test_normalize_history_unified_renormalizes_when_total_exceeds_100():
+    """SK이노 2022 결함 — 합계 158% 응답 시 비례 재정규화 (가드)."""
+    from stock import dart_segments
+
+    tables_per_year = {2022: ["dummy"]}
+    bad_response = json.dumps({
+        "years_data": [{"year": 2022, "segments": [
+            {"segment": "석유", "revenue_pct": 17.7},
+            {"segment": "기타", "revenue_pct": 40.5},
+            {"segment": "기초유화", "revenue_pct": 69.7},
+            {"segment": "화학소재", "revenue_pct": 30.3},
+        ]}],
+        "description": "",
+        "keywords": [],
+    })
+
+    with patch("stock.dart_segments.OPENAI_API_KEY", "sk-test"), \
+         patch("services.ai_gateway.call_openai_chat", return_value=_mock_chat_response(bad_response)):
+        result = dart_segments._normalize_history_unified(tables_per_year, "SK이노", user_id=1)
+
+    # 비례 재정규화 후 합계 100 (반올림 ±1 허용)
+    total = sum(s["revenue_pct"] for s in result["years"][2022])
+    assert 99.0 <= total <= 100.5

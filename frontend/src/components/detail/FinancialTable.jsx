@@ -154,13 +154,21 @@ function ForwardSection({ forward, currency }) {
         )}
         {target_mean_price != null && (
           <div className="px-4 py-3">
-            <div className="text-xs text-gray-500 mb-0.5">목표주가 (평균)</div>
+            <div className="text-xs text-gray-500 mb-0.5">
+              목표주가 <span className="text-gray-400">(글로벌 추정)</span>
+            </div>
             <div className="text-sm font-semibold text-gray-800">{fmtPrice(target_mean_price)}</div>
             {(target_high_price != null || target_low_price != null) && (
               <div className="text-xs text-gray-400 mt-0.5">
                 {fmtPrice(target_low_price)} ~ {fmtPrice(target_high_price)}
               </div>
             )}
+            <div className="text-[11px] text-gray-400 mt-0.5">
+              yfinance{forward?.num_analysts ? ` · ${forward.num_analysts}명` : ''}
+            </div>
+            <div className="text-[11px] text-amber-600 mt-0.5">
+              ※ 외국계 포함 · 한국 발행은 아래 컨센서스 표 참조
+            </div>
           </div>
         )}
         {rec && (

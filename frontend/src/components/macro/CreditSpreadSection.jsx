@@ -123,7 +123,7 @@ export default function CreditSpreadSection({ data, loading, error }) {
   if (!cs) return null
 
   const {
-    oas_current, oas_history_5y, oas_stats, oas_sentiment, oas_percentile,
+    oas_current, oas_history_10y, oas_history_5y, oas_stats, oas_sentiment, oas_percentile,
     ig_current, hy_ig_spread,
     partial_failure,
     events,
@@ -131,13 +131,15 @@ export default function CreditSpreadSection({ data, loading, error }) {
 
   const sentiment = SENTIMENT_CONFIG[oas_sentiment] || null
 
-  // 5년 OAS 시계열 — 주 단위 샘플링
+  // OAS 시계열 (FRED 공식, 자체 oas_history_store FIFO 누적) — 주 단위 샘플링.
+  // 2026-04~ ICE BofA 라이센스 변경으로 FRED는 ~3년만 반환. 매일 +1일치 누적되어
+  // 7년 후 자연스럽게 10년 시계열로 확장됨.
   const oasChartData = useMemo(() => {
-    const src = oas_history_5y || cs.oas_history || []
+    const src = oas_history_10y || oas_history_5y || cs.oas_history || []
     if (!src.length) return []
-    const step = Math.max(1, Math.floor(src.length / 260))
+    const step = Math.max(1, Math.floor(src.length / 520))
     return src.filter((_, i) => i % step === 0 || i === src.length - 1)
-  }, [oas_history_5y, cs.oas_history])
+  }, [oas_history_10y, oas_history_5y, cs.oas_history])
 
   // 백분위 임계 → OAS 절댓값 매핑 (시계열 ReferenceLine 동적)
   const refLines = useMemo(() => {
@@ -271,7 +273,7 @@ export default function CreditSpreadSection({ data, loading, error }) {
       {oasChartData.length > 0 && (
         <div className="rounded-lg border bg-white p-4 shadow-sm mb-4">
           <div className="text-sm font-medium text-gray-500 mb-2">
-            HY OAS 추이 (5년, FRED)
+            HY OAS 추이 (FRED)
             <span className="ml-2 text-[10px] text-gray-400">
               ■ 회색=NBER 침체 / ▼ 붉은색=S&amp;P -20% 약세장
             </span>
@@ -287,6 +289,7 @@ export default function CreditSpreadSection({ data, loading, error }) {
                   labelFormatter={(l) => l}
                   contentStyle={{ fontSize: 12, borderRadius: 8 }}
                 />
+
                 {/* 음영 + ReferenceArea label 콜백. 글로벌 row 할당으로 충돌 회피. */}
                 {snappedEvents.bear_markets.map((b, i) => {
                   const { row, displayLabel } = csRowMap.rowDisplayFor('bear', b.x1, b.x2)
@@ -340,7 +343,10 @@ export default function CreditSpreadSection({ data, loading, error }) {
             </ResponsiveContainer>
           </div>
           <div className="text-xs text-gray-400 mt-1">
-            OAS(Option-Adjusted Spread) = 하이일드 채권 금리 - 국고채 금리. 임계선은 전 기간 baseline 백분위 기준.
+            OAS(Option-Adjusted Spread) = 하이일드 채권 금리 - 국고채 금리. 임계선은 FRED 전 기간 baseline 백분위 기준.
+            <span className="ml-2 text-amber-700">
+              ※ ICE BofA 라이센스 정책 변경(2026-04~)으로 FRED API가 최근 ~3년만 반환. 매일 +1일치 자체 누적되어 시간이 지날수록 시계열 확장됩니다.
+            </span>
           </div>
         </div>
       )}

@@ -1,5 +1,9 @@
 # Ignore environment files with secrets
 .env
+.env.local
+
+# 로컬 docker override (개발자 별도 설정 — 운영 image 영향 없음)
+docker-compose.override.yml
 
 # macOS
 .DS_Store

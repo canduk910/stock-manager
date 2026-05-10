@@ -327,10 +327,12 @@ function CashflowChart({ rows, market }) {
   )
 }
 
-// ── 매출비중 5년 추이 (Phase 1A, ValueScreener 자문 2026-05-10) ──────────
-// Stacked Bar 100% + 테이블 병기. AI 추정 면책 의무. composite_score 미반영.
+// ── 매출비중 5년 추이 (Phase 1A/B, ValueScreener 자문 2026-05-10) ──────
+// Stacked Bar 100% + 테이블 병기. DART 실측이 1년치만 확보된 경우에도 단년도
+// 차트 + 안내 (covered_years 부족 명시). composite_score 미반영.
 function SegmentsHistoryChart({ history, highlights, source }) {
-  if (!Array.isArray(history) || history.length < 2) return null
+  if (!Array.isArray(history) || history.length < 1) return null
+  const isSingleYear = history.length === 1
 
   // 모든 segment 명칭 수집 (연도 간 합집합)
   const allSegments = []
@@ -363,12 +365,17 @@ function SegmentsHistoryChart({ history, highlights, source }) {
             AI 추정 · 추세는 참고용
           </span>
         )}
-        {growing.length > 0 && growing.map((g, i) => (
+        {isSingleYear && (
+          <span className="inline-block text-[11px] bg-amber-50 text-amber-700 border border-amber-200 rounded px-1.5 py-0.5">
+            DART 1년치만 확보 — 추세 비교 불가
+          </span>
+        )}
+        {!isSingleYear && growing.length > 0 && growing.map((g, i) => (
           <span key={`g-${i}`} className="inline-block text-[11px] bg-green-50 text-green-700 border border-green-200 rounded px-1.5 py-0.5">
             ↑ {g.segment} +{g.delta_pct.toFixed(1)}%p
           </span>
         ))}
-        {shrinking.length > 0 && shrinking.map((s, i) => (
+        {!isSingleYear && shrinking.length > 0 && shrinking.map((s, i) => (
           <span key={`s-${i}`} className="inline-block text-[11px] bg-red-50 text-red-700 border border-red-200 rounded px-1.5 py-0.5">
             ↓ {s.segment} {s.delta_pct.toFixed(1)}%p
           </span>
@@ -589,9 +596,11 @@ function ForwardEstimatesSection({ forward, market, code, currentPrice }) {
     revenue_current != null && { label: `매출 ${curLabel}`, value: fmtRev(revenue_current), sub: revenue_forward != null ? `${fwdLabel}: ${fmtRev(revenue_forward)}` : null },
     net_income_estimate != null && { label: `순이익 ${curLabel}`, value: fmtRev(net_income_estimate), sub: net_income_forward != null ? `${fwdLabel}: ${fmtRev(net_income_forward)}` : null },
     target_mean_price != null && {
-      label: '목표주가',
+      label: '목표주가 (글로벌 추정)',
       value: fmtPrice(target_mean_price),
-      sub: (target_low_price != null || target_high_price != null) ? `${fmtPrice(target_low_price)} ~ ${fmtPrice(target_high_price)}` : null,
+      sub: (target_low_price != null || target_high_price != null)
+        ? `${fmtPrice(target_low_price)} ~ ${fmtPrice(target_high_price)} · yfinance${num_analysts ? ` ${num_analysts}명` : ''}`
+        : `yfinance${num_analysts ? ` ${num_analysts}명` : ''}`,
       clickable: true,
     },
   ].filter(Boolean)

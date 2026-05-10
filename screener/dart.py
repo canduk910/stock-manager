@@ -30,13 +30,16 @@ def _dart_get(url: str, params: dict, timeout: int = 30) -> requests.Response:
                 time.sleep(2 ** attempt)
     raise last_exc
 
+import re
+
 _DART_LIST_URL = "https://opendart.fss.or.kr/api/list.json"
 
-# report_nm에 포함되는 키워드 → 보고서 종류 분류 (정기공시 A 카테고리용)
-_REPORT_KEYWORDS: list[tuple[str, str]] = [
-    ("사업보고서", "사업보고서"),
-    ("반기보고서", "반기보고서"),
-    ("분기보고서", "분기보고서"),
+# report_nm에 포함되는 패턴 → 보고서 종류 분류 (정기공시 A 카테고리용)
+# CLAUDE.md "키워드 검색은 정규식" 지침 준수. 띄어쓰기/접두사 변형 자동 흡수.
+_REPORT_PATTERNS: list[tuple] = [
+    (re.compile(r"사업\s*보고서"), "사업보고서"),
+    (re.compile(r"반기\s*보고서"), "반기보고서"),
+    (re.compile(r"분기\s*보고서"), "분기보고서"),
 ]
 
 # DART pblntf_ty 코드 → 한글 카테고리 라벨 (Phase 2A, ValueScreener 자문 2026-05-10)
@@ -71,13 +74,13 @@ def _get_api_key() -> str:
 
 
 def _classify_report(report_nm: str) -> str | None:
-    """report_nm에서 정기공시(사업/반기/분기) 키워드 추출. 없으면 None.
+    """report_nm에서 정기공시(사업/반기/분기) 패턴 추출. 없으면 None.
 
     정기공시(A) 카테고리 세부분류용. non-A 카테고리는 report_nm을 그대로
     사용하므로(예: "유상증자결정") None 반환을 제외 사유로 삼지 않는다.
     """
-    for keyword, label in _REPORT_KEYWORDS:
-        if keyword in report_nm:
+    for pattern, label in _REPORT_PATTERNS:
+        if pattern.search(report_nm):
             return label
     return None
 

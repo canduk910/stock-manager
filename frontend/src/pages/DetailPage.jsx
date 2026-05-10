@@ -10,6 +10,7 @@ import FundamentalPanel from '../components/advisory/FundamentalPanel'
 import TechnicalPanel from '../components/advisory/TechnicalPanel'
 import AIReportPanel from '../components/advisory/AIReportPanel'
 import ResearchDataPanel from '../components/advisory/ResearchDataPanel'
+import AnalystReportsTable from '../components/advisory/AnalystReportsTable'
 import ValuationChart from '../components/detail/ValuationChart'
 import ReportChatBubble from '../components/common/ReportChatBubble'
 
@@ -158,7 +159,16 @@ export default function DetailPage() {
           {/* 탭 컨텐츠 */}
           <div className="mt-0">
             {activeTab === 'financials' && (
-              <FinancialTable data={data.financials} basic={data.basic} forward={data.forward_estimates} />
+              <div className="space-y-5">
+                <FinancialTable data={data.financials} basic={data.basic} forward={data.forward_estimates} />
+                {/* 증권사 컨센서스 (KR 한정 — 네이버 리서치 스크래핑, GPT 호출 0건) */}
+                {market === 'KR' && (
+                  <div className="bg-white rounded-xl border border-gray-200 p-5">
+                    <h2 className="text-base font-bold text-gray-900 mb-3">📊 증권사 컨센서스</h2>
+                    <AnalystReportsTable code={symbol} market={market} currentPrice={data.basic?.price} />
+                  </div>
+                )}
+              </div>
             )}
             {activeTab === 'report' && (
               <div>

@@ -273,15 +273,15 @@ def _collect_fundamental_kr(code: str, name: str, user_id: int = 1) -> dict:
     from stock.market import fetch_market_metrics
     from stock.yf_client import fetch_forward_estimates_yf
 
-    with ThreadPoolExecutor(max_workers=8) as pool:
+    with ThreadPoolExecutor(max_workers=7) as pool:
         f_income = pool.submit(dart_fin.fetch_income_detail_annual, code, 10)
         f_bs_cf = pool.submit(dart_fin.fetch_bs_cf_annual, code, 10)
         f_metrics = pool.submit(fetch_market_metrics, code)
-        f_segments = pool.submit(advisory_fetcher.fetch_segments_kr, code, name, user_id)
         f_forward = pool.submit(fetch_forward_estimates_yf, code, True)
         f_val_stats = pool.submit(advisory_fetcher.fetch_valuation_stats, code, "KR")
         f_quarterly = pool.submit(dart_fin.fetch_quarterly_financials, code, 8)
-        # Phase 1A (2026-05-10): 5년치 매출비중 추이. GPT 1회 통합. 표시 한정.
+        # 2026-05-10: segments_kr (GPT 추정 단일 시점) 제거.
+        # 파이차트는 segments_history 최신 연도 데이터 재사용 (DART 실측, GPT 호출 0건 추가).
         f_segments_history = pool.submit(advisory_fetcher.fetch_segments_history_kr, code, name, user_id=user_id)
 
         income_stmt = f_income.result()
@@ -290,11 +290,22 @@ def _collect_fundamental_kr(code: str, name: str, user_id: int = 1) -> dict:
         cashflow = bs_cf.get("cashflow", [])
         metrics_raw = f_metrics.result()
         metrics = _build_metrics_kr(metrics_raw, balance_sheet, income_stmt)
-        segments_data = f_segments.result()
         forward_estimates = f_forward.result()
         valuation_stats = f_val_stats.result()
         quarterly = f_quarterly.result()
         segments_history_data = f_segments_history.result()
+
+    # 파이차트용 segments + description/keywords — DART 통합 호출 1회 결과 재사용 (GPT 호출 0건 추가)
+    # 2026-05-10: 사업 개요는 DART 부문별 매출표를 컨텍스트로 GPT가 생성 (신빙성↑).
+    history_years = segments_history_data.get("years_data", []) if isinstance(segments_history_data, dict) else []
+    if history_years:
+        segments_data = {
+            "segments": history_years[-1].get("segments", []),
+            "description": segments_history_data.get("description", "") if isinstance(segments_history_data, dict) else "",
+            "keywords": segments_history_data.get("keywords", []) if isinstance(segments_history_data, dict) else [],
+        }
+    else:
+        segments_data = {"segments": [], "description": "", "keywords": []}
 
     # 하위호환: 구 캐시가 list일 수 있음
     if isinstance(segments_data, dict):

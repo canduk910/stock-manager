@@ -118,7 +118,9 @@ frontend/
 - CreditSpreadSection — HY OAS 백분위 5단계 시계추 + 5년차트(p10/p25/p75/p90 ReferenceLine) + IG OAS·HY-IG 보조카드(>5%p 정크패닉)
 - EventLabelsOverlay — `computeEventRows` + `makeLabelRenderer`. 글로벌 row 계산으로 침체/약세장 라벨 충돌 차단
 - CurrencySection (4환율), CommoditySection (5원자재)
-- SectorHeatmapSection (11섹터 × 5기간 1M/3M/6M/1Y/3Y) + SectorRelativeChart (산점도, x=SMA20 cross 일수, y=1Y z-score, 동적 도메인)
+- SectorHeatmapSection — 상단 KR/US 토글(ReportPage 패턴) + 부제로 분류 기준 명시. 좌(산점도) + 우(히트맵 테이블) `lg:grid-cols-2` 좌우 분할(모바일은 세로 스택). 시장 전환 시 펼친 섹터 자동 닫힘. 섹터명 클릭 시 대표종목 5개 펼침
+- SectorRelativeChart (산점도, x=`🟢 골든크로스/🔴 데드크로스 N일째`, y=`평균 대비 ±σ`, 동적 도메인). 4분면 한국식 라벨: ↗ 추세 가속 / ↖ 전환 직전 / ↘ 추세 약화 / ↙ 약세 가속. 각 분면 안쪽에 큰 컨셉 라벨 + 우상단 2x2 범례 + 하단 회색 박스 정의 설명
+- sectorRepresentatives.js — KR_SECTOR_REPS(KODEX/TIGER ETF 14개 직접 매핑) + SECTOR_REPS(US GICS 11카테고리). KR은 ETF symbol 직접 룩업 우선, US는 GICS 카테고리. `getPrimaryReps(sector)` / `getAllReps(sector)` / `resolveCategory(sector)` 공용 헬퍼
 
 **tax/** TaxSummaryCards (4카드), TaxBySymbolChart, TaxTransactionsTable, TaxCalculationDetail (FIFO lots), TaxDisclaimer, TaxSimulationPanel
 

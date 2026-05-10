@@ -1,5 +1,48 @@
 # 변경 이력
 
+## 2026-05-10 — 매크로 섹터 히트맵 KR/US 분리 + 산점도 직관화 + OAS FIFO 누적
+
+### 매크로 섹터 히트맵 KR/US 토글 신규
+
+KRX 자체 섹터 분류는 GICS와 1:1 매핑 안 돼 단일 표(US 11종)에 KR을 카테고리 매핑으로 끼워 넣으면 대표종목이 엉망으로 노출됨(KODEX 자동차에 이마트, KODEX 미디어에 통신사 등). 시장별 별개 화면으로 분리.
+
+- **`services/macro_service.py:get_sector_heatmap()`** 응답 확장 — `sectors_us`(11) + `sectors_kr`(14) 동시 반환. `sectors` 키는 백워드 호환을 위해 US 데이터 유지.
+- **`stock/macro_fetcher.py:_KR_SECTOR_ETFS`** — KODEX IT(157490) 추가로 13→14종. 네이버/카카오/삼성SDS/엔씨/넷마블 등 인터넷·SI 섹터 추적 가능. KRX 산업분류상 "서비스업"이라 기존 13개 섹터에 미포함이었음.
+- **`frontend/src/components/macro/SectorHeatmapSection.jsx`** — ReportPage 패턴의 KR/US 토글(회색 배경 + 선택 시 흰색 shadow). 부제로 분류 기준 명시("KRX 자체 분류 13섹터" / "GICS 11섹터"). 시장 전환 시 펼친 섹터 자동 닫힘.
+- **레이아웃 좌우 분할** — `lg:grid-cols-2`로 데스크탑은 산점도(좌) + 히트맵 테이블(우) 한 화면. 모바일은 세로 스택(반응형).
+- **`frontend/src/components/macro/sectorRepresentatives.js` 신규** — KR_SECTOR_REPS에 KODEX/TIGER ETF 14개 각각의 실제 비중 상위 5종목 직접 정의(ETF symbol 키). GICS 카테고리 폴백은 안전망. US는 GICS 카테고리 매핑 그대로(표준이라 정확).
+
+### 섹터 산점도 직관화 (옛 기준 유지 + 한국식 용어)
+
+새 기준(1M × 1Y 수익률)은 직관적이나 점이 위쪽에 몰려 분산도 떨어짐. 옛 기준(`trend_days × intensity_z`) 복귀 + 한국 투자자 친숙 용어로 라벨만 직관화.
+
+- **`frontend/src/components/macro/SectorRelativeChart.jsx`** — x축 `trend_days`를 `🟢 골든크로스 N일째 / 🔴 데드크로스 N일째`로 표기. y축 `intensity_z`를 `평균 대비 ±σ`로 표기. 4분면 한국식 라벨: ↗ 추세 가속 / ↖ 전환 직전 / ↘ 추세 약화 / ↙ 약세 가속. 각 분면 안쪽에 큰 컨셉 라벨 + 우상단 2x2 범례 + 하단 회색 박스에 정의 설명(20일 이동평균선 돌파 후 유지된 일수 / z-score 의미).
+- 툴팁 — 4분면 컨셉 배지 + `🟢 골든크로스 N일째` + 강도(σ) + 1Y 수익률.
+
+### HY OAS 시계열 자체 누적 인프라 (FRED 라이센스 변경 대응)
+
+ICE BofA 라이센스 정책 변경(2026-04~)으로 FRED `BAMLH0A0HYM2`가 최근 ~3년치만 반환. 매일 +1일치 누적해 시간이 지날수록 시계열 확장.
+
+- **`stock/oas_history_store.py` 신규** — cache.db 영속(50년 TTL = 사실상 무한) FIFO 누적 store. `merge_and_persist(series_id, new_rows)` / `slice_history(series_id, years)` / `cleanup(series_id)`. 10년 보존 후 가장 오래된 항목 자동 제거. 키 스키마 `macro:oas_history_persist:{series_id}`.
+- **`stock/macro_fetcher.py:_fetch_fred_oas()`/`_fetch_fred_ig_oas()`** — FRED 신규 데이터(rows)를 누적 store에 머지 후 store에서 10년/5년 슬라이스 사용(FRED 직접 슬라이스 fallback 보존). 신규 1일치 자연 머지 + FIFO retention.
+- **`tests/unit/test_oas_history_store.py` 신규** — FIFO 누적/머지 vintage 보존/slice years 분기/series_id isolation 7개 테스트.
+
+### HYG ETF 프록시 시도 → 제거 (사용자 검토 결과 신뢰도 부족)
+
+HYG 분배수익률은 6~12개월 전 매수 채권의 쿠폰 lag 반영이라 OAS의 실시간 YTM·옵션 조정과 본질적으로 다름. 평균 캘리브레이션은 절대 레벨만 맞출 뿐 변곡점 시점 자체가 어긋나 신용 사이클 전환점에서 정확히 반대 방향이 나올 수 있음. 사용자 결정으로 방향 A(FRED만 정직 표시 + 자체 FIFO 누적)로 정리.
+
+- `_fetch_hyg_proxy_oas()` 함수(96줄) + `fetch_credit_spread()` 내 hyg_proxy 호출/캘리브레이션 로직/응답 필드 3개(`hy_proxy_current`/`hy_proxy_history_10y`/`hy_proxy_offset`) 모두 제거.
+- `frontend/src/components/macro/CreditSpreadSection.jsx` — ComposedChart→AreaChart 복귀, Line/Legend/proxy 머지 로직 모두 제거. 면책 텍스트 갱신("FRED 라이센스 변경으로 ~3년만 표시. 매일 +1일치 자체 누적되어 시간이 지날수록 시계열 확장"). 캐시 키 v7→v8.
+
+### 회귀 가드
+
+- 백워드 호환: `get_sector_heatmap` 응답 `sectors` 키 유지(US 데이터). 옛 호출자(예: macro-cycle 섹터 로테이션 입력) 영향 0.
+- `oas_history_store`는 별도 시리즈(`BAMLH0A0HYM2`/`BAMLC0A0CM`)별 격리 — 한 시리즈 손상이 다른 시리즈 미파급.
+- `_compute_sma20_trend_days` / `_compute_intensity_zscore` 응답 필드(`trend_days`/`intensity_z`) 그대로 보존 — 산점도 외 다른 곳에서 참조 가능성 보호.
+- 프론트 빌드 ✓ / 백엔드 fetch_credit_spread/get_sector_heatmap 응답 검증 ✓.
+
+---
+
 ## 2026-05-09 — 배포 실패 5건 누적 원인 해소 (pycryptodome 누락)
 
 ### 진단 (사용자 후속 보고 "DB손해보험 재무내역 여전히 안 됨, 캐시 문제인지?" 추적)

@@ -534,19 +534,18 @@ def fetch_segments_history_kr(
     if cached is not None:
         return cached
 
-    # Phase B: DART 본문 파싱 1순위 (실측)
+    # 2026-05-10: DART 본문 파싱 단독 사용 (GPT fallback 제거 — AI API 사용 최소화).
+    # 사용자 결정: AI API는 종목/포트폴리오 자문 + 챗봇 한정. 매출비중은 DART 실측만.
     try:
         from stock.dart_segments import fetch_segments_history_dart
         dart_result = fetch_segments_history_dart(code, name, years=years, user_id=user_id)
+        # 빈 결과도 캐시 (재시도 회피, 24h stale)
         if dart_result.get("years_data"):
-            # DART 성공 — 표시 전용 캐시 저장 후 반환
             set_cached(cache_key, dart_result, ttl_hours=24 * 7)
-            return dart_result
+        else:
+            set_cached(cache_key, dart_result, ttl_hours=24)
+        return dart_result
     except Exception:
-        # DART 파싱 실패는 silent — GPT fallback 진행
-        pass
-
-    if not OPENAI_API_KEY:
         return empty
 
     try:

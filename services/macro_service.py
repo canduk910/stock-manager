@@ -327,18 +327,32 @@ def get_commodities() -> dict:
 # ── 섹터 히트맵 ─────────────────────────────────────────────────────────────
 
 def get_sector_heatmap() -> dict:
-    """11개 섹터 ETF 기간별 수익률 히트맵."""
+    """섹터 ETF 기간별 수익률 히트맵 (KR/US 모두 반환).
+
+    - US: GICS 11섹터 (SPDR Select Sector ETF)
+    - KR: KRX 자체 분류 13섹터 (KODEX/TIGER ETF)
+    프론트는 시장 토글로 KR/US 선택. 백워드 호환을 위해 `sectors` 키엔
+    US 데이터를 유지(과거 호출자 보호).
+    """
     errors = []
     now = now_kst_iso()
 
-    sectors = []
+    sectors_us = []
     try:
-        sectors = macro_fetcher.fetch_sector_returns()
+        sectors_us = macro_fetcher.fetch_sector_returns()
     except Exception as e:
-        errors.append(f"섹터 수익률: {e}")
+        errors.append(f"미국 섹터 수익률: {e}")
+
+    sectors_kr = []
+    try:
+        sectors_kr = macro_fetcher.fetch_sector_returns_kr()
+    except Exception as e:
+        errors.append(f"한국 섹터 수익률: {e}")
 
     return {
-        "sectors": sectors,
+        "sectors": sectors_us,           # 백워드 호환
+        "sectors_us": sectors_us,
+        "sectors_kr": sectors_kr,
         "updated_at": now,
         "errors": errors,
     }

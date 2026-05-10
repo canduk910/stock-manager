@@ -722,11 +722,16 @@ def _fetch_fred_via_api(series_id: str) -> Optional[list[dict]]:
     import requests as _requests
     try:
         url = "https://api.stlouisfed.org/fred/series/observations"
+        # 2026-05-10: realtime_start/end 기본값(today)이 vintage 필터로 작용해
+        # ~3년치만 반환되던 결함. '1776-07-04'~'9999-12-31'로 전 vintage 활성화.
+        # FRED API docs: https://fred.stlouisfed.org/docs/api/fred/series_observations.html
         params = {
             "series_id": series_id,
             "api_key": FRED_API_KEY,
             "file_type": "json",
             "observation_start": "1996-12-31",
+            "realtime_start": "1776-07-04",
+            "realtime_end": "9999-12-31",
         }
         resp = _requests.get(
             url, params=params, timeout=_FRED_TIMEOUT,
@@ -818,19 +823,40 @@ def _fetch_fred_oas() -> dict:
         stats = _compute_oas_stats(rows)
         clf = _classify_oas_sentiment(current, stats)
 
-        five_year_start = (date.today() - timedelta(days=365 * 5)).strftime("%Y-%m-%d")
-        oas_history_5y = [r for r in rows if r["date"] >= five_year_start]
+        # 2026-05-10: ICE BofA 라이센스 정책으로 FRED API가 ~3년치만 반환.
+        # 자체 누적 store(stock.oas_history_store)에 매일 1일치 머지 + FIFO 10년 유지.
+        # FRED 신규 데이터(rows)를 store에 머지 + 누적된 전체 시계열 사용.
+        try:
+            from stock.oas_history_store import merge_and_persist, slice_history
+            persist_rows = [{"date": r["date"], "value": r["oas"]} for r in rows]
+            merge_stats = merge_and_persist("BAMLH0A0HYM2", persist_rows)
+            logger.info("OAS HY 누적: +%d rows, total=%d (%s ~ %s)",
+                        merge_stats["added"], merge_stats["total"],
+                        merge_stats["first_date"], merge_stats["last_date"])
+            # 누적 store에서 10년/5년 슬라이스 (FRED 직접 슬라이스 X)
+            persist_10y = slice_history("BAMLH0A0HYM2", 10)
+            persist_5y = slice_history("BAMLH0A0HYM2", 5)
+            oas_history_10y = [{"date": r["date"], "oas": r["value"]} for r in persist_10y]
+            oas_history_5y = [{"date": r["date"], "oas": r["value"]} for r in persist_5y]
+        except Exception as e:
+            # 누적 store 실패 시 FRED 직접 슬라이스 fallback (이전 동작)
+            logger.warning("OAS 누적 store 실패, FRED 직접 슬라이스 fallback: %s", e)
+            ten_year_start = (date.today() - timedelta(days=365 * 10)).strftime("%Y-%m-%d")
+            oas_history_10y = [r for r in rows if r["date"] >= ten_year_start]
+            five_year_start = (date.today() - timedelta(days=365 * 5)).strftime("%Y-%m-%d")
+            oas_history_5y = [r for r in rows if r["date"] >= five_year_start]
 
         result = {
             "oas_current": current,
+            "oas_history_10y": oas_history_10y,
             "oas_history_5y": oas_history_5y,
             "oas_history_full": rows,
             "oas_stats": stats,
             "oas_percentile": clf.get("percentile"),
             "oas_zscore": clf.get("zscore"),
             "sentiment": clf.get("sentiment"),
-            # 후방호환 alias
-            "oas_history": oas_history_5y,
+            # 후방호환 alias — 10y 우선 (5y는 fallback)
+            "oas_history": oas_history_10y,
             "percentile": clf.get("percentile"),
             "_stale_used": False,
         }
@@ -885,12 +911,26 @@ def _fetch_fred_ig_oas() -> dict:
         rows_for_stats = [{"date": r["date"], "oas": r["ig"]} for r in rows]
         stats = _compute_oas_stats(rows_for_stats)
 
-        five_year_start = (date.today() - timedelta(days=365 * 5)).strftime("%Y-%m-%d")
-        ig_history_5y = [r for r in rows if r["date"] >= five_year_start]
+        # 2026-05-10: 자체 누적 store + FIFO 10년 유지 (HY OAS와 동일 정책).
+        try:
+            from stock.oas_history_store import merge_and_persist, slice_history
+            persist_rows = [{"date": r["date"], "value": r["ig"]} for r in rows]
+            merge_and_persist("BAMLC0A0CM", persist_rows)
+            persist_10y = slice_history("BAMLC0A0CM", 10)
+            persist_5y = slice_history("BAMLC0A0CM", 5)
+            ig_history_10y = [{"date": r["date"], "ig": r["value"]} for r in persist_10y]
+            ig_history_5y = [{"date": r["date"], "ig": r["value"]} for r in persist_5y]
+        except Exception as e:
+            logger.warning("IG OAS 누적 store 실패, FRED 직접 슬라이스 fallback: %s", e)
+            ten_year_start = (date.today() - timedelta(days=365 * 10)).strftime("%Y-%m-%d")
+            ig_history_10y = [r for r in rows if r["date"] >= ten_year_start]
+            five_year_start = (date.today() - timedelta(days=365 * 5)).strftime("%Y-%m-%d")
+            ig_history_5y = [r for r in rows if r["date"] >= five_year_start]
 
         result = {
             "ig_current": rows[-1]["ig"],
-            "ig_history_5y": ig_history_5y,
+            "ig_history_10y": ig_history_10y,
+            "ig_history_5y": ig_history_5y,  # 후방호환
             "ig_stats": stats,
             "_stale_used": False,
         }
@@ -911,8 +951,9 @@ def fetch_credit_spread() -> dict:
     1순위: FRED HY OAS 백분위 5단계 (하워드 막스 프레임워크, 전 기간 baseline)
     보조: FRED IG OAS + HY-IG 스프레드(정크 디스카운트)
     """
-    # v5 (2026-05-05): HYG/LQD 제거 후 캐시 강제 invalidate.
-    key = "macro:credit_spread_v5"
+    # v8 (2026-05-10): HYG 프록시 제거. FRED 라이센스 정책으로 ~3년만 표시.
+    # 자체 oas_history_store(FRED 데이터만) FIFO 누적 → 7년 후 자연스럽게 10년 도달.
+    key = "macro:credit_spread_v8"
     cached = get_cached(key)
     if cached is not None:
         return cached
@@ -941,37 +982,47 @@ def fetch_credit_spread() -> dict:
         if hy_current is not None and ig_current is not None
         else None
     )
-    hy_ig_history_5y = []
+    # 2026-05-10: HY-IG 스프레드 시계열 5y → 10y 확대.
+    # FRED CSV 매일 자동 갱신 + 24h 캐시 → FIFO rolling 자연 발생.
+    hy_ig_history_10y = []
+    hy_ig_history_5y = []  # 후방호환
     try:
-        hy_5y = fred_data.get("oas_history_5y", []) if fred_data else []
-        ig_5y = ig_data.get("ig_history_5y", []) if ig_data else []
-        if hy_5y and ig_5y:
-            ig_map = {r["date"]: r["ig"] for r in ig_5y}
-            for r in hy_5y:
+        hy_10y = fred_data.get("oas_history_10y", []) if fred_data else []
+        ig_10y = ig_data.get("ig_history_10y", []) if ig_data else []
+        if hy_10y and ig_10y:
+            ig_map = {r["date"]: r["ig"] for r in ig_10y}
+            for r in hy_10y:
                 ig_v = ig_map.get(r["date"])
                 if ig_v is not None:
-                    hy_ig_history_5y.append({
+                    hy_ig_history_10y.append({
                         "date": r["date"],
                         "spread": round(r["oas"] - ig_v, 2),
                     })
+            # 5y는 10y의 슬라이스
+            from datetime import date as _d, timedelta as _td
+            five_year_start = (_d.today() - _td(days=365 * 5)).strftime("%Y-%m-%d")
+            hy_ig_history_5y = [r for r in hy_ig_history_10y if r["date"] >= five_year_start]
     except Exception as e:
         logger.debug("HY-IG 시계열 매칭 실패: %s", e)
 
     result = {
-        # FRED HY OAS (전 기간 baseline + 5단계)
+        # FRED HY OAS (전 기간 baseline + 5단계, 10년 시계열)
         "oas_current": fred_data.get("oas_current") if fred_data else None,
-        "oas_history_5y": fred_data.get("oas_history_5y", []) if fred_data else [],
-        "oas_history": fred_data.get("oas_history_5y", []) if fred_data else [],  # 후방호환 alias
+        "oas_history_10y": fred_data.get("oas_history_10y", []) if fred_data else [],
+        "oas_history_5y": fred_data.get("oas_history_5y", []) if fred_data else [],  # 후방호환
+        "oas_history": fred_data.get("oas_history_10y", []) if fred_data else [],  # alias 10y 우선
         "oas_stats": fred_data.get("oas_stats", {}) if fred_data else {},
         "oas_percentile": fred_data.get("oas_percentile") if fred_data else None,
         "oas_zscore": fred_data.get("oas_zscore") if fred_data else None,
         "oas_sentiment": fred_data.get("sentiment") if fred_data else None,
-        "percentile": fred_data.get("oas_percentile") if fred_data else None,  # 후방호환 alias
-        # FRED IG OAS + HY-IG 스프레드
+        "percentile": fred_data.get("oas_percentile") if fred_data else None,  # 후방호환
+        # FRED IG OAS + HY-IG 스프레드 (10년)
         "ig_current": ig_current,
-        "ig_history_5y": ig_data.get("ig_history_5y", []) if ig_data else [],
+        "ig_history_10y": ig_data.get("ig_history_10y", []) if ig_data else [],
+        "ig_history_5y": ig_data.get("ig_history_5y", []) if ig_data else [],  # 후방호환
         "hy_ig_spread": hy_ig_spread,
-        "hy_ig_spread_history_5y": hy_ig_history_5y,
+        "hy_ig_spread_history_10y": hy_ig_history_10y,
+        "hy_ig_spread_history_5y": hy_ig_history_5y,  # 후방호환
         # 부분 실패 메타
         "partial_failure": partial_failure,
     }
@@ -1289,6 +1340,7 @@ def fetch_sector_returns() -> list[dict]:
 
 _KR_SECTOR_ETFS = [
     ("091160.KS", "Semiconductor", "반도체"),
+    ("157490.KS", "IT/Internet", "IT/인터넷"),
     ("305720.KS", "Secondary Battery", "2차전지"),
     ("117700.KS", "Construction", "건설"),
     ("244580.KS", "Bio/Healthcare", "바이오/헬스케어"),
