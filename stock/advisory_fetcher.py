@@ -503,21 +503,25 @@ def _compute_segments_highlights(years_data: list) -> dict:
 def fetch_segments_history_kr(
     code: str, name: str, *, years: int = 5, user_id=None
 ) -> dict:
-    """KR 사업부문 매출비중 N년치 추이. GPT 1회 통합 추론.
+    """KR 사업부문 매출비중 N년치 추이.
+
+    Phase B (2026-05-10): DART 사업보고서 본문 직접 파싱 1순위 + GPT fallback.
+    - DART 파싱 성공 → source="dart_parsed", confidence="high" (실측)
+    - DART 실패 (corp_code 미존재, 본문 다운/표 미발견 등) → GPT fallback
+      (source="gpt_inference", confidence="low")
+    - DART 부분 성공 (일부 연도만) → 부분 + GPT 보강 또는 DART 단독 (covered_years 메타)
 
     캐시 키: advisor:segments_history_kr:{code}:{years}, TTL 168h(7일).
-    `service_name="segments_history_kr"` (AI 게이트웨이 쿼터 추적).
+    `service_name="segments_history_kr"` (GPT fallback 시).
 
     반환:
         {
-            "years_data": [{"year": int, "segments": [{segment, revenue_pct, note:"AI추정"}]}, ...],
+            "years_data": [{"year": int, "segments": [{segment, revenue_pct, note}]}, ...],
             "highlights": {"growing": [{segment, delta_pct}], "shrinking": [...]},
-            "confidence": "low",  # GPT 단독 추정
-            "source": "gpt_inference",
+            "confidence": "high" | "low",
+            "source": "dart_parsed" | "gpt_inference" | "mixed",
+            "covered_years": int,  # DART 파싱 성공 연도 수 (mixed/dart_parsed 시)
         }
-    OPENAI_API_KEY 미설정/실패 시 years_data=[].
-
-    Phase B(DART 본문 파싱)에서 source="dart_parsed" + confidence="high"로 교체 예정.
     """
     from stock.cache import get_cached, set_cached
     from datetime import date
@@ -529,6 +533,18 @@ def fetch_segments_history_kr(
     cached = get_cached(cache_key)
     if cached is not None:
         return cached
+
+    # Phase B: DART 본문 파싱 1순위 (실측)
+    try:
+        from stock.dart_segments import fetch_segments_history_dart
+        dart_result = fetch_segments_history_dart(code, name, years=years, user_id=user_id)
+        if dart_result.get("years_data"):
+            # DART 성공 — 표시 전용 캐시 저장 후 반환
+            set_cached(cache_key, dart_result, ttl_hours=24 * 7)
+            return dart_result
+    except Exception:
+        # DART 파싱 실패는 silent — GPT fallback 진행
+        pass
 
     if not OPENAI_API_KEY:
         return empty
