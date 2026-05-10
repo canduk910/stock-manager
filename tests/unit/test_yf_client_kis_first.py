@@ -157,7 +157,9 @@ def test_fetch_detail_yf_overrides_only_price_fields():
     assert result["low_52"] == 130.0
     assert result["per"] == 28.5
     assert result["pbr"] == 50.0
-    assert result["sector"] == "Technology"
+    # REQ-BACK-004 (2026-05-10): sector 한글 정규화 적용 후 "정보기술".
+    # KIS 미제공 필드(sector) 자체는 yfinance 보존 — 단지 한글 라벨로 변환된 형태.
+    assert result["sector"] == "정보기술"
 
 
 def test_fetch_detail_yf_kis_none_uses_yf_price():

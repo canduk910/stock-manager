@@ -1,5 +1,55 @@
 # 변경 이력
 
+## 2026-05-11 — 섹터명 한글 정규화 SSoT + 스크리너 헤더 sticky + watchlist sector 누락 fix
+
+### 섹터 정규화 모듈 신규 (`stock/sector_normalize.py`)
+
+관심종목/스크리너의 섹터명 컬럼이 영문/한자 혼재 또는 KRX 업종(전기·전자/서비스업/운수장비)과 매크로 섹터히트맵 분류(반도체/IT/인터넷/2차전지 등)가 일치하지 않아 사용자 혼란. 매크로 섹터히트맵 분류를 단일 정답(SSoT)으로 삼아 모든 노출 영역에서 동일한 한글 라벨로 표시.
+
+- **단일 출처 동기**: `KR_SECTOR_LABELS`는 `stock/macro_fetcher.py:_KR_SECTOR_ETFS`의 `name_ko`를 import-time 자동 추출(14개). 매크로 SSoT 변경 시 본 모듈 자동 추종, 별도 수정 불필요.
+- **70 KR 종목 코드 화이트리스트**: 프론트 `KR_SECTOR_REPS`와 동일(매크로 대표종목). 코드 매핑이 정규식보다 우선.
+- **정규식 다대일 매핑**: 한글 KRX 업종(`전기·전자` → 반도체) + 영문 GICS sector/industry 14 패턴(`Auto Manufacturers` → 자동차, `Banks - Regional` → 은행/금융 등). yfinance가 KR 종목에 영문 GICS 라벨 반환하는 케이스 다수 커버 — `industry`(세부) → `sector`(광역) 순으로 매칭.
+- **`\bMedia\b` 단어경계** — `Multimedia`(IT/인터넷)와 미디어/엔터 패턴 충돌 차단 (`Communication Services + Electronic Gaming & Multimedia` → IT/인터넷 정상 매핑).
+- **US 11 GICS 한글**: 정보기술/헬스케어/금융/커뮤니케이션 서비스/임의소비재/필수소비재/산업재/에너지/유틸리티/부동산/소재(KB·미래에셋 리서치 표기 관행).
+- **폴백**: 매핑 모호 시 "기타" (Graham 보수 원칙 — false 매핑 회피).
+- **캐시**: `normalize_sector_cached()` wrapper로 `sector_norm:{market}:{code}` 30일 TTL.
+
+### 데이터 수집부 정규화 단일 진입점
+
+- **`stock/yf_client.py:_normalize_sector_for_code(raw, code, industry=None)`** — KR(6자리 숫자)/US 자동 추론 헬퍼. `fetch_detail_yf` / `fetch_sector_peers` 호출에 `info.get("industry")` 함께 전달.
+- **`stock/market.py:fetch_detail/fetch_market_metrics`** — KR yfinance 응답에서 `info.get("sector")` + `info.get("industry")` 둘 다 `normalize_sector()`에 전달.
+- **`services/watchlist_service.py:_norm_sector(raw, code, market, industry=None)`** — 응답 직전 idempotent wrapper(데이터 수집부에서 이미 정규화되어도 None/빈 값/구버전 영문 GICS 캐시 방어).
+
+### `services/watchlist_service.py` stock_info hit 분기 sector 누락 fix
+
+기존 코드는 `_build_row()`에서 stock_info 영속 캐시 hit(metrics_fresh=True)인 경우 외부 API 호출을 건너뛰어 `row["sector"]`가 line 85의 초기값 `None` 그대로 응답에 들어감. 상세 페이지(`detail_service`)는 별도 경로라 정상 표시되었으나 관심종목 대시보드 sector 컬럼만 빈 칸. `_build_row()` line 113 근처에 `if metrics_fresh and info.get("sector"): row["sector"] = _norm_sector(...)` 추가.
+
+### `services/growth_grade.py:_LEADER_SECTOR_MAP` 키워드 확장
+
+sector_normalize 일관화로 응답 sector 라벨이 KR 14 한글로 통일됨에 따라 leader 매칭 누락 위험. `반도체`/`2차전지`/`IT/인터넷`/`자동차`/`바이오/헬스케어`/`은행/금융`/`철강/소재`/`에너지/화학`/`미디어/엔터`/`운송/물류` 등 14 한글 라벨 전 phase(회복/확장/과열/수축) 매트릭스에 추가. 기존 키 100% 보존, 추가만. 14×4=56 케이스 회귀 테스트(`test_growth_grade_sector.py`).
+
+### 스크리너 결과 테이블 헤더 sticky (`frontend/src/components/common/DataTable.jsx`)
+
+스크리너 결과를 스크롤할 때 컬럼 헤더가 화면 밖으로 나가 컬럼 의미 파악 어려움. `DataTable`에 `stickyHeader` prop 추가(default false) — 활성화 시 부모 `overflow-x-auto` 제거 + `<thead>` `sticky top-14 z-20 shadow-sm` (페이지 헤더 56px 아래 고정). `<th>`에 `bg-gray-50` 명시(투명 sticky 시 본문 비침 방지). `frontend/src/components/screener/StockTable.jsx`에서 활성화. 다른 테이블(잔고/관심종목/공시 등)은 prop 미사용 → 기존 동작 유지.
+
+### 회귀 가드
+
+- 단위 테스트: 1257 passed (사이클 신규 27 케이스 — 영문 GICS industry 14 매핑 + sector-only 폴백 + 우선순위)
+- 17 errors는 PostgreSQL 5433 미가동 baseline (본 변경 무관)
+- frontend `npm run build` 0 error (vite v6.4.1, 4.26s)
+- `growth_grade._LEADER_SECTOR_MAP` 기존 키 100% 보존 가드 (4 phase × frozen set 비교)
+- `composite_score` sector 독립성 5케이스 가드
+- 매크로 SSoT(`_KR_SECTOR_ETFS` / `KR_SECTOR_REPS`) 무변경
+
+### 도메인 합의 (요건서 `_workspace/dev_sector_normalize/01_requirements.md`)
+
+- KR 14 + US 11 + "기타" 폴백 (보수 원칙)
+- "임의소비재"(US) vs "경기소비재"(KR) 시장별 분리 채택
+- DART KSIC 도입은 후속 phase
+- "Specialty Industrial Machinery"(두산에너빌리티 등) 14 KR 분류에 직매핑 없어 "기타" 폴백 — 향후 코드 화이트리스트 종목별 보강 옵션
+
+---
+
 ## 2026-05-10 — 매크로 섹터 히트맵 KR/US 분리 + 산점도 직관화 + OAS FIFO 누적
 
 ### 매크로 섹터 히트맵 KR/US 토글 신규

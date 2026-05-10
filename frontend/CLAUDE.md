@@ -159,7 +159,7 @@ frontend/
 - **통화**: FinancialTable — USD면 M USD 기준(1,000M→$B, 1,000,000M→$T), KRW는 억/조
 
 ### 공용 컴포넌트
-- **DataTable**: 헤더 클릭 정렬 (⇅, asc/desc, 숫자/문자 자동). `renderContext` prop으로 외부 의존 전달. `sortable: false` 지원
+- **DataTable**: 헤더 클릭 정렬 (⇅, asc/desc, 숫자/문자 자동). `renderContext` prop으로 외부 의존 전달. `sortable: false` 지원. `stickyHeader` prop(default false): true 시 부모 `overflow-x-auto` 제거 + `<thead>` `sticky top-14 z-20 shadow-sm` (페이지 헤더 56px 아래 고정). 가로 스크롤 필요한 테이블은 비활성. ScreenerPage `StockTable`에서 활성화.
 - **WatchlistButton**: `common/WatchlistButton` — StockTable·FilingsTable 공용
 - **CandlestickChart**: `common/CandlestickChart` — PriceChartPanel·TechnicalPanel 공용
 

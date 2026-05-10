@@ -151,5 +151,5 @@ export default function StockTable({ stocks, hasGuru }) {
 
   const enriched = stocks.map((s, i) => ({ ...s, _rank: i + 1 }))
 
-  return <DataTable columns={makeColumns(watchlistSet, hasGuru)} data={enriched} rowKey="code" />
+  return <DataTable columns={makeColumns(watchlistSet, hasGuru)} data={enriched} rowKey="code" stickyHeader />
 }

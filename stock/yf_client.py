@@ -29,6 +29,21 @@ from typing import Optional
 from stock.cache import get_cached, set_cached
 from stock.market import _is_us_trading_hours
 from stock.kis_overseas_client import get_kis_price, get_kis_ohlcv_daily
+from stock.sector_normalize import normalize_sector
+from stock.utils import is_domestic
+
+
+def _normalize_sector_for_code(raw_sector, code: str, industry=None) -> str:
+    """yfinance sector raw + (선택) industry + 코드 → 한글 라벨.
+
+    REQ-BACK-004: 데이터 수집부 sector 정규화 단일 진입점 헬퍼.
+    KR(6자리 숫자) → KR 14 라벨. 그 외 → US 11 라벨.
+    industry는 KR/US 모두에서 sector 미매칭 시 폴백으로 사용 (yfinance가 KR 종목에
+    영문 GICS 라벨을 반환하는 케이스 다수 — industry가 더 세밀해 14 분류 정합).
+    """
+    market = "KR" if is_domestic(code) else "US"
+    code_arg = code if market == "KR" else None
+    return normalize_sector(raw_sector, market, code=code_arg, industry=industry)
 
 import logging
 logger = logging.getLogger(__name__)
@@ -300,7 +315,8 @@ def fetch_detail_yf(code: str) -> Optional[dict]:
             "mktcap": mktcap,
             "currency": fi.currency or info.get("currency", "USD"),
             "market_type": info.get("exchange", ""),
-            "sector": info.get("sector", ""),
+            # REQ-BACK-004: 한글 화이트리스트로 정규화 (시장 자동 추론, industry 폴백)
+            "sector": _normalize_sector_for_code(info.get("sector"), code, industry=info.get("industry")),
             "high_52": _safe(info.get("fiftyTwoWeekHigh")),
             "low_52": _safe(info.get("fiftyTwoWeekLow")),
             "per": _safe(info.get("trailingPE") or info.get("forwardPE")),
@@ -1356,8 +1372,9 @@ def fetch_sector_peers(code: str, max_peers: int = 5) -> list[dict]:
         return cached
     try:
         info = _ticker(code).info or {}
-        sector = info.get("sector", "")
         industry = info.get("industry", "")
+        # REQ-BACK-004: sector 한글 정규화 (시장 자동 추론, industry 폴백)
+        sector = _normalize_sector_for_code(info.get("sector"), code, industry=industry)
 
         # yfinance에 직접적인 peer list API 없음
         # industry_key 기반 screener도 불안정하므로 빈 리스트 반환

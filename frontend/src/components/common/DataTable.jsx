@@ -11,7 +11,7 @@ function SortIcon({ active, dir }) {
   return <span className={`ml-1 text-xs ${active ? 'text-blue-500' : 'text-gray-300'}`}>{dir === 'asc' ? '▲' : '▼'}</span>
 }
 
-export default function DataTable({ columns, data, rowKey, renderContext = {} }) {
+export default function DataTable({ columns, data, rowKey, renderContext = {}, stickyHeader = false }) {
   const [sortKey, setSortKey] = useState(null)
   const [sortDir, setSortDir] = useState('asc')
 
@@ -40,15 +40,15 @@ export default function DataTable({ columns, data, rowKey, renderContext = {} })
   if (!data || data.length === 0) return null
 
   return (
-    <div className="overflow-x-auto rounded-lg border border-gray-200">
+    <div className={`rounded-lg border border-gray-200 ${stickyHeader ? '' : 'overflow-x-auto'}`}>
       <table className="min-w-full text-sm">
-        <thead className="bg-gray-50 border-b border-gray-200">
+        <thead className={`bg-gray-50 border-b border-gray-200 ${stickyHeader ? 'sticky top-14 z-20 shadow-sm' : ''}`}>
           <tr>
             {columns.map((col) => (
               <th
                 key={col.key}
                 onClick={() => col.sortable !== false && handleSort(col.key)}
-                className={`px-4 py-2.5 font-semibold text-gray-600 whitespace-nowrap select-none transition-colors ${
+                className={`px-4 py-2.5 font-semibold text-gray-600 whitespace-nowrap select-none transition-colors bg-gray-50 ${
                   col.sortable !== false ? 'cursor-pointer hover:bg-gray-100' : 'cursor-default'
                 } ${
                   col.align === 'right'

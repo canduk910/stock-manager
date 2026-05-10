@@ -191,7 +191,11 @@ def fetch_detail(code: str, refresh: bool = False) -> Optional[dict]:
         info = t.info
 
         market_type = _market_type(ticker_str)
-        sector = info.get("sector")  # 영문
+        # REQ-BACK-004: KR 종목 sector 한글 정규화 (코드 직접 매핑 → industry → sector 순)
+        from stock.sector_normalize import normalize_sector
+        sector = normalize_sector(
+            info.get("sector"), "KR", code=code, industry=info.get("industry"),
+        )
         high_52 = fi.year_high
         low_52 = fi.year_low
         per_raw = info.get("trailingPE")
@@ -375,7 +379,11 @@ def fetch_market_metrics(code: str) -> dict:
         info = t.info
 
         result["market_type"] = _market_type(ticker_str)
-        result["sector"] = info.get("sector")
+        # REQ-BACK-004: KR 종목 sector 한글 정규화 (코드 직접 매핑 → industry → sector 순)
+        from stock.sector_normalize import normalize_sector
+        result["sector"] = normalize_sector(
+            info.get("sector"), "KR", code=code, industry=info.get("industry"),
+        )
         result["mktcap"] = int(fi.market_cap) if fi.market_cap else None
         result["shares"] = int(fi.shares) if fi.shares else None
         result["high_52"] = int(fi.year_high) if fi.year_high else None

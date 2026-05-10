@@ -14,8 +14,22 @@ from services import _telemetry
 from stock import store, symbol_map
 from stock.dart_fin import fetch_financials, fetch_financials_multi_year
 from stock.market import fetch_detail, fetch_price, fetch_market_metrics
+from stock.sector_normalize import normalize_sector
 from stock.utils import is_domestic
 import stock.yf_client as yf_client
+
+
+def _norm_sector(raw, code: str, market: str = None, industry=None):
+    """REQ-BACK-004: sector 한글 정규화 idempotent wrapper.
+
+    데이터 수집 진입점(yf_client/market)에서 이미 정규화되지만,
+    서비스 레이어에서도 한 번 더 통과시켜 None/빈 값/구버전 캐시 방어.
+    industry는 KR yfinance에서 영문 GICS 라벨이 들어올 때 폴백용.
+    """
+    if market is None:
+        market = "KR" if is_domestic(code) else "US"
+    code_arg = code if market == "KR" else None
+    return normalize_sector(raw, market, code=code_arg, industry=industry)
 
 
 def _awk(won: Optional[int]) -> Optional[int]:
@@ -98,6 +112,10 @@ def _fetch_dashboard_row(item: dict) -> dict:
 
             if metrics_fresh and info.get("dividend_yield") is not None:
                 row["dividend_yield"] = info["dividend_yield"]
+            # 누락 버그 fix: stock_info hit 분기에 sector 채움 + 한글 정규화
+            # (영문 GICS가 캐시된 구버전도 idempotent wrapper로 14/11 한글 변환)
+            if metrics_fresh and info.get("sector"):
+                row["sector"] = _norm_sector(info.get("sector"), code, market)
 
             if fin_fresh and info.get("revenue") is not None:
                 rev = info.get("revenue")
@@ -135,7 +153,7 @@ def _fetch_dashboard_row(item: dict) -> dict:
             try:
                 metrics = fetch_market_metrics(code)
                 row["dividend_yield"] = metrics.get("dividend_yield")
-                row["sector"] = metrics.get("sector")
+                row["sector"] = _norm_sector(metrics.get("sector"), code, "KR")
             except Exception as e:
                 logger.warning("watchlist fetch failed code=%s field=metrics err=%s", code, e)
                 row["partial_failure"].append("metrics")
@@ -176,7 +194,7 @@ def _fetch_dashboard_row(item: dict) -> dict:
                 detail = yf_client.fetch_detail_yf(code)
                 if detail:
                     row["dividend_yield"] = detail.get("dividend_yield")
-                    row["sector"] = detail.get("sector")
+                    row["sector"] = _norm_sector(detail.get("sector"), code, "US")
             except Exception as e:
                 logger.warning("watchlist fetch failed code=%s field=metrics err=%s", code, e)
                 row["partial_failure"].append("metrics")
@@ -279,7 +297,7 @@ class WatchlistService:
                         "high_52": detail.get("high_52"),
                         "low_52": detail.get("low_52"),
                         "market": detail.get("market_type"),
-                        "sector": detail.get("sector"),
+                        "sector": _norm_sector(detail.get("sector"), code, "KR"),
                         "shares": detail.get("shares"),
                     }
                 )
@@ -336,7 +354,7 @@ class WatchlistService:
                         "high_52": detail.get("high_52"),
                         "low_52": detail.get("low_52"),
                         "market": detail.get("market_type"),
-                        "sector": detail.get("sector"),
+                        "sector": _norm_sector(detail.get("sector"), code, "US"),
                         "roe": detail.get("roe"),
                         "dividend_yield": detail.get("dividend_yield"),
                         "dividend_per_share": detail.get("dividend_per_share"),

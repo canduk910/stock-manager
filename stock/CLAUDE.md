@@ -35,6 +35,7 @@ CLI와 API 라우터 양쪽에서 공용. 비즈니스 데이터는 SQLAlchemy O
 | `strategy_store.py` | 백테스트/전략 CRUD. `db/repositories/backtest_repo.py` 위임. Job: `save_backtest_job/result/update_job_status/delete_job/get_latest_backtest_metrics/get_job_history` + `set_mcp_job_id` + `update_job_failed`. Strategy: `save_strategy/list_strategies/get_strategy/delete_strategy` (builder_state_json 포함). |
 | `tax_store.py` | 양도세 매매내역/계산/FIFO lot CRUD. `db/repositories/tax_repo.py` 위임. |
 | `cache.py` | SQLite TTL 캐시 (`cache.db`). NaN/Inf → None 자동 sanitize. |
+| `sector_normalize.py` | 섹터명 한글 라벨 정규화 SSoT. KR 14(매크로 `_KR_SECTOR_ETFS` 자동 동기) + US 11 GICS 한글 + "기타" 폴백. `normalize_sector(raw, market, code=None, industry=None)` — KR은 코드 화이트리스트(70종) → industry 정규식 → sector 정규식 → "기타" 순. yfinance가 KR 종목에 영문 GICS(`Consumer Cyclical`/`Auto Manufacturers` 등) 반환하는 케이스 커버. `\bMedia\b` 단어경계로 `Multimedia`(IT/인터넷)와 충돌 차단. `normalize_sector_cached()` 30일 TTL wrapper(`sector_norm:{market}:{code}`). |
 | `display.py` | Rich 테이블 출력 + CSV 내보내기. |
 | `cli.py` | Click CLI. `stock watch add/remove/list/memo/dashboard/info`. |
 

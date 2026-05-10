@@ -29,16 +29,29 @@ from typing import Optional
 
 # 사이클 주도 섹터 정합성 — services/macro_cycle.py LEADER_SECTORS와 호환
 # 추가로 한국 섹터 키워드 매핑(섹터 이름이 한국어/영어로 들어올 수 있음)
+#
+# 주의(REQ-DOMAIN-001, 2026-05-10):
+# - 신규 sector_normalize 모듈의 KR 14 한글 라벨 호환성을 위해 누락 키워드 추가만 허용.
+# - 기존 영문/한글 키 삭제 절대 금지 — silent regression 방지 가드 테스트
+#   (tests/unit/test_growth_grade_sector.py::test_leader_map_preserves_existing_keys).
 _LEADER_SECTOR_MAP: dict[str, set[str]] = {
     "recovery": {"XLF", "XLI", "XLB", "Financials", "Industrials", "Materials",
-                 "금융", "산업재", "소재", "은행", "건설", "기계"},
+                 "금융", "산업재", "소재", "은행", "건설", "기계",
+                 # REQ-DOMAIN-001 추가 — 자본재 cycle 회복기 leader
+                 "자동차", "운송/물류", "운송"},
     "expansion": {"XLK", "XLY", "XLC", "Technology", "Consumer Discretionary",
                   "Communication Services", "기술", "IT", "반도체", "소프트웨어",
-                  "임의소비재", "커뮤니케이션", "인터넷"},
+                  "임의소비재", "커뮤니케이션", "인터넷",
+                  # REQ-DOMAIN-001 추가 — KR 한국 cycle 독자성 (배터리/IT 광의)
+                  "2차전지", "IT/인터넷", "정보기술"},
     "overheating": {"XLE", "XLB", "XLP", "Energy", "Materials", "Consumer Staples",
-                    "에너지", "필수소비재", "정유", "화학"},
+                    "에너지", "필수소비재", "정유", "화학",
+                    # REQ-DOMAIN-001 추가 — KR 통합 라벨 정확 매칭
+                    "에너지/화학", "철강/소재"},
     "contraction": {"XLU", "XLV", "XLP", "Utilities", "Healthcare", "Consumer Staples",
-                    "유틸리티", "헬스케어", "필수소비재", "통신"},
+                    "유틸리티", "헬스케어", "필수소비재", "통신",
+                    # REQ-DOMAIN-001 추가 — KR 통합 라벨 정확 매칭
+                    "바이오/헬스케어"},
 }
 
 
