@@ -43,7 +43,7 @@ frontend/
 | `/watchlist` | WatchlistPage | 관심종목 CRUD + 시세/재무 대시보드 |
 | `/detail/:symbol` | DetailPage | 탭 UI: 재무분석 / 종합 리포트 (서브탭: CAGR요약 / 기본적분석 / 기술적분석+PER·PBR / AI자문) |
 | `/order` | OrderPage | 탭 UI: 주문발송 / 미체결 / 체결내역 / 주문이력 / 예약주문 |
-| `/market-board` | MarketBoardPage | 시세판: 신고가/신저가 + 사용자 선택 종목. 실시간 WS. |
+| `/market-board` | MarketBoardPage | 시세판: 신고가/신저가 + 사용자 선택 종목. **REST 일괄 폴링** (2026-05-12 WS 폐지, `usePricePolling` 장중 15s / 장외 60s) |
 
 ---
 
@@ -60,7 +60,7 @@ frontend/
 | `order.js` | `placeOrder()`, `fetchBuyable()`, `fetchOpenOrders()`, `cancelOrder()`, `modifyOrder()`, `fetchExecutions()`, `fetchOrderHistory()`, `syncOrders()`, `createReservation()`, `fetchReservations()`, `deleteReservation()` | `/api/order/*` |
 | `advisory.js` | `fetchAdvisoryStocks()`, `addAdvisoryStock()`, `removeAdvisoryStock()`, `refreshAdvisoryData(code, market, name)`, `fetchAdvisoryData()`, `generateReport()`, `fetchReport()`, `fetchReportHistory(code, market, limit)`, `fetchReportById(code, reportId, market)`, `fetchAdvisoryOhlcv(code, market, interval, period)` | `/api/advisory/*` |
 | `search.js` | `searchStocks(q, market)` | `GET /api/search` |
-| `marketBoard.js` | `fetchNewHighsLows(top)`, `fetchSparklines(items)`, `fetchCustomStocks()`, `addCustomStock()`, `removeCustomStock()`, `fetchBoardOrder()`, `saveBoardOrder(items)` | `/api/market-board/*` |
+| `marketBoard.js` | `fetchNewHighsLows(top)`, `fetchSparklines(items)`, `fetchCustomStocks()`, `addCustomStock()`, `removeCustomStock()`, `fetchBoardOrder()`, `saveBoardOrder(items)`, **`fetchPricesBatch(codes, market)`** | `/api/market-board/*` |
 
 ---
 
@@ -79,7 +79,7 @@ frontend/
 | `useNotification.js` | `useNotification()` | `{ toasts, notify, dismiss }` — 토스트 상태 + 브라우저 Notification API |
 | `useWebSocket.js` | `useWebSocket(url, { onMessage, onOpen })` | `{ connected, sendMessage }` — 공용 WS 연결 수명주기. 지수 백오프 재연결(500ms→10초), visibilitychange 탭 복귀 재연결. url=null이면 연결 안 함. `buildWsUrl(path)` 헬퍼도 export. **(2026-05-08 stale-token fix)** `url`이 `string \| null \| (() => string\|null)` — 함수형이면 매 connect 시도마다 lazy 평가하여 1008 close 후 백오프 재시도 시 갱신된 access_token을 자동 반영. REST `/api/auth/refresh` 인터셉터(`api/client.js`)와 비대칭이던 stale-token 무한 백오프 버그를 자기치유. 호출자는 함수 reference를 모듈 const 또는 useCallback으로 안정화. |
 | `useQuote.js` | `useQuote(symbol, market='KR', exchange='auto')` | `{ price, change, changeRate, sign, asks, bids, totalAskVolume, totalBidVolume, connected }` — `useWebSocket` 기반. `market` 파라미터를 WS URL `?market=` 쿼리로 전달 (`KR`/`FNO`/`US`). **(2026-05-08 KRX+NXT+SOR)** `exchange` 3번째 파라미터 추가 — `auto`(기본, 백엔드 KISQuoteManager가 KST 4구간 자동 분기) / `UN` / `KRX` / `NXT`. WS URL에 `&exchange=` 자동 부착. symbol/market/exchange 변경 시 state 초기화. |
-| `useMarketClock.js` | `useMarketClock()` (신규 2026-05-08) | `{ exchange:'UN'\|'KRX'\|'NXT', label, isHoliday, isClosed, phase }` — KST 시계 기반 KR 거래소 4구간 자동 판정 훅. `resolvePhaseByClock(now)` 순수 함수 export(테스트용). 1분 setInterval 폴링 + `/ws/market-status` 메시지 도착 시 override(정밀 trigger). 4구간: 08:00~09:00 NXT 프리오픈 / 09:00~15:30 통합(UN) / 15:30~15:40 KRX 동시호가 / 15:40~20:00 NXT 시간외 / 그 외 CLOSED. 휴장 1차=주말, 2차=공휴일(v2), 3차=WS market-status. OrderbookPanel 헤더 거래소 라벨에 사용. |
+| `useMarketClock.js` | `useMarketClock()` | `{ exchange:'UN'\|'KRX'\|'NXT', label, isHoliday, isClosed, phase }` — KST 시계 기반 KR 거래소 4구간 자동 판정 훅. `resolvePhaseByClock(now)` 순수 함수 export(테스트용). 1분 setInterval **단독**(2026-05-12 `/ws/market-status` WS override 분기 제거 — 자동매매 slot 회수). 4구간: 08:00~09:00 NXT 프리오픈 / 09:00~15:30 통합(UN) / 15:30~15:40 KRX 동시호가 / 15:40~20:00 NXT 시간외 / 그 외 CLOSED. 휴장 1차=주말, 2차=공휴일(v2). OrderbookPanel 헤더 거래소 라벨에 사용. |
 | `useExecutionNotice.js` | `useExecutionNotice(onNotice)` | `useWebSocket` 기반. `/ws/execution-notice` 연결 + `execution_notice` 메시지 콜백 호출. **(2026-05-08)** `mapOrdExgGb(code)` 헬퍼 export + 콜백 호출 시 `notice.exchange` 필드 자동 enrich(1=KRX/2=NXT/3=SOR-KRX/4=SOR-NXT, 누락 시 KRX 폴백). 토스트 거래소 prefix 표기에 사용. |
 | `useAdvisory.js` | `useAdvisoryStocks()` | `{ stocks, loading, error, load, add, remove }` — 자문종목 목록 CRUD |
 | | `useAdvisoryData()` | `{ data, loading, error, load, refresh }` — 분석 데이터 조회/새로고침. `refresh(code, market, name)` |
@@ -87,7 +87,7 @@ frontend/
 | | `useAdvisoryOhlcv()` | `{ result, loading, error, load }` — 타임프레임별 OHLCV+지표 조회. `load(code, market, interval, period)` → `{ ohlcv, indicators, interval, period }` |
 | `useMarketBoard.js` | `useMarketBoard()` | `{ data, sparklines, loading, error, load, loadSparklines }` — 신고가/신저가 REST 로드 + sparkline 배치 로드 |
 | | `useDisplayStocks()` | `{ watchlistStocks, customStocks, displayStocks, loaded, loadAll, addStock, removeStock, reorder }` — 관심종목+별도등록 종목 병합+정렬. `displayStocks`: orderMap 기반 정렬 적용. `reorder(newStocks)`: 낙관적 업데이트 + `saveBoardOrder()`. |
-| `useMarketBoardWS.js` | `useMarketBoardWS()` | `{ prices, connected, subscribe, unsubscribe }` — `useWebSocket` 기반. subscribe/unsubscribe 시 WS 구독 메시지 전송. 재연결 시 기존 구독 자동 복원. prices: `{ [symbol]: { price, change_pct, sign } }` |
+| `useMarketBoard.js` | `usePricePolling(codes, market)` (2026-05-12 신규) | `{ prices, loading, error }` — `fetchPricesBatch(codes, market)` REST 폴링. `useMarketClock` phase 기반 장중 15s / 장외 60s 자동 조정. 기존 WS prices shape 호환 (`{ [code]: { price, change, change_pct, prev_close, volume, sign } }`). **`useMarketBoardWS` 폐지** — KIS WS 다중구독 slot이 외부 자동매매와 충돌(41건 한도)하여 REST 일괄 폴링으로 대체. |
 
 ---
 
@@ -245,14 +245,14 @@ frontend/
 ### MarketBoardPage (`/market-board`)
 - 마운트 시 `GET /api/market-board/new-highs-lows` 호출 (최초 조회 시 수십 초 소요, 이후 캐시)
 - 신고가/신저가 종목 확정 후 sparkline 배치 로드 (`POST /api/market-board/sparklines`)
-- `useMarketBoardWS`로 단일 WS 연결, 신고가/신저가 + 사용자 종목 일괄 구독
+- `usePricePolling(polledCodes, 'KR')` REST 폴링으로 신고가/신저가 + 사용자 종목 가격 일괄 갱신 (장중 15s / 장외 60s, 2026-05-12 KIS WS 다중구독 폐지 — 외부 자동매매 시스템과 41건 한도 충돌 해소)
 - **마운트 시 병렬 조회**: `useDisplayStocks().loadAll()` → watchlistStocks/customStocks 상태 세팅 (api/ 직접 import 대신 훅 사용)
 - **하단 표시 = 관심종목(★) + 별도 등록 종목(X)**: `displayStocks = useMemo(...)` 중복 제거 합산
   - `_source: 'watchlist'` → ★ 배지, X 버튼 없음 (관심종목에서 삭제 시 자동 제거)
   - `_source: 'custom'` → X 버튼으로 DB 삭제 가능 (GET/POST/DELETE `/api/market-board/custom-stocks`)
-- custom 종목 추가/삭제 시 DB API 호출 + 상태 업데이트 + WS subscribe/unsubscribe + sparkline 요청
+- custom 종목 추가/삭제 시 DB API 호출 + 상태 업데이트 + `polledCodes` useMemo 자동 반영
 - 새로고침 버튼으로 수동 갱신 가능
-- 연결 상태 배지(초록/회색) + 기준 시각 + 스캔 종목 수 표시
+- 기준 시각 + 스캔 종목 수 표시
 
 ---
 

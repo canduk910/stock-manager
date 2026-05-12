@@ -2,23 +2,23 @@
 시세판 API 라우터.
 GET    /api/market-board/new-highs-lows         신고가/신저가 Top 10
 POST   /api/market-board/sparklines             복수 종목 sparkline 배치
+GET    /api/market-board/prices                 다중심볼 가격 일괄 폴링 (REST, yfinance+KIS REST 폴백)
 GET    /api/market-board/custom-stocks          별도 등록 종목 목록
 POST   /api/market-board/custom-stocks          별도 등록 종목 추가
 DELETE /api/market-board/custom-stocks/{code}   별도 등록 종목 삭제
-WS     /ws/market-board                         다중심볼 실시간 시세
+
+NOTE: 시세판 다중심볼 WS (`/ws/market-board`)는 2026-05-12 폐지됨.
+      KIS WS slot 잠식(자동매매 41건 제한)을 회수하기 위해 REST 일괄 폴링으로 전환.
+      장중 15s / 장외 60s 폴링 (in-memory 캐시는 장중 10s/장외 60s).
 """
-import asyncio
-import json
 import logging
 
-from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
 from services.auth_deps import get_current_user
-from services.exceptions import NotFoundError, ConflictError
-
-from services.quote_service import get_manager, get_overseas_manager
-from stock.utils import is_domestic
+from services.exceptions import NotFoundError, ConflictError, ServiceError
+from stock.market import fetch_prices_batch
 
 router = APIRouter(tags=["market-board"])
 logger = logging.getLogger(__name__)
@@ -111,147 +111,50 @@ def save_board_order(body: SaveOrderBody, user: dict = Depends(get_current_user)
     return {"ok": True}
 
 
-# ── 다중심볼 WebSocket ────────────────────────────────────────────────────────
+# ── 다중심볼 가격 일괄 폴링 (REST) ────────────────────────────────────────────
 
-@router.websocket("/ws/market-board")
-async def market_board_ws(websocket: WebSocket):
-    """다중심볼 실시간 시세 WebSocket.
+# 시세판 폴링 가드 — 한 번에 최대 50종목까지만 허용
+_MAX_BATCH_CODES = 50
 
-    클라이언트 → 서버:
-      {"action": "subscribe",   "symbols": ["005930", "000660", "AAPL"]}
-      {"action": "unsubscribe", "symbols": ["000660"]}
 
-    서버 → 클라이언트:
-      {"type": "prices", "data": {"005930": {"price": 72000, "change_pct": 1.5, "sign": "2"}, ...}}
-      {"type": "ping"}
+@router.get("/api/market-board/prices")
+def get_prices_batch(
+    codes: str = Query(..., description="콤마 구분 종목코드 목록, 최대 50개"),
+    market: str = Query("KR", description="KR / US"),
+    _user: dict = Depends(get_current_user),
+):
+    """다중심볼 가격 일괄 폴링.
+
+    1차 yfinance ``Tickers(...).fast_info`` 일괄 + 2차 KIS REST 폴백.
+    in-memory TTL 캐시(장중 10s / 장외 60s)로 rate limit 방지.
+    부분 실패 시에도 200 + 성공한 종목만 반환 (보드는 부분 표시가 더 유용).
+
+    Args:
+        codes: ``"005930,000660"`` 형식. 최대 50개. 빈 문자열 허용(빈 결과).
+        market: ``"KR"`` 또는 ``"US"``.
+
+    Returns:
+        ``{"prices": {code: {price, change, change_pct, prev_close, volume}}}``
+
+    Raises:
+        ServiceError(400): codes 개수가 50개를 초과한 경우.
     """
-    token = websocket.query_params.get("token")
-    if not token:
-        await websocket.close(code=1008)
-        return
-    try:
-        from services.auth_service import verify_token
-        verify_token(token)
-    except Exception:
-        await websocket.close(code=1008)
-        return
-    await websocket.accept()
-
-    domestic_mgr = get_manager()
-    overseas_mgr = get_overseas_manager()
-
-    # 심볼 → queue 매핑 (이 WS 연결 전용)
-    queues: dict[str, asyncio.Queue] = {}
-
-    async def subscribe_symbol(symbol: str):
-        if symbol in queues:
-            return
-        q: asyncio.Queue = asyncio.Queue(maxsize=50)
-        queues[symbol] = q
-        if is_domestic(symbol):
-            await domestic_mgr.subscribe(symbol, q)
-        else:
-            await overseas_mgr.subscribe(symbol, q)
-
-    def unsubscribe_symbol(symbol: str):
-        q = queues.pop(symbol, None)
-        if q is None:
-            return
-        if is_domestic(symbol):
-            domestic_mgr.unsubscribe(symbol, q)
-        else:
-            overseas_mgr.unsubscribe(symbol, q)
-
-    def unsubscribe_all():
-        for sym, q in list(queues.items()):
-            if is_domestic(sym):
-                domestic_mgr.unsubscribe(sym, q)
-            else:
-                overseas_mgr.unsubscribe(sym, q)
-        queues.clear()
-
-    async def recv_loop():
-        """클라이언트 제어 메시지 수신."""
-        while True:
-            text = await websocket.receive_text()
-            try:
-                msg = json.loads(text)
-                action = msg.get("action")
-                symbols = [s.upper() for s in msg.get("symbols", [])]
-                if action == "subscribe":
-                    for sym in symbols:
-                        await subscribe_symbol(sym)
-                elif action == "unsubscribe":
-                    for sym in symbols:
-                        unsubscribe_symbol(sym)
-            except Exception as e:
-                logger.debug("[MarketBoardWS] 제어 메시지 파싱 오류: %s", e)
-
-    async def send_loop():
-        """모든 구독 큐에서 메시지 수집 → 200ms 창 병합 → 클라이언트 전송."""
-        while True:
-            if not queues:
-                # 구독 없음 → ping 유지
-                await asyncio.sleep(20)
-                await websocket.send_json({"type": "ping"})
-                continue
-
-            # 최대 200ms 동안 모든 큐 폴링
-            batch: dict[str, dict] = {}  # symbol → latest price data
-            deadline = asyncio.get_event_loop().time() + 0.2
-
-            while asyncio.get_event_loop().time() < deadline:
-                remaining = deadline - asyncio.get_event_loop().time()
-                if remaining <= 0:
-                    break
-
-                # 모든 큐에서 즉시 수집 (non-blocking)
-                got_any = False
-                for sym, q in list(queues.items()):
-                    while not q.empty():
-                        try:
-                            msg = q.get_nowait()
-                            if msg.get("type") == "price":
-                                batch[sym] = {
-                                    "price": msg.get("price"),
-                                    "change_pct": msg.get("change_rate"),
-                                    "change": msg.get("change"),
-                                    "sign": msg.get("sign"),
-                                    "open": msg.get("open"),
-                                    "high": msg.get("high"),
-                                    "low": msg.get("low"),
-                                }
-                            got_any = True
-                        except asyncio.QueueEmpty:
-                            break
-
-                if not got_any:
-                    # 새 메시지 없으면 잠깐 대기
-                    await asyncio.sleep(0.05)
-
-            if batch:
-                await websocket.send_json({"type": "prices", "data": batch})
-            else:
-                # 200ms 동안 데이터 없으면 ping
-                await asyncio.sleep(0.1)
-
-    try:
-        # recv_loop와 send_loop 동시 실행
-        recv_task = asyncio.create_task(recv_loop())
-        send_task = asyncio.create_task(send_loop())
-        done, pending = await asyncio.wait(
-            [recv_task, send_task],
-            return_when=asyncio.FIRST_EXCEPTION,
+    raw = (codes or "").strip()
+    if not raw:
+        return {"prices": {}}
+    code_list = [c.strip().upper() for c in raw.split(",") if c.strip()]
+    if len(code_list) > _MAX_BATCH_CODES:
+        raise ServiceError(
+            f"codes 최대 {_MAX_BATCH_CODES}개까지 허용 (요청 {len(code_list)}개)"
         )
-        for t in pending:
-            t.cancel()
-    except WebSocketDisconnect:
-        pass
+    mkt = (market or "KR").upper()
+    if mkt not in ("KR", "US"):
+        raise ServiceError(f"market은 'KR' 또는 'US'여야 합니다 (입력: {market})")
+
+    try:
+        prices = fetch_prices_batch(code_list, market=mkt) or {}
     except Exception as e:
-        logger.error("[MarketBoardWS] 오류: %s", e)
-        try:
-            await websocket.close(code=1011)
-        except Exception:
-            pass
-    finally:
-        unsubscribe_all()
+        # 부분 실패 정책: 외부 API 예외도 빈 결과로 graceful degrade
+        logger.warning("[market-board/prices] fetch_prices_batch 실패: %s", e)
+        prices = {}
+    return {"prices": prices}

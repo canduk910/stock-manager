@@ -501,12 +501,17 @@ KIS 실전계좌 잔고 조회. KIS API 키 미설정 시 503 반환.
 │              /ws/quote/{symbol} → 브라우저                   │
 └───────────────────────────────────────────────────────────────┘
 
-┌── 시세판 (Market Board) ─────────────────────────────────────┐
+┌── 시세판 (Market Board) — 2026-05-12 REST 폴링 전환 ─────────┐
 │                                                               │
-│  /ws/market-board (다중 심볼 단일 WS)                        │
-│    ├─ 클라이언트 → subscribe/unsubscribe 메시지              │
-│    ├─ 서버 → 200ms 배칭 → {"type":"prices","data":{}} 일괄   │
-│    └─ 국내+해외 심볼 혼합 가능                                │
+│  GET /api/market-board/prices?codes=&market=KR               │
+│    ├─ 프론트 usePricePolling → 장중 15s / 장외 60s            │
+│    ├─ 서버: yfinance Tickers fast_info 일괄 1차              │
+│    │         → 빈응답·예외 시 KIS REST FHKST01010100 폴백    │
+│    └─ in-memory TTL 캐시(장중 10s / 장외 60s) + 부분 반환    │
+│                                                               │
+│  WS 다중구독 폐지: 동일 KIS 계정 자동매매와의 동시구독 41건   │
+│  한도 충돌 해소(시세판 N×2 + 장운영정보 3건 slot 회수).      │
+│  호가창 /ws/quote/{symbol}·체결통보 /ws/execution-notice 유지.│
 └───────────────────────────────────────────────────────────────┘
 ```
 
@@ -573,7 +578,7 @@ stock-manager/
 │   ├── quote.py           #   WS /ws/quote/{symbol}
 │   ├── advisory.py        #   /api/advisory/*
 │   ├── search.py          #   GET /api/search
-│   ├── market_board.py    #   /api/market-board/* + WS (200ms 배칭)
+│   ├── market_board.py    #   /api/market-board/* (가격 일괄 폴링 GET /prices)
 │   ├── macro.py           #   /api/macro/* (지수/뉴스/심리/투자자)
 │   ├── portfolio_advisor.py #  /api/portfolio-advisor/* (AI 포트폴리오 자문)
 │   ├── report.py          #   /api/reports/* (일일보고서/추천이력/성과)

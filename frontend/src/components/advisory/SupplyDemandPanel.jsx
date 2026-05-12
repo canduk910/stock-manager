@@ -173,18 +173,15 @@ export default function SupplyDemandPanel({ code, market = 'KR' }) {
       {data?.summary && (
         <div className="px-3 py-2 bg-gray-50 rounded text-sm mb-3 flex flex-wrap gap-3">
           <span style={{ color: cm.foreign }}>
-            외국인 {data.summary.foreign_today > 0 ? '+' : ''}
-            {formatAmount(data.summary.foreign_today)}
+            외국인 {formatAmount(data.summary.foreign_today)}
           </span>
           <span className="text-gray-300">/</span>
           <span style={{ color: cm.institution }}>
-            기관 {data.summary.institution_today > 0 ? '+' : ''}
-            {formatAmount(data.summary.institution_today)}
+            기관 {formatAmount(data.summary.institution_today)}
           </span>
           <span className="text-gray-300">/</span>
           <span style={{ color: cm.personal }}>
-            개인 {data.summary.personal_today > 0 ? '+' : ''}
-            {formatAmount(data.summary.personal_today)}
+            개인 {formatAmount(data.summary.personal_today)}
           </span>
           <span className="ml-auto text-gray-500 text-xs">
             누적 외국인 {formatAmount(data.summary.foreign_cum_total)} ·

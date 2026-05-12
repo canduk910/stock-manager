@@ -50,24 +50,20 @@ function SummaryChip({ data, colorMap }) {
   const foreign = data.foreign_today
   const inst = data.institution_today
 
-  const sign = (v) => (v > 0 ? '+' : '')
   const colorOf = (v, key) => (v === 0 ? '#6b7280' : colorMap?.[key] || '#374151')
 
   return (
     <div className="text-sm text-gray-700 flex flex-wrap gap-3">
       <span style={{ color: colorOf(foreign, 'foreign') }}>
-        외국인 {sign(foreign)}
-        {formatAmount(foreign)}
+        외국인 {formatAmount(foreign)}
       </span>
       <span className="text-gray-300">/</span>
       <span style={{ color: colorOf(inst, 'institution') }}>
-        기관 {sign(inst)}
-        {formatAmount(inst)}
+        기관 {formatAmount(inst)}
       </span>
       <span className="text-gray-300">/</span>
       <span style={{ color: colorOf(personal, 'personal') }}>
-        개인 {sign(personal)}
-        {formatAmount(personal)}
+        개인 {formatAmount(personal)}
       </span>
     </div>
   )

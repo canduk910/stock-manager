@@ -1,5 +1,49 @@
 # 변경 이력
 
+## 2026-05-12 — 시세판/장운영정보 KIS WS → REST 폴링 전환 (자동매매 동시구독 41건 충돌 해소) + 수급 차트 부호 중복 버그 수정
+
+### 리팩토링 — 시세판 다중심볼 WS 제거, REST 일괄 폴링 전환
+
+**배경**: 동일 KIS 계정으로 외부 자동매매 시스템이 실시간 시세를 구독하는데, 본 프로젝트 시세판의 다중심볼 WS(`/ws/market-board`, 종목당 체결+호가 2 slot) + 장운영정보 WS(`/ws/market-status`, 3 slot 고정)가 KIS WS **계정당 41건 동시구독 한도**를 잠식해 자동매매 측 종목 수신이 중단됨. 시세판은 정보 표시(브라우징)용으로 실시간성보다 충돌 회피가 우선이라 판단해 REST 폴링으로 전환. 호가창(`/ws/quote/{symbol}`)과 체결통보(`/ws/execution-notice`)는 매매 결정 직접 영향(슬리피지/IOC)이라 KIS WS 유지.
+
+**KIS WS slot 회수 효과**: 시세판 N종목 × 2건(체결+호가) + 장운영정보 3건 = `N×2+3`건 회수 (N=20 가정 시 43건 → 자동매매 41건 한도 해소).
+
+**백엔드 (`stock/market.py`)**
+- 신규 `fetch_prices_batch(codes: list[str], market='KR'|'US')` — 시세판 다중심볼 일괄 폴링. 반환 `{code: {price, change, change_pct, prev_close, volume, sign}}`(`sign='2'`/`'5'`/`'3'`은 기존 WS shape 호환)
+- 1차 yfinance `yf.Tickers(...)` fast_info 일괄 호출(`_kr_yf_ticker_str()` 캐시로 `.KS`/`.KQ` suffix 자동 부착) → 2차 폴백 (빈응답·예외·모든 종목 None 시) KIS REST `FHKST01010100` 종목별 호출(분당 한도 보호 N≤20 가드). **부분 실패 시에도 성공 종목만 반환** (시세판은 부분 표시가 전체 실패보다 나음)
+- in-memory TTL 캐시: 장중 10초 / 장외 60초 (yfinance rate limit 방지)
+
+**라우터 (`routers/market_board.py`, `routers/quote.py`)**
+- 신규 `GET /api/market-board/prices?codes=&market=KR` — codes 콤마 구분, 최대 50개 가드, 빈 codes 400 + ServiceError(400) 사용
+- 제거 `WS /ws/market-board` (다중심볼 시세 WS) + 헬퍼 5종 일괄 삭제
+- 제거 `WS /ws/market-status` (장운영정보 멀티플렉스 WS)
+
+**서비스 (`services/quote_kis.py`)**
+- `subscribe_market_status` / `unsubscribe_market_status` / `_send_subscribe_market_status` / `_broadcast_market_status` / `_KR_MARKET_STATUS_TR_IDS` / `_market_status_subscribers` 6개 헬퍼 + `_handle_message`/`_run_ws`의 market-status 분기 제거. KISQuoteManager는 호가/체결/체결통보 단일 책임으로 단순화
+
+**프론트엔드**
+- 신규 `api/marketBoard.js:fetchPricesBatch(codes, market)` — GET 호출 + codes 콤마 직렬화
+- 신규 `hooks/useMarketBoard.js:usePricePolling(codes, market)` — `useMarketClock` phase 기반 장중 15s/장외 60s 자동 조정. cleanup·재마운트·codes 변경 시 setInterval 안전 재구성. 기존 `useMarketBoardWS` prices shape 100% 호환
+- 삭제 `hooks/useMarketBoardWS.js` (단일 책임 종료)
+- `hooks/useMarketClock.js` — `useWebSocket`/`buildMarketStatusUrl`/`onMessage` WS 분기 제거. `resolvePhaseByClock(now)` 시계 폴백 + 1분 setInterval 단독 사용
+- `pages/MarketBoardPage.jsx` — `useMarketBoardWS` import 제거, `usePricePolling(polledCodes, 'KR')` 연결, `polledCodes = useMemo(...)` 변경 시 자동 재구독
+
+**테스트**
+- `tests/unit/test_market_prices_batch.py` (신규 8건) — yfinance 정상 / 빈응답 폴백 / KIS REST 폴백 / 모든 종목 None 시 폴백 / 부분 실패 부분반환 / N>20 KIS REST 가드 / TTL 캐시 적중 / sign 부호 매핑
+- `tests/api/test_market_board_prices.py` (신규 6건) — 응답 shape / 부분 실패에도 200 / codes>50 400 / 빈 codes 400 / market missing 422 / market 기본값 'KR'
+- `tests/api/test_quote_ws_exchange.py` — `test_market_status_ws_*` 2건 제거(엔드포인트 폐지)
+- 전체 회귀 1,710 PASS (baseline 동일)
+
+**경계면 QA**: API 응답 shape ↔ `usePricePolling` 기대값 일치 / 제거된 WS 라우트가 프론트 코드에 잔존 0건 / 호가창·체결통보 WS 무변경 / 예외 계층 준수(`ServiceError` 사용, `HTTPException` 0건) / 프론트 빌드 862 modules (baseline 863 − useMarketBoardWS 1건 삭제, 예상치 부합).
+
+**도메인 자문 (OrderAdvisor)**: 시세판 폴링 주기 15s/60s는 주문 의사결정/안전마진에 **영향 없음** — 시세판은 정보 표시용, 매매는 OrderPage의 `useQuote` 실시간 WS로 진행. 호가창 즉시성 보존으로 슬리피지/IOC 정확도 유지. 안전마진가격은 일봉 기준 계산(밀리세컨드 정밀도 불필요).
+
+### 버그 수정 — 수급 차트 당일 요약 양수 부호 중복 (`++100억`)
+
+매크로 `SupplyDemandSection`(`SummaryChip`)과 종목 상세 `SupplyDemandPanel`이 `formatAmount(v)`로 이미 부호(`+`/`-`)를 포함해 반환하는 값에 외부 분기 `v > 0 ? '+' : ''`로 한 번 더 양수 부호를 추가해 `++100억`이 표시되었음. 음수는 외부 분기가 빈 문자열이라 `-100억` 정상 표시되어 비대칭 발생. 외부 부호 분기 4곳 제거(파일당 2곳 × 2파일) + `SummaryChip`의 `sign` 함수 제거. `formatAmount`만 호출하도록 단순화. 빌드 863 modules 변동 없음.
+
+---
+
 ## 2026-05-12 — 투자자별 수급정보(매크로+종목) + 백테스트 UI/UX 개선 (단위 토글·포트폴리오 모달)
 
 ### 신규 기능 1 — 투자자별 수급정보 V1 (개인/외국인/기관 11종)

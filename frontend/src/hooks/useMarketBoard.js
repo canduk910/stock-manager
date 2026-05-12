@@ -1,6 +1,7 @@
-import { useState, useCallback, useMemo } from 'react'
-import { fetchNewHighsLows, fetchSparklines, fetchIntradayOhlc, fetchCustomStocks, addCustomStock, removeCustomStock, fetchBoardOrder, saveBoardOrder } from '../api/marketBoard'
+import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
+import { fetchNewHighsLows, fetchSparklines, fetchIntradayOhlc, fetchCustomStocks, addCustomStock, removeCustomStock, fetchBoardOrder, saveBoardOrder, fetchPricesBatch } from '../api/marketBoard'
 import { fetchWatchlist } from '../api/watchlist'
+import { useMarketClock } from './useMarketClock'
 
 export function useMarketBoard() {
   const [data, setData] = useState(null)   // { new_highs, new_lows, updated_at }
@@ -133,4 +134,83 @@ export function useDisplayStocks() {
   }, [])
 
   return { watchlistStocks, customStocks, displayStocks, loaded, loadAll, addStock, removeStock, reorder }
+}
+
+
+// ── 시세판 가격 폴링 훅 (REST, 2026-05-12 WS 폐지 대체) ──────────────────────
+//
+// 기존 useMarketBoardWS 가 제공하던 `prices` shape (`{[code]: {price, change_pct, sign}}`)
+// 호환을 유지하여 MarketBoardPage 변경을 최소화한다.
+//
+// 폴링 주기는 useMarketClock 의 phase 기반 — 장중(09:00~15:30) 15s, 그 외 60s.
+
+/**
+ * 다중심볼 가격 폴링 훅.
+ *
+ * @param {string[]} codes 종목코드 목록
+ * @param {'KR'|'US'} market
+ * @returns {{
+ *   prices: Record<string, {price, change, change_pct, prev_close, volume, sign}>,
+ *   connected: boolean,
+ *   refresh: () => Promise<void>,
+ * }}
+ */
+export function usePricePolling(codes, market = 'KR') {
+  const [prices, setPrices] = useState({})
+  const [connected, setConnected] = useState(false)
+  const clock = useMarketClock()
+  const codesRef = useRef(codes)
+  codesRef.current = codes
+  const marketRef = useRef(market)
+  marketRef.current = market
+
+  // 장중/장외 폴링 주기 결정 — UN(통합 KRX+NXT, 09:00~15:30) 만 빠른 폴링
+  const intervalMs = useMemo(() => {
+    if ((market || 'KR').toUpperCase() === 'US') {
+      // US는 useUsMarketClock 비도입 — 단순히 KR 기준 시간 외 60s
+      return 60 * 1000
+    }
+    // KR — UN(통합) 시간대에만 15s, 그 외 60s
+    return clock.phase === 'UN' ? 15 * 1000 : 60 * 1000
+  }, [clock.phase, market])
+
+  const fetchOnce = useCallback(async () => {
+    const currCodes = codesRef.current || []
+    if (currCodes.length === 0) {
+      setPrices({})
+      setConnected(true)
+      return
+    }
+    try {
+      const { prices: data } = await fetchPricesBatch(currCodes, marketRef.current)
+      // sign 매핑: change > 0 → '2'(상승), < 0 → '5'(하락), 0 → '3'(보합)
+      // (기존 WS 응답이 KIS sign 표기를 유지했으므로 호환)
+      const enriched = {}
+      Object.entries(data || {}).forEach(([code, rec]) => {
+        const change = rec?.change ?? 0
+        const sign = change > 0 ? '2' : change < 0 ? '5' : '3'
+        enriched[code] = { ...rec, sign }
+      })
+      setPrices(enriched)
+      setConnected(true)
+    } catch (e) {
+      // 부분 실패 — 기존 prices 유지, connected만 false
+      setConnected(false)
+    }
+  }, [])
+
+  // 초기 fetch + 폴링 인터벌
+  useEffect(() => {
+    let mounted = true
+    fetchOnce()
+    const id = setInterval(() => {
+      if (mounted) fetchOnce()
+    }, intervalMs)
+    return () => {
+      mounted = false
+      clearInterval(id)
+    }
+  }, [fetchOnce, intervalMs, codes && codes.length, market])
+
+  return { prices, connected, refresh: fetchOnce }
 }

@@ -22,6 +22,23 @@ export async function fetchIntradayOhlc(items) {
   })
 }
 
+/** 다중심볼 가격 일괄 폴링 (REST 시세판용 — 2026-05-12 WS 폐지 대체).
+ *
+ * @param {string[]} codes 종목코드 목록 (최대 50개)
+ * @param {'KR'|'US'} market
+ * @returns {Promise<{prices: Record<string, {price, change, change_pct, prev_close, volume}>}>}
+ */
+export async function fetchPricesBatch(codes, market = 'KR') {
+  if (!codes || codes.length === 0) {
+    return { prices: {} }
+  }
+  const query = new URLSearchParams({
+    codes: codes.join(','),
+    market: (market || 'KR').toUpperCase(),
+  }).toString()
+  return apiFetch(`${BASE}/prices?${query}`)
+}
+
 // ── 시세판 별도 등록 종목 CRUD ────────────────────────────────────────────────
 
 export async function fetchCustomStocks() {

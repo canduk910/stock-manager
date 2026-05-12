@@ -11,11 +11,12 @@
  * 휴장 판정:
  *   1차: 주말 (토/일)
  *   2차: 공휴일은 v2에서 KIS API CTCA0903R 또는 백엔드 휴일 헬퍼 연동(현재 v1은 미반영)
- *   3차: /ws/market-status 메시지 도착 시 override (정밀 trigger)
+ *
+ * NOTE: /ws/market-status (장운영정보 WS) override 분기는 2026-05-12 폐지됨.
+ *       KIS WS slot 잠식(자동매매 41건 제한) 회수를 위해 시계 기반 폴백만 사용.
+ *       정밀 trigger(휴장/장개시/장종료)는 사용자가 필요시 새로고침으로 해결.
  *
  * 폴링: 1분 setInterval로 phase 재계산.
- *   phase 변경 시 React state 갱신 → 의존하는 훅(useQuote)의 buildUrl 함수 인스턴스가
- *   갱신되어 자동 재연결.
  *
  * 반환:
  *   { exchange, label, isHoliday, isClosed, phase }
@@ -25,8 +26,7 @@
  *   - isClosed: 거래 시간 외 여부
  *   - phase: 4구간 키 'NXT_PRE' | 'UN' | 'KRX_CLOSE' | 'NXT_AFTER' | 'CLOSED'
  */
-import { useEffect, useState, useRef } from 'react'
-import { useWebSocket, buildWsUrl } from './useWebSocket'
+import { useEffect, useState } from 'react'
 
 const KST_OFFSET_MIN = 9 * 60
 
@@ -57,8 +57,6 @@ export function resolvePhaseByClock(now = new Date()) {
   return { phase: 'CLOSED', exchange: 'UN', label: '장 마감', isHoliday: false, isClosed: true }
 }
 
-const buildMarketStatusUrl = () => buildWsUrl('/ws/market-status')
-
 export function useMarketClock() {
   const [phase, setPhase] = useState(() => resolvePhaseByClock(new Date()))
 
@@ -69,21 +67,6 @@ export function useMarketClock() {
     }, 60 * 1000)
     return () => clearInterval(id)
   }, [])
-
-  // /ws/market-status 메시지 override
-  // KIS 응답이 오면 백엔드가 정밀 phase 를 알려준다(휴장/장개시/장종료 등).
-  const phaseRef = useRef(phase)
-  phaseRef.current = phase
-
-  const onMessage = (msg) => {
-    if (msg && msg.type === 'market_status' && msg.exchange) {
-      // 백엔드 메시지는 거래소(UN/KRX/NXT)만 보낸다 — 시계 기반 phase 라벨은 유지하되
-      // exchange 만 갱신. 이로써 실제 KIS 가 알려주는 거래소 분기를 우선시한다.
-      setPhase(prev => prev.exchange === msg.exchange ? prev : { ...prev, exchange: msg.exchange })
-    }
-  }
-
-  useWebSocket(buildMarketStatusUrl, { onMessage })
 
   return phase
 }

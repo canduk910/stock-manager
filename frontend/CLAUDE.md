@@ -48,9 +48,9 @@ frontend/
 | `useWebSocket.js` | 공용 WS 훅. 지수 백오프 재연결(500ms→10s) + visibilitychange. **url 인자에 함수형 지원** — `connect()` 안에서 lazy 평가, 1008 close 후 재시도 시 신선한 access_token 자동 반영 (stale-token 무한 백오프 방지). 호출자는 모듈 함수 또는 useCallback로 안정 reference 전달 |
 | `useQuote.js` | 실시간 호가 WS. `useQuote(symbol, market='KR', exchange='auto')`. exchange 쿼리 자동 부착. rAF throttle 자체 관리 |
 | `useExecutionNotice.js` | 체결통보(H0STCNI0) WS 수신. `mapOrdExgGb(code)` 헬퍼로 응답에 `exchange` 필드 (1=KRX/2=NXT/3=SOR-KRX/4=SOR-NXT, NULL→KRX 폴백) |
-| `useMarketClock.js` | KST 4구간 KR 거래소 자동 판정 (`UN`/`KRX`/`NXT`). `resolvePhaseByClock(now)` 순수 함수 export. 1분 setInterval + `/ws/market-status` override |
+| `useMarketClock.js` | KST 4구간 KR 거래소 자동 판정 (`UN`/`KRX`/`NXT`). `resolvePhaseByClock(now)` 순수 함수 export. 1분 setInterval **단독 (WS override 제거 — `/ws/market-status` 폐지로 시계 폴백만 사용)** |
 | `useUsMarketClock.js` | ET 4구간 미국 시장 (`pre`/`regular`/`after`/`closed`). `Intl.DateTimeFormat('en-US', {timeZone:'America/New_York'})` DST 자동. `US_HOLIDAYS_ET` 2026~2028 30일 + `isUsHoliday()` 헬퍼 (주말+공휴일) |
-| `useMarketBoard.js` | useMarketBoard (신고가/신저가 + sparkline + ohlc) + useDisplayStocks (관심+별도등록 병합+순서) |
+| `useMarketBoard.js` | useMarketBoard (신고가/신저가 + sparkline + ohlc) + useDisplayStocks (관심+별도등록 병합+순서) + **usePricePolling(codes, market)** — `fetchPricesBatch` 폴링(`useMarketClock` phase 기반 장중 15s / 장외 60s 자동 조정). 기존 WS prices shape 호환 (`{[code]: {price, change, change_pct, prev_close, volume, sign}}`) |
 | `useAdvisory.js` | useAdvisoryStocks/useAdvisoryData/useAdvisoryReport/useAdvisoryOhlcv/**useStockSupplyDemand**(code, days) |
 | `useMacro.js` | 섹션별 독립 훅 (Indices/News/Sentiment/InvestorQuotes/**SupplyDemand(market, days)**). 부분 실패 격리 |
 | `usePortfolioAdvisor.js` | analyze/loadLatest/loadById. stale closure 해결 (loadHistory 의존성 없음) |
@@ -138,7 +138,7 @@ frontend/
 | WatchlistPage | `/watchlist` | |
 | DetailPage | `/detail/:symbol` | 재무분석/종합 리포트 (서브탭 5개: 요약/기본적/기술적/AI자문/**수급·투자자**) |
 | OrderPage | `/order` | 5탭 (주문/미체결/체결/이력/예약) |
-| MarketBoardPage | `/market-board` | 시세판 (실시간 WS) |
+| MarketBoardPage | `/market-board` | 시세판 (**REST 일괄 폴링** — yfinance 일괄 → KIS REST 폴백. `useMarketBoardWS` 폐지 → `usePricePolling`로 교체, 장중 15s / 장외 60s) |
 | MacroPage | `/macro` | 매크로 분석 |
 | PortfolioPage | `/portfolio` | 통합 (체제+배분+수익+AI자문) |
 | ReportPage | `/reports` | 데일리 추천 (KR/US 토글, 3컨셉 탑픽) |
@@ -173,7 +173,7 @@ frontend/
 - **WatchlistDashboard**: 종목명 클릭 → `/detail/:symbol`. 통화 배지 (US=`[US]`). `partial_failure` 표시 — 외부 API 부분 실패 영역(price/metrics/financials)은 회색 + ⚠ + tooltip "데이터 일시 미수집". @dnd-kit 드래그핸들(⠿) 행 DnD
 - **DetailPage**: StockHeader → KLineChartPanel → 2탭. 종합 리포트 5개 서브탭(요약/기본적/기술적/AI자문/수급·투자자). advisory + 수급은 lazy load
 - **OrderPage**: 5탭. 공유 상태(symbol/symbolName/market) 최상단. `isMounted` ref 중복 호출 방지. 10초 자동 폴링(미체결/체결), 체결통보 WS 수신 시 토스트+갱신, 발송 후 3초 딜레이 갱신
-- **MarketBoardPage**: `useDisplayStocks` 훅 (api/ 직접 import 금지). @dnd-kit 카드 순서 (DB 영속)
+- **MarketBoardPage**: `useDisplayStocks` 훅 (api/ 직접 import 금지). @dnd-kit 카드 순서 (DB 영속). **가격 갱신은 `usePricePolling(polledCodes, 'KR')` REST 폴링** — KIS WS 다중구독 폐지(자동매매 동시구독 41건 충돌 해소)
 
 ### 잔고 테이블 컬럼 순서
 - **HoldingsTable(KR)**: 거래소 → 종목코드 → 종목명 → 비중 → 보유수량 → 평가금액 → 매입단가 → 현재가 → 평가손익 → 수익률 → 시총 → PER → ROE → PBR → 배당수익률 → 주문

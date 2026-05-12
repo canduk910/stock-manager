@@ -218,39 +218,5 @@ async def execution_notice_ws(websocket: WebSocket):
         manager.unsubscribe_notice(queue)
 
 
-@router.websocket("/ws/market-status")
-async def market_status_ws(websocket: WebSocket):
-    """장운영정보(H0UNMKO0+H0STMKO0+H0NXMKO0) 통합 멀티플렉스 WebSocket.
-
-    클라이언트(useMarketClock 등)는 KST 시계 기반 4구간 자동 분기를 1차로 쓰되,
-    이 WS 메시지가 도착하면 정밀 trigger(휴장/장개시/장종료)로 override 한다.
-
-    응답 메시지 포맷: `{type: "market_status", exchange: "UN"|"KRX"|"NXT", tr_id, raw}`.
-    """
-    token = websocket.query_params.get("token")
-    if not token:
-        await websocket.close(code=1008)
-        return
-    try:
-        from services.auth_service import verify_token
-        verify_token(token)
-    except Exception:
-        await websocket.close(code=1008)
-        return
-    await websocket.accept()
-    manager = get_manager()
-    queue: asyncio.Queue = asyncio.Queue(maxsize=50)
-    await manager.subscribe_market_status(queue)
-    try:
-        while True:
-            try:
-                msg = await asyncio.wait_for(queue.get(), timeout=30.0)
-                await websocket.send_json(msg)
-            except asyncio.TimeoutError:
-                await websocket.send_json({"type": "ping"})
-    except WebSocketDisconnect:
-        pass
-    except Exception as e:
-        logger.error("[MarketStatusWS] %s", e)
-    finally:
-        manager.unsubscribe_market_status(queue)
+# NOTE: /ws/market-status (장운영정보 멀티플렉스 H0UNMKO0/H0STMKO0/H0NXMKO0) 폐지 (2026-05-12).
+#       KIS WS slot 잠식 회수를 위해 제거. useMarketClock은 시계 기반 폴백만 사용.

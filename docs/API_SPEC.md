@@ -661,16 +661,9 @@ KIS 당일 체결 내역과 로컬 DB 대사(Reconciliation). 로컬 `PLACED`/`P
 
 ## 실시간 호가 — `routers/quote.py`
 
-### `WS /ws/market-status` (2026-05-08 신규)
+### ~~`WS /ws/market-status`~~ (2026-05-12 폐지)
 
-장운영정보 통합 멀티플렉스 WebSocket. KIS `H0UNMKO0`(통합) + `H0STMKO0`(KRX) + `H0NXMKO0`(NXT) 3개 TR_ID 를 한 번에 구독.
-
-**Query**:
-- `token` — JWT (인증)
-
-**메시지**: `{"type":"market_status", "exchange":"UN"|"KRX"|"NXT", "tr_id":"H0UN/ST/NXMKO0", "raw":"..."}`
-
-**용도**: 프론트 `useMarketClock` 훅이 KST 시계 기반 4구간 자동 분기를 하다가 이 WS 메시지가 오면 정밀 trigger(휴장/장개시/장종료) 로 override. 휴장일 자동 처리.
+> **제거됨.** 장운영정보 멀티플렉스 WS(`H0UNMKO0`/`H0STMKO0`/`H0NXMKO0`)는 동일 KIS 계정을 공유하는 외부 자동매매 시스템과의 동시구독 41건 충돌 원인 중 하나로, slot 3건 회수를 위해 폐지. 프론트 `useMarketClock`은 KST 시계 기반 4구간 폴백(`resolvePhaseByClock(now)` + 1분 setInterval)을 단독 사용한다.
 
 ---
 
@@ -1170,8 +1163,12 @@ CREATE TABLE reservations (
 ### `PUT /api/market-board/order`
 시세판 종목 표시 순서 저장 (전체 교체). 바디: `{"items": [{"code": "005930", "market": "KR"}, ...]}`. 응답: `{"ok": true}`
 
-### `WS /ws/market-board`
-다중심볼 실시간 시세 WebSocket. 구독: `{"action": "subscribe", "symbols": ["005930"]}`. 시세: `{"type": "prices", "data": {"005930": {"price", "change_pct", "change", "sign", "open", "high", "low"}}}`. KIS WS 연결 시 시가/고가/저가 실시간 갱신.
+### `GET /api/market-board/prices?codes=&market=KR` (2026-05-12 신규)
+다중심볼 가격 일괄 폴링 — `WS /ws/market-board` 대체. 쿼리: `codes`(콤마 구분, 최대 50개) + `market='KR'|'US'`(기본 `KR`). 응답: `{"prices": {"005930": {"price", "change", "change_pct", "prev_close", "volume", "sign"}, ...}}`. yfinance `yf.Tickers(...)` fast_info 일괄 1차 → 빈응답·예외 시 KIS REST `FHKST01010100` 폴백(분당 한도 보호 N≤20 가드). 부분 실패 시에도 200 + 성공 종목만 반환. in-memory TTL 캐시 장중 10s / 장외 60s. 에러: 400(`codes` 빈 값/50개 초과), 422(missing).
+
+### ~~`WS /ws/market-board`~~ (2026-05-12 폐지)
+
+> **제거됨.** 다중심볼 실시간 시세 WebSocket은 동일 KIS 계정을 공유하는 외부 자동매매 시스템과 동시구독 41건 한도를 잠식해 충돌 원인이 되었음. `GET /api/market-board/prices` REST 일괄 폴링으로 대체. 호가창(`/ws/quote/{symbol}`)·체결통보(`/ws/execution-notice`)는 유지.
 
 ---
 

@@ -268,6 +268,7 @@ pykrx로 KOSPI + KOSDAQ 전 종목 코드/이름/시장을 수집하고 7일간 
 | `fetch_valuation_history(code, years)` | 월말 PER/PBR 시계열 (KRX 인증 필요, 미인증 시 빈 배열) | 24시간 |
 | `fetch_period_returns(code)` | 당일/3개월/6개월/1년 주가 수익률 (%) | 1시간 |
 | `fetch_market_metrics(code)` | 잔고/AI자문용 계량지표 (시가총액·PER·PBR·ROE·배당수익률) | 6시간 |
+| `fetch_prices_batch(codes, market='KR'\|'US')` *(2026-05-12)* | 시세판 다중심볼 일괄 폴링. yfinance `yf.Tickers(...)` fast_info 1차 → 빈응답·예외 시 KIS REST `FHKST01010100` 폴백(N≤20 가드). 부분 실패 시 성공 종목만 반환. 반환: `{code: {price, change, change_pct, prev_close, volume, sign}}` | in-memory 10s(장중) / 60s(장외) |
 
 #### yfinance ticker 선택 (`_kr_yf_ticker_str`)
 

@@ -1,7 +1,10 @@
-"""R_5 (KRX+NXT 통합시세): /ws/quote/{symbol} exchange 쿼리 + /ws/market-status WS API 테스트.
+"""R_5 (KRX+NXT 통합시세): /ws/quote/{symbol} exchange 쿼리 WS API 테스트.
 
-KIS WS 실연결은 모킹하지 않고, KISQuoteManager 의 subscribe/subscribe_market_status 만 mock.
+KIS WS 실연결은 모킹하지 않고, KISQuoteManager 의 subscribe 만 mock.
 verify_token 도 mock 으로 통과시켜 인증 분기 검증과 본문 흐름 검증을 분리.
+
+NOTE: /ws/market-status (장운영정보 WS) 관련 테스트는 2026-05-12 엔드포인트 폐지에 따라 제거됨.
+      WS slot 잠식 회수를 위해 시계 기반 폴백만 사용.
 """
 import asyncio
 from unittest.mock import patch
@@ -26,14 +29,6 @@ def test_quote_ws_rejects_missing_token(app):
     client = TestClient(app)
     with pytest.raises(Exception):
         with client.websocket_connect("/ws/quote/005930"):
-            pass
-
-
-def test_market_status_ws_rejects_missing_token(app):
-    """/ws/market-status: token 없으면 1008 close."""
-    client = TestClient(app)
-    with pytest.raises(Exception):
-        with client.websocket_connect("/ws/market-status"):
             pass
 
 
@@ -85,28 +80,3 @@ def test_quote_ws_subscribe_default_exchange_is_auto(app):
             pass
 
     assert captured.get("exchange") == "auto"
-
-
-def test_market_status_ws_subscribes_market_status(app):
-    """/ws/market-status 가 manager.subscribe_market_status 를 호출한다."""
-    called = {"sub": False, "unsub": False}
-
-    class FakeManager:
-        async def subscribe_market_status(self, queue):
-            called["sub"] = True
-
-        def unsubscribe_market_status(self, queue):
-            called["unsub"] = True
-
-    with patch("routers.quote.get_manager", return_value=FakeManager()), \
-         patch("services.auth_service.verify_token", return_value={"sub": "1"}):
-        client = TestClient(app)
-        try:
-            with client.websocket_connect("/ws/market-status?token=abc") as ws:
-                ws.close()
-        except Exception:
-            pass
-
-    assert called["sub"] is True
-    # close 후 finally 블록에서 unsubscribe
-    assert called["unsub"] is True

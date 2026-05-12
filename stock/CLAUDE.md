@@ -18,7 +18,7 @@ CLI와 API 라우터 양쪽에서 공용. 비즈니스 데이터는 SQLAlchemy O
 | `indicators.py` | 기술 지표 순수 계산 (MACD/RSI Wilder/Stochastic/BB/MA/ATR/`volume_signal`/`bb_position`). 외부 의존 없음. `calc_technical_indicators(ohlcv)` 최대 300봉. |
 | `utils.py` | `is_domestic(code)` 6자리 숫자=국내 / `is_fno(code)` FNO 단축코드 판별. |
 | `symbol_map.py` | 종목코드↔종목명 매핑 (7일 캐시). `code_to_name()`. pykrx 실패 시 DART corpCode.xml fallback. |
-| `market.py` | yfinance 기반 KR 시세/시총/PER/PBR/배당/섹터. `_kr_yf_ticker_str(code)` `.KS/.KQ` suffix 자동 (score≥1 검증). PER/PBR/ROE는 yfinance 1차 실패 시 income_stmt/대차/분기 TTM으로 직접 계산. |
+| `market.py` | yfinance 기반 KR 시세/시총/PER/PBR/배당/섹터. `_kr_yf_ticker_str(code)` `.KS/.KQ` suffix 자동 (score≥1 검증). PER/PBR/ROE는 yfinance 1차 실패 시 income_stmt/대차/분기 TTM으로 직접 계산. **`fetch_prices_batch(codes, market='KR'\|'US')`** — 시세판 다중심볼 일괄 폴링. yfinance `yf.Tickers(...)` fast_info 1차 → 빈응답·예외 시 KIS REST `FHKST01010100` 폴백 (분당 한도 보호 N≤20 가드). in-memory TTL 캐시(장중 10s/장외 60s). `{code: {price, change, change_pct, prev_close, volume, sign}}` 반환, 부분 실패 부분 반환 (시세판 부분 표시 우선). |
 | `market_board.py` | 시세판: 신고가/신저가 탐지 + sparkline + 당일 OHLC 배치 조회. |
 | `market_board_store.py` | 시세판 별도 등록 종목 CRUD. `db/repositories/market_board_repo.py` 위임. |
 | `dart_fin.py` | OpenDart 재무제표 (최대 10년) + `fetch_quarterly_financials()`(누계→분기) + `calc_interest_coverage()`. 연도별 API 호출로 각 연도 고유 `rcept_no`(보고서 링크) 보장. |

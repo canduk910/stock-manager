@@ -1,35 +1,39 @@
-import { useEffect, useRef, useState } from 'react'
-import { useMarketBoard, useDisplayStocks } from '../hooks/useMarketBoard'
-import { useMarketBoardWS } from '../hooks/useMarketBoardWS'
+import { useEffect, useMemo, useState } from 'react'
+import { useMarketBoard, useDisplayStocks, usePricePolling } from '../hooks/useMarketBoard'
 import NewHighLowSection from '../components/market-board/NewHighLowSection'
 import CustomStockSection from '../components/market-board/CustomStockSection'
 
 export default function MarketBoardPage() {
   const { data, sparklines, ohlc, loading, error, load, loadSparklines } = useMarketBoard()
-  const { prices, connected, subscribe, unsubscribe } = useMarketBoardWS()
   const { watchlistStocks, customStocks, displayStocks, loadAll, addStock, removeStock, reorder } = useDisplayStocks()
-  const subscribedRef = useRef(new Set())
+
+  // 폴링 대상 코드: 신고가/신저가 + 관심종목 + 별도등록(중복 제거)
+  // 시세판 표시 종목은 모두 KR 가정 (해외는 별도 처리 X — 기존 동작 유지)
+  const polledCodes = useMemo(() => {
+    const set = new Set()
+    ;(data?.new_highs || []).forEach(s => set.add(s.code))
+    ;(data?.new_lows  || []).forEach(s => set.add(s.code))
+    displayStocks.forEach(s => {
+      if (s.market === 'KR' || !s.market) set.add(s.code)
+    })
+    return Array.from(set)
+  }, [data, displayStocks])
+
+  const { prices, connected } = usePricePolling(polledCodes, 'KR')
 
   // 초기 데이터 로드
   useEffect(() => {
     load()
   }, [load])
 
-  // 마운트 시: watchlist + custom stocks 병렬 로드 → WS 구독 + sparkline
+  // 마운트 시: watchlist + custom stocks 병렬 로드 + sparkline 배치
   useEffect(() => {
     const init = async () => {
       const { watchlist: wl, custom } = await loadAll()
-
-      // 전체 종목 WS 구독 + sparkline
       const allItems = [
         ...wl,
         ...custom.filter(c => !wl.some(w => w.code === c.code && w.market === c.market)),
       ]
-      const newSyms = allItems.map(s => s.code).filter(c => !subscribedRef.current.has(c))
-      if (newSyms.length > 0) {
-        newSyms.forEach(c => subscribedRef.current.add(c))
-        subscribe(newSyms)
-      }
       if (allItems.length > 0) {
         loadSparklines(allItems.map(s => ({ code: s.code, market: s.market })))
       }
@@ -38,47 +42,19 @@ export default function MarketBoardPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // 신고가/신저가 종목 WS 구독
-  useEffect(() => {
-    if (!data) return
-    const symbols = [
-      ...(data.new_highs || []).map(s => s.code),
-      ...(data.new_lows  || []).map(s => s.code),
-    ]
-    if (symbols.length === 0) return
-    const newSyms = symbols.filter(s => !subscribedRef.current.has(s))
-    if (newSyms.length === 0) return
-    newSyms.forEach(s => subscribedRef.current.add(s))
-    subscribe(newSyms)
-  }, [data, subscribe])
-
-  // custom 종목 추가
+  // custom 종목 추가 — 스파크라인만 별도 로드 (가격은 다음 폴링 사이클에 자동 반영)
   const handleAddStock = async (item) => {
     try {
       await addStock(item)
-      if (!subscribedRef.current.has(item.code)) {
-        subscribedRef.current.add(item.code)
-        subscribe([item.code])
-      }
       loadSparklines([{ code: item.code, market: item.market }])
     } catch (e) {
-      // 중복(409) 등 에러는 무시 (이미 있으면 표시만)
+      // 중복(409) 등 에러는 무시
     }
   }
 
-  // custom 종목 삭제
+  // custom 종목 삭제 — 폴링 코드 셋이 useMemo로 자동 갱신되어 추가 액션 불필요
   const handleRemoveStock = async (code, market) => {
     await removeStock(code, market)
-    // watchlist에도 없으면 WS unsubscribe
-    const inWatchlist = watchlistStocks.some(s => s.code === code && s.market === market)
-    const inHighLow = [
-      ...(data?.new_highs || []),
-      ...(data?.new_lows  || []),
-    ].some(s => s.code === code)
-    if (!inWatchlist && !inHighLow) {
-      subscribedRef.current.delete(code)
-      unsubscribe([code])
-    }
   }
 
   return (
@@ -96,7 +72,7 @@ export default function MarketBoardPage() {
         </div>
         <div className="flex items-center gap-2">
           <span className={`w-2 h-2 rounded-full ${connected ? 'bg-green-400' : 'bg-gray-400'}`} />
-          <span className="text-xs text-gray-500">{connected ? '실시간' : '연결 중'}</span>
+          <span className="text-xs text-gray-500">{connected ? '폴링' : '연결 중'}</span>
           <button
             onClick={load}
             disabled={loading}

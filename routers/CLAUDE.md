@@ -13,10 +13,10 @@
 | `detail.py` | `/api/detail/*` | 10년 재무 + PER/PBR 히스토리 + 종합 리포트 |
 | `_kis_auth.py` | (내부) | KIS 인증 공통 (토큰 관리, hashkey, **사용자별 토큰 캐시 dict**). `get_kis_credentials(user_id)` 사용자 키 우선 + 운영자 키 폴백 |
 | `order.py` | `/api/order/*` | 주문 발송/정정/취소/미체결/체결/이력/예약주문/FNO 시세 |
-| `quote.py` | `WS /ws/quote/{symbol}`, `WS /ws/execution-notice`, `WS /ws/market-status`, `GET /api/quote/us/{symbol}/orderbook`, `GET /api/quote/us/{symbol}/detail` | 실시간 호가 WS (KR/FNO/US) + 체결통보 WS + 장운영정보 멀티플렉스 WS (H0UNMKO0/H0STMKO0/H0NXMKO0). `/ws/quote/{symbol}?exchange=auto\|UN\|KRX\|NXT` (기본 auto, KST 시계 4구간 자동 분기). US REST 폴백 — orderbook(HHDFS76200100, 10단계) + detail(HHDFS76200200, 시/고/저/거래량/52주). 응답 200/503(키 부재)/504(KIS None) |
+| `quote.py` | `WS /ws/quote/{symbol}`, `WS /ws/execution-notice`, `GET /api/quote/us/{symbol}/orderbook`, `GET /api/quote/us/{symbol}/detail` | 실시간 호가 WS (KR/FNO/US) + 체결통보 WS. `/ws/quote/{symbol}?exchange=auto\|UN\|KRX\|NXT` (기본 auto, KST 시계 4구간 자동 분기). US REST 폴백 — orderbook(HHDFS76200100, 10단계) + detail(HHDFS76200200, 시/고/저/거래량/52주). 응답 200/503(키 부재)/504(KIS None). **장운영정보 WS(`/ws/market-status`) 제거 — `useMarketClock` 시계 폴백 단독 사용 (KIS WS slot 3건 회수)** |
 | `advisory.py` | `/api/advisory/*` | AI자문 종목 관리 + 데이터 수집(+리서치) + AI 리포트 v3 통합. `POST /research` 수동 리서치 수집. `GET /{code}/analyst-reports` (KR=네이버/US=yfinance). `POST /{code}/chat` 보고서 컨텍스트 stateless 챗봇. `POST /{code}/analyze` body `AnalyzeBody(user_comment: Optional[str])` (1000자) — 양면 평가 트리거. `GET /{code}/supply-demand?days=10..60` (기본 30, 국내 6자리 전용) — 종목별 투자자 수급 + advisory_note |
 | `search.py` | `GET /api/search` | 종목 검색 (KR=자동완성, US=티커 검증, FNO=마스터) |
-| `market_board.py` | `/api/market-board/*`, `WS /ws/market-board` | 신고가/신저가 + sparkline + 당일 OHLC + 시세판 종목 CRUD + 순서 관리 + 실시간 WS |
+| `market_board.py` | `/api/market-board/*` | 신고가/신저가 + sparkline + 당일 OHLC + 시세판 종목 CRUD + 순서 관리 + **다중심볼 가격 일괄 폴링(`GET /prices?codes=&market=`, 최대 50개, yfinance 일괄 → KIS REST 폴백 + TTL 캐시)**. **다중심볼 WS(`/ws/market-board`) 제거 — KIS WS slot 회수(자동매매 충돌 해소)** |
 | `macro.py` | `/api/macro/*` | 매크로 분석: 지수/뉴스/심리/투자자/금리차/신용스프레드/환율/원자재/섹터히트맵/국면/**수급**. 12개 GET. `GET /supply-demand?market=kospi\|kosdaq&days=10..60` (기본 20) — 시장별 투자자(개인/외국인/기관 11종) 일별+누적 |
 | `portfolio_advisor.py` | `/api/portfolio-advisor/*` | AI 포트폴리오 자문: `POST /analyze`, `POST /chat` (require_admin, `service_name="portfolio_chat"`), `GET /history`, `GET /history/{id}`. `AnalyzeBody.user_comment: Optional[str]` (1000자) — 캐시 키 SHA256에 코멘트 strip 포함 |
 | `report.py` | `/api/reports/*` | 일일 보고서 + 추천 이력 + 성과 통계 + 매크로 체제 이력. 8개 GET. `GET /by-date` 날짜+시장 조회. `/{report_id}` 패스 파라미터는 마지막 등록 |
@@ -109,7 +109,7 @@ GET  /api/order/fno-price            선물옵션 현재가
 | `H0UNCNT0` / `H0UNASP0` | 통합(KRX+NXT) 실시간 체결가/호가 WS (09:00~15:30) |
 | `H0STCNT0` / `H0STASP0` | KRX 단독 WS (15:30~15:40 마감) |
 | `H0NXCNT0` / `H0NXASP0` | NXT 단독 WS (08:00~09:00, 15:40~20:00) |
-| `H0UNMKO0` / `H0STMKO0` / `H0NXMKO0` | 장운영정보 — `/ws/market-status` 멀티플렉스 |
+| ~~`H0UNMKO0` / `H0STMKO0` / `H0NXMKO0`~~ | ~~장운영정보 WS — 제거됨 (2026-05-12). `useMarketClock` 시계 폴백 사용~~ |
 | `H0STCNI0` | 체결통보 WS (AES-CBC, `KIS_HTS_ID` 필요) |
 | `JTTT1002U` / `JTTT1006U` | 해외 매수/매도 |
 | `TTTS3018R` | 해외 미체결 |
