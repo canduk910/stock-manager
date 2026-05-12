@@ -61,9 +61,12 @@ logger = logging.getLogger(__name__)
 # ── 공유 캐시 stampede 방지 (2026-05-12) ─────────────────────────────────────
 # 동시 N명이 동일 (code, market) refresh 호출 시 첫 호출만 외부 API 수집,
 # 나머지는 Lock 대기 후 캐시 hit 반환. threading.Lock 사용 (FastAPI는 동기 핸들러 threadpool).
+# perf_counter() 기반 메모리 플래그로 timezone 무관 — DB updated_at은 KST tz-aware ISO이고
+# 호스트 시각이 UTC(CI 등)인 경우 naive 비교 시 ±9h 오차로 윈도우 우회가 무효화될 수 있어 분리.
 _REFRESH_LOCKS: dict[tuple[str, str], threading.Lock] = {}
 _REFRESH_LOCKS_GUARD = threading.Lock()
-_REFRESH_RECENT_SECONDS = 5.0  # Lock 획득 후 직전 캐시가 최근이면 fetcher 우회
+_REFRESH_LAST_DONE: dict[tuple[str, str], float] = {}
+_REFRESH_RECENT_SECONDS = 5.0
 
 
 def _get_refresh_lock(code: str, market: str) -> threading.Lock:
@@ -89,30 +92,22 @@ def refresh_stock_data(code: str, market: str, name: str, user_id: int = 1) -> d
     """
     from services import _telemetry as _tel
     import time as _time
-    from datetime import datetime, timedelta
 
+    key = (code.upper(), market.upper())
     lock = _get_refresh_lock(code, market)
     acquired = lock.acquire(timeout=120)
     if not acquired:
         _tel.record_event("advisory.refresh.lock_timeout")
         raise ExternalAPIError("동일 종목 새로고침이 진행 중입니다. 잠시 후 다시 시도해주세요.")
     try:
-        # Lock 획득 직후 캐시 hit 우회 — 직전 호출이 방금 채웠으면 fetcher 생략
-        existing = advisory_store.get_cache(user_id, code, market)
-        if existing and existing.get("updated_at"):
-            try:
-                upd = datetime.fromisoformat(existing["updated_at"])
-                # KST tz-aware일 수 있어 naive로 통일
-                upd_naive = upd.replace(tzinfo=None)
-                now_naive = datetime.now().replace(tzinfo=None)
-                # KST(+9) ISO와 local now() 비교 보정 (대략적 매우 짧은 시간 윈도우만 활용)
-                age = abs((now_naive - upd_naive).total_seconds())
-                # KST=local 가정 9h 보정 가능 — 보수적으로 abs로 처리
-                if age < _REFRESH_RECENT_SECONDS:
-                    _tel.record_event("advisory.refresh.stampede_skip")
-                    return existing
-            except Exception:
-                pass
+        # Lock 획득 직후 stampede 우회 — 직전 호출이 방금 채웠으면 fetcher 생략
+        # perf_counter() 단조 증가, timezone 무관
+        last_done = _REFRESH_LAST_DONE.get(key)
+        if last_done is not None and (_time.perf_counter() - last_done) < _REFRESH_RECENT_SECONDS:
+            existing = advisory_store.get_cache(user_id, code, market)
+            if existing:
+                _tel.record_event("advisory.refresh.stampede_skip")
+                return existing
 
         _t0 = _time.perf_counter()
         # 4단계 병렬 실행
@@ -155,11 +150,11 @@ def refresh_stock_data(code: str, market: str, name: str, user_id: int = 1) -> d
                 pool.submit(_run_research),
             ]
             for fut in as_completed(futures):
-                key, val, dur, err = fut.result()
-                results[key] = val
-                phase_times[key] = dur
+                phase, val, dur, err = fut.result()
+                results[phase] = val
+                phase_times[phase] = dur
                 if err is not None:
-                    logger.warning("refresh phase %s failed for %s: %s", key, code, err)
+                    logger.warning("refresh phase %s failed for %s: %s", phase, code, err)
 
         # 텔레메트리 (병렬이어도 각 phase wall-time 기록)
         _tel.observe("advisory.phase.fundamental.duration_ms", phase_times.get("fundamental", 0) * 1000.0)
@@ -175,6 +170,7 @@ def refresh_stock_data(code: str, market: str, name: str, user_id: int = 1) -> d
             strategy_signals=results["strategy_signals"],
             research_data=results["research_data"],
         )
+        _REFRESH_LAST_DONE[key] = _time.perf_counter()
         return advisory_store.get_cache(user_id, code, market) or {}
     finally:
         lock.release()

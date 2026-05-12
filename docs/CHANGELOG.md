@@ -1,5 +1,26 @@
 # 변경 이력
 
+## 2026-05-12 (후속) — advisory_service stampede 우회 버그 수정
+
+### 버그 수정 — refresh_stock_data 동시 호출 시 fetcher 중복 호출
+
+**증상**: CI에서 `tests/api/test_advisory_refresh_dedup.py::test_concurrent_refresh_deduplicates` 실패. 5 thread 동시 호출 시 fetcher가 1회가 아니라 5회 호출됨 (`fundamental called 5x`).
+
+**Root cause**: `services/advisory_service.py:refresh_stock_data()` 내 variable shadowing.
+- 함수 진입 시 `key = (code.upper(), market.upper())`를 stampede 캐시 키로 정의
+- 그러나 `as_completed(futures)` 루프에서 `key, val, dur, err = fut.result()`가 같은 `key` 변수를 phase 문자열("fundamental" 등)로 덮어씀
+- 결과적으로 `_REFRESH_LAST_DONE[key] = perf_counter()`가 잘못된 문자열 키에 저장 → 후속 thread의 tuple 키 조회는 항상 miss → stampede 우회 무효화
+
+**보조 발견**: stampede 윈도우 비교가 `datetime.now().replace(tzinfo=None)` vs KST tz-aware ISO `updated_at`을 naive로 비교 → CI(UTC) 환경에서 ±9h 오차로 5s 윈도우가 무조건 초과되던 잠재 버그도 동시 존재.
+
+**변경**:
+- `services/advisory_service.py` — `as_completed` 루프 변수 `key` → `phase`로 rename (shadowing 제거)
+- timezone-naive `updated_at` 비교를 in-memory `_REFRESH_LAST_DONE[(code, market)] = perf_counter()` 단조 시계 비교로 교체. 호스트 timezone 무관, datetime/timedelta import 제거
+
+**검증**:
+- `tests/api/test_advisory_refresh_dedup.py` GREEN (fundamental/technical/research/strategy 각 1회)
+- `tests/unit/test_advisory_parallel.py` + `tests/unit/test_advisory_cache_shared.py` 회귀 PASS
+
 ## 2026-05-12 — 중복 데이터 최소화 (공유 캐시 전환) + 핫 병목 비동기화 + 멀티유저 격리 보강 + 매크로 뉴스/투자자 공유 캐싱
 
 ### 리팩토링 — 트랙 1: `advisory_cache` 공유 캐시 전환
