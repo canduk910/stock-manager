@@ -66,11 +66,17 @@ def chat(body: ChatBody, _user: dict = Depends(require_admin)):
 
 @router.get("/history")
 def get_history(limit: int = 20, _user: dict = Depends(require_admin)):
-    """포트폴리오 자문 이력 목록 (최신순, 본문 제외)."""
-    return portfolio_advisor_service.get_report_history(limit)
+    """포트폴리오 자문 이력 목록 (본인 것만, 최신순, 본문 제외).
+
+    2026-05-12: user_id 격리 — 멀티유저 환경에서 본인 보고서만 조회.
+    """
+    return portfolio_advisor_service.get_report_history(limit, user_id=_user.get("id"))
 
 
 @router.get("/history/{report_id}")
 def get_report(report_id: int, _user: dict = Depends(require_admin)):
-    """특정 자문 리포트 상세 조회."""
-    return portfolio_advisor_service.get_report_by_id(report_id)
+    """특정 자문 리포트 상세 조회 (본인 것만).
+
+    2026-05-12: user_id 격리 — 다른 사용자 리포트 접근은 404로 차단(존재 노출 회피).
+    """
+    return portfolio_advisor_service.get_report_by_id(report_id, user_id=_user.get("id"))

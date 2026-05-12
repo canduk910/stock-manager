@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { useDetailReport } from '../hooks/useDetail'
+import { useDetailBundle } from '../hooks/useDetail'
 import { useAdvisoryData, useAdvisoryReport } from '../hooks/useAdvisory'
 import StockHeader from '../components/detail/StockHeader'
 import KLineChartPanel from '../components/detail/KLineChartPanel'
@@ -64,7 +64,9 @@ export default function DetailPage() {
   const [subTab, setSubTab] = useState('cagr')
   // 사용자 가설 코멘트 (AI 자문 서브탭) — 페이지 이동 시 초기화 (2026-05-07)
   const [userComment, setUserComment] = useState('')
-  const { data, loading, error, load } = useDetailReport()
+  // 2026-05-12: useDetailBundle — DetailPage 마운트 N+1 호출(/financials + /valuation + /report)
+  // 패턴을 단일 /bundle 호출로 축약. ThreadPoolExecutor 병렬 + 부분 실패 보존.
+  const { data, loading, error, load } = useDetailBundle()
 
   const { data: advData, loading: advLoading, error: advError, load: loadAdvData, refresh: refreshAdvData, resumeIfActive: resumeAdvJob, progressMessage: advProgressMsg } = useAdvisoryData()
   const { report, history: reportHistory, loading: reportLoading, error: reportError, load: loadReport, generate, loadById: loadReportById, resumeIfActive: resumeReportJob, progressMessage: reportProgressMsg } = useAdvisoryReport()
@@ -75,7 +77,8 @@ export default function DetailPage() {
   const advLoadedRef = useRef(false)
 
   useEffect(() => {
-    if (symbol) load(symbol)
+    // bundle은 시장 인자로 'auto' 전달 — 백엔드가 is_domestic으로 판별
+    if (symbol) load(symbol, 'auto')
   }, [symbol, load])
 
   useEffect(() => {
@@ -135,6 +138,13 @@ export default function DetailPage() {
 
       {data && !loading && (
         <>
+          {/* 부분 실패 안내 (2026-05-12 bundle 도입) — 일부 섹션만 미수집 시 안내 */}
+          {Array.isArray(data.partial_failure) && data.partial_failure.length > 0 && (
+            <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-2 text-xs text-amber-700">
+              일부 데이터 수집 실패: {data.partial_failure.join(', ')} — 표시 가능한 영역만 렌더링됩니다.
+            </div>
+          )}
+
           {/* 헤더 */}
           <StockHeader
             symbol={symbol}

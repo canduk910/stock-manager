@@ -35,6 +35,8 @@
 from __future__ import annotations
 
 import json
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional
 
 import logging
@@ -56,42 +58,126 @@ from services.macro_regime import (
 logger = logging.getLogger(__name__)
 
 
+# ── 공유 캐시 stampede 방지 (2026-05-12) ─────────────────────────────────────
+# 동시 N명이 동일 (code, market) refresh 호출 시 첫 호출만 외부 API 수집,
+# 나머지는 Lock 대기 후 캐시 hit 반환. threading.Lock 사용 (FastAPI는 동기 핸들러 threadpool).
+_REFRESH_LOCKS: dict[tuple[str, str], threading.Lock] = {}
+_REFRESH_LOCKS_GUARD = threading.Lock()
+_REFRESH_RECENT_SECONDS = 5.0  # Lock 획득 후 직전 캐시가 최근이면 fetcher 우회
+
+
+def _get_refresh_lock(code: str, market: str) -> threading.Lock:
+    """(code, market) 키별 Lock을 lazy 생성 + 메모이즈."""
+    key = (code.upper(), market.upper())
+    with _REFRESH_LOCKS_GUARD:
+        lock = _REFRESH_LOCKS.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _REFRESH_LOCKS[key] = lock
+        return lock
+
+
 # ── 공개 API ──────────────────────────────────────────────────────────────────
 
 def refresh_stock_data(code: str, market: str, name: str, user_id: int = 1) -> dict:
     """전체 데이터 수집 → advisory_cache 저장 → 저장된 캐시 반환.
 
-    국내(KR): dart_fin + market.fetch_market_metrics + 15분봉KIS
-    해외(US): yf_client + 15분봉 yfinance
-    + KIS MCP 전략 신호 (활성화 시)
+    2026-05-12 변경:
+      - 공유 캐시 stampede 방지: (code, market) 키별 Lock으로 동시 호출 1회만 fetch
+      - 4단계 ThreadPoolExecutor 병렬 실행: max(단계)≈3s, 직렬 대비 단축
+      - 부분 실패 허용: 한 단계 예외 발생 시 다른 단계 결과 보존, 실패 필드는 빈 dict
     """
-    # T-5: 4 페이즈 timing (lazy import — 순환 의존 회피)
     from services import _telemetry as _tel
     import time as _time
+    from datetime import datetime, timedelta
 
-    _t0 = _time.perf_counter()
-    fundamental = _collect_fundamental(code, market, name, user_id)
-    _tel.observe("advisory.phase.fundamental.duration_ms", (_time.perf_counter() - _t0) * 1000.0)
+    lock = _get_refresh_lock(code, market)
+    acquired = lock.acquire(timeout=120)
+    if not acquired:
+        _tel.record_event("advisory.refresh.lock_timeout")
+        raise ExternalAPIError("동일 종목 새로고침이 진행 중입니다. 잠시 후 다시 시도해주세요.")
+    try:
+        # Lock 획득 직후 캐시 hit 우회 — 직전 호출이 방금 채웠으면 fetcher 생략
+        existing = advisory_store.get_cache(user_id, code, market)
+        if existing and existing.get("updated_at"):
+            try:
+                upd = datetime.fromisoformat(existing["updated_at"])
+                # KST tz-aware일 수 있어 naive로 통일
+                upd_naive = upd.replace(tzinfo=None)
+                now_naive = datetime.now().replace(tzinfo=None)
+                # KST(+9) ISO와 local now() 비교 보정 (대략적 매우 짧은 시간 윈도우만 활용)
+                age = abs((now_naive - upd_naive).total_seconds())
+                # KST=local 가정 9h 보정 가능 — 보수적으로 abs로 처리
+                if age < _REFRESH_RECENT_SECONDS:
+                    _tel.record_event("advisory.refresh.stampede_skip")
+                    return existing
+            except Exception:
+                pass
 
-    _t1 = _time.perf_counter()
-    technical = _collect_technical(code, market)
-    _tel.observe("advisory.phase.technical.duration_ms", (_time.perf_counter() - _t1) * 1000.0)
+        _t0 = _time.perf_counter()
+        # 4단계 병렬 실행
+        results = {"fundamental": {}, "technical": {}, "strategy_signals": None, "research_data": {}}
+        phase_times = {}
 
-    _t2 = _time.perf_counter()
-    strategy_signals = _collect_strategy_signals(code, market)
-    _tel.observe("advisory.phase.strategy_signals.duration_ms", (_time.perf_counter() - _t2) * 1000.0)
+        def _run_fundamental():
+            t = _time.perf_counter()
+            try:
+                return "fundamental", _collect_fundamental(code, market, name, user_id), _time.perf_counter() - t, None
+            except Exception as e:
+                return "fundamental", {}, _time.perf_counter() - t, e
 
-    _t3 = _time.perf_counter()
-    research_data = _collect_research(code, market, name)
-    _tel.observe("advisory.phase.research.duration_ms", (_time.perf_counter() - _t3) * 1000.0)
+        def _run_technical():
+            t = _time.perf_counter()
+            try:
+                return "technical", _collect_technical(code, market), _time.perf_counter() - t, None
+            except Exception as e:
+                return "technical", {}, _time.perf_counter() - t, e
 
-    _tel.observe("advisory.refresh.total_duration_ms", (_time.perf_counter() - _t0) * 1000.0)
-    _tel.record_event("advisory.refresh.calls")
+        def _run_strategy():
+            t = _time.perf_counter()
+            try:
+                return "strategy_signals", _collect_strategy_signals(code, market), _time.perf_counter() - t, None
+            except Exception as e:
+                return "strategy_signals", None, _time.perf_counter() - t, e
 
-    advisory_store.save_cache(user_id, code, market, fundamental, technical,
-                              strategy_signals=strategy_signals,
-                              research_data=research_data)
-    return advisory_store.get_cache(user_id, code, market) or {}
+        def _run_research():
+            t = _time.perf_counter()
+            try:
+                return "research_data", _collect_research(code, market, name), _time.perf_counter() - t, None
+            except Exception as e:
+                return "research_data", {}, _time.perf_counter() - t, e
+
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            futures = [
+                pool.submit(_run_fundamental),
+                pool.submit(_run_technical),
+                pool.submit(_run_strategy),
+                pool.submit(_run_research),
+            ]
+            for fut in as_completed(futures):
+                key, val, dur, err = fut.result()
+                results[key] = val
+                phase_times[key] = dur
+                if err is not None:
+                    logger.warning("refresh phase %s failed for %s: %s", key, code, err)
+
+        # 텔레메트리 (병렬이어도 각 phase wall-time 기록)
+        _tel.observe("advisory.phase.fundamental.duration_ms", phase_times.get("fundamental", 0) * 1000.0)
+        _tel.observe("advisory.phase.technical.duration_ms", phase_times.get("technical", 0) * 1000.0)
+        _tel.observe("advisory.phase.strategy_signals.duration_ms", phase_times.get("strategy_signals", 0) * 1000.0)
+        _tel.observe("advisory.phase.research.duration_ms", phase_times.get("research_data", 0) * 1000.0)
+        _tel.observe("advisory.refresh.total_duration_ms", (_time.perf_counter() - _t0) * 1000.0)
+        _tel.record_event("advisory.refresh.calls")
+
+        advisory_store.save_cache(
+            user_id, code, market,
+            results["fundamental"], results["technical"],
+            strategy_signals=results["strategy_signals"],
+            research_data=results["research_data"],
+        )
+        return advisory_store.get_cache(user_id, code, market) or {}
+    finally:
+        lock.release()
 
 
 def _collect_research(code: str, market: str, name: str) -> dict:

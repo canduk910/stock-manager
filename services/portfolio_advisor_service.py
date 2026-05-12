@@ -812,12 +812,14 @@ def analyze_portfolio(
     analyzed_at = now_kst_iso()
 
     # DB 영구 저장 (Phase 3 확장 필드)
+    # 2026-05-12: user_id 격리 추가 — 멀티유저 환경에서 보고서를 본인만 조회 가능.
     weighted_avg = context.get("portfolio_grade_weighted_avg")
     report_id = advisory_store.save_portfolio_report(
         OPENAI_MODEL, analysis,
         weighted_grade_avg=weighted_avg,
         regime=regime,
         schema_version="v2" if weighted_avg is not None else "v1",
+        user_id=user_id,
     )
 
     # 캐시 저장
@@ -834,14 +836,18 @@ def analyze_portfolio(
 
 # ── 이력 조회 ────────────────────────────────────────────────────────────────
 
-def get_report_history(limit: int = 20) -> list[dict]:
-    """포트폴리오 자문 이력 목록."""
-    return advisory_store.get_portfolio_report_history(limit)
+def get_report_history(limit: int = 20, user_id: int | None = None) -> list[dict]:
+    """포트폴리오 자문 이력 목록. user_id 지정 시 본인 보고서만."""
+    return advisory_store.get_portfolio_report_history(limit, user_id=user_id)
 
 
-def get_report_by_id(report_id: int) -> dict:
-    """특정 자문 리포트 상세 조회."""
-    result = advisory_store.get_portfolio_report_by_id(report_id)
+def get_report_by_id(report_id: int, user_id: int | None = None) -> dict:
+    """특정 자문 리포트 상세 조회. user_id 지정 시 본인 보고서만 (403 효과).
+
+    OrderAdvisor 자문(2026-05-12): 보유 종목 자체가 사적 정보이므로 다른 사용자
+    리포트 접근은 NotFoundError(404)로 차단한다. 존재 여부 노출도 회피.
+    """
+    result = advisory_store.get_portfolio_report_by_id(report_id, user_id=user_id)
     if not result:
         raise NotFoundError("해당 자문 리포트를 찾을 수 없습니다.")
     return result
@@ -902,11 +908,13 @@ def _validate_chat_messages(messages) -> list[dict]:
 def chat_with_report(report_id: int, messages: list, user_id: int) -> dict:
     """이미 생성된 포트폴리오 자문보고서에 대한 stateless 챗봇.
 
-    PortfolioReport는 user_id 컬럼이 없으나 라우터에서 require_admin로 권한 차단됨.
+    2026-05-12: user_id 격리 — 본인 보고서만 챗 가능. require_admin 우회 방지.
+    OrderAdvisor 자문: 보유 종목 사적정보 보호.
     """
     cleaned = _validate_chat_messages(messages)
 
-    report_row = advisory_store.get_portfolio_report_by_id(int(report_id))
+    # 본인 보고서만 조회. 다른 사용자 리포트는 NotFoundError(404)로 차단.
+    report_row = advisory_store.get_portfolio_report_by_id(int(report_id), user_id=user_id)
     if not report_row:
         raise NotFoundError("포트폴리오 자문보고서를 찾을 수 없습니다.")
 

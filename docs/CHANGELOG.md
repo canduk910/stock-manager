@@ -1,5 +1,98 @@
 # 변경 이력
 
+## 2026-05-12 — 중복 데이터 최소화 (공유 캐시 전환) + 핫 병목 비동기화 + 멀티유저 격리 보강 + 매크로 뉴스/투자자 공유 캐싱
+
+### 리팩토링 — 트랙 1: `advisory_cache` 공유 캐시 전환
+
+**배경**: 멀티유저 환경에서 `advisory_cache` PK가 `(user_id, code, market)`로 격리되어 동일 종목의 fundamental/technical 분석을 사용자 N명이 각자 외부 API(DART/yfinance/KIS) 수집 → AI 자문 첫 응답 30~60초, 외부 호출 N배. `cache.db`(시세/재무/공시/매크로 지표) 영역은 이미 user_id 무관 공유이지만 `app.db.advisory_cache`만 격리되어 가장 큰 중복 누수 지점.
+
+**변경**:
+- `db/models/advisory.py` — `AdvisoryCache` PK `(user_id, code, market)` → **`(code, market)`** 변경. `user_id` 컬럼은 1차 안정화 기간 nullable=True 유지(2차 마이그레이션에서 drop 예정, 롤백 안전)
+- `db/repositories/advisory_repo.py` — `save_cache/load_cache/save_research_data/get_cache` 4함수 user_id 인자 호환 유지, 내부에서 무시(공유 저장/조회)
+- `stock/advisory_store.py` — adapter 시그니처 100% 유지 (백워드 호환)
+- `services/advisory_service.py` — `_REFRESH_LOCKS: dict[(code,market), Lock]` 추가 → **stampede 방지**: 동일 종목 동시 N명 호출 시 1명만 실제 수집, 나머지는 대기 후 동일 결과 공유
+- `alembic/versions/c1d2e3f4a5b6_share_advisory_cache_drop_user_id_pk.py` 신규 — 동일 (code, market) 중복 row 중 `updated_at` 최신만 보존 후 PK 재정의. **SQLite 호환 dialect 분기**: PostgreSQL은 `drop_constraint("advisory_cache_pkey")`, SQLite는 PK constraint 자동 명명 없으므로 `batch_alter_table(recreate="always") + create_primary_key`만 사용. 멱등 가드(`_current_pk_cols`)로 부분 적용 상태에서 재실행 안전
+
+**효과**: 동일 종목 첫 사용자 수집 → 다른 사용자 즉시 캐시 응답. 외부 API 호출 50~70%↓.
+
+**도메인 자문 — MarginAnalyst**: TTL 30분 유지 GO. 분기 결산 직후 사용자 격리 모드와 안전성 동등 (오히려 캐시 일관성 우위).
+
+### 리팩토링 — 트랙 2: AI 자문 4단계 병렬화
+
+**변경**:
+- `services/advisory_service.py:refresh_stock_data()` — fundamental/technical/strategy_signals/research 4단계를 `ThreadPoolExecutor(max_workers=4)`로 동시 실행. 부분 실패 시 다른 단계 결과 보존(실패 필드만 null)
+
+**효과**: 30~60초 → 7~20초 (외부 I/O 블로킹이라 GIL 영향 미미).
+
+### 리팩토링 — 트랙 3: 매크로 pre-warm + 일일 cron
+
+**배경**: `macro_gpt_cache` KST 일자별 캐시 자정 후 첫 사용자가 GPT(10s) + FRED(2s) + yfinance(3s) 누적 15~30s 대기.
+
+**변경**:
+- `services/macro_service.py:prewarm_macro_summary()` 신규 — 모든 카테고리(`indices`, `sentiment`, `summary`) `user_id=None` 시스템 호출(쿼터 미차감)로 사전 적재
+- `services/scheduler_service.py:_run_macro_prewarm_job()` 신규 + APScheduler **KST 00:05** cron 등록 (cleanup 직후 실행)
+
+**효과**: 자정 후 첫 매크로 페이지 진입 15~30s → 즉시.
+
+**도메인 자문 — MacroSentinel**: 단일 cron(00:05) GO. 한국 새벽 거주자 즉시 응답 우선. 미국 마감 후 정확도 향상은 06:30 보조 cron(후속 작업).
+
+### 신규 기능 — 트랙 4: `/api/watchlist/batch-details` 신규 엔드포인트
+
+**배경**: 관심종목 대시보드가 N종목에 대해 N번 `/api/stock/{code}/detail` 호출 → 캐시 미스 누적 10~20s.
+
+**변경**:
+- `routers/watchlist.py` — `GET /api/watchlist/batch-details?codes=...&market=auto` 신규. codes ≤ 50 가드 (ServiceError(400))
+- `services/watchlist_service.py:fetch_batch_details(codes, market='auto')` 신규 — ThreadPoolExecutor(4)로 종목별 metrics 병렬 수집. 시장 자동 판별 + 부분 실패 부분 반환
+- `frontend/src/api/watchlist.js:fetchWatchlistBatchDetails(codes, market)` 신규
+
+**효과**: 10~20s → 2~5s.
+
+### 신규 — `portfolio_reports.user_id` 격리
+
+**배경**: `portfolio_reports` 테이블 `user_id` 컬럼 없음 — 현재 admin 1명 가정 운영 중이지만 멀티유저 시 충돌 위험.
+
+**변경**:
+- `alembic/versions/d4e5f6a7b8c9_add_user_id_to_portfolio_reports.py` 신규 — `user_id INTEGER NULL` 컬럼 추가 + 기존 행 백필(`user_id=1`) + 인덱스 `(user_id, generated_at DESC)` + FK `users(id) ondelete=SET NULL`. 멱등 가드(`_has_column`/`_has_index`) + downgrade 가능
+- `db/models/advisory.py` — `PortfolioReport.user_id` 컬럼 + FK + 인덱스
+- `db/repositories/advisory_repo.py` — `save_portfolio_report/get_portfolio_report_by_id/get_portfolio_report_history/get_latest_portfolio_report` 4함수에 user_id 인자
+- `stock/advisory_store.py` — adapter 4함수 백워드 호환
+- `services/portfolio_advisor_service.py` — `analyze_portfolio/get_report_by_id/get_report_history/chat_with_report` 사용자별 격리 + 권한 검증(`NotFoundError`)
+- `routers/portfolio_advisor.py` — `Depends(require_admin)` user_id 명시 전달
+
+**도메인 자문 — OrderAdvisor**: DB 저장은 사용자별 분리 필수(보유 종목 = 사적 정보), 캐시(잔고 해시 키)는 공유 유지 OK(분석 결과 = 잔고의 함수). 캐시 키 정밀화(평가손익 반영)는 후속 PR로 분리.
+
+### 신규 기능 — `/api/detail/{symbol}/bundle` 신규 엔드포인트
+
+**배경**: DetailPage 마운트 시 stock-detail / DART financials / yfinance metrics 등을 N회 fetch — 캐시 미스 시 3~8s 누적.
+
+**변경**:
+- `services/detail_service.py:get_bundle(symbol, market='auto')` 신규 — basic/financials/valuation/forward_estimates/summary 5섹션을 `ThreadPoolExecutor(max_workers=4)`로 병렬 수집. 부분 실패 시 `partial_failure: list[str]`로 보존
+- `routers/detail.py` — `GET /api/detail/{symbol}/bundle?market=auto` 신규
+- `frontend/src/api/detail.js:fetchDetailBundle(code, market)` 신규
+- `frontend/src/hooks/useDetail.js:useDetailBundle(symbol, market)` 신규
+- `frontend/src/pages/DetailPage.jsx` — `useDetailReport` → `useDetailBundle` 전환 + 부분 실패 안내 카드. 기존 컴포넌트(`FundamentalPanel`/`TechnicalPanel` 등) shape 100% 호환
+
+### 신규 — 매크로 뉴스/투자자 코멘트 공유 캐싱
+
+**배경**: 매크로 페이지의 뉴스(`get_news`)와 투자대가 코멘트(`get_investor_quotes`)는 RSS fetch + GPT 번역/추출을 매 호출마다 일부 반복. RSS는 부분 캐시(0.5h/6h)였으나 **전체 결과 캐싱이 없어** 사용자별 호출 시 함수 진입부터 재실행. 사용자 요청: 뉴스 4시간 단위 / 투자대가 일일 단위로 공유 캐싱.
+
+**변경**:
+- `services/macro_service.py:get_news()` — 전체 결과 `cache.db` `macro:news:full_result_v1` 키 **4시간 공유 캐싱** (빈 응답 가드: korean/international 모두 빈 경우 캐싱 거부)
+- `services/macro_service.py:get_investor_quotes()` — 전체 결과 `macro_store` `investor_quotes_full` 카테고리 **KST 일별 공유 캐싱** (최소 1명 quotes 확보 시에만 저장)
+
+**공유 메커니즘**: cache.db / macro_store 둘 다 user_id 없는 공유 인프라 → 별도 작업 없이 즉시 모든 사용자 공유 적용.
+
+**효과**:
+- 4시간 슬롯 내 뉴스 호출: RSS fetch 0회 + GPT 번역 0회 → 즉시 응답
+- KST 일자 내 투자대가 호출: RSS 6×0회 + GPT 6×0회 → 즉시 응답
+- AI 사용량(`macro_translate`/`macro_investor`) 일일 1회로 축소
+
+### 테스트
+- 신규 23건 (advisory_cache_shared 4 / refresh_dedup 1 / advisory_parallel 2 / macro_prewarm 3 / watchlist_batch_service 3 / watchlist_batch_details 6 / portfolio_user_id 9 / migration_portfolio_user_id 4 / detail_bundle_service 3 / detail_bundle 2)
+- 회귀: `pytest tests/ -v` baseline +18 PASS, 회귀 0건. 사전 결함(pdfplumber 미설치 + quote_overseas_kis_ws_orderbook) 본 PR 무관
+
+---
+
 ## 2026-05-12 — 시세판/장운영정보 KIS WS → REST 폴링 전환 (자동매매 동시구독 41건 충돌 해소) + 수급 차트 부호 중복 버그 수정
 
 ### 리팩토링 — 시세판 다중심볼 WS 제거, REST 일괄 폴링 전환

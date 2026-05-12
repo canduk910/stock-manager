@@ -14,6 +14,7 @@ from sqlalchemy.orm import sessionmaker
 from fastapi.testclient import TestClient
 
 from db.base import Base
+import db.models  # noqa: F401 — 모든 ORM 모델 트리거 import (create_all 전체 테이블 생성 보장)
 from db.session import get_db
 from services.auth_deps import get_current_user, require_admin
 import db.session as _db_session_mod

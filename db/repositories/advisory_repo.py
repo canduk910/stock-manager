@@ -63,14 +63,16 @@ class AdvisoryRepository:
         )
         return row.to_dict() if row else None
 
-    # ── Cache CRUD ──────────────────────────────────────────────
+    # ── Cache CRUD (공유 캐시: 2026-05-12) ────────────────────────
+    # PK = (code, market). user_id 파라미터는 시그니처 호환 유지를 위해 받지만 lookup/upsert에서 무시.
+    # 최초 저장 시 user_id는 호출자 값으로 기록(audit 용도), 이후 갱신 시 덮어쓰지 않음.
 
     def save_cache(self, user_id: int, code: str, market: str, fundamental: dict, technical: dict,
                    strategy_signals: dict = None, research_data: dict = None) -> None:
         code_u, market_u = code.upper(), market.upper()
         row = (
             self.db.query(AdvisoryCache)
-            .filter_by(user_id=user_id, code=code_u, market=market_u)
+            .filter_by(code=code_u, market=market_u)
             .first()
         )
         if not row:
@@ -86,11 +88,11 @@ class AdvisoryRepository:
 
     def save_research_data(self, user_id: int, code: str, market: str,
                            research_data: dict) -> None:
-        """리서치 데이터만 별도 저장 (기존 fundamental/technical 유지)."""
+        """리서치 데이터만 별도 저장 (기존 fundamental/technical 유지). 공유 캐시."""
         code_u, market_u = code.upper(), market.upper()
         row = (
             self.db.query(AdvisoryCache)
-            .filter_by(user_id=user_id, code=code_u, market=market_u)
+            .filter_by(code=code_u, market=market_u)
             .first()
         )
         if not row:
@@ -101,9 +103,10 @@ class AdvisoryRepository:
         row.research_data = research_data
 
     def get_cache(self, user_id: int, code: str, market: str) -> Optional[dict]:
+        """공유 캐시 조회 — user_id 파라미터는 시그니처 호환 유지(무시)."""
         row = (
             self.db.query(AdvisoryCache)
-            .filter_by(user_id=user_id, code=code.upper(), market=market.upper())
+            .filter_by(code=code.upper(), market=market.upper())
             .first()
         )
         return row.to_dict() if row else None
@@ -169,6 +172,7 @@ class AdvisoryRepository:
         return row.to_dict() if row else None
 
     # ── Portfolio Report CRUD ───────────────────────────────────
+    # 2026-05-12: user_id 격리 추가. user_id=None은 백워드 호환 (마이그레이션 전 호출).
 
     def save_portfolio_report(
         self,
@@ -177,8 +181,10 @@ class AdvisoryRepository:
         weighted_grade_avg: float | None = None,
         regime: str | None = None,
         schema_version: str = "v1",
+        user_id: int | None = None,
     ) -> int:
         r = PortfolioReport(
+            user_id=user_id,
             generated_at=now_kst_iso(),
             model=model,
             report=report,
@@ -190,23 +196,29 @@ class AdvisoryRepository:
         self.db.flush()
         return r.id
 
-    def get_portfolio_report_history(self, limit: int = 20) -> list[dict]:
-        rows = (
-            self.db.query(PortfolioReport)
-            .order_by(PortfolioReport.id.desc())
-            .limit(limit)
-            .all()
-        )
+    def get_portfolio_report_history(
+        self, limit: int = 20, user_id: int | None = None,
+    ) -> list[dict]:
+        """포트폴리오 자문 이력. user_id 지정 시 본인 보고서만 반환."""
+        query = self.db.query(PortfolioReport)
+        if user_id is not None:
+            query = query.filter_by(user_id=user_id)
+        rows = query.order_by(PortfolioReport.id.desc()).limit(limit).all()
         return [r.to_summary_dict() for r in rows]
 
-    def get_portfolio_report_by_id(self, report_id: int) -> Optional[dict]:
-        row = self.db.query(PortfolioReport).filter_by(id=report_id).first()
+    def get_portfolio_report_by_id(
+        self, report_id: int, user_id: int | None = None,
+    ) -> Optional[dict]:
+        """ID로 포트폴리오 자문 조회. user_id 지정 시 본인 보고서만 반환(권한 검증)."""
+        query = self.db.query(PortfolioReport).filter_by(id=report_id)
+        if user_id is not None:
+            query = query.filter_by(user_id=user_id)
+        row = query.first()
         return row.to_dict() if row else None
 
-    def get_latest_portfolio_report(self) -> Optional[dict]:
-        row = (
-            self.db.query(PortfolioReport)
-            .order_by(PortfolioReport.id.desc())
-            .first()
-        )
+    def get_latest_portfolio_report(self, user_id: int | None = None) -> Optional[dict]:
+        query = self.db.query(PortfolioReport)
+        if user_id is not None:
+            query = query.filter_by(user_id=user_id)
+        row = query.order_by(PortfolioReport.id.desc()).first()
         return row.to_dict() if row else None

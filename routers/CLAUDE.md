@@ -9,8 +9,8 @@
 | `screener.py` | `GET /api/screener/stocks` | 멀티팩터 스크리닝 + yfinance enrichment(섹터 포함) + 구루 공식(preset=greenblatt/neff/seo, DART guru enrichment) + 체제 연계(regime_aware) + 52주 하락률 필터 + Value Trap 경고 |
 | `earnings.py` | `GET /api/earnings/filings` | 정기보고서 (KR DART / US SEC EDGAR) |
 | `balance.py` | `GET /api/balance` | KIS 실전계좌 잔고 (국내+해외+선물옵션). user_id Depends |
-| `watchlist.py` | `/api/watchlist/*` | 관심종목 CRUD + 대시보드 + 종목정보 + 순서 관리. `GET/PUT /order`는 `/{code}` 라우트보다 앞에 등록 |
-| `detail.py` | `/api/detail/*` | 10년 재무 + PER/PBR 히스토리 + 종합 리포트 |
+| `watchlist.py` | `/api/watchlist/*` | 관심종목 CRUD + 대시보드 + 종목정보 + 순서 관리. `GET/PUT /order`는 `/{code}` 라우트보다 앞에 등록. **`GET /api/watchlist/batch-details?codes=&market=auto`** — N종목 metrics 병렬 일괄 (codes ≤ 50 가드, ServiceError(400), 부분 실패 부분 반환) |
+| `detail.py` | `/api/detail/*` | 10년 재무 + PER/PBR 히스토리 + 종합 리포트. **`GET /api/detail/{symbol}/bundle?market=auto`** — DetailPage 마운트 시 모든 섹션(basic/financials/valuation/forward_estimates/summary) 병렬 일괄. 부분 실패 시 `partial_failure: list[str]` |
 | `_kis_auth.py` | (내부) | KIS 인증 공통 (토큰 관리, hashkey, **사용자별 토큰 캐시 dict**). `get_kis_credentials(user_id)` 사용자 키 우선 + 운영자 키 폴백 |
 | `order.py` | `/api/order/*` | 주문 발송/정정/취소/미체결/체결/이력/예약주문/FNO 시세 |
 | `quote.py` | `WS /ws/quote/{symbol}`, `WS /ws/execution-notice`, `GET /api/quote/us/{symbol}/orderbook`, `GET /api/quote/us/{symbol}/detail` | 실시간 호가 WS (KR/FNO/US) + 체결통보 WS. `/ws/quote/{symbol}?exchange=auto\|UN\|KRX\|NXT` (기본 auto, KST 시계 4구간 자동 분기). US REST 폴백 — orderbook(HHDFS76200100, 10단계) + detail(HHDFS76200200, 시/고/저/거래량/52주). 응답 200/503(키 부재)/504(KIS None). **장운영정보 WS(`/ws/market-status`) 제거 — `useMarketClock` 시계 폴백 단독 사용 (KIS WS slot 3건 회수)** |

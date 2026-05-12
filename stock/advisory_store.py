@@ -101,7 +101,8 @@ def get_latest_report(user_id: int, code: str, market: str) -> Optional[dict]:
         return AdvisoryRepository(db).get_latest_report(user_id, code, market)
 
 
-# ── 포트폴리오 자문 리포트 CRUD (user_id 불필요 — admin 전용) ──────────────────
+# ── 포트폴리오 자문 리포트 CRUD ─────────────────────────────────────────────
+# 2026-05-12: user_id 격리 추가 (멀티유저). user_id=None은 백워드 호환.
 
 def save_portfolio_report(
     model: str,
@@ -109,6 +110,7 @@ def save_portfolio_report(
     weighted_grade_avg: float | None = None,
     regime: str | None = None,
     schema_version: str = "v1",
+    user_id: int | None = None,
 ) -> int:
     """포트폴리오 자문 리포트 저장. 생성된 ID 반환."""
     with get_session() as db:
@@ -116,22 +118,27 @@ def save_portfolio_report(
             model, report,
             weighted_grade_avg=weighted_grade_avg, regime=regime,
             schema_version=schema_version,
+            user_id=user_id,
         )
 
 
-def get_portfolio_report_history(limit: int = 20) -> list[dict]:
-    """포트폴리오 자문 이력 목록 (최신순, 본문 제외)."""
+def get_portfolio_report_history(
+    limit: int = 20, user_id: int | None = None,
+) -> list[dict]:
+    """포트폴리오 자문 이력 목록 (최신순, 본문 제외). user_id 지정 시 본인만."""
     with get_session() as db:
-        return AdvisoryRepository(db).get_portfolio_report_history(limit)
+        return AdvisoryRepository(db).get_portfolio_report_history(limit, user_id=user_id)
 
 
-def get_portfolio_report_by_id(report_id: int) -> Optional[dict]:
-    """특정 ID의 포트폴리오 자문 리포트 조회."""
+def get_portfolio_report_by_id(
+    report_id: int, user_id: int | None = None,
+) -> Optional[dict]:
+    """특정 ID의 포트폴리오 자문 리포트 조회. user_id 지정 시 본인만(권한 검증)."""
     with get_session() as db:
-        return AdvisoryRepository(db).get_portfolio_report_by_id(report_id)
+        return AdvisoryRepository(db).get_portfolio_report_by_id(report_id, user_id=user_id)
 
 
-def get_latest_portfolio_report() -> Optional[dict]:
-    """최신 포트폴리오 자문 리포트 조회."""
+def get_latest_portfolio_report(user_id: int | None = None) -> Optional[dict]:
+    """최신 포트폴리오 자문 리포트 조회. user_id 지정 시 본인만."""
     with get_session() as db:
-        return AdvisoryRepository(db).get_latest_portfolio_report()
+        return AdvisoryRepository(db).get_latest_portfolio_report(user_id=user_id)

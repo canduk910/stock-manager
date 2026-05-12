@@ -269,6 +269,18 @@ KIS 실전계좌 잔고 조회. KIS API 키 필수.
 **요청 바디**: `{"items": [{"code": "005930", "market": "KR"}, ...]}`
 **응답**: `{"ok": true}`
 
+### `GET /api/watchlist/batch-details`
+
+N종목 metrics 병렬 일괄 조회 (2026-05-12 신규). `useWatchlist` N+1 호출 패턴 제거 + ThreadPoolExecutor(4) 병렬.
+
+| 파라미터 | 타입 | 기본값 | 설명 |
+|---------|------|--------|------|
+| `codes` | str (CSV) | — | 종목 코드 콤마 구분 (최대 50개, 초과 시 400 ServiceError) |
+| `market` | "auto"/"KR"/"US" | "auto" | "auto"는 `is_domestic(code)`로 자동 판별 |
+
+**응답**: `{"details": {"005930": {price, change, change_pct, per, pbr, roe, dividend_yield, sector, ...}, ...}}`
+**부분 실패**: 일부 종목 fetch 실패 시 해당 키만 누락(200 응답 유지). 빈 codes → 400.
+
 ---
 
 ## 종목 상세 분석 — `routers/detail.py`
@@ -356,6 +368,18 @@ PER > 500 이상치는 평균 계산에서 제외.
 
 - `per_vs_avg` / `pbr_vs_avg`: 평균 대비 현재 밸류에이션 비율(%). 음수면 저평가.
 - CAGR: 첫 해와 마지막 해 기준 연평균 성장률(%).
+
+### `GET /api/detail/{symbol}/bundle`
+
+DetailPage 마운트 시 모든 섹션을 한 번에 반환 (2026-05-12 신규). `report/{symbol}`의 응답과 동일 shape이지만 내부적으로 ThreadPoolExecutor 병렬 수집 + 부분 실패 보존.
+
+| 파라미터 | 타입 | 기본값 | 설명 |
+|---------|------|--------|------|
+| `market` | "auto"/"KR"/"US" | "auto" | 시장 자동 판별 |
+
+**응답 추가 필드**: `partial_failure: list[str]` — 실패한 섹션 ID 목록 (예: `["valuation"]`). 정상 시 빈 배열.
+
+**효과**: DetailPage 마운트 N+1 → 1회 호출 + 캐시 미스 시 3~8s → 2~3s.
 
 ---
 

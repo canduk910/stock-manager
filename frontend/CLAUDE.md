@@ -44,7 +44,7 @@ frontend/
 | 파일 | 책임 |
 |------|------|
 | `useAsyncState.js` | data/loading/error 공통 훅. `run(asyncFn)` 자동 관리 |
-| `useScreener/useEarnings/useBalance/useWatchlist/useDetail/useOrder/useNotification` | 각 도메인 데이터 훅 |
+| `useScreener/useEarnings/useBalance/useWatchlist/useDetail/useOrder/useNotification` | 각 도메인 데이터 훅. **`useDetailBundle(symbol, market)`** (in `useDetail.js`) — DetailPage 마운트 시 `/api/detail/{symbol}/bundle` 1회 호출로 모든 섹션 일괄 수신, 부분 실패는 `data.partial_failure`로 표시 (기존 N+1 useDetailReport 패턴 대체) |
 | `useWebSocket.js` | 공용 WS 훅. 지수 백오프 재연결(500ms→10s) + visibilitychange. **url 인자에 함수형 지원** — `connect()` 안에서 lazy 평가, 1008 close 후 재시도 시 신선한 access_token 자동 반영 (stale-token 무한 백오프 방지). 호출자는 모듈 함수 또는 useCallback로 안정 reference 전달 |
 | `useQuote.js` | 실시간 호가 WS. `useQuote(symbol, market='KR', exchange='auto')`. exchange 쿼리 자동 부착. rAF throttle 자체 관리 |
 | `useExecutionNotice.js` | 체결통보(H0STCNI0) WS 수신. `mapOrdExgGb(code)` 헬퍼로 응답에 `exchange` 필드 (1=KRX/2=NXT/3=SOR-KRX/4=SOR-NXT, NULL→KRX 폴백) |

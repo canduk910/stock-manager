@@ -13,6 +13,7 @@ from typing import Optional
 
 from config import OPENAI_API_KEY, OPENAI_MODEL
 from stock import macro_fetcher
+from stock.cache import get_cached, set_cached
 from stock.macro_store import (
     get_today as get_macro_today,
     save_today as save_macro_today,
@@ -79,8 +80,19 @@ def get_indices() -> dict:
 
 # ── 뉴스 ─────────────────────────────────────────────────────────────────────
 
+_NEWS_CACHE_KEY = "macro:news:full_result_v1"
+_NEWS_CACHE_TTL_HOURS = 4
+
+
 def get_news(user_id=None) -> dict:
-    """네이버 + NYT 뉴스. NYT는 GPT 번역 (키 있을 때)."""
+    """네이버 + NYT 뉴스. NYT는 GPT 번역 (키 있을 때).
+
+    전체 결과 4시간 공유 캐싱 — 동일 시간대 내 사용자 무관 동일 응답 (cache.db).
+    """
+    cached = get_cached(_NEWS_CACHE_KEY)
+    if cached is not None:
+        return cached
+
     errors = []
 
     # 네이버 (한국어)
@@ -116,7 +128,16 @@ def get_news(user_id=None) -> dict:
                 "translated": bool(tr.get("title")),
             })
 
-    return {"korean": korean, "international": international, "errors": errors}
+    result = {"korean": korean, "international": international, "errors": errors}
+
+    # 4h 공유 캐싱 — 에러만 있고 데이터 모두 빈 경우는 캐싱 거부 (다음 호출에서 재시도)
+    if korean or international:
+        try:
+            set_cached(_NEWS_CACHE_KEY, result, ttl_hours=_NEWS_CACHE_TTL_HOURS)
+        except Exception as e:
+            logger.warning("뉴스 4h 캐시 저장 실패: %s", e)
+
+    return result
 
 
 # ── 심리 지표 ────────────────────────────────────────────────────────────────
@@ -155,8 +176,18 @@ def get_sentiment() -> dict:
 
 # ── 투자자 코멘트 ────────────────────────────────────────────────────────────
 
+_INVESTOR_QUOTES_CATEGORY = "investor_quotes_full"
+
+
 def get_investor_quotes(user_id=None) -> dict:
-    """투자 대가 뉴스 검색 + GPT 추출/번역."""
+    """투자 대가 뉴스 검색 + GPT 추출/번역.
+
+    전체 결과 일일(KST) 공유 캐싱 — 동일 일자 내 사용자 무관 동일 응답 (macro_store).
+    """
+    cached = get_macro_today(_INVESTOR_QUOTES_CATEGORY)
+    if cached is not None:
+        return cached
+
     investors_result = []
     errors = []
 
@@ -178,7 +209,16 @@ def get_investor_quotes(user_id=None) -> dict:
             })
             errors.append(f"{inv['name_ko']}: {e}")
 
-    return {"investors": investors_result, "errors": errors}
+    result = {"investors": investors_result, "errors": errors}
+
+    # 일일 공유 캐싱 — 최소 1명이라도 quotes를 가져온 경우만 저장 (전부 실패 시 재시도 허용)
+    if any(inv.get("quotes") for inv in investors_result):
+        try:
+            save_macro_today(_INVESTOR_QUOTES_CATEGORY, result)
+        except Exception as e:
+            logger.warning("투자자 코멘트 일일 캐시 저장 실패: %s", e)
+
+    return result
 
 
 # ── 수익률곡선 ──────────────────────────────────────────────────────────────
@@ -486,6 +526,33 @@ def get_summary() -> dict:
         result["errors"].append({"section": "macro_cycle", "message": str(e)})
 
     return result
+
+
+# ── Pre-warm (2026-05-12 트랙 3) ─────────────────────────────────────────────
+
+def prewarm_macro_summary() -> dict:
+    """매크로 페이지 자정 후 첫 진입 지연 해소 — indices/sentiment/summary를 미리 적재.
+
+    APScheduler에서 매일 KST 00:05 호출. 서버 기동 시 background 1회 호출도 가능.
+    예외 발생 시 logger.warning + continue, 함수 자체는 raise 안 함.
+    """
+    prewarmed = []
+    errors = []
+
+    for section_name, fn in (
+        ("indices", get_indices),
+        ("sentiment", get_sentiment),
+        ("summary", get_summary),
+    ):
+        try:
+            fn()
+            prewarmed.append(section_name)
+            logger.info("[prewarm] %s 적재 완료", section_name)
+        except Exception as e:
+            errors.append(f"{section_name}: {e}")
+            logger.warning("[prewarm] %s 실패: %s", section_name, e)
+
+    return {"prewarmed": prewarmed, "errors": errors}
 
 
 # ── GPT 헬퍼 ─────────────────────────────────────────────────────────────────

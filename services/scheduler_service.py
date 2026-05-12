@@ -38,6 +38,23 @@ def _run_macro_cleanup_job():
         logger.error(f"[스케줄러] 매크로 캐시 cleanup 실패: {e}", exc_info=True)
 
 
+def _run_macro_prewarm_job():
+    """일일 매크로 pre-warm (2026-05-12 신규, MacroSentinel 도메인 자문 결과 KST 00:05 채택).
+
+    cleanup 직후 indices/sentiment/summary 캐시를 미리 적재 →
+    매크로 페이지 자정 후 첫 사용자 응답 시간 GPT 15~30s → < 1s.
+    부분 실패는 logger.warning로만 기록, 함수 자체는 raise 안 함.
+    """
+    from services.macro_service import prewarm_macro_summary
+    try:
+        result = prewarm_macro_summary()
+        ok = len(result.get("prewarmed", []))
+        err = len(result.get("errors", []))
+        logger.info(f"[스케줄러] 매크로 pre-warm 완료: {ok}개 적재, {err}건 오류")
+    except Exception as e:
+        logger.error(f"[스케줄러] 매크로 pre-warm 실패: {e}", exc_info=True)
+
+
 def setup_scheduler():
     """APScheduler 시작 (08:00 KR / 16:00 US KST)."""
     global _scheduler
@@ -71,8 +88,18 @@ def setup_scheduler():
             name="매크로 GPT 캐시 cleanup (00:05)",
             replace_existing=True,
         )
+        # 2026-05-12: 매크로 pre-warm (KST 00:05, cleanup 직후).
+        # MacroSentinel 도메인 자문: 한국 거주자 새벽 사용자 즉시 응답이 주 목적.
+        # 미국 마감 후 정확도 향상은 후속 작업(06:30 보조 cron) 후 검토.
+        _scheduler.add_job(
+            _run_macro_prewarm_job,
+            CronTrigger(hour=0, minute=5),
+            id="macro_prewarm",
+            name="매크로 pre-warm (00:05)",
+            replace_existing=True,
+        )
         _scheduler.start()
-        logger.info("[스케줄러] 스케줄러 시작 (08:00 KR / 16:00 US / 00:05 매크로 cleanup)")
+        logger.info("[스케줄러] 스케줄러 시작 (08:00 KR / 16:00 US / 00:05 cleanup+prewarm)")
     except ImportError:
         logger.warning("[스케줄러] apscheduler 미설치 — 스케줄러 비활성화")
     except Exception as e:

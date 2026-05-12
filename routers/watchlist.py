@@ -5,7 +5,7 @@ from pydantic import BaseModel
 
 from services import _dashboard_cache, _telemetry
 from services.auth_deps import get_current_user
-from services.exceptions import NotFoundError, ConflictError, ExternalAPIError
+from services.exceptions import NotFoundError, ConflictError, ExternalAPIError, ServiceError
 from services.watchlist_service import WatchlistService
 from stock import store
 
@@ -137,3 +137,33 @@ def get_stock_info(code: str, market: str = Query("KR"), _user: dict = Depends(g
         raise NotFoundError(f"종목 정보를 찾을 수 없습니다: {code}")
 
     return detail
+
+
+# ── 다중 종목 batch (2026-05-12 트랙 4) ──────────────────────────────────────
+
+@router.get("/batch-details")
+@_telemetry.timed("watchlist.batch_details")
+def get_batch_details(
+    codes: str = Query(..., description="콤마 구분 종목코드 (최대 50)"),
+    market: str = Query("auto", description="KR | US | auto"),
+    _user: dict = Depends(get_current_user),
+):
+    """N개 종목 metrics+price 일괄 조회 — N+1 호출 제거.
+
+    응답: {"details": {code: {price, change, market_cap, per, pbr, roe,
+                              dividend_yield, sector, currency}},
+           "errors": ["code:reason", ...]}
+    """
+    code_list = [c.strip() for c in (codes or "").split(",") if c.strip()]
+    if not code_list:
+        raise ServiceError("codes 파라미터 필수 (콤마 구분)", status_code=400)
+    if len(code_list) > 50:
+        raise ServiceError("최대 50종목까지 일괄 조회 가능", status_code=400)
+
+    market_u = (market or "auto").upper()
+    if market_u not in ("KR", "US", "AUTO"):
+        raise ServiceError(f"market 값은 KR/US/auto 중 하나여야 합니다: {market}", status_code=400)
+
+    result = _svc.fetch_batch_details(code_list, market=market_u)
+    _telemetry.observe("watchlist.batch_details.codes_count", len(code_list))
+    return result

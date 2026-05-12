@@ -2,9 +2,14 @@
 
 10년 재무, 월별 밸류에이션 히스토리, 종합 리포트를 제공한다.
 해외주식(yfinance)도 지원한다.
+
+2026-05-12: get_bundle() 신규 — DetailPage 마운트 시 N+1 호출 패턴을 단일 호출로 축약.
+ThreadPoolExecutor 병렬 수집 + 부분 실패 보존(partial_failure 리스트).
 """
 
+from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
+import logging
 
 from services.exceptions import ExternalAPIError
 from stock import symbol_map
@@ -12,6 +17,8 @@ from stock.dart_fin import fetch_financials_multi_year
 from stock.market import fetch_detail, fetch_valuation_history, fetch_market_metrics
 from stock.utils import is_domestic
 import stock.yf_client as yf_client
+
+logger = logging.getLogger(__name__)
 
 
 def _awk(won: Optional[int]) -> Optional[int]:
@@ -271,6 +278,162 @@ class DetailService:
             })
 
         return self._build_report(basic, financials, valuation, forward)
+
+    def get_bundle(self, code: str, market: str = "auto", years: int = 10) -> dict:
+        """DetailPage 마운트용 통합 응답. ThreadPoolExecutor 병렬 수집 + 부분 실패 보존.
+
+        2026-05-12: 프론트 N+1 호출 패턴 제거 — 재무/밸류에이션/기본시세/예상실적/심볼맵을 동시 수집.
+        각 섹션 실패 시 해당 키는 None + partial_failure 리스트에 섹션명 기록 (200 응답 보존).
+
+        market='auto' (기본): is_domestic(code) 자동 판별. 'KR'/'US' 명시도 허용.
+        """
+        # 시장 판별
+        is_kr = is_domestic(code) if market == "auto" else (market.upper() == "KR")
+        eff_years = years if is_kr else min(years, 4)
+
+        partial_failure: list[str] = []
+        results: dict = {
+            "financials": None,
+            "valuation": None,
+            "detail": None,
+            "metrics": None,
+            "forward": None,
+            "name": code,
+        }
+
+        def _safe_fin():
+            try:
+                return self.get_financials(code, eff_years)
+            except Exception as e:
+                logger.warning("[bundle] financials 실패 %s: %s", code, e)
+                partial_failure.append("financials")
+                return None
+
+        def _safe_val():
+            try:
+                return self.get_valuation_chart(code, eff_years)
+            except Exception as e:
+                logger.warning("[bundle] valuation 실패 %s: %s", code, e)
+                partial_failure.append("valuation")
+                return None
+
+        def _safe_detail():
+            try:
+                if is_kr:
+                    return fetch_detail(code)
+                return yf_client.fetch_detail_yf(code)
+            except Exception as e:
+                logger.warning("[bundle] detail 실패 %s: %s", code, e)
+                partial_failure.append("detail")
+                return None
+
+        def _safe_metrics():
+            if not is_kr:
+                return None  # US는 detail에 다 포함 (별도 호출 없음)
+            try:
+                return fetch_market_metrics(code)
+            except Exception as e:
+                logger.warning("[bundle] metrics 실패 %s: %s", code, e)
+                partial_failure.append("metrics")
+                return None
+
+        def _safe_forward():
+            try:
+                return yf_client.fetch_forward_estimates_yf(code, is_kr=is_kr)
+            except Exception as e:
+                logger.warning("[bundle] forward 실패 %s: %s", code, e)
+                partial_failure.append("forward_estimates")
+                return None
+
+        def _safe_name():
+            if not is_kr:
+                return code  # US는 detail에서 가져옴
+            try:
+                resolved = symbol_map.resolve(code)
+                return resolved[1] if resolved else code
+            except Exception:
+                return code
+
+        # ThreadPoolExecutor 병렬 — t3.small 보호 max_workers=4
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            futures = {
+                "financials": executor.submit(_safe_fin),
+                "valuation": executor.submit(_safe_val),
+                "detail": executor.submit(_safe_detail),
+                "metrics": executor.submit(_safe_metrics),
+                "forward": executor.submit(_safe_forward),
+                "name": executor.submit(_safe_name),
+            }
+            for key, fut in futures.items():
+                try:
+                    results[key] = fut.result()
+                except Exception as e:
+                    logger.warning("[bundle] %s future 실패 %s: %s", key, code, e)
+                    if key not in partial_failure:
+                        partial_failure.append(key)
+
+        # basic 구성 — 기존 _get_report_kr/_get_report_us와 동일 shape
+        basic: dict = {
+            "code": code,
+            "name": results["name"],
+            "currency": "KRW" if is_kr else "USD",
+            "price": None,
+            "change": None,
+            "change_pct": None,
+            "market_cap": None,
+            "per": None,
+            "pbr": None,
+            "roe": None,
+            "dividend_yield": None,
+            "dividend_per_share": None,
+            "high_52": None,
+            "low_52": None,
+            "market": None,
+            "sector": None,
+        }
+        detail = results["detail"]
+        if detail:
+            mktcap = detail.get("mktcap")
+            basic.update({
+                "price": detail.get("close"),
+                "change": detail.get("change"),
+                "change_pct": detail.get("change_pct"),
+                "market_cap": _awk(mktcap) if is_kr else _usd_m(mktcap),
+                "per": detail.get("per"),
+                "pbr": detail.get("pbr"),
+                "high_52": detail.get("high_52"),
+                "low_52": detail.get("low_52"),
+                "market": detail.get("market_type"),
+                "sector": detail.get("sector"),
+            })
+            if not is_kr:
+                # US는 detail에 name/roe/dividend 포함
+                basic["name"] = detail.get("name", code)
+                basic["roe"] = detail.get("roe")
+                basic["dividend_yield"] = detail.get("dividend_yield")
+                basic["dividend_per_share"] = detail.get("dividend_per_share")
+
+        # KR metrics 보충 (PER/PBR/ROE fallback)
+        metrics = results["metrics"]
+        if metrics:
+            basic["roe"] = metrics.get("roe", basic.get("roe"))
+            basic["dividend_yield"] = metrics.get("dividend_yield", basic.get("dividend_yield"))
+            basic["dividend_per_share"] = metrics.get(
+                "dividend_per_share", basic.get("dividend_per_share"),
+            )
+            if basic["pbr"] is None and metrics.get("pbr"):
+                basic["pbr"] = metrics["pbr"]
+            if basic["per"] is None and metrics.get("per"):
+                basic["per"] = metrics["per"]
+
+        # _build_report 와 동일 summary 산출
+        financials = results["financials"] or {"code": code, "currency": "KRW" if is_kr else "USD", "rows": []}
+        valuation = results["valuation"] or {"history": [], "avg_per": None, "avg_pbr": None}
+        forward = results["forward"] or {}
+
+        bundle = self._build_report(basic, financials, valuation, forward)
+        bundle["partial_failure"] = partial_failure
+        return bundle
 
     def _build_report(self, basic: dict, financials: dict, valuation: dict, forward: dict = None) -> dict:
         current_per = basic.get("per")

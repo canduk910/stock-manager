@@ -1,6 +1,6 @@
 """Advisory models: AdvisoryStock, AdvisoryCache, AdvisoryReport, PortfolioReport."""
 
-from sqlalchemy import Boolean, Column, Float, Index, Integer, String, Text
+from sqlalchemy import Boolean, Column, Float, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.types import JSON
 
 from db.base import Base
@@ -29,9 +29,11 @@ class AdvisoryStock(Base):
 class AdvisoryCache(Base):
     __tablename__ = "advisory_cache"
 
-    user_id = Column(Integer, primary_key=True)
+    # 2026-05-12: 공유 캐시 전환 — PK 를 (code, market)으로 변경.
+    # user_id는 nullable=True로 유지(다음 마이그레이션에서 drop. 롤백 안전성).
     code = Column(String, primary_key=True)
     market = Column(String, primary_key=True, default="KR")
+    user_id = Column(Integer, nullable=True)
     updated_at = Column(String, nullable=False)
     fundamental = Column(JSON)
     technical = Column(JSON)
@@ -105,6 +107,9 @@ class PortfolioReport(Base):
     __tablename__ = "portfolio_reports"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    # 2026-05-12: user_id 추가 (멀티유저 격리). 기존 행은 백필로 user_id=1.
+    # nullable=True + FK ondelete=SET NULL — admin 삭제 시 보고서 자체는 보존(이력 추적).
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     generated_at = Column(String, nullable=False)
     model = Column(String, nullable=False)
     report = Column(JSON, nullable=False)
@@ -112,9 +117,14 @@ class PortfolioReport(Base):
     regime = Column(String, nullable=True)
     schema_version = Column(String, nullable=True, default="v1")
 
+    __table_args__ = (
+        Index("idx_portfolio_reports_user_created", "user_id", "generated_at"),
+    )
+
     def to_dict(self) -> dict:
         return {
             "id": self.id,
+            "user_id": self.user_id,
             "generated_at": self.generated_at,
             "model": self.model,
             "report": self.report or {},
@@ -127,6 +137,7 @@ class PortfolioReport(Base):
         """Report history (without body)."""
         return {
             "id": self.id,
+            "user_id": self.user_id,
             "generated_at": self.generated_at,
             "model": self.model,
             "weighted_grade_avg": self.weighted_grade_avg,

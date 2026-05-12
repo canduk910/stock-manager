@@ -44,3 +44,19 @@ def get_report(
 ):
     """재무 + 밸류에이션 + 종합 요약 통합."""
     return _svc.get_report(symbol, years)
+
+
+@router.get("/{symbol}/bundle")
+def get_bundle(
+    symbol: str,
+    market: str = Query(default="auto", pattern="^(auto|KR|US)$"),
+    years: int = Query(default=10, ge=1, le=20),
+    _user: dict = Depends(get_current_user),
+):
+    """DetailPage 마운트용 통합 응답 (병렬 수집 + 부분 실패 보존).
+
+    2026-05-12: 프론트 N+1 호출(stock-detail + financials + valuation + ...) 패턴을 1회 호출로 축약.
+    응답: {basic, financials, valuation, forward_estimates, summary, partial_failure}.
+    부분 섹션 실패 시에도 200 + 해당 필드 null + partial_failure 리스트에 섹션명 기록.
+    """
+    return _svc.get_bundle(symbol, market=market, years=years)

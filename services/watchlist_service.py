@@ -272,6 +272,95 @@ class WatchlistService:
                 results[futures[fut]] = fut.result()
         return results
 
+    # ── 다중 종목 batch (2026-05-12 트랙 4) ─────────────────────────────────
+
+    def fetch_batch_details(self, codes: list[str], market: str = "auto") -> dict:
+        """다중 종목 metrics+price 일괄 조회 — N+1 호출 제거용.
+
+        Args:
+            codes: 종목코드 리스트 (≤ 50, 위에서 ServiceError 가드)
+            market: "KR" | "US" | "auto" (auto는 code별 is_domestic 판별)
+
+        Returns:
+            {"details": {code: {price, change, change_pct, market_cap,
+                               currency, per, pbr, roe, dividend_yield, sector}},
+             "errors": ["code:reason", ...]}
+
+        부분 실패 허용: 실패한 종목은 errors에 기록, 성공한 종목만 details에 포함.
+        ThreadPoolExecutor(max_workers=4)로 외부 API I/O 병렬화.
+        """
+        market_u = market.upper() if market else "AUTO"
+        details: dict = {}
+        errors: list[str] = []
+
+        def _fetch_one(code: str) -> tuple[str, dict | None, str | None]:
+            code_u = code.upper().strip()
+            if not code_u:
+                return code, None, "empty code"
+            try:
+                if market_u == "AUTO":
+                    use_kr = is_domestic(code_u)
+                elif market_u == "KR":
+                    use_kr = True
+                elif market_u == "US":
+                    use_kr = False
+                else:
+                    return code_u, None, f"invalid market: {market}"
+
+                if use_kr:
+                    try:
+                        price = fetch_price(code_u) or {}
+                    except Exception as e:
+                        logger.debug("batch fetch_price KR 실패 %s: %s", code_u, e)
+                        price = {}
+                    metrics = fetch_market_metrics(code_u) or {}
+                    detail = {
+                        "currency": "KRW",
+                        "price": price.get("close"),
+                        "change": price.get("change"),
+                        "change_pct": price.get("change_pct"),
+                        "market_cap": _awk(price.get("mktcap") or metrics.get("mktcap")),
+                        "per": metrics.get("per"),
+                        "pbr": metrics.get("pbr"),
+                        "roe": metrics.get("roe"),
+                        "dividend_yield": metrics.get("dividend_yield"),
+                        "sector": _norm_sector(metrics.get("sector"), code_u, "KR"),
+                    }
+                else:
+                    detail_yf = yf_client.fetch_detail_yf(code_u) or {}
+                    if not detail_yf:
+                        return code_u, None, "yfinance 조회 실패"
+                    detail = {
+                        "currency": "USD",
+                        "price": detail_yf.get("close"),
+                        "change": detail_yf.get("change"),
+                        "change_pct": detail_yf.get("change_pct"),
+                        "market_cap": _usd_m(detail_yf.get("mktcap")),
+                        "per": detail_yf.get("per"),
+                        "pbr": detail_yf.get("pbr"),
+                        "roe": detail_yf.get("roe"),
+                        "dividend_yield": detail_yf.get("dividend_yield"),
+                        "sector": _norm_sector(detail_yf.get("sector"), code_u, "US"),
+                    }
+                return code_u, detail, None
+            except Exception as e:
+                logger.warning("batch_details fetch failed code=%s err=%s", code_u, e)
+                return code_u, None, str(e)
+
+        if not codes:
+            return {"details": {}, "errors": []}
+
+        with ThreadPoolExecutor(max_workers=min(4, len(codes))) as pool:
+            futures = {pool.submit(_fetch_one, c): c for c in codes}
+            for fut in as_completed(futures):
+                code_u, detail, err = fut.result()
+                if detail is not None:
+                    details[code_u] = detail
+                if err is not None:
+                    errors.append(f"{code_u}: {err}")
+
+        return {"details": details, "errors": errors}
+
     # ── 단일 종목 상세 ───────────────────────────────────────────────────────
 
     def get_stock_detail(self, code: str, market: str = "KR") -> dict:
