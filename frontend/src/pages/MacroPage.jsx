@@ -6,6 +6,7 @@ import {
 } from '../hooks/useMacro'
 import MacroCycleSection from '../components/macro/MacroCycleSection'
 import IndexSection from '../components/macro/IndexSection'
+import SupplyDemandSection from '../components/macro/SupplyDemandSection'
 import SentimentSection from '../components/macro/SentimentSection'
 import YieldCurveSection from '../components/macro/YieldCurveSection'
 import CreditSpreadSection from '../components/macro/CreditSpreadSection'
@@ -45,6 +46,7 @@ export default function MacroPage() {
       <h1 className="text-2xl font-bold text-gray-900">매크로 분석</h1>
       <MacroCycleSection data={cycle.data} loading={cycle.loading} error={cycle.error} />
       <IndexSection data={indices.data} loading={indices.loading} error={indices.error} />
+      <SupplyDemandSection />
       <SentimentSection data={sentiment.data} loading={sentiment.loading} error={sentiment.error} />
       <YieldCurveSection data={yieldCurve.data} loading={yieldCurve.loading} error={yieldCurve.error} />
       <CreditSpreadSection data={creditSpread.data} loading={creditSpread.loading} error={creditSpread.error} />

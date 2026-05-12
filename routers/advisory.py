@@ -9,7 +9,7 @@ from fastapi import APIRouter, Body, Depends, Query
 from pydantic import BaseModel
 
 from services.auth_deps import get_current_user
-from services import advisory_service, advisory_jobs
+from services import advisory_service, advisory_jobs, supply_demand_service
 from services.exceptions import ServiceError, NotFoundError, ConflictError
 from stock import advisory_store
 from stock.utils import is_domestic
@@ -276,6 +276,22 @@ def get_ohlcv(
     from stock.advisory_fetcher import fetch_ohlcv_by_interval
     result = fetch_ohlcv_by_interval(code.upper(), market.upper(), interval, period)
     return {**result, "interval": interval, "period": period}
+
+
+@router.get("/{code}/supply-demand")
+def get_supply_demand(
+    code: str,
+    days: int = Query(30, description="조회 일수 (10~60)"),
+    _user: dict = Depends(get_current_user),
+):
+    """종목 상세용 일별 수급 + 매수/매도 분리 + 누적 추세.
+
+    REQ-SUPPLY-ROUTER-02. 단위는 억원. advisory_note(OrderAdvisor 자문 고지) 항상 포함.
+    매매 액션 키 (recommendation/action/buy_signal) 미포함 — V1은 표시만.
+    국내 종목(6자리 숫자)만 지원. 해외 → 400. 미존재 → 404. KIS 키 미설정 → 503.
+    days 범위 외(10~60) → 400 (ServiceError, 서비스 레이어 검증).
+    """
+    return supply_demand_service.fetch_stock_supply_demand(code.upper(), days=days)
 
 
 @router.get("/{code}/analyst-reports")

@@ -10,6 +10,7 @@ import FundamentalPanel from '../components/advisory/FundamentalPanel'
 import TechnicalPanel from '../components/advisory/TechnicalPanel'
 import AIReportPanel from '../components/advisory/AIReportPanel'
 import ResearchDataPanel from '../components/advisory/ResearchDataPanel'
+import SupplyDemandPanel from '../components/advisory/SupplyDemandPanel'
 import AnalystReportsTable from '../components/advisory/AnalystReportsTable'
 import ValuationChart from '../components/detail/ValuationChart'
 import ReportChatBubble from '../components/common/ReportChatBubble'
@@ -20,10 +21,11 @@ const TABS = [
 ]
 
 const REPORT_SUB_TABS = [
-  { id: 'cagr',        label: '요약' },
-  { id: 'fundamental', label: '기본적 분석' },
-  { id: 'technical',   label: '기술적 분석' },
-  { id: 'ai',          label: 'AI 자문' },
+  { id: 'cagr',          label: '요약' },
+  { id: 'fundamental',   label: '기본적 분석' },
+  { id: 'technical',     label: '기술적 분석' },
+  { id: 'supply-demand', label: '수급/투자자' },
+  { id: 'ai',            label: 'AI 자문' },
 ]
 
 function TabBtn({ id, active, onClick, children }) {
@@ -77,7 +79,9 @@ export default function DetailPage() {
   }, [symbol, load])
 
   useEffect(() => {
-    if (activeTab === 'report' && subTab !== 'cagr' && symbol && !advData && !advLoading && !advLoadedRef.current) {
+    // supply-demand 서브탭은 advData/리포트 불필요 — 독립 API 호출.
+    const needsAdvData = subTab === 'fundamental' || subTab === 'technical' || subTab === 'ai'
+    if (activeTab === 'report' && needsAdvData && symbol && !advData && !advLoading && !advLoadedRef.current) {
       const market = /^\d{6}$/.test(symbol) ? 'KR' : 'US'
       advLoadedRef.current = true
       loadAdvData(symbol, market)
@@ -185,8 +189,8 @@ export default function DetailPage() {
                     </SubTabBtn>
                   ))}
 
-                  {/* 새로고침/AI분석 버튼: cagr 탭에서는 숨김 */}
-                  {subTab !== 'cagr' && (
+                  {/* 새로고침/AI분석 버튼: cagr + supply-demand 탭에서는 숨김 (advData 의존 안 함) */}
+                  {subTab !== 'cagr' && subTab !== 'supply-demand' && (
                     <div className="ml-auto flex gap-2 py-1">
                       <button
                         onClick={handleRefresh}
@@ -261,6 +265,12 @@ export default function DetailPage() {
                     {!isAdvWorking && advData && (
                       <TechnicalPanel data={advData} symbol={symbol} market={market} />
                     )}
+                  </div>
+                )}
+                {subTab === 'supply-demand' && (
+                  <div className="bg-white rounded-xl border border-gray-200 p-5">
+                    {/* 독립 API: advData/새로고침 의존 없음 — lazy-mount 시 자체 호출 */}
+                    <SupplyDemandPanel code={symbol} market={market} />
                   </div>
                 )}
                 {subTab === 'ai' && (

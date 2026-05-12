@@ -4,6 +4,7 @@
  */
 import { useState } from 'react'
 import { CATEGORY_LABELS, CATEGORY_COLORS, PARAM_KR } from './StrategySelector'
+import BacktestPortfolioModal from './BacktestPortfolioModal'
 
 const STATUS_BADGE = {
   completed: 'bg-green-100 text-green-800',
@@ -80,6 +81,7 @@ function formatPct(val) {
 
 export default function BacktestHistoryTable({ history, onSelect, onDelete, loading }) {
   const [expandedJob, setExpandedJob] = useState(null)
+  const [portfolioModalJob, setPortfolioModalJob] = useState(null)
 
   if (loading) {
     return <div className="text-sm text-gray-500 py-4 text-center">이력 로딩 중...</div>
@@ -100,6 +102,7 @@ export default function BacktestHistoryTable({ history, onSelect, onDelete, load
   }
 
   return (
+    <>
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
@@ -122,8 +125,12 @@ export default function BacktestHistoryTable({ history, onSelect, onDelete, load
               new Date() - new Date(job.submitted_at) > 10 * 60 * 1000
             const displayStatus = isStale ? 'failed' : job.status
             const category = STRATEGY_CATEGORY[job.strategy_name]
-            const symbolDisplay = job.symbol_name && job.symbol_name !== job.symbol
-              ? job.symbol_name : job.symbol
+            // 포트폴리오: symbols 배열 길이 > 1
+            const isPortfolio = Array.isArray(job.symbols) && job.symbols.length > 1
+            const symbolDisplay = isPortfolio
+              ? `포트폴리오 (${job.symbols.length}종목)`
+              : (job.symbol_name && job.symbol_name !== job.symbol
+                  ? job.symbol_name : job.symbol)
             // 전략명: MCP display name 우선 → STRATEGY_KR fallback → ID
             const strategyLabel = job.strategy_display_name
               || STRATEGY_KR[job.strategy_name]
@@ -138,9 +145,21 @@ export default function BacktestHistoryTable({ history, onSelect, onDelete, load
                   {formatDate(job.submitted_at || job.completed_at)}
                 </td>
                 <td className="py-2 px-2">
-                  <div className="font-medium text-gray-900">{symbolDisplay}</div>
-                  {job.symbol_name && job.symbol_name !== job.symbol && (
+                  <div className="font-medium text-gray-900 flex items-center gap-1.5">
+                    {isPortfolio && (
+                      <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-indigo-100 text-indigo-700">
+                        PF
+                      </span>
+                    )}
+                    <span>{symbolDisplay}</span>
+                  </div>
+                  {!isPortfolio && job.symbol_name && job.symbol_name !== job.symbol && (
                     <div className="text-xs text-gray-400 font-mono">{job.symbol}</div>
+                  )}
+                  {isPortfolio && (
+                    <div className="text-[10px] text-gray-400 font-mono truncate max-w-[14rem]">
+                      {(job.symbols || []).slice(0, 3).join(', ')}{job.symbols.length > 3 ? ' ...' : ''}
+                    </div>
                   )}
                 </td>
                 <td className="py-2 px-2">
@@ -237,7 +256,13 @@ export default function BacktestHistoryTable({ history, onSelect, onDelete, load
                 <td className="py-2 px-2 text-center">
                   {job.status === 'completed' && (
                     <button
-                      onClick={() => onSelect(job)}
+                      onClick={() => {
+                        if (isPortfolio) {
+                          setPortfolioModalJob(job)
+                        } else if (onSelect) {
+                          onSelect(job)
+                        }
+                      }}
                       className="text-xs text-blue-600 hover:text-blue-800 hover:underline"
                     >
                       보기
@@ -250,5 +275,12 @@ export default function BacktestHistoryTable({ history, onSelect, onDelete, load
         </tbody>
       </table>
     </div>
+    {portfolioModalJob && (
+      <BacktestPortfolioModal
+        job={portfolioModalJob}
+        onClose={() => setPortfolioModalJob(null)}
+      />
+    )}
+    </>
   )
 }

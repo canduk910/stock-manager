@@ -1772,6 +1772,292 @@ class KoreaInvestment:
         resp = requests.get(url, headers=headers, params=params)
         return resp.json()
 
+
+# ───────────────────────────────────────────────────────────────────────────
+# 투자자별 매매동향 (수급정보) — module-level standalone helpers
+# REQ-SUPPLY-API-01 / REQ-SUPPLY-API-02
+# 클래스 인스턴스(token.dat) 의존 없이 routers/_kis_auth의 사용자별 토큰 캐시 활용.
+# 단위는 백만원(KIS 원본) 유지 — 서비스 레이어에서 ÷100(억원) 변환.
+# ───────────────────────────────────────────────────────────────────────────
+
+_VALID_MARKET_CODES = {"U001", "U201"}
+
+
+def _kis_token():
+    """routers/_kis_auth.get_access_token() 위임. 테스트에서는 patch 대상."""
+    from routers._kis_auth import get_access_token
+    return get_access_token()
+
+
+def _kis_app_key():
+    """KIS appkey/appsecret 반환. 테스트에서는 patch 대상."""
+    from routers._kis_auth import get_kis_credentials
+    app_key, app_secret, _, _, _ = get_kis_credentials()
+    return app_key, app_secret
+
+
+def _kis_base_url() -> str:
+    from routers._kis_auth import BASE_URL
+    return BASE_URL
+
+
+def _to_int(value, default: int = 0) -> int:
+    """문자열/숫자를 int로. 빈문자 또는 None은 default."""
+    if value is None:
+        return default
+    try:
+        s = str(value).strip()
+        if not s:
+            return default
+        # 부호 + 정수 또는 부호 + 소수 → 정수 반올림
+        return int(round(float(s)))
+    except (TypeError, ValueError):
+        return default
+
+
+def _to_float(value, default: float = 0.0) -> float:
+    if value is None:
+        return default
+    try:
+        s = str(value).strip()
+        if not s:
+            return default
+        return float(s)
+    except (TypeError, ValueError):
+        return default
+
+
+def _format_date_yyyymmdd(s: str) -> str:
+    """'20240517' → '2024-05-17'. 형식 불일치 시 원본 반환."""
+    if not s or len(s) < 8:
+        return s or ""
+    s = str(s).strip()
+    if len(s) == 8 and s.isdigit():
+        return f"{s[0:4]}-{s[4:6]}-{s[6:8]}"
+    return s
+
+
+def get_market_investor_daily(market_code: str, days: int = 20) -> list[dict]:
+    """시장별 투자자매매동향(일별). KIS TR_ID FHPTJ04040000.
+
+    Args:
+        market_code: "U001"(KOSPI) 또는 "U201"(KOSDAQ).
+        days: 1~60. 기간 슬라이싱은 KIS가 자동(오늘 기준 역순)으로 반환되므로,
+              본 함수는 응답을 그대로 받아 최대 `days`만큼 잘라 반환.
+
+    Returns:
+        list[dict]: 표준화 키 — date(YYYY-MM-DD), index_close, prev_diff, prev_pct,
+        personal_net_amt, foreign_net_amt, institution_net_amt(각 백만원),
+        그리고 기관 11종 분해(securities/inv_trust/private_fund/bank/insurance/
+        mrbn/pension/etc_finance/etc_corp/etc_org_net_amt). 단위는 백만원 그대로.
+        오름차순(과거→최근)으로 반환.
+
+    Raises:
+        ValueError: market_code 또는 days 범위 외.
+        ExternalAPIError: KIS HTTP 5xx 또는 rt_cd != "0".
+    """
+    # ─ 입력 검증 ─
+    if market_code not in _VALID_MARKET_CODES:
+        raise ValueError(
+            f"market_code는 'U001'(KOSPI) 또는 'U201'(KOSDAQ)이어야 합니다: {market_code!r}"
+        )
+    if not isinstance(days, int) or days < 1 or days > 60:
+        raise ValueError(f"days는 1~60 범위여야 합니다: {days!r}")
+
+    # ─ KIS 호출 파라미터 매핑 ─
+    # FID_INPUT_ISCD / FID_INPUT_ISCD_2: 업종분류코드(0001=코스피, 1001=코스닥)
+    # FID_INPUT_ISCD_1: 소속시장(KSP/KSQ). KIS 명세 FHPTJ04040000.
+    iscd_map = {"U001": "0001", "U201": "1001"}
+    iscd_short_map = {"U001": "KSP", "U201": "KSQ"}
+    today = datetime.datetime.now().strftime("%Y%m%d")
+
+    token = _kis_token()
+    app_key, app_secret = _kis_app_key()
+    base_url = _kis_base_url()
+
+    url = f"{base_url}/uapi/domestic-stock/v1/quotations/inquire-investor-daily-by-market"
+    headers = {
+        "content-type": "application/json",
+        "authorization": f"Bearer {token}",
+        "appkey": app_key,
+        "appsecret": app_secret,
+        "tr_id": "FHPTJ04040000",
+        "custtype": "P",
+    }
+    params = {
+        "FID_COND_MRKT_DIV_CODE": "U",
+        "FID_INPUT_ISCD": iscd_map[market_code],
+        "FID_INPUT_DATE_1": today,
+        "FID_INPUT_ISCD_1": iscd_short_map[market_code],
+        "FID_INPUT_DATE_2": today,
+        "FID_INPUT_ISCD_2": iscd_map[market_code],
+    }
+
+    try:
+        resp = requests.get(url, headers=headers, params=params, timeout=10)
+    except requests.RequestException as exc:
+        from services.exceptions import ExternalAPIError
+        raise ExternalAPIError(f"KIS 시장 수급 API 호출 실패: {exc}")
+
+    if resp.status_code != 200:
+        from services.exceptions import ExternalAPIError
+        raise ExternalAPIError(
+            f"KIS 시장 수급 HTTP {resp.status_code}: {getattr(resp, 'text', '')[:200]}"
+        )
+
+    data = resp.json() or {}
+    if str(data.get("rt_cd", "")) != "0":
+        from services.exceptions import ExternalAPIError
+        raise ExternalAPIError(
+            f"KIS 시장 수급 응답 오류: rt_cd={data.get('rt_cd')} msg={data.get('msg1', '')[:200]}"
+        )
+
+    raw_rows = data.get("output") or []
+
+    # ─ 표준화 ─
+    standardized: list[dict] = []
+    for row in raw_rows:
+        standardized.append({
+            "date": _format_date_yyyymmdd(row.get("stck_bsop_date", "")),
+            "index_close": _to_float(row.get("bstp_nmix_prpr")),
+            "prev_diff": _to_float(row.get("bstp_nmix_prdy_vrss")),
+            "prev_pct": _to_float(row.get("bstp_nmix_prdy_ctrt")),
+            # 합계 3종 (백만원)
+            "personal_net_amt": _to_int(row.get("prsn_ntby_tr_pbmn")),
+            "foreign_net_amt": _to_int(row.get("frgn_ntby_tr_pbmn")),
+            "institution_net_amt": _to_int(row.get("orgn_ntby_tr_pbmn")),
+            # 기관 11종 분해 (백만원)
+            "securities_net_amt": _to_int(row.get("scrt_ntby_tr_pbmn")),
+            "inv_trust_net_amt": _to_int(row.get("ivtr_ntby_tr_pbmn")),
+            "private_fund_net_amt": _to_int(row.get("pe_fund_ntby_tr_pbmn")),
+            "bank_net_amt": _to_int(row.get("bank_ntby_tr_pbmn")),
+            "insurance_net_amt": _to_int(row.get("insu_ntby_tr_pbmn")),
+            "mrbn_net_amt": _to_int(row.get("mrbn_ntby_tr_pbmn")),
+            "pension_net_amt": _to_int(row.get("fund_ntby_tr_pbmn")),
+            "etc_finance_net_amt": _to_int(row.get("etc_ntby_tr_pbmn")),
+            "etc_corp_net_amt": _to_int(row.get("etc_corp_ntby_tr_pbmn")),
+            "etc_org_net_amt": _to_int(row.get("etc_orgt_ntby_tr_pbmn")),
+        })
+
+    # KIS는 보통 최신→과거 순. 과거→최신 정렬(차트 자연스러운 방향).
+    standardized.sort(key=lambda r: r["date"])
+
+    # days 만큼 슬라이싱 (최근 days개 유지)
+    if len(standardized) > days:
+        standardized = standardized[-days:]
+    return standardized
+
+
+def get_stock_investor_daily(code: str, days: int = 30) -> list[dict]:
+    """종목별 투자자매매동향(일별). KIS TR_ID FHPTJ04160001.
+
+    Args:
+        code: 6자리 숫자(국내 종목).
+        days: 1~60.
+
+    Returns:
+        list[dict]: 표준화 키 — 시장 응답에 매수/매도 분리 + close_price 추가.
+        REQ-SUPPLY-API-02 명세. 단위는 백만원(서비스 레이어에서 변환).
+        오름차순(과거→최근).
+
+    Raises:
+        ValueError: code 형식 또는 days 범위 외.
+        ExternalAPIError: KIS 오류.
+    """
+    # ─ 입력 검증 ─
+    if not isinstance(code, str) or len(code) != 6 or not code.isdigit():
+        raise ValueError(f"code는 6자리 숫자여야 합니다(국내 종목만 지원): {code!r}")
+    if not isinstance(days, int) or days < 1 or days > 60:
+        raise ValueError(f"days는 1~60 범위여야 합니다: {days!r}")
+
+    # KIS FHPTJ04160001 명세: "해당일 조회는 장 종료 후 정상 조회 가능"
+    # KST 평일 15:40 이전 또는 주말이면 직전 영업일로 후퇴(장중에도 어제까지 데이터 조회 가능).
+    _KST = datetime.timezone(datetime.timedelta(hours=9))
+    _now_kst = datetime.datetime.now(_KST)
+    _cutoff = _now_kst.replace(hour=15, minute=40, second=0, microsecond=0)
+    if _now_kst.weekday() >= 5 or _now_kst < _cutoff:
+        _d = _now_kst.date() - datetime.timedelta(days=1)
+        while _d.weekday() >= 5:
+            _d -= datetime.timedelta(days=1)
+        today = _d.strftime("%Y%m%d")
+    else:
+        today = _now_kst.strftime("%Y%m%d")
+
+    token = _kis_token()
+    app_key, app_secret = _kis_app_key()
+    base_url = _kis_base_url()
+
+    url = f"{base_url}/uapi/domestic-stock/v1/quotations/investor-trade-by-stock-daily"
+    headers = {
+        "content-type": "application/json",
+        "authorization": f"Bearer {token}",
+        "appkey": app_key,
+        "appsecret": app_secret,
+        "tr_id": "FHPTJ04160001",
+        "custtype": "P",
+    }
+    params = {
+        "FID_COND_MRKT_DIV_CODE": "J",
+        "FID_INPUT_ISCD": code,
+        "FID_INPUT_DATE_1": today,
+        "FID_ORG_ADJ_PRC": "",
+        "FID_ETC_CLS_CODE": "1",
+    }
+
+    try:
+        resp = requests.get(url, headers=headers, params=params, timeout=10)
+    except requests.RequestException as exc:
+        from services.exceptions import ExternalAPIError
+        raise ExternalAPIError(f"KIS 종목 수급 API 호출 실패: {exc}")
+
+    if resp.status_code != 200:
+        from services.exceptions import ExternalAPIError
+        raise ExternalAPIError(
+            f"KIS 종목 수급 HTTP {resp.status_code}: {getattr(resp, 'text', '')[:200]}"
+        )
+
+    data = resp.json() or {}
+    if str(data.get("rt_cd", "")) != "0":
+        from services.exceptions import ExternalAPIError
+        raise ExternalAPIError(
+            f"KIS 종목 수급 응답 오류: rt_cd={data.get('rt_cd')} msg={data.get('msg1', '')[:200]}"
+        )
+
+    raw_rows = data.get("output2") or []
+    standardized: list[dict] = []
+    for row in raw_rows:
+        standardized.append({
+            "date": _format_date_yyyymmdd(row.get("stck_bsop_date", "")),
+            "close_price": _to_int(row.get("stck_clpr")),
+            # 순매수 합계 3종 (백만원)
+            "personal_net_amt": _to_int(row.get("prsn_ntby_tr_pbmn")),
+            "foreign_net_amt": _to_int(row.get("frgn_ntby_tr_pbmn")),
+            "institution_net_amt": _to_int(row.get("orgn_ntby_tr_pbmn")),
+            # 매수/매도 분리 (백만원)
+            "personal_buy_amt": _to_int(row.get("prsn_shnu_tr_pbmn")),
+            "personal_sell_amt": _to_int(row.get("prsn_seln_tr_pbmn")),
+            "foreign_buy_amt": _to_int(row.get("frgn_shnu_tr_pbmn")),
+            "foreign_sell_amt": _to_int(row.get("frgn_seln_tr_pbmn")),
+            "institution_buy_amt": _to_int(row.get("orgn_shnu_tr_pbmn")),
+            "institution_sell_amt": _to_int(row.get("orgn_seln_tr_pbmn")),
+            # 기관 11종 분해 (백만원)
+            "securities_net_amt": _to_int(row.get("scrt_ntby_tr_pbmn")),
+            "inv_trust_net_amt": _to_int(row.get("ivtr_ntby_tr_pbmn")),
+            "private_fund_net_amt": _to_int(row.get("pe_fund_ntby_tr_pbmn")),
+            "bank_net_amt": _to_int(row.get("bank_ntby_tr_pbmn")),
+            "insurance_net_amt": _to_int(row.get("insu_ntby_tr_pbmn")),
+            "mrbn_net_amt": _to_int(row.get("mrbn_ntby_tr_pbmn")),
+            "pension_net_amt": _to_int(row.get("fund_ntby_tr_pbmn")),
+            "etc_finance_net_amt": _to_int(row.get("etc_ntby_tr_pbmn")),
+            "etc_corp_net_amt": _to_int(row.get("etc_corp_ntby_tr_pbmn")),
+            "etc_org_net_amt": _to_int(row.get("etc_orgt_ntby_tr_pbmn")),
+        })
+    standardized.sort(key=lambda r: r["date"])
+    if len(standardized) > days:
+        standardized = standardized[-days:]
+    return standardized
+
+
 if __name__ == "__main__":
     import pprint
 

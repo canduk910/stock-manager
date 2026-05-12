@@ -11,6 +11,7 @@ import {
   fetchCommodities,
   fetchSectorHeatmap,
   fetchMacroCycle,
+  fetchSupplyDemand,
 } from '../api/macro'
 
 export function useMacroIndices() {
@@ -70,5 +71,15 @@ export function useSectorHeatmap() {
 export function useMacroCycle() {
   const { data, loading, error, run } = useAsyncState()
   const load = useCallback(() => run(() => fetchMacroCycle()).catch(() => {}), [run])
+  return { data, loading, error, load }
+}
+
+// REQ-SUPPLY-UI-01: 매크로 페이지 시장 수급. 부분 실패 격리 — 다른 매크로 섹션 영향 없음
+export function useSupplyDemand() {
+  const { data, loading, error, run } = useAsyncState()
+  const load = useCallback(
+    (market = 'kospi', days = 20) => run(() => fetchSupplyDemand(market, days)).catch(() => {}),
+    [run]
+  )
   return { data, loading, error, load }
 }

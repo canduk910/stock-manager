@@ -1,9 +1,11 @@
 """매크로 분석 API 라우터."""
 
-from fastapi import APIRouter, Depends
+from typing import Literal
+
+from fastapi import APIRouter, Depends, Query
 
 from services.auth_deps import get_current_user
-from services import macro_service
+from services import macro_service, supply_demand_service
 
 router = APIRouter(prefix="/api/macro", tags=["macro"])
 
@@ -72,3 +74,18 @@ def get_macro_cycle(_user: dict = Depends(get_current_user)):
 def get_summary(_user: dict = Depends(get_current_user)):
     """전체 매크로 분석 통합 (섹션별 독립 — 부분 실패 허용)."""
     return macro_service.get_summary()
+
+
+@router.get("/supply-demand")
+def get_supply_demand(
+    market: Literal["kospi", "kosdaq"] = Query(..., description="kospi 또는 kosdaq"),
+    days: int = Query(20, description="조회 일수 (10~60)"),
+    _user: dict = Depends(get_current_user),
+):
+    """매크로 페이지용 시장(KOSPI/KOSDAQ) 일별 수급 + 누적 추세.
+
+    REQ-SUPPLY-ROUTER-01. 단위는 억원 (서비스 레이어에서 KIS 백만원 ÷ 100).
+    market 잘못된 값 → 422 (FastAPI Literal). days 범위 외 → 400 (ServiceError).
+    KIS 키 미설정 시 ConfigError(503) → 다른 매크로 섹션은 정상.
+    """
+    return supply_demand_service.fetch_market_supply_demand(market, days=days)

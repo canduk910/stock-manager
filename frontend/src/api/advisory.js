@@ -93,3 +93,7 @@ export const fetchAdvisoryOhlcv = (code, market = 'KR', interval = '15m', period
 // ── 증권사별 목표가 + 리포트 ──────────────────────────────────────────────
 export const fetchAnalystReports = (code, market = 'KR') =>
   apiFetch(`/api/advisory/${encodeURIComponent(code)}/analyst-reports?market=${market}`)
+
+// ── 종목 수급(개인/외국인/기관) (REQ-SUPPLY-ROUTER-02) ─────────────────────
+export const fetchStockSupplyDemand = (code, days = 30) =>
+  apiFetch(`/api/advisory/${encodeURIComponent(code)}/supply-demand?days=${days}`)

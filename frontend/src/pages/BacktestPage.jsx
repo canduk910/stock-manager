@@ -35,6 +35,10 @@ export default function BacktestPage() {
   const [symbolName, setSymbolName] = useState('')
   // 로컬 프리셋(다중 종목) 모드 전용 — 칩 리스트
   const [multiSymbols, setMultiSymbols] = useState([]) // [{code, name}]
+  // 단위 토글: 'single'(종목 단위) | 'portfolio'(포트폴리오 단위)
+  // - single  → 전략 탭은 builder/preset/custom 노출, local-preset 숨김
+  // - portfolio → local-preset 단독 노출, multiSymbols 입력 사용
+  const [unitMode, setUnitMode] = useState('single')
   const [strategyMode, setStrategyMode] = useState('builder')
   const [selectedPreset, setSelectedPreset] = useState('')
   const [yamlContent, setYamlContent] = useState('')
@@ -88,6 +92,23 @@ export default function BacktestPage() {
     setSelectedPreset('')
     setCustomParams({})
   }, [strategyMode])
+
+  // 단위 토글 변경 → 전략 모드 자동 보정
+  // - portfolio: local-preset 강제
+  // - single   : 현재가 local-preset이면 builder로 폴백 (그 외 유지)
+  useEffect(() => {
+    if (unitMode === 'portfolio') {
+      if (strategyMode !== 'local-preset') setStrategyMode('local-preset')
+    } else if (unitMode === 'single') {
+      if (strategyMode === 'local-preset') setStrategyMode('builder')
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [unitMode])
+
+  // StrategySelector에 전달할 노출 모드 화이트리스트
+  const allowedStrategyModes = unitMode === 'portfolio'
+    ? ['local-preset']
+    : ['builder', 'preset', 'custom']
 
   // 마운트 시 + 백테스트 완료 시 히스토리 로드
   useEffect(() => { loadHistory() }, [loadHistory])
@@ -212,8 +233,41 @@ export default function BacktestPage() {
   return (
     <div className="space-y-4">
       {/* 헤더 */}
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-bold text-gray-900">백테스트</h1>
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div className="flex items-center gap-3">
+          <h1 className="text-xl font-bold text-gray-900">백테스트</h1>
+          {/* 단위 토글 — segment control 스타일 */}
+          <div
+            role="group"
+            aria-label="백테스트 단위 선택"
+            className="inline-flex rounded-lg border border-gray-300 bg-gray-50 p-0.5 text-xs"
+          >
+            <button
+              type="button"
+              onClick={() => setUnitMode('single')}
+              className={`px-3 py-1 rounded-md font-medium transition-colors ${
+                unitMode === 'single'
+                  ? 'bg-white text-blue-700 shadow-sm border border-gray-200'
+                  : 'text-gray-500 hover:text-gray-700'
+              }`}
+              title="단일 종목 백테스트 (빌더 / MCP 프리셋 / 커스텀)"
+            >
+              종목
+            </button>
+            <button
+              type="button"
+              onClick={() => setUnitMode('portfolio')}
+              className={`px-3 py-1 rounded-md font-medium transition-colors ${
+                unitMode === 'portfolio'
+                  ? 'bg-white text-blue-700 shadow-sm border border-gray-200'
+                  : 'text-gray-500 hover:text-gray-700'
+              }`}
+              title="포트폴리오 백테스트 (로컬 프리셋, 최대 10종목 균등 배분)"
+            >
+              포트폴리오
+            </button>
+          </div>
+        </div>
         <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${
           mcpAvailable ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'
         }`}>
@@ -233,9 +287,9 @@ export default function BacktestPage() {
       <div className="bg-white rounded-lg border p-4 space-y-4">
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">
-            {strategyMode === 'local-preset' ? '종목 (1~10개)' : '종목'}
+            {unitMode === 'portfolio' ? '종목 (1~10개, 균등 배분)' : '종목'}
           </label>
-          {strategyMode === 'local-preset' ? (
+          {unitMode === 'portfolio' ? (
             <SymbolMultiInput
               symbols={multiSymbols}
               onChange={setMultiSymbols}
@@ -263,6 +317,7 @@ export default function BacktestPage() {
             yamlContent={yamlContent}
             mode={strategyMode}
             onModeChange={setStrategyMode}
+            allowedModes={allowedStrategyModes}
             onPresetChange={handlePresetChange}
             onYamlChange={(yaml) => { setYamlContent(yaml); setBuilderYamlState(null) }}
             customParams={customParams}
@@ -276,6 +331,8 @@ export default function BacktestPage() {
                 setYamlContent(strategy.yaml_content)
                 setBuilderYamlState(strategy.builder_state_json || null)
                 setStrategyMode('custom')
+                // 저장 전략 실행 시 단위는 'single'로 자동 전환
+                setUnitMode('single')
               }
             }}
           />

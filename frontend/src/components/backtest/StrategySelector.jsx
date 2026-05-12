@@ -144,9 +144,24 @@ export default function StrategySelector({
   onRunSavedStrategy,
   // 로컬 프리셋(4개 KR 전략 + 다중 종목 포트폴리오)
   localPresets,
+  // 단위 토글(종목/포트폴리오)에 따른 노출 모드 화이트리스트.
+  // 미지정 시 4개 모드 모두 노출(기존 동작).
+  allowedModes,
 }) {
   // 일반 프리셋 / 로컬 프리셋 — 같은 selectedPreset state를 공유.
   const activePresetList = mode === 'local-preset' ? (localPresets || []) : (presets || [])
+
+  // 모드 탭 필터링 (allowedModes 미지정 시 전체 노출)
+  const ALL_MODES = ['builder', 'preset', 'local-preset', 'custom']
+  const MODE_LABELS = {
+    builder: '전략 빌더',
+    preset: '프리셋 전략',
+    'local-preset': '로컬 프리셋',
+    custom: '커스텀 YAML',
+  }
+  const visibleModes = (Array.isArray(allowedModes) && allowedModes.length > 0)
+    ? ALL_MODES.filter((m) => allowedModes.includes(m))
+    : ALL_MODES
   const presetDetail = useMemo(() => {
     if (!selectedPreset || !activePresetList?.length) return null
     return activePresetList.find((p) => {
@@ -157,49 +172,24 @@ export default function StrategySelector({
 
   return (
     <div className="space-y-3">
-      {/* 모드 선택 탭 */}
-      <div className="flex gap-2">
-        <button
-          onClick={() => onModeChange('builder')}
-          className={`px-4 py-1.5 text-sm rounded font-medium transition-colors ${
-            mode === 'builder'
-              ? 'bg-blue-600 text-white'
-              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-          }`}
-        >
-          전략 빌더
-        </button>
-        <button
-          onClick={() => onModeChange('preset')}
-          className={`px-4 py-1.5 text-sm rounded font-medium transition-colors ${
-            mode === 'preset'
-              ? 'bg-blue-600 text-white'
-              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-          }`}
-        >
-          프리셋 전략
-        </button>
-        <button
-          onClick={() => onModeChange('local-preset')}
-          className={`px-4 py-1.5 text-sm rounded font-medium transition-colors ${
-            mode === 'local-preset'
-              ? 'bg-blue-600 text-white'
-              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-          }`}
-          title="4개 KR 전략 + 균등 배분 포트폴리오 (최대 10종목, 일봉 단순화)"
-        >
-          로컬 프리셋
-        </button>
-        <button
-          onClick={() => onModeChange('custom')}
-          className={`px-4 py-1.5 text-sm rounded font-medium transition-colors ${
-            mode === 'custom'
-              ? 'bg-blue-600 text-white'
-              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-          }`}
-        >
-          커스텀 YAML
-        </button>
+      {/* 모드 선택 탭 — allowedModes 화이트리스트 적용 */}
+      <div className="flex gap-2 flex-wrap">
+        {visibleModes.map((m) => (
+          <button
+            key={m}
+            onClick={() => onModeChange(m)}
+            className={`px-4 py-1.5 text-sm rounded font-medium transition-colors ${
+              mode === m
+                ? 'bg-blue-600 text-white'
+                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+            }`}
+            title={m === 'local-preset'
+              ? '4개 KR 전략 + 균등 배분 포트폴리오 (최대 10종목, 일봉 단순화)'
+              : undefined}
+          >
+            {MODE_LABELS[m]}
+          </button>
+        ))}
       </div>
 
       {mode === 'builder' ? (

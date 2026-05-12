@@ -15,6 +15,7 @@ import {
   fetchReportById,
   fetchAdvisoryOhlcv,
   collectResearchData,
+  fetchStockSupplyDemand,
 } from '../api/advisory'
 import { saveActiveJob, loadActiveJob, clearActiveJob } from './_advisoryJobPersist'
 
@@ -292,4 +293,14 @@ export function useAdvisoryOhlcv() {
     [run]
   )
   return { result, loading, error, load }
+}
+
+/** REQ-SUPPLY-UI-02: 종목 수급. 부분 실패 격리. */
+export function useStockSupplyDemand() {
+  const { data, loading, error, run } = useAsyncState()
+  const load = useCallback(
+    (code, days = 30) => run(() => fetchStockSupplyDemand(code, days)).catch(() => {}),
+    [run]
+  )
+  return { data, loading, error, load }
 }

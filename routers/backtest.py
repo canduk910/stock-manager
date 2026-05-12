@@ -230,18 +230,39 @@ def get_result(job_id: str, user: dict = Depends(get_current_user)):
 
 @router.get("/history")
 def get_history(symbol: Optional[str] = None, market: Optional[str] = None, limit: int = 20, user: dict = Depends(get_current_user)):
-    """백테스트 작업 이력."""
+    """백테스트 작업 이력.
+
+    응답 보강 필드:
+    - `symbol_name`: 대표 심볼(symbol) → 종목명 변환. 백워드 호환 유지.
+    - `symbols_names`: 다종목(local 백테스트) — `[{code, name}, ...]`.
+      단일 종목/`symbols` 미보유 행은 None 또는 빈 배열.
+    """
     jobs = strategy_store.get_job_history(user["id"], symbol=symbol, market=market, limit=limit)
+    # 함수 내부 import — 모듈 로드 시 cycle/오버헤드 방지 + 테스트에서 patch 가능
+    from stock.symbol_map import code_to_name
+
+    def _resolve_name(code: str) -> str:
+        if not code:
+            return code or ""
+        if is_domestic(code):
+            try:
+                return code_to_name(code) or code
+            except Exception:
+                return code
+        return code
+
     for job in jobs:
         sym = job.get("symbol", "")
-        if is_domestic(sym):
-            try:
-                from stock.symbol_map import code_to_name
-                job["symbol_name"] = code_to_name(sym) or sym
-            except Exception:
-                job["symbol_name"] = sym
+        job["symbol_name"] = _resolve_name(sym)
+
+        # 다종목(local 백테스트) — `symbols` 배열 변환
+        symbols_list = job.get("symbols")
+        if isinstance(symbols_list, list) and len(symbols_list) > 0:
+            job["symbols_names"] = [
+                {"code": c, "name": _resolve_name(c)} for c in symbols_list
+            ]
         else:
-            job["symbol_name"] = sym
+            job["symbols_names"] = None
     return jobs
 
 

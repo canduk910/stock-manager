@@ -28,9 +28,9 @@ frontend/
 | `watchlist.js` | CRUD + market 파라미터 |
 | `detail.js` | 10년 재무 + 밸류에이션 + 종합 리포트 |
 | `order.js` | placeOrder/fetchOpenOrders/cancelOrder/modifyOrder/fetchExecutions/fetchBuyable/fetchFnoPrice |
-| `advisory.js` | fetchAdvisoryStocks/addAdvisoryStock/refreshAdvisoryData/generateReport(userComment)/fetchReport/fetchReportHistory/fetchReportById/fetchAdvisoryOhlcv |
+| `advisory.js` | fetchAdvisoryStocks/addAdvisoryStock/refreshAdvisoryData/generateReport(userComment)/fetchReport/fetchReportHistory/fetchReportById/fetchAdvisoryOhlcv/**fetchStockSupplyDemand**(code, days) |
 | `search.js` | searchStocks(q, market) |
-| `macro.js` | fetchMacroIndices/fetchMacroNews/fetchMacroSentiment/fetchMacroInvestorQuotes/fetchMacroSummary |
+| `macro.js` | fetchMacroIndices/fetchMacroNews/fetchMacroSentiment/fetchMacroInvestorQuotes/fetchMacroSummary/**fetchSupplyDemand**(market, days) |
 | `advisor.js` | analyzePortfolio(userComment)/fetchAdvisorHistory/fetchAdvisorReport |
 | `backtest.js` | fetchMcpStatus/fetchPresets/runPresetBacktest/runCustomBacktest/runBatchBacktest/fetchBacktestResult/fetchBacktestHistory/fetchLocalPresets/runLocalBacktest |
 | `strategyBuilder.js` | convert/validate/save/load/list/delete (/api/backtest/strategy/*) |
@@ -51,8 +51,8 @@ frontend/
 | `useMarketClock.js` | KST 4구간 KR 거래소 자동 판정 (`UN`/`KRX`/`NXT`). `resolvePhaseByClock(now)` 순수 함수 export. 1분 setInterval + `/ws/market-status` override |
 | `useUsMarketClock.js` | ET 4구간 미국 시장 (`pre`/`regular`/`after`/`closed`). `Intl.DateTimeFormat('en-US', {timeZone:'America/New_York'})` DST 자동. `US_HOLIDAYS_ET` 2026~2028 30일 + `isUsHoliday()` 헬퍼 (주말+공휴일) |
 | `useMarketBoard.js` | useMarketBoard (신고가/신저가 + sparkline + ohlc) + useDisplayStocks (관심+별도등록 병합+순서) |
-| `useAdvisory.js` | useAdvisoryStocks/useAdvisoryData/useAdvisoryReport/useAdvisoryOhlcv |
-| `useMacro.js` | 섹션별 독립 훅 (Indices/News/Sentiment/InvestorQuotes) |
+| `useAdvisory.js` | useAdvisoryStocks/useAdvisoryData/useAdvisoryReport/useAdvisoryOhlcv/**useStockSupplyDemand**(code, days) |
+| `useMacro.js` | 섹션별 독립 훅 (Indices/News/Sentiment/InvestorQuotes/**SupplyDemand(market, days)**). 부분 실패 격리 |
 | `usePortfolioAdvisor.js` | analyze/loadLatest/loadById. stale closure 해결 (loadHistory 의존성 없음) |
 | `useReport.js` | 5개 훅 (Reports/ReportDetail/Recommendations/Performance/Regimes) |
 | `usePortfolio.js` | balance+sentiment 병렬 + 자산배분/안전마진 등급 계산 |
@@ -91,17 +91,19 @@ frontend/
 - ResearchDataPanel — 입력데이터 16카테고리 통합 미리보기. `_safeText()` 객체 안전 렌더 + `renderSegments` 키 매핑(`s.segment||s.name||s.product`)
 - `UserCommentaryCard` — 사용자 가설 양면 평가. stance 5단계 배지 + 좌(👍 녹색)/우(👎 빨강) 2컬럼 + strength 1~10 게이지. evaluation null 미렌더
 - AnalystReportsModal (KR=네이버리서치/US=yfinance 등급이력)
+- **SupplyDemandPanel** — 종합리포트 5번째 서브탭("수급/투자자") 본체. Recharts ComposedChart(개인/외국인/기관 일별 막대 + 누적 라인). 상단 advisory_note 노란 배너. 매수/매도 분리 토글. 해외종목 진입 시 "국내 전용" 안내. KIS 키 미설정 503 → 안내 카드
 
 **report/** ReportDetailView, SectorConceptTabs(3컨셉 + WatchlistButton + 기등록 ★), ReportHistoryList
 **portfolio/** RegimeBanner, AllocationChart, ProfitChart, HoldingsOverview
 **advisor/** AdvisorPanel, DiagnosisCard, SectorRecommendationCard, RebalanceCard, TradeTable, TradeConfirmModal
 
 **backtest/**
-- StrategySelector — 4탭 순서: 전략빌더(기본) → MCP 프리셋 → 로컬 프리셋 → 커스텀 YAML. 프리셋 드롭다운+상세(파라미터 슬라이더). `PARAM_KR` 80+ 한글명 매핑
+- StrategySelector — 4탭 순서: 전략빌더(기본) → MCP 프리셋 → 로컬 프리셋 → 커스텀 YAML. 프리셋 드롭다운+상세(파라미터 슬라이더). `PARAM_KR` 80+ 한글명 매핑. **`allowedModes` prop** — 단위 토글(종목/포트폴리오)이 화이트리스트 전달, 외 탭 자동 숨김
 - MetricsCard, BacktestResultPanel (캔들+수익률곡선 이중축 + 거래량 바 + 보유구간 ReferenceArea + 포지션요약 6카드 + 연간/월별 수익률 + 거래내역. `per_symbol_contribution` 시 종목별 카드. 원화 `Math.floor()` 절사)
 - backtestUtils.js (computeAnnualReturns/computeMonthlyReturns/computePositionSummary)
 - AnnualReturnsTable, MonthlyReturnsHeatmap, PositionSummary, BatchCompareTable
-- BacktestHistoryTable (일시/종목/카테고리/전략/수익률/샤프/낙폭/상태/파라미터/삭제/보기)
+- BacktestHistoryTable (일시/종목/카테고리/전략/수익률/샤프/낙폭/상태/파라미터/삭제/보기). 다종목(`symbols.length>1`)이면 종목 컬럼에 "포트폴리오 (N종목)" + 앞 3개 칩 미리보기 + "보기" → 모달
+- **BacktestPortfolioModal** — 다종목 백테스트 상세. 헤더(일시·전략·기간·수익률·샤프·MDD 4메트릭) → 종목 칩 리스트(`symbols_names` 기반 코드+명) → per_symbol_contribution 테이블(거래수/수익률/기여도) → 파라미터 JSON. ESC + 백드롭 클릭 닫기. 단일 종목 행은 기존 동작 유지
 
 **strategy-builder/**
 - StrategyBuilder (5단계 스테퍼, 리스크 최소1개 필수)
@@ -113,6 +115,7 @@ frontend/
 
 **macro/**
 - IndexSection, SentimentSection (VIX+버핏+F&G), NewsSection (한국+NYT 2컬럼), InvestorSection
+- **SupplyDemandSection** — 코스피/코스닥 토글(SectorHeatmap KR/US 패턴 차용) + 10~60일 슬라이더. Recharts ComposedChart(개인/외국인/기관 일별 막대 + 누적 라인) + 당일 요약 칩(외국인 +X억 / 기관 -Y억 / 개인 +Z억). KIS 키 미설정 503/외부 API 502 → 부분 실패 안내 카드(다른 섹션 무영향). IndexSection 직후 마운트
 - MacroCycleSection (4단계 + 투자체제 나란히 + 괴리설명 + confidence + 지표카드)
 - YieldCurveSection — 3단 레이아웃: 4금리 카드 → SpreadCard|곡선 → 10Y-3M 추이 풀폭 (h-80). NBER 침체+S&P 약세장 ReferenceArea 음영
 - CreditSpreadSection — HY OAS 백분위 5단계 시계추 + 5년차트(p10/p25/p75/p90 ReferenceLine) + IG OAS·HY-IG 보조카드(>5%p 정크패닉)
@@ -133,13 +136,13 @@ frontend/
 | EarningsPage | `/earnings` | KR/US 탭 |
 | BalancePage | `/balance` | KR/US/FNO 3섹션 |
 | WatchlistPage | `/watchlist` | |
-| DetailPage | `/detail/:symbol` | 재무분석/종합 리포트 (서브탭 4개) |
+| DetailPage | `/detail/:symbol` | 재무분석/종합 리포트 (서브탭 5개: 요약/기본적/기술적/AI자문/**수급·투자자**) |
 | OrderPage | `/order` | 5탭 (주문/미체결/체결/이력/예약) |
 | MarketBoardPage | `/market-board` | 시세판 (실시간 WS) |
 | MacroPage | `/macro` | 매크로 분석 |
 | PortfolioPage | `/portfolio` | 통합 (체제+배분+수익+AI자문) |
 | ReportPage | `/reports` | 데일리 추천 (KR/US 토글, 3컨셉 탑픽) |
-| BacktestPage | `/backtest` | 빌더(기본)/MCP/로컬/커스텀 4모드. KR만. 거래비용 입력. 가용 기간 가이드 (US ≥ 1998-01-02 / KR ≥ 2000-01-04) |
+| BacktestPage | `/backtest` | **단위 토글(종목/포트폴리오)** segment control이 전략 탭 자동 제한: 종목→빌더/MCP/커스텀 3탭+SymbolSearchBar(단일), 포트폴리오→로컬프리셋 단독+SymbolMultiInput(1~10). 전환 시 state 보존(재전환 시 복원). KR만. 거래비용 입력. 가용 기간 가이드 (US ≥ 1998-01-02 / KR ≥ 2000-01-04) |
 | TaxPage | `/tax` | 4탭 (요약/매매/계산/시뮬레이션) |
 | AdminPage | `/admin` | → `/admin/ai` redirect |
 | AdminAIPage | `/admin/ai` | 3탭 (사용량/한도/감사). LimitsTab user_id는 사용자 검색 콤보 |
@@ -168,7 +171,7 @@ frontend/
 - **EarningsPage**: KR/US 탭 → 조회 시 필터 초기화. 클라이언트 사이드 필터
 - **BalancePage**: KR/US/FNO 3섹션. KR 항상 표시, FNO는 `fno_enabled`일 때. KIS 키 없으면 안내 메시지 (에러 대신)
 - **WatchlistDashboard**: 종목명 클릭 → `/detail/:symbol`. 통화 배지 (US=`[US]`). `partial_failure` 표시 — 외부 API 부분 실패 영역(price/metrics/financials)은 회색 + ⚠ + tooltip "데이터 일시 미수집". @dnd-kit 드래그핸들(⠿) 행 DnD
-- **DetailPage**: StockHeader → KLineChartPanel → 2탭. 종합 리포트 4개 서브탭. advisory는 lazy load
+- **DetailPage**: StockHeader → KLineChartPanel → 2탭. 종합 리포트 5개 서브탭(요약/기본적/기술적/AI자문/수급·투자자). advisory + 수급은 lazy load
 - **OrderPage**: 5탭. 공유 상태(symbol/symbolName/market) 최상단. `isMounted` ref 중복 호출 방지. 10초 자동 폴링(미체결/체결), 체결통보 WS 수신 시 토스트+갱신, 발송 후 3초 딜레이 갱신
 - **MarketBoardPage**: `useDisplayStocks` 훅 (api/ 직접 import 금지). @dnd-kit 카드 순서 (DB 영속)
 

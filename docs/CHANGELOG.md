@@ -1,5 +1,82 @@
 # 변경 이력
 
+## 2026-05-12 — 투자자별 수급정보(매크로+종목) + 백테스트 UI/UX 개선 (단위 토글·포트폴리오 모달)
+
+### 신규 기능 1 — 투자자별 수급정보 V1 (개인/외국인/기관 11종)
+
+매크로 페이지(시장 단위 KOSPI/KOSDAQ)와 종목 상세 종합 리포트(개별 종목)에 KIS OpenAPI 기반 일별 투자자 매매동향 가시화. KIS TR `FHPTJ04040000`(시장 일별) + `FHPTJ04160001`(종목 일별) 신규 wrapping. 외부 무료 소스(yfinance/FRED/RSS)는 한국 투자자별 수급 미제공, KIS가 유일 진입점.
+
+**KIS wrapper (`wrapper.py`)**
+- `get_market_investor_daily(market_code, days)` / `get_stock_investor_daily(code, days)` 신규 메서드 + 헬퍼 5종 (`_format_date_yyyymmdd`, `_to_float`, `_to_int` 등)
+- 응답 표준화 키: 합계 3종(personal/foreign/institution_net_amt) + 기관 11종 분해(securities/inv_trust/private_fund/bank/insurance/mrbn/pension/etc_finance/etc_corp/etc_org). 단위 백만원 그대로(서비스 레이어 변환)
+- **결함 후 hotfix(같은 날 12:00 KST)**: 시장 TR `FID_INPUT_ISCD_2`를 `KSP`/`KSQ`(소속시장) → `0001`/`1001`(업종분류코드) 정정. KIS 명세상 ISCD_2는 "하위 분류코드(업종분류코드)"이며, 잘못된 KSP/KSQ 송신 시 KIS가 전 행 `*_ntby_tr_pbmn=0`과 엉뚱한 지수값을 반환. 검증: 코스피 호출 직후 개인 +1.43조원/외국인 -1.95조원/기관 +4,884억원 정상 수신
+- **종목 TR `FID_INPUT_DATE_1` KST cutoff 후퇴 로직**: KIS 명세에 "해당일 조회는 장 종료 후 정상 조회 가능" 명시되어 있어 평일 15:40 이전엔 오늘 날짜로 TIME LIMIT 반환. KST 평일 15:40 이전 또는 주말이면 직전 영업일(월요일은 직전 금요일, 토·일은 직전 금요일)로 자동 후퇴 → 장중에도 어제까지 데이터 정상 조회. 표준라이브러리 `datetime.timezone(timedelta(hours=9))`만 사용(pytz 미의존)
+
+**서비스 (`services/supply_demand_service.py` 신규)**
+- `fetch_market_supply_demand(market, days)` / `fetch_stock_supply_demand(code, days)` — wrapper 위임 + 단위 변환(백만원 → 억원, ÷100 반올림) + 누적합 + 색상 표준(개인 #EF4444 / 외국인 #3B82F6 / 기관 #10B981 — 한국 차트 컨벤션) + advisory_note 안전 고지(Graham 원칙)
+- 매매 액션 키 금지(`recommendation`/`action`/`buy_signal` 부재) — OrderAdvisor 자문 결과. 자동 트리거 미래 방지 테스트(`test_advisory_note_no_trade_signal_keys`) 포함
+- 영속 캐시: `stock/macro_store.py`(KST 일자 기반) 재사용. 카테고리 키 `supply_demand:market:{kospi|kosdaq}` / `supply_demand:stock:{code}`. DB 마이그레이션 0건
+- **zero-row 가드** (`_is_all_zero_net` + `_fetch_or_cache`) — 결함 응답 영속 캐시 차단. 정책: (1) 캐시 hit + 정상 → 그대로 / (2) 캐시 hit + 전 행 zero-row → 자동 폐기 + wrapper 재호출(영속 결함 자동 복구) / (3) wrapper 결과 zero-row → 캐시 저장 거부 + `ExternalAPIError(502)` 표면화 / (4) wrapper 재호출 1회만(무한 루프 방지). 일부 행만 0(휴장일 등)은 정상 통과(false positive 방지). 이 가드는 2026-05-12 오전 코스피 결함 60행 영속 사례에서 도출
+- 예외 계층: `ConfigError(503)` KIS 키 미설정 / `ExternalAPIError(502)` KIS 5xx 또는 zero-row / `ServiceError(400)` days 10~60 외 / `NotFoundError(404)` 빈 응답. `HTTPException` 직접 raise 0건
+
+**라우터**
+- `GET /api/macro/supply-demand?market=kospi|kosdaq&days=10..60` (기본 20) — 시장별, `Literal["kospi","kosdaq"]` 422 가드
+- `GET /api/advisory/{code}/supply-demand?days=10..60` (기본 30) — 종목별, 국내 6자리 전용. 해외종목 400, 빈 응답 404, KIS 키 미설정 503
+
+**프론트엔드**
+- `frontend/src/components/macro/SupplyDemandSection.jsx` (신규) — 코스피/코스닥 토글 + 10~60일 슬라이더 + Recharts ComposedChart(일별 막대 + 누적 라인) + 당일 요약 칩(외국인 +X억 / 기관 -Y억 / 개인 +Z억)
+- `frontend/src/components/advisory/SupplyDemandPanel.jsx` (신규) — 동일 차트 패턴 + advisory_note 노란 배너 + 매수/매도 분리 토글 + 해외종목 "국내 전용" 안내
+- `frontend/src/pages/DetailPage.jsx` — 종합 리포트 5번째 서브탭 `{id:'supply-demand', label:'수급/투자자'}` 신설, lazy-mount(KIS 호출 절약)
+- `frontend/src/pages/MacroPage.jsx` — `<IndexSection />` 직후 `<SupplyDemandSection />` 마운트(체감상 지수와 묶이는 자연 위치)
+- `frontend/src/api/{macro,advisory}.js`에 `fetchSupplyDemand(market, days)` / `fetchStockSupplyDemand(code, days)` 추가, `hooks/{useMacro,useAdvisory}.js`에 `useSupplyDemand()` / `useStockSupplyDemand(code)` 부분 실패 격리 훅
+
+**도메인 자문 (요건서 `_workspace/dev_20260511/01_requirements.md`)**
+- **MacroSentinel**: 단위 억원 통일, 20일 기본, REGIME_MATRIX 결합은 V2 분리 — 매크로 페이지 독립 카드. Graham "미스터 마켓" 보조지표
+- **OrderAdvisor**: V1 표시 한정. AI 자문 입력 통합·시그널 임계값(외국인·기관 동반 매수 5거래일, 등급 가중치 ≤ 0.1)은 V2. V1엔 `advisory_note` 안전 고지 + 매매 액션 키 금지로 충분
+- MarginAnalyst / ValueScreener는 미관여(본 작업과 무관). V2 분리: 섹터별 수급(KRX TR 미존재) / 외국인 보유비율 추이(`FHKST01010800`) / AI 자문 입력 통합 / 체제 가중치
+
+**테스트**
+- `tests/unit/test_kis_wrapper_supply_demand.py` (신규, 20건) — TR_ID + ISCD_2 매핑(KOSPI/KOSDAQ) + KST cutoff 후퇴 6 케이스(장중/장후/cutoff 정각/토/일/월 직전 금요일). `wrapper.datetime.datetime.now`만 patch하는 `_freeze_kst()` 헬퍼(`timezone`/`timedelta` 원본 유지)
+- `tests/unit/test_supply_demand_service.py` (신규, 26건) — 단위 변환 / 누적 / 부분 응답 / 캐시 hit/miss / advisory_note / 매매 액션 키 부재 + **zero-row 가드 6건** (헬퍼 단독 / wrapper zero-row → ExternalAPIError / 캐시 폐기 후 재호출 회복 / 재호출도 zero-row → 502 + 무한 루프 방지 / partial zero / 종목 TR)
+- `tests/api/test_macro_supply_demand.py` (신규, 6건) — 응답 shape / 422 / 400 / 503 / 502
+- `tests/api/test_advisory_supply_demand.py` (신규, 7건) — `advisory_note` 존재 + 매매 액션 키 부재 + 해외 400 + 빈 응답 404 + 503/502 + days 파라미터 전달
+
+**회귀 결과**
+- supply-demand 회귀 스위트: **59 PASS / 0 FAIL** (wrapper 20 + service 26 + macro API 6 + advisory API 7). 이 중 신규/갱신: KST cutoff 6 + ISCD_2 매핑 갱신 2 + zero-row 가드 6 = **14건**
+- KOSPI 캐시 결함 핫픽스: `macro_store.delete_today('supply_demand:market:kospi')` 1회 호출로 60행 zero-row 영속 데이터 폐기 → 새 wrapper로 재호출 → 정상 응답(개인 +16,690억 / 외국인 -21,582억 / 기관 +4,531억)
+
+### 신규 기능 2 — 백테스트 UI/UX (단위 토글 + 포트폴리오 모달)
+
+기존 "로컬프리셋" 탭이 다종목 포트폴리오 백테스트 진입점이지만 명시적이지 않았고, 이력 테이블이 다종목 백테스트도 `symbol`(첫 종목)만 표시해 정보 손실. `BacktestJob.symbols` JSON 컬럼은 이미 존재(2026-05-07 추가). 프론트 표면화 + 백엔드 응답 보강만으로 해결.
+
+**프론트엔드**
+- `frontend/src/pages/BacktestPage.jsx` — 상단 segment control "단위: 종목 / 포트폴리오" 토글(`unitMode` state, 기본 `'single'`). 토글이 전략 탭 자동 제한: `'single'` → `allowedModes=['builder','preset','custom']` + SymbolSearchBar(단일), `'portfolio'` → `allowedModes=['local-preset']` + SymbolMultiInput + `strategyMode='local-preset'` 자동. 전환 시 `multiSymbols`/`symbol` state 보존(재전환 시 복원)
+- `frontend/src/components/backtest/StrategySelector.jsx` — `allowedModes` prop 추가, 4탭 화이트리스트 필터링(`visibleModes`). prop 미전달 시 기존 4탭 모두 노출(백워드 호환)
+- `frontend/src/components/backtest/BacktestHistoryTable.jsx` — `Array.isArray(job.symbols) && job.symbols.length > 1` 분기로 종목 컬럼에 "포트폴리오 (N종목)" + 앞 3개 칩 미리보기 + "보기" → 모달. 단일 종목 행은 기존 동작(symbol_name 표시 + onSelect 콜백) 100% 유지
+- `frontend/src/components/backtest/BacktestPortfolioModal.jsx` (신규) — 헤더(일시·전략명·기간·최종 수익률·샤프·MDD 4메트릭 카드) + 종목 칩 리스트(`symbols_names` 매핑) + per_symbol_contribution 테이블(종목·거래수·수익률·기여도) + 파라미터 JSON pretty 출력. ESC 키 + 백드롭 클릭 닫기
+
+**백엔드**
+- `routers/backtest.py` — `GET /api/backtest/history` 응답에 `symbols_names: [{code, name}] | null` 필드 추가. `_resolve_name()` 헬퍼로 `symbol_map.code_to_name()` 위임. 기존 `symbol_name` 단일 필드는 유지(백워드 호환)
+
+**테스트**
+- `tests/unit/test_backtest_history_response.py` (신규, 4건) — 단일 종목 / 다종목 KR / 혼합 / 빈 배열 케이스로 `symbols_names` 변환 검증
+
+**회귀 결과**
+- 백테스트 전용 스위트: 54/54 PASS (50 baseline + 4 신규)
+- 프론트 빌드: 863 modules OK (baseline 856 → +7)
+
+### KIS 명세 동기화 — `docs/kis/` 23개 마크다운 + MCP 보조
+
+수급 작업 중 KIS API 명세 검증을 위해 `mcp__kis-code-assistant__search_domestic_stock_api`로 FHPTJ04040000 응답 필드를 사전 확인. `docs/kis/07_KR_MARKET_ANALYSIS.md`에 정리된 시장/종목 매매동향 TR이 1차 검증 출처로 활용됨. 결함 진단 시 컨테이너 내 직접 wrapper 호출 + 캐시 dump + 로그로 root cause 격리하는 패턴 정립.
+
+### 운영 hotfix 패턴 — docker-compose 빌드 캐시 + 결함 캐시 영속
+
+- 컨테이너 dist 파일이 옛 빌드 시점에 박혀 있어 `docker-compose up --build` 필수(단순 `restart`로는 갱신 안 됨). Vite 컨텐츠 해시 기반 파일명이라 번들 내용 변경 없으면 같은 해시 → mtime만 변하지 않을 수 있음을 검증
+- wrapper.py 같은 백엔드 코드는 `docker cp` + `docker-compose restart`로 hot-fix 가능. 단 이미지 자체는 다음 정규 빌드에서 호스트 코드로 재빌드됨(상태 일관성)
+- 결함 응답이 일자 영속 캐시에 굳어버리는 시나리오는 zero-row 가드(`_fetch_or_cache`)로 항구 차단. 운영 중 동일 패턴 재발 시 다음 호출에서 자동 복구
+
+---
+
 ## 2026-05-11 — 섹터명 한글 정규화 SSoT + 스크리너 헤더 sticky + watchlist sector 누락 fix
 
 ### 섹터 정규화 모듈 신규 (`stock/sector_normalize.py`)
