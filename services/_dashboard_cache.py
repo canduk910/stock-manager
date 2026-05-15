@@ -3,16 +3,17 @@
 목적
 ----
 - F5 연타 시 ThreadPool 풀가동 반복으로 t3.small swap thrashing 발생.
-- 사용자별 (user_id, items hash) 키로 60s TTL in-memory 캐시 → 즉시 응답.
-- 동시 30 사용자 시 외부 API 호출 1/30로 감소.
+- 사용자별 (user_id, items hash) 키로 짧은 TTL in-memory 캐시 → F5 dedup 한정.
+- 동시 다중 요청 보호 (swap thrashing 방지).
 
 설계
 ----
 - 키: (user_id, hash(sorted((code, market) tuples))). 종목 추가/삭제 즉시 새 키.
 - 값: (data, expires_at). data는 list[dict] (dashboard 행).
-- TTL: 60s (default). add/remove/update_memo 핸들러에서 invalidate(user_id) 호출.
+- TTL: 5s — 현재가는 캐시 금지 도메인 원칙. F5 연타 dedup 목적의 최소값.
+  시세판 in-memory 캐시(장중 10s)와 일관된 정책.
 - 동시성: threading.Lock으로 dict 보호.
-- 부분 실패(partial_failure 포함) 응답은 짧은 TTL(15s)로 캐시 — 다음 요청에서 재시도 유도.
+- 부분 실패(partial_failure 포함) 응답은 더 짧은 TTL(3s)로 캐시 — 즉시 재시도 유도.
 
 멀티 인스턴스 제약 (F-4-A 참조)
 ----------------------------
@@ -30,8 +31,8 @@ from typing import Iterable, Optional
 _CACHE: dict[tuple, tuple] = {}
 _LOCK = threading.Lock()
 
-DEFAULT_TTL_SEC = 60.0
-PARTIAL_FAILURE_TTL_SEC = 15.0  # 부분 실패는 짧게 캐시 → 곧 재시도
+DEFAULT_TTL_SEC = 5.0  # 현재가 캐시 금지 도메인 원칙 — F5 dedup 한정 (시세판 10s와 일관)
+PARTIAL_FAILURE_TTL_SEC = 3.0  # 부분 실패는 더 짧게 → 즉시 재시도
 
 
 def _now() -> float:

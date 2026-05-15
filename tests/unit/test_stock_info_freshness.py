@@ -81,27 +81,31 @@ class TestIsStaleFromDict:
         assert is_stale_from_dict(info, "price") is True
 
     def test_explicit_now_parameter(self):
-        """주입된 now로 트레이딩 윈도우 검증 (KST 평일 14:00=trading)."""
+        """주입된 now로 트레이딩 윈도우 검증 (KST 평일 14:00=trading).
+
+        현재가 캐시 금지 도메인 원칙: 장중 TTL=5초 (F5 dedup만).
+        """
         from db.repositories.stock_info_repo import is_stale_from_dict
         now = datetime(2026, 5, 4, 14, 0, 0)  # 평일 KST 14:00
-        # 11분 전 갱신 → trading TTL 10분 초과 → stale
-        info = {"price_updated_at": _iso(now - timedelta(minutes=11))}
+        # 10초 전 갱신 → trading TTL 5초 초과 → stale
+        info = {"price_updated_at": _iso(now - timedelta(seconds=10))}
         assert is_stale_from_dict(info, "price", now=now) is True
 
-        # 9분 전 → fresh
-        info2 = {"price_updated_at": _iso(now - timedelta(minutes=9))}
+        # 2초 전 → fresh
+        info2 = {"price_updated_at": _iso(now - timedelta(seconds=2))}
         assert is_stale_from_dict(info2, "price", now=now) is False
 
     def test_off_hours_uses_off_ttl(self):
+        """장외 TTL=30분 (폐장 후 호가 변동 없음)."""
         from db.repositories.stock_info_repo import is_stale_from_dict
         # 토요일 자정 = 비거래
         now = datetime(2026, 5, 2, 0, 0, 0)
-        info = {"price_updated_at": _iso(now - timedelta(hours=8))}
-        # off TTL=12h, 8시간 전 → fresh
+        info = {"price_updated_at": _iso(now - timedelta(minutes=20))}
+        # off TTL=30분, 20분 전 → fresh
         assert is_stale_from_dict(info, "price", now=now) is False
 
-        info2 = {"price_updated_at": _iso(now - timedelta(hours=13))}
-        # 13시간 전 → stale
+        info2 = {"price_updated_at": _iso(now - timedelta(minutes=35))}
+        # 35분 전 → stale
         assert is_stale_from_dict(info2, "price", now=now) is True
 
 

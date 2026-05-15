@@ -118,14 +118,14 @@ CLI와 API 라우터 양쪽에서 공용. 비즈니스 데이터는 SQLAlchemy O
 | `advisor:52w:{market}:{code}` | 6h |
 | `market:metrics:` | 장중 1h / 장외 12h |
 | `market:period_returns:` | 장중 15m / 장외 6h |
-| `market:price:` | 장중 6m / 장외 6h |
+| `market:price:` | 장중 5s / 장외 30m (현재가 캐시 금지 도메인 원칙, F5 dedup만) |
 | `yf:*` | 1~24h (장중/장외 분리), `yf:forward:` 6h |
 | `market_board:intraday_ohlc:` | 장중 6m / 장외 6h |
 | `analyst:summary:` | 영구 |
 
 ### stock_info_store.py (영속 캐시)
 - Docker 재시작에도 유지 (entrypoint.sh 미초기화)
-- 영역별 TTL: price (장중 10m / 장외 12h), metrics (장중 6h / 장외 24h), financials (7일), returns (장중 30m / 장외 12h)
+- 영역별 TTL: **price (장중 5s / 장외 30m — 현재가 캐시 금지 도메인 원칙, F5 dedup 한정)**, metrics (장중 6h / 장외 24h), financials (7일), returns (장중 30m / 장외 12h)
 - write-through: `market.py`/`dart_fin.py`/`yf_client.py`의 fetch 함수가 결과 자동 저장
 - 대시보드 우선 조회: `watchlist_service.py`에서 stock_info 먼저 → stale 시에만 외부 API
 

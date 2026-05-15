@@ -205,7 +205,8 @@ def fetch_price_yf(code: str) -> Optional[dict]:
                     "mktcap": None,  # KIS 미제공
                     "currency": kis.get("currency") or "USD",
                 }
-                ttl = 2 / 60 if _is_us_trading_hours() else 0.5
+                # 현재가 캐시 금지 도메인 원칙 — 장중 5초(F5 dedup만), 장외 30분
+                ttl = 5 / 3600 if _is_us_trading_hours() else 0.5
                 set_cached(key, result, ttl_hours=ttl)
                 try:
                     from .stock_info_store import upsert_price
@@ -239,7 +240,8 @@ def fetch_price_yf(code: str) -> Optional[dict]:
             "mktcap": mktcap,
             "currency": fi.currency or "USD",
         }
-        ttl = 2 / 60 if _is_us_trading_hours() else 0.5  # 장중 2분, 장외 30분
+        # 현재가 캐시 금지 도메인 원칙 — 장중 5초(F5 dedup만), 장외 30분
+        ttl = 5 / 3600 if _is_us_trading_hours() else 0.5
         set_cached(key, result, ttl_hours=ttl)
         # 영속 캐시 write-through
         try:

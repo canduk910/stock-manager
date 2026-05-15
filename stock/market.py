@@ -155,7 +155,8 @@ def fetch_price(code: str, refresh: bool = False) -> Optional[dict]:
             "shares": int(shares) if shares else None,
             "trading_date": date.today().strftime("%Y%m%d"),
         }
-        ttl = 0.1 if _is_kr_trading_hours() else 6  # 장중 6분, 장외 6시간
+        # 현재가 캐시 금지 도메인 원칙 — 장중 5초(F5 dedup만), 장외 30분
+        ttl = 0.0014 if _is_kr_trading_hours() else 0.5
         set_cached(cache_key, result, ttl_hours=ttl)
         # 영속 캐시 write-through
         try:

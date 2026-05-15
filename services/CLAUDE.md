@@ -11,7 +11,7 @@
 | `exceptions.py` | 공용 예외 계층 (ServiceError → NotFound/Conflict/ExternalAPI/Config/PaymentRequired/AiQuotaExceeded) |
 | `ai_gateway.py` | 모든 OpenAI 호출 단일 진입점. `call_openai_chat()`, 유저별 일일 쿼터 + 사용량 기록. `user_id=None`은 시스템 호출(쿼터 미차감). `AiQuotaExceededError(429)`. |
 | `_telemetry.py` | 계측 (stdlib only). `@timed` / `record_event` / `observe(p50/p95/p99)` / `start_periodic_flush`. `TELEMETRY_ENABLED`/`TELEMETRY_FLUSH_SEC` 제어. 메모리 < 300KB 상한. |
-| `_dashboard_cache.py` | 워치리스트 dashboard 사용자별 60s in-memory TTL (부분 실패 15s). `(user_id, sorted_codes_hash)` 키. add/remove/update 핸들러에서 invalidate. 멀티 인스턴스 시 Redis로 재설계 필요. |
+| `_dashboard_cache.py` | 워치리스트 dashboard 사용자별 in-memory TTL (장중 5s / 부분 실패 3s) — **현재가 캐시 금지 도메인 원칙**, F5 dedup + t3.small swap thrashing 방지 한정. 시세판 인메모리 캐시(장중 10s)와 일관된 정책. `(user_id, sorted_codes_hash)` 키. add/remove/update 핸들러에서 invalidate. 멀티 인스턴스 시 Redis로 재설계 필요. |
 | `secure_store.py` | AES-GCM 암호화 (`KIS_ENCRYPTION_KEY` 32-byte b64). nonce 12B + ciphertext + tag 16B. 키 미설정 시 `ConfigError(503)`. 사용자 KIS 자격증명 저장. cryptography>=42. |
 | `kis_validator.py` | KIS 자격증명 검증. `/oauth2/tokenP` 호출로 토큰 발급 시도. 실패 시 `ExternalAPIError`. |
 | `auth_deps.py` | FastAPI Depends — `get_current_user`, `require_admin`, `require_kis` (사용자 KIS 자격증명 필수). |

@@ -13,11 +13,13 @@ from db.utils import KST, now_kst, now_kst_iso
 logger = logging.getLogger(__name__)
 
 # ── TTL policy (hours) ──────────────────────────────────────────────────────
+# price: 현재가 캐시 금지 도메인 원칙 — 장중 5초(F5 dedup만), 장외 30분(폐장 후 호가 변동 없음).
+#        시세판 in-memory 캐시(장중 10s/장외 60s)와 일관된 정책.
 _TTL = {
-    "price":      {"trading": 0.167, "off": 12.0},
-    "metrics":    {"trading": 6.0,   "off": 24.0},
-    "financials": {"trading": 168.0, "off": 168.0},
-    "returns":    {"trading": 0.5,   "off": 12.0},
+    "price":      {"trading": 0.0014, "off": 0.5},   # 5s / 30m
+    "metrics":    {"trading": 6.0,    "off": 24.0},
+    "financials": {"trading": 168.0,  "off": 168.0},
+    "returns":    {"trading": 0.5,    "off": 12.0},
 }
 
 # 영역명 → DB 컬럼명 매핑 (financials는 fin_updated_at 변형)

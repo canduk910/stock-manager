@@ -349,10 +349,10 @@ KRX 인증(KRX_ID/KRX_PASSWORD) 필요. 미인증 시 빈 배열 반환.
 
 | 함수 | 장중 TTL | 장외 TTL |
 |------|---------|---------|
-| `fetch_price` (국내) | 6분 | 6시간 |
+| `fetch_price` (국내) | **5초** (F5 dedup) | **30분** |
 | `fetch_period_returns` (국내) | 15분 | 6시간 |
 | `fetch_market_metrics` (국내) | 1시간 | 12시간 |
-| `fetch_price_yf` (해외) | 2분 | 30분 |
+| `fetch_price_yf` (해외) | **5초** (F5 dedup) | **30분** |
 | `fetch_period_returns_yf` (해외) | 15분 | 6시간 |
 | `fetch_detail_yf` (해외) | 30분 | 6시간 |
 | `fetch_metrics_yf` (해외) | 30분 | 6시간 |

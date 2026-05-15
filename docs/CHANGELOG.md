@@ -1,5 +1,38 @@
 # 변경 이력
 
+## 2026-05-15 — 관심종목 현재가 캐시 제거 (도메인 원칙 정합)
+
+### 버그 수정 — 관심종목 대시보드 현재가 갱신 지연
+
+**진단**: 사용자 보고 "관심종목 현재가가 제대로 안 갱신된다". 코드 감사 결과 현재가에 **4중 캐시**가 운영 중이었음.
+
+| 계층 | 위치 | 기존 장중 TTL | 기존 장외 TTL |
+|------|------|---------------|---------------|
+| L1 응답 | `services/_dashboard_cache.py` | 60s | 60s |
+| L2 영속 | `db/repositories/stock_info_repo.py:_TTL["price"]` | **10분** | **12시간** |
+| L3 raw (KR) | `stock/market.py:fetch_price` cache.db | 6분 | 6시간 |
+| L4 raw (US) | `stock/yf_client.py:fetch_price_yf` cache.db | 2분 | 30분 |
+
+가장 큰 stale 원인: L2. `_fetch_dashboard_row`(`services/watchlist_service.py:107`)가 `price_fresh`이면 외부 API 호출 자체를 스킵 → 장중 최대 10분, 장외 최대 12시간 stale. 시세판(인메모리 10s/60s)과 비교 시 장중 60배, 장외 720배 stale.
+
+**도메인 원칙 (사용자 결정)**: 현재가는 캐시 적용 금지 영역. F5 연타 시 t3.small swap thrashing 방지를 위한 **dedup 5초만 허용** (시세판 정책과 일관). 장외(폐장)는 호가 변동이 없으므로 30분 유지.
+
+**변경**:
+- `services/_dashboard_cache.py:33-34` — `DEFAULT_TTL_SEC` 60s → **5s**, `PARTIAL_FAILURE_TTL_SEC` 15s → **3s** + 모듈 docstring 업데이트
+- `db/repositories/stock_info_repo.py:17` — `_TTL["price"]` `{trading:0.167h, off:12.0h}` → `{trading:0.0014h, off:0.5h}` (5s/30m). 다른 영역(metrics/financials/returns)은 유지 (분 단위 변동 없음, 도메인 원칙 미해당)
+- `stock/market.py:158` — `fetch_price()` cache.db ttl `0.1h / 6h` → `0.0014h / 0.5h` (5s/30m)
+- `stock/yf_client.py` (KIS 경로 + yfinance 폴백 2곳) — `fetch_price_yf()` cache.db ttl `2/60h / 0.5h` → `5/3600h / 0.5h` (5s/30m)
+- `tests/unit/test_stock_info_freshness.py` — 회귀 가드 갱신 (5s/30m 경계 검증으로 변경)
+
+**효과**:
+- 장중 관심종목 현재가 stale 상한: 10분 → 5초 (**120배 감소**)
+- 장외 관심종목 현재가 stale 상한: 12시간 → 30분 (**24배 감소**)
+- 시세판(인메모리 10s)과 일관된 "현재가 캐시 금지 + F5 dedup 한정" 정책 확립
+
+**회귀 가드**: `pytest tests/unit/test_stock_info_freshness.py tests/unit/test_dashboard_cache.py tests/unit/test_watchlist_partial_failure.py -v` → **26 passed**.
+
+---
+
 ## 2026-05-15 — 종목별 외국인 보유율 차트 + 반년 누적 추이 (V1.5 + V1.6)
 
 ### 신규 — 외국인 보유율 + 추가 매수여력 직관적 차트 (V1.5)
