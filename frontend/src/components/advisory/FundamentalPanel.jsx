@@ -76,8 +76,12 @@ function Th({ children, right = false }) {
 }
 
 // ── 손익계산서 테이블 ─────────────────────────────────────────────────────
-function IncomeTable({ rows, market, forward }) {
+// REQ-DISPLAY-01 (2026-05-16): sector_tier ∈ {bank_holding, insurance, securities}
+//   일 때 매출원가/매출총이익 행 미렌더 (IFRS 금융업 회계 표준상 부재).
+function IncomeTable({ rows, market, forward, sectorTier = 'general' }) {
   if (!rows?.length) return <p className="text-xs text-gray-400 py-2">데이터 없음</p>
+
+  const isFinancialIndustry = sectorTier === 'bank_holding' || sectorTier === 'insurance' || sectorTier === 'securities'
 
   const fyEnd  = forward?.current_fiscal_year_end
   const fyYear = fyEnd ? parseInt(fyEnd.slice(0, 4)) : null
@@ -117,11 +121,12 @@ function IncomeTable({ rows, market, forward }) {
         <tbody>
           {[
             { label: '매출', field: 'revenue' },
-            { label: '매출원가', field: 'cogs' },
-            { label: '매출총이익', field: 'gross_profit' },
+            // REQ-DISPLAY-01: 금융업(은행/보험/증권)은 매출원가/매출총이익 부재 → 숨김
+            { label: '매출원가', field: 'cogs', hideForFinancial: true },
+            { label: '매출총이익', field: 'gross_profit', hideForFinancial: true },
             { label: '영업이익', field: 'operating_income' },
             { label: '순이익', field: 'net_income' },
-          ].map(({ label, field }) => (
+          ].filter(({ hideForFinancial }) => !(hideForFinancial && isFinancialIndustry)).map(({ label, field }) => (
             <tr key={field} className="border-t border-gray-100">
               <td className="px-3 py-2 text-xs font-medium text-gray-600 bg-gray-50 sticky left-0">{label}</td>
               {rows.map(r => (
@@ -219,8 +224,12 @@ function IncomeChart({ rows, market, forward }) {
 }
 
 // ── 대차대조표 테이블 ─────────────────────────────────────────────────────
-function BalanceSheetTable({ rows, market }) {
+// REQ-DISPLAY-02 (2026-05-16): sector_tier ∈ {bank_holding, insurance, securities}
+//   일 때 유동자산/비유동자산/유동부채/비유동부채/유동비율 5행 미렌더
+//   (IFRS 금융업에서는 유동/비유동 구분 미사용 — 회계 표준상 정상).
+function BalanceSheetTable({ rows, market, sectorTier = 'general' }) {
   if (!rows?.length) return <p className="text-xs text-gray-400 py-2">데이터 없음</p>
+  const isFinancialIndustry = sectorTier === 'bank_holding' || sectorTier === 'insurance' || sectorTier === 'securities'
   return (
     <div className="overflow-x-auto">
       <table className="min-w-full text-gray-700">
@@ -233,14 +242,15 @@ function BalanceSheetTable({ rows, market }) {
         <tbody>
           {[
             { label: '자산총계', field: 'total_assets', bold: true },
-            { label: '유동자산', field: 'current_assets' },
-            { label: '비유동자산', field: 'non_current_assets' },
+            // REQ-DISPLAY-02: 금융업은 유동/비유동 구분 미사용
+            { label: '유동자산', field: 'current_assets', hideForFinancial: true },
+            { label: '비유동자산', field: 'non_current_assets', hideForFinancial: true },
             { label: '부채총계', field: 'total_liabilities', bold: true },
-            { label: '유동부채', field: 'current_liabilities' },
-            { label: '비유동부채', field: 'non_current_liabilities' },
+            { label: '유동부채', field: 'current_liabilities', hideForFinancial: true },
+            { label: '비유동부채', field: 'non_current_liabilities', hideForFinancial: true },
             { label: '자본총계', field: 'total_equity', bold: true },
             { label: '이익잉여금', field: 'retained_earnings' },
-          ].map(({ label, field, bold }) => (
+          ].filter(({ hideForFinancial }) => !(hideForFinancial && isFinancialIndustry)).map(({ label, field, bold }) => (
             <tr key={field} className="border-t border-gray-100">
               <td className={`px-3 py-2 text-xs bg-gray-50 sticky left-0 ${bold ? 'font-semibold text-gray-700' : 'font-medium text-gray-600'}`}>{label}</td>
               {rows.map(r => <Td key={r.year} right bold={bold}>{fmtMoney(r[field], market)}</Td>)}
@@ -254,14 +264,16 @@ function BalanceSheetTable({ rows, market }) {
               </td>
             ))}
           </tr>
-          <tr className="border-t border-gray-100">
-            <td className="px-3 py-2 text-xs font-medium text-gray-600 bg-gray-50">유동비율</td>
-            {rows.map(r => (
-              <td key={r.year} className={`px-3 py-2 text-xs text-right ${pctColor(r.current_ratio != null ? r.current_ratio - 100 : null)}`}>
-                {r.current_ratio != null ? r.current_ratio.toFixed(1) + '%' : '-'}
-              </td>
-            ))}
-          </tr>
+          {!isFinancialIndustry && (
+            <tr className="border-t border-gray-100">
+              <td className="px-3 py-2 text-xs font-medium text-gray-600 bg-gray-50">유동비율</td>
+              {rows.map(r => (
+                <td key={r.year} className={`px-3 py-2 text-xs text-right ${pctColor(r.current_ratio != null ? r.current_ratio - 100 : null)}`}>
+                  {r.current_ratio != null ? r.current_ratio.toFixed(1) + '%' : '-'}
+                </td>
+              ))}
+            </tr>
+          )}
         </tbody>
       </table>
     </div>
@@ -431,9 +443,16 @@ function SegmentsHistoryChart({ history, highlights, source }) {
 }
 
 // ── 사업 개요 (키워드 + 파이차트 + 사업설명 + 5년 추이) ──────────────────
-function BusinessOverview({ segments, description, keywords, segmentsHistory, segmentsHighlights, segmentsHistorySource }) {
+// REQ-DISPLAY-04 (2026-05-16): metric prop으로 파이차트 라벨 분기
+//   `revenue_share`          → "매출 비중"
+//   `operating_income_share` → "영업이익 비중" (금융지주 등)
+// metric은 segments[].metric에서도 동일하게 부착됨 (REQ-SEGMENT-03).
+function BusinessOverview({ segments, description, keywords, segmentsHistory, segmentsHighlights, segmentsHistorySource, metric = 'revenue_share' }) {
   const hasSegments = segments?.length > 0
   const isAiEstimate = segments?.some(s => s.note === 'AI추정')
+  // REQ-DISPLAY-04: 비중 라벨 분기 — segments[0].metric 우선 (백엔드 권위), prop 폴백
+  const effectiveMetric = (segments?.[0]?.metric) || metric || 'revenue_share'
+  const metricLabel = effectiveMetric === 'operating_income_share' ? '영업이익 비중' : '매출 비중'
 
   if (!hasSegments && !description && !keywords?.length) {
     return <p className="text-xs text-gray-400 py-2">데이터 없음</p>
@@ -463,11 +482,15 @@ function BusinessOverview({ segments, description, keywords, segmentsHistory, se
       {/* 파이차트 + 범례 */}
       {hasSegments && (
         <div>
-          {isAiEstimate && (
-            <span className="inline-block text-xs bg-yellow-100 text-yellow-700 border border-yellow-300 rounded px-2 py-0.5 mb-2">
-              AI 추정 (참고용)
-            </span>
-          )}
+          {/* REQ-DISPLAY-04: metric에 따라 차트 제목 분기 */}
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-xs font-medium text-gray-600">{metricLabel}</span>
+            {isAiEstimate && (
+              <span className="inline-block text-xs bg-yellow-100 text-yellow-700 border border-yellow-300 rounded px-2 py-0.5">
+                AI 추정 (참고용)
+              </span>
+            )}
+          </div>
           <div className="flex items-center gap-4">
             <ResponsiveContainer width={160} height={160}>
               <PieChart>
@@ -658,6 +681,10 @@ export default function FundamentalPanel({ data, market, code }) {
   const segmentsHistory = fundamental.segments_history || []
   const segmentsHighlights = fundamental.segments_highlights || null
   const segmentsHistorySource = fundamental.segments_history_source || null
+  // REQ-SECTOR-03 / REQ-DISPLAY-01/02/04 (2026-05-16): 업종 분류 + 비중 metric
+  const sectorTier = fundamental.sector_tier || 'general'
+  const segmentsMetric = fundamental.segments_metric || 'revenue_share'
+  const isFinancialIndustry = sectorTier === 'bank_holding' || sectorTier === 'insurance' || sectorTier === 'securities'
 
   const hasBizModel = businessModel && Object.values(businessModel).some(
     v => v && String(v).trim().length > 0
@@ -674,6 +701,7 @@ export default function FundamentalPanel({ data, market, code }) {
         segmentsHistory={segmentsHistory}
         segmentsHighlights={segmentsHighlights}
         segmentsHistorySource={segmentsHistorySource}
+        metric={segmentsMetric}
       />
 
       {/* 비즈니스 모델 — 매출 흐름 / 현금 창출 / R&D 투자 */}
@@ -697,19 +725,20 @@ export default function FundamentalPanel({ data, market, code }) {
         <MetricCard label="ROE (%)" value={metrics.roe} />
         <MetricCard label="ROA (%)" value={metrics.roa} />
         <MetricCard label="부채/자본" value={metrics.debt_to_equity} integer />
-        <MetricCard label="유동비율" value={metrics.current_ratio} integer />
+        {/* REQ-DISPLAY-02: 금융업은 유동비율 정의 자체가 없음 — 카드 숨김 */}
+        {!isFinancialIndustry && <MetricCard label="유동비율" value={metrics.current_ratio} integer />}
         <MetricCard label="EPS" value={metrics.eps} integer />
         <MetricCard label="안전마진가격" value={metrics.graham_number} integer />
       </div>
 
       {/* 손익계산서 */}
       <SectionTitle>손익계산서</SectionTitle>
-      <IncomeTable rows={incomeStmt} market={market} forward={forwardEstimates} />
+      <IncomeTable rows={incomeStmt} market={market} forward={forwardEstimates} sectorTier={sectorTier} />
       <IncomeChart rows={incomeStmt} market={market} forward={forwardEstimates} />
 
       {/* 대차대조표 */}
       <SectionTitle>대차대조표</SectionTitle>
-      <BalanceSheetTable rows={balanceSheet} market={market} />
+      <BalanceSheetTable rows={balanceSheet} market={market} sectorTier={sectorTier} />
 
       {/* 현금흐름표 */}
       <SectionTitle>현금흐름표</SectionTitle>

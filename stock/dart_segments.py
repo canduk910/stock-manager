@@ -43,6 +43,7 @@ _CACHE_TTL_HOURS = 24 * 7  # 사업보고서 연 1회 공시 → 7일 캐시
 
 # 매출 표 후보 식별 패턴 (정규식, CLAUDE.md "키워드 검색은 정규식" 지침 준수)
 # `\s*` 자동 흡수로 띄어쓰기 변형 모두 매칭. 단순 `keyword in text` 회피.
+# REQ-SEGMENT-01 (2026-05-16): 금융지주 8개 패턴 추가 — 086790/105560/055550 실측 검증.
 _REVENUE_TABLE_PATTERNS = [
     re.compile(r"사업\s*부문"),
     re.compile(r"영업\s*부문"),
@@ -58,6 +59,15 @@ _REVENUE_TABLE_PATTERNS = [
     re.compile(r"부문별"),
     re.compile(r"제품별"),
     re.compile(r"서비스별"),
+    # 금융지주 패턴 (REQ-SEGMENT-01, §D-5)
+    re.compile(r"부문별\s*영업이익"),       # 105560 KB금융 표준 표
+    re.compile(r"부문별\s*영업\s*손익"),     # 변형
+    re.compile(r"부문별\s*총영업이익"),
+    re.compile(r"영업\s*부문\s*정보"),       # IFRS 8 표준 헤더
+    re.compile(r"주요\s*자회사"),             # 105560 케이스
+    re.compile(r"부문별\s*요약\s*재무정보"),
+    re.compile(r"그룹\s*사업\s*영역"),       # 055550 신한지주 케이스
+    re.compile(r"세그먼트"),
 ]
 
 # 사업의 내용 섹션 시작 패턴 (정규식)
@@ -71,6 +81,10 @@ _REVENUE_SECTION_PATTERNS = [
     re.compile(r"주요\s*사업\s*부문"),
     re.compile(r"매출\s*및\s*수주\s*상황"),
     re.compile(r"주요\s*제품\s*및\s*서비스"),
+    # 금융지주 섹션 헤더 (REQ-SEGMENT-01, §D-5)
+    re.compile(r"영업\s*부문"),               # 086790 하나금융지주 (2) 영업부문
+    re.compile(r"세그먼트\s*정보"),
+    re.compile(r"부문별\s*재무"),
 ]
 
 # 다음 큰 섹션 헤더 (사업의 내용 섹션 종료)
@@ -270,15 +284,72 @@ def _extract_table_candidates(section_xml: str, max_tables: int = 5) -> list[str
 # ── 4. GPT 표 정규화 ─────────────────────────────────────────────────────
 
 
+def _attach_metric_field(
+    segments: list[dict], metric: str = "revenue_share"
+) -> list[dict]:
+    """segments 각 row에 `metric` 필드 부착 (REQ-SEGMENT-03, §D-6).
+
+    값:
+      `revenue_share`           — 매출 기준 비중 (기본)
+      `operating_income_share`  — 영업이익 기준 비중 (금융지주 영업이익 표만 있는 경우)
+    프론트 라벨 분기 — REQ-DISPLAY-04 "매출 비중" / "영업이익 비중".
+    """
+    if metric not in ("revenue_share", "operating_income_share"):
+        metric = "revenue_share"
+    out = []
+    for s in segments:
+        if not isinstance(s, dict):
+            continue
+        new_s = dict(s)
+        new_s["metric"] = metric
+        out.append(new_s)
+    return out
+
+
+# REQ-SEGMENT-02 (§D-6): 금융지주 부문 라벨 통일 — 7개 카테고리.
+_BANK_HOLDING_SEGMENTS_HINT = (
+    "\n[금융지주 부문 사전] 회사가 금융지주/은행이므로 부문 명칭을 다음 7개 표준 "
+    "카테고리로 통일하라: '은행/증권/보험/카드/캐피탈/자산운용/기타금융'(비금융 "
+    "사업이 있으면 '비금융'도 가능). 회사가 표에서 사용한 자회사명(예: KB국민은행/"
+    "KB증권)이 있더라도 표준 카테고리로 매핑한다. 5년 모두 동일 카테고리 사용으로 "
+    "추세 추적 가능. 표가 영업이익 비중만 보고하는 경우 그대로 사용 (분모는 호출자가 "
+    "결정).\n"
+)
+
+
+def _build_segments_system_prompt(
+    sector_tier: Optional[str] = None,
+    *,
+    base_prompt: Optional[str] = None,
+) -> str:
+    """GPT 시스템 프롬프트 빌더 (REQ-SEGMENT-02, §D-6).
+
+    sector_tier="bank_holding" 시 7개 카테고리 hint 추가.
+    base_prompt 미전달 시 단일 연도 정규화용 기본 프롬프트 사용.
+    """
+    if base_prompt is None:
+        base_prompt = (
+            "당신은 한국 가치투자 자문 시스템의 사업부문 추출 보조다. "
+            "DART 사업보고서 본문에서 추출한 표를 입력으로 받아, "
+            "사업부문별 매출(또는 영업수익) 비중을 표준 JSON으로 정규화한다. "
+            "표에 명시된 수치만 사용하고 추측하지 않는다. 부문 명칭은 표 원문 그대로 보존한다."
+        )
+    if sector_tier == "bank_holding":
+        return base_prompt + _BANK_HOLDING_SEGMENTS_HINT
+    return base_prompt
+
+
 def _normalize_with_gpt(
     table_texts: list[str],
     bsns_year: int,
     name: str,
     user_id: Optional[int],
+    sector_tier: Optional[str] = None,
 ) -> Optional[list[dict]]:
     """표 텍스트들 → 표준 JSON segments. 1회 호출.
 
-    반환: [{segment, revenue_pct, raw_amount?}] 또는 None (실패).
+    sector_tier (REQ-SEGMENT-02): "bank_holding" 시 7개 카테고리 hint 주입.
+    반환: [{segment, revenue_pct, raw_amount?, metric}] 또는 None (실패).
     """
     if not table_texts or not OPENAI_API_KEY:
         return None
@@ -287,12 +358,8 @@ def _normalize_with_gpt(
         from services.ai_gateway import call_openai_chat
 
         joined = "\n\n---\n\n".join(table_texts)
-        system_prompt = (
-            "당신은 한국 가치투자 자문 시스템의 사업부문 추출 보조다. "
-            "DART 사업보고서 본문에서 추출한 표를 입력으로 받아, "
-            "사업부문별 매출(또는 영업수익) 비중을 표준 JSON으로 정규화한다. "
-            "표에 명시된 수치만 사용하고 추측하지 않는다. 부문 명칭은 표 원문 그대로 보존한다."
-        )
+        # REQ-SEGMENT-02: sector_tier="bank_holding" 시 부문 사전 hint 주입
+        system_prompt = _build_segments_system_prompt(sector_tier=sector_tier)
         user_prompt = (
             f"{name}의 {bsns_year}년 사업보고서 표에서 사업부문별 매출비중을 추출해 JSON으로:\n"
             f"{{\"segments\": [{{\"segment\": \"부문명\", \"revenue_pct\": 숫자, \"raw_amount\": 숫자(원)}}]}}\n"
@@ -336,7 +403,11 @@ def _normalize_with_gpt(
                 })
             except (TypeError, ValueError):
                 continue
-        return result if result else None
+        if not result:
+            return None
+        # REQ-SEGMENT-03: metric 필드 부착 (금융지주 영업이익 표만 보고 시 operating_income_share)
+        metric = "operating_income_share" if sector_tier == "bank_holding" else "revenue_share"
+        return _attach_metric_field(result, metric=metric)
     except Exception as e:
         logger.debug("GPT 정규화 실패 (%s, %d): %s", name, bsns_year, e)
         return None
@@ -350,16 +421,20 @@ def fetch_segments_dart_single(
     name: str,
     bsns_year: int,
     user_id: Optional[int] = None,
+    sector_tier: Optional[str] = None,
 ) -> Optional[list[dict]]:
     """단일 연도 DART 사업보고서 본문 파싱.
 
-    캐시 키: dart:segments:{corp_code}:{bsns_year}
+    sector_tier (REQ-SEGMENT-02): "bank_holding" 시 GPT 부문 사전 hint 주입.
+    캐시 키: dart:segments:{corp_code}:{bsns_year}:v3 (REQ-SEGMENT-02 caching: v3 bump)
     실패 시 None 반환 (호출자가 GPT fallback 결정).
     """
     if not corp_code:
         return None
 
-    cache_key = f"dart:segments:{corp_code}:{bsns_year}"
+    # REQ-SEGMENT-02 캐시 키 v3 bump: 기존 자유형식 라벨 무효화
+    # (도메인팀장 결정 §D-6: 금융지주 부문 명칭 통일 — 기존 캐시 라벨이 비통일 형식일 수 있음)
+    cache_key = f"dart:segments:{corp_code}:{bsns_year}:v3"
     cached = get_cached(cache_key)
     if cached is not None:
         # 캐시된 빈 결과(False/[])도 그대로 반환 — 재시도 회피
@@ -384,7 +459,9 @@ def fetch_segments_dart_single(
     candidates = _extract_table_candidates(section)
     segments = None
     if candidates:
-        segments = _normalize_with_gpt(candidates, bsns_year, name, user_id)
+        segments = _normalize_with_gpt(
+            candidates, bsns_year, name, user_id, sector_tier=sector_tier
+        )
 
     # 2차 폴백: 표 추출 실패 시 섹션 텍스트 전체 GPT 입력
     # 보험사처럼 부문별 매출표가 단순 표 추출로 안 잡히는 경우 보강.
@@ -392,7 +469,9 @@ def fetch_segments_dart_single(
     if not segments:
         section_text = _section_to_text(section)
         if section_text:
-            segments = _normalize_with_gpt([section_text[:30000]], bsns_year, name, user_id)
+            segments = _normalize_with_gpt(
+                [section_text[:30000]], bsns_year, name, user_id, sector_tier=sector_tier
+            )
 
     if not segments:
         set_cached(cache_key, [], ttl_hours=6)
@@ -437,8 +516,11 @@ def _normalize_history_unified(
     tables_per_year: dict[int, list[str]],
     name: str,
     user_id: Optional[int],
+    sector_tier: Optional[str] = None,
 ) -> Optional[dict]:
     """N년치 표 통합 정규화 — GPT 1회 호출. 동일 부문명 강제.
+
+    sector_tier (REQ-SEGMENT-02): "bank_holding" 시 7개 표준 카테고리 hint 추가.
 
     2026-05-10 사용자 결정: description + keywords도 같은 호출에서 함께 추출.
     DART 부문별 매출표를 컨텍스트로 받으므로 회사명 단독 추정보다 신빙성↑.
@@ -512,6 +594,9 @@ def _normalize_history_unified(
             "에서 언급한 사업명과도 일치해야 함. 파이차트(최신 연도 segments)와 5년 추이 "
             "차트가 동일한 부문명을 보여주도록 작성.\n"
         )
+        # REQ-SEGMENT-02 (§D-6): 금융지주 부문 사전 hint 추가
+        if sector_tier == "bank_holding":
+            system_prompt = system_prompt + _BANK_HOLDING_SEGMENTS_HINT
         user_prompt = (
             f"{name}의 N년치 사업보고서 표를 받았습니다. "
             f"위 8개 규칙을 엄격히 따라 매출비중 + 사업 개요 + 키워드를 JSON으로 정규화하세요.\n\n"
@@ -603,12 +688,17 @@ def fetch_segments_history_dart(
     *,
     years: int = 5,
     user_id: Optional[int] = None,
+    sector_tier: Optional[str] = None,
 ) -> dict:
     """N년치 DART 사업보고서 본문 파싱 + 통합 정규화. GPT 호출 1회.
 
-    캐시 키: advisor:segments_history_dart:{code}:{years}
+    sector_tier (REQ-SEGMENT-02/03): "bank_holding" 시 7개 표준 카테고리 hint +
+                                      metric=operating_income_share 부착.
+    캐시 키: advisor:segments_history_dart:{code}:{years}:v3
+            (v3 bump — 도메인팀장 §D-6 결정으로 부문 라벨 통일, 기존 자유형식 무효화)
     """
-    cache_key = f"advisor:segments_history_dart:{code}:{years}"
+    # REQ-SEGMENT-02 캐시 키 v3 bump (요건서 §4 운영 정책)
+    cache_key = f"advisor:segments_history_dart:{code}:{years}:v3"
     cached = get_cached(cache_key)
     if cached is not None:
         return cached
@@ -619,6 +709,7 @@ def fetch_segments_history_dart(
         "confidence": "high",
         "source": "dart_parsed",
         "covered_years": 0,
+        "sector_tier": sector_tier or "general",
     }
 
     corp_code = _fetch_corp_code(code)
@@ -637,13 +728,17 @@ def fetch_segments_history_dart(
         return empty
 
     # 2. 5년치 통합 GPT 1회 호출 (segments + description + keywords)
-    normalized = _normalize_history_unified(tables_per_year, name, user_id)
+    normalized = _normalize_history_unified(
+        tables_per_year, name, user_id, sector_tier=sector_tier
+    )
     if not normalized or not normalized.get("years"):
         return empty
 
+    # REQ-SEGMENT-03: metric 필드 부착 (금융지주는 operating_income_share)
+    metric = "operating_income_share" if sector_tier == "bank_holding" else "revenue_share"
     years_map = normalized["years"]
     years_data = [
-        {"year": y, "segments": years_map[y]}
+        {"year": y, "segments": _attach_metric_field(years_map[y], metric=metric)}
         for y in sorted(years_map.keys())
     ]
 
@@ -658,6 +753,8 @@ def fetch_segments_history_dart(
         "confidence": "high",
         "source": "dart_parsed",
         "covered_years": len(years_data),
+        "sector_tier": sector_tier or "general",
+        "metric": metric,
     }
     set_cached(cache_key, result, ttl_hours=_CACHE_TTL_HOURS)
     return result

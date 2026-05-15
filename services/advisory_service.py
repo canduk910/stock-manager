@@ -329,6 +329,28 @@ def generate_ai_report(
 
 # ── 내부 헬퍼 ─────────────────────────────────────────────────────────────────
 
+def _extract_sector_tier_from_fundamental(
+    income_stmt: list, bs_cf: dict
+) -> str:
+    """기본적분석 결과에서 sector_tier 추출 (REQ-SECTOR-02/03, 2026-05-16).
+
+    fetch_income_detail_annual / fetch_bs_cf_annual 응답에 dart_fin이 부착한
+    sector_tier를 통합. 두 응답 모두 부재 시 "general" 보수적 기본값.
+    """
+    # income_stmt 첫 row의 sector_tier (REQ-SECTOR-02 dart_fin 추가)
+    if income_stmt and isinstance(income_stmt, list):
+        for row in income_stmt:
+            tier = (row or {}).get("sector_tier") if isinstance(row, dict) else None
+            if tier:
+                return tier
+    # bs_cf dict 최상위 sector_tier (REQ-SECTOR-02 dart_fin 추가)
+    if isinstance(bs_cf, dict):
+        tier = bs_cf.get("sector_tier")
+        if tier:
+            return tier
+    return "general"
+
+
 def _collect_fundamental(code: str, market: str, name: str, user_id: int = 1) -> dict:
     """기본적 분석 데이터 수집."""
     if market == "KR":
@@ -362,14 +384,22 @@ def _collect_fundamental_kr(code: str, name: str, user_id: int = 1) -> dict:
         f_forward = pool.submit(fetch_forward_estimates_yf, code, True)
         f_val_stats = pool.submit(advisory_fetcher.fetch_valuation_stats, code, "KR")
         f_quarterly = pool.submit(dart_fin.fetch_quarterly_financials, code, 8)
-        # 2026-05-10: segments_kr (GPT 추정 단일 시점) 제거.
-        # 파이차트는 segments_history 최신 연도 데이터 재사용 (DART 실측, GPT 호출 0건 추가).
-        f_segments_history = pool.submit(advisory_fetcher.fetch_segments_history_kr, code, name, user_id=user_id)
-
+        # REQ-SECTOR-03: segments_history는 income_stmt 완료 후 sector_tier 전파하여 호출
+        # (병렬화 손실 < GPT 비용/품질 효과 — bank_holding 부문 사전 hint)
         income_stmt = f_income.result()
         bs_cf = f_bs_cf.result()
         balance_sheet = bs_cf.get("balance_sheet", [])
         cashflow = bs_cf.get("cashflow", [])
+
+        # sector_tier 추출 (income_stmt 첫 행 또는 bs_cf 응답에서 — 모두 동일값)
+        sector_tier = _extract_sector_tier_from_fundamental(income_stmt, bs_cf)
+
+        # segments_history는 sector_tier 전파를 위해 income 완료 후 호출
+        f_segments_history = pool.submit(
+            advisory_fetcher.fetch_segments_history_kr, code, name,
+            user_id=user_id, sector_tier=sector_tier,
+        )
+
         metrics_raw = f_metrics.result()
         metrics = _build_metrics_kr(metrics_raw, balance_sheet, income_stmt)
         forward_estimates = f_forward.result()
@@ -406,6 +436,12 @@ def _collect_fundamental_kr(code: str, name: str, user_id: int = 1) -> dict:
         user_id=user_id,
     )
 
+    # REQ-SEGMENT-03: metric 필드 추출 (revenue_share / operating_income_share)
+    segments_metric = (
+        segments_history_data.get("metric", "revenue_share")
+        if isinstance(segments_history_data, dict)
+        else "revenue_share"
+    )
     return {
         "income_stmt": income_stmt,
         "balance_sheet": balance_sheet,
@@ -418,6 +454,10 @@ def _collect_fundamental_kr(code: str, name: str, user_id: int = 1) -> dict:
         "forward_estimates": forward_estimates,
         "valuation_stats": valuation_stats,  # Phase 2-2
         "quarterly": quarterly,              # Phase 2-3
+        # REQ-SECTOR-03: 업종 분류 (bank_holding/insurance/securities/general)
+        "sector_tier": sector_tier,
+        # REQ-SEGMENT-03: 매출비중 분모 표기 (revenue_share / operating_income_share)
+        "segments_metric": segments_metric,
         # Phase 1A (2026-05-10): 5년치 매출비중 추이 — 표시 전용. composite_score 미반영.
         "segments_history": segments_history_data.get("years_data", []) if isinstance(segments_history_data, dict) else [],
         "segments_highlights": segments_history_data.get("highlights") if isinstance(segments_history_data, dict) else None,
@@ -491,6 +531,9 @@ def _collect_fundamental_us(code: str, name: str = "", user_id: int = 1) -> dict
         "forward_estimates": forward_estimates,
         "valuation_stats": valuation_stats,  # Phase 2-2
         "quarterly": quarterly,              # Phase 2-3
+        # REQ-SECTOR-03: US 종목은 항상 general (한국 금융지주 분류 미적용)
+        "sector_tier": "general",
+        "segments_metric": "revenue_share",
         # Phase 1A: US는 yfinance 한계로 segments_history 미지원. 빈 배열 반환(프론트 분기 단순화).
         "segments_history": [],
         "segments_highlights": None,

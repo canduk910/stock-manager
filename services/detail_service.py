@@ -84,6 +84,8 @@ class DetailService:
     def _get_financials_kr(self, code: str, years: int) -> dict:
         multi_rows = fetch_financials_multi_year(code, years)
         result_rows = []
+        # REQ-SECTOR-03 (2026-05-16): sector_tier 응답 노출 (dart_fin 결과 통과)
+        sector_tier = "general"
         for i, row in enumerate(multi_rows):
             prev = multi_rows[i - 1] if i > 0 else None
             rev = row["revenue"]
@@ -92,6 +94,10 @@ class DetailService:
             prev_rev = prev["revenue"] if prev else None
             prev_op = prev["operating_income"] if prev else None
             oi_margin = round(op / rev * 100, 1) if rev and op and rev != 0 else None
+            # 최초 row에서 sector_tier 추출 (모든 row 동일값)
+            row_tier = row.get("sector_tier")
+            if row_tier and sector_tier == "general":
+                sector_tier = row_tier
             result_rows.append({
                 "year": row["year"],
                 "revenue": _awk(rev),
@@ -102,9 +108,10 @@ class DetailService:
                 "yoy_op": _growth(op, prev_op),
                 "dart_url": row.get("dart_url", ""),
             })
-        return {"code": code, "currency": "KRW", "rows": result_rows}
+        return {"code": code, "currency": "KRW", "rows": result_rows, "sector_tier": sector_tier}
 
     def _get_financials_us(self, code: str, years: int) -> dict:
+        # REQ-SECTOR-03: US는 항상 general (한국 금융지주 분류 미적용)
         multi_rows = yf_client.fetch_financials_multi_year_yf(code, years)
         result_rows = []
         for i, row in enumerate(multi_rows):
@@ -127,7 +134,7 @@ class DetailService:
                 "yoy_op": _growth(op, prev_op),
                 "dart_url": "",
             })
-        return {"code": code, "currency": "USD", "rows": result_rows}
+        return {"code": code, "currency": "USD", "rows": result_rows, "sector_tier": "general"}
 
     def get_valuation_chart(self, code: str, years: int = 10) -> dict:
         """월별 PER/PBR 히스토리 + 기간 평균 반환.

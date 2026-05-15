@@ -1,5 +1,68 @@
 # 변경 이력
 
+## 2026-05-16 — 금융지주/금융업 데이터 보강 + PostgreSQL SEQUENCE hotfix
+
+### 신규 기능 — 금융지주/금융업 종목 기본적 분석 정상화
+
+**배경**: 사용자 보고. 하나금융지주(086790) 관심종목 상세에서 매출 5,525억(자산 591조 / 순이익 3.5조 대비 비정상)·영업이익률 +849%·매출원가/매출총이익/유동자산·부채 "-"·사업개요 누락. 진단 결과 `_ACCOUNT_REGEX["revenue"]`의 `보험(영업)?수익` 절(보험사 보강용)이 금융지주에서 자회사 보험사만 매칭하여 발생.
+
+**도메인 자문 합의** (4명 전원, 9건):
+- D-1: 금융지주 매출 = `이자수익 + 수수료수익 + 보험수익` 합산 (`_sum_bank_holding_revenue`)
+- D-2: 업종 4-tier 자동 감지 — `detect_sector_tier(items)` (insurance → bank_holding → securities → general, 회계과목 패턴 기반, `is_insurance_company()`와 동일 위치)
+- D-3: 매출원가/매출총이익/유동자산·부채 5+2행은 `sector_tier`에 따라 프론트 행 자체 숨김
+- D-4: 7점 등급 산정은 본 작업 범위 외 (등급 산정 무변경, 매출 정상화로 자동 보정. PBR 임계값 분기는 후속 phase 권고)
+- D-5: 사업보고서 키워드 정규식 보강 (`_REVENUE_TABLE_PATTERNS` 8개 + `_REVENUE_SECTION_PATTERNS` 3개: `부문별\s*영업이익`/`영업\s*부문`/`그룹의\s*사업영역`/`주요\s*자회사` — 086790/105560/055550 실제 헤더 검증)
+- D-6: 부문 라벨 GPT hint 7카테고리 통일 (은행/카드/증권/보험/자산운용/기타금융/비금융) + `_attach_metric_field()` `revenue_share`/`operating_income_share` 분기
+- D-7: `detect_sector_tier()` 헬퍼 위치 — `stock/dart_fin.py` 내부 (보험사 분기와 동일 모듈)
+- D-8: MacroSentinel 본 작업 범위 외 (체제별 금융업 영향은 후속)
+- D-9: OrderAdvisor 본 작업 범위 외 (위험 가드 미발동)
+
+**변경 파일**:
+- 백엔드 (5): `stock/dart_fin.py` (업종 4-tier 감지 + 금융지주 매출 합산 + BS 신규 필드 5개), `stock/dart_segments.py` (키워드 8+3 패턴 + GPT hint 7카테고리), `stock/advisory_fetcher.py` (sector_tier 응답), `services/advisory_service.py` (`_extract_sector_tier_from_fundamental`), `services/detail_service.py` (sector_tier 응답)
+- 프론트 (2): `frontend/src/components/advisory/FundamentalPanel.jsx` (5+2행 조건부 미렌더), `frontend/src/components/detail/FinancialTable.jsx` (동일 prop 분기)
+- 신규 테스트 (3): `test_dart_fin_sector_tier.py` (22), `test_dart_segments_bank_holding.py` (19), `test_advisory_detail_sector_tier.py` (8) — **49/49 PASS**
+- 본 작업 영역 회귀 가드: 331/331 PASS / 0 FAIL (dart_fin/dart_segments/advisory/detail/safety_grade)
+- 캐시 키 v3 bump: `advisor:segments_history_kr/dart:{}:{years}:v3` + `dart:segments:{}:{}:v3`
+
+**검증 결과 (도메인팀 OPENDART 실측)**:
+- 086790 하나금융지주: 28.33조원 매출, 영업이익률 17.1% (이전 5,525억 → 정상)
+- 105560 KB금융: 47.43조원
+- 316140 우리금융: 24.88조원
+- 회귀: 보험사(032830) 11+13+6/30 PASS, 일반 제조업 변경 없음, 카카오(035720) securities 미발동 → general 분류 (의도된 폴백)
+
+---
+
+### 버그 수정 — 운영 PostgreSQL `user_kis_credentials.id` SEQUENCE 누락 hotfix
+
+**배경**: 사용자가 운영(dkstock.cloud)에서 `/settings/kis` 계좌 추가 시도 시 모두 500 (21 bytes `Internal Server Error` 평문) → 502 응답. 운영 로그에 traceback 부재. AWS SSM Run Command + nginx access log 추적으로 원인 진단.
+
+**원인 사슬**:
+1. `e7f8a9b0c1d2` 마이그레이션에서 `id` 컬럼을 `add_column(autoincrement=True)`로 추가 — PostgreSQL은 **컬럼 추가 시점에 SEQUENCE 자동 생성 안 함** (CREATE TABLE 시점에만 작동)
+2. 결과: PostgreSQL `user_kis_credentials.id`가 `is_identity=NO`, `column_default=NULL`, `is_nullable=NO` 상태
+3. INSERT 시 id 명시 누락 → NULL → **NotNullViolation (psycopg2 IntegrityError)**
+4. SQLAlchemy IntegrityError는 `ServiceError` 계층 아님 → `main.py:149` ServiceError 핸들러 미통과
+5. starlette `ServerErrorMiddleware` 기본 응답 = `Internal Server Error` 21 bytes 평문 ← 운영 nginx access log에서 본 응답
+6. SQLite는 `INTEGER PRIMARY KEY`로 ROWID 자동 매핑 → 로컬 정상 (운영-로컬 차이의 원인)
+
+**수정**:
+- **신규 마이그레이션 `alembic/versions/f1a2b3c4d5e6_user_kis_id_sequence.py`**:
+  - PostgreSQL: `CREATE SEQUENCE IF NOT EXISTS user_kis_credentials_id_seq OWNED BY user_kis_credentials.id` + `ALTER TABLE ... ALTER COLUMN id SET DEFAULT nextval(...)` + 기존 max(id)+1 setval
+  - SQLite: no-op (dialect 분기)
+  - dialect 분기로 다른 DB도 안전 통과
+- **`main.py` generic Exception 핸들러 추가** (`@app.exception_handler(Exception)`):
+  - 미처리 예외 응답: 21 bytes 평문 → JSON `{"detail":"내부 오류가 발생했습니다.","error_id":"..."}`
+  - traceback 자동 logger.error (exc_info=True)로 운영 로그에 출력 — 미래 동일 결함 즉시 진단
+  - ServiceError 핸들러가 먼저 매칭되므로 ServiceError 계층 영향 없음
+
+**검증**:
+- 테스트 PostgreSQL(stock-manager-test-db, 포트 5433)에 마이그레이션 적용 → `id` 컬럼 `column_default: nextval('user_kis_credentials_id_seq'::regclass)` 정상
+- 실제 INSERT 시 id 자동 부여 검증 (1, 2 순차 발급)
+- 로컬 SQLite docker 재빌드 → `alembic head 일치: f1a2b3c4d5e6` (no-op 정상 통과)
+
+**호가 문제 동반 해결 가능성**: 계좌 등록 실패로 `user_kis_credentials` 비어 있으면 `get_kis_credentials(user_id)` ConfigError(503) → WS/REST 호가 둘 다 실패 → "해외 호가 데이터 수신 중..." 무한 대기. 본 hotfix로 계좌 등록 정상화되면 호가도 자동 복구 가능성 높음.
+
+---
+
 ## 2026-05-15 — KIS 멀티 계좌 지원 (1→N 확장, 전체 자산 합산 평가)
 
 ### 신규 기능 — 사용자 1명 N개 KIS 계좌 등록 + 합산 평가 + 계좌별 주문

@@ -186,6 +186,13 @@ function ForwardSection({ forward, currency }) {
 
 export default function FinancialTable({ data, basic, forward }) {
   const currency = data?.currency || 'KRW'
+  // REQ-DISPLAY-03 (2026-05-16): sector_tier 기반 행 분기 (FundamentalPanel과 동일 정책).
+  //   bank_holding/insurance/securities → 매출원가/매출총이익/유동자산 등 행 미렌더.
+  //   현재 FinancialTable은 매출/영업이익/순이익만 표시하므로 직접 영향 없음 — 후속 phase에서
+  //   상세 BS/IS 추가 시 동일 분기 적용. 본 phase에서는 sector_tier prop만 받아 통과.
+  const sectorTier = data?.sector_tier || 'general'
+  // eslint-disable-next-line no-unused-vars
+  const isFinancialIndustry = sectorTier === 'bank_holding' || sectorTier === 'insurance' || sectorTier === 'securities'
   if (!data) {
     return (
       <div className="bg-white rounded-xl border border-gray-200 p-8 text-center text-gray-400 text-sm">

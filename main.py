@@ -168,6 +168,30 @@ async def service_error_handler(request: Request, exc: ServiceError):
     )
 
 
+@app.exception_handler(Exception)
+async def generic_exception_handler(request: Request, exc: Exception):
+    """비-ServiceError 미처리 예외 캐치 — 운영에서 starlette 기본 `Internal Server Error` 평문
+    응답(21 bytes, traceback 미로깅) 대신 JSON `{detail, error_id}` 응답 + traceback 보장.
+
+    f1a2b3c4d5e6 마이그레이션 사후 사후 진단성 보강. ServiceError 핸들러가 먼저 매칭되므로
+    SerivceError 계층은 영향 없음.
+    """
+    error_id = _uuid.uuid4().hex[:8]
+    _svc_err_logger.error(
+        "[%s] UnhandledException %s %s exc_type=%s msg=%s",
+        error_id,
+        request.method,
+        request.url.path,
+        type(exc).__name__,
+        str(exc),
+        exc_info=True,
+    )
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "내부 오류가 발생했습니다.", "error_id": error_id},
+    )
+
+
 # ── Phase 4 단계 5 (C): 페이지뷰 통계 미들웨어 ─────────────────────────────
 # /api/health, /assets/*, /static/*, /ws/*, /api/admin/page-stats(자기참조)는 제외.
 # asyncio.create_task로 비동기 INSERT (latency 영향 ≈ 0).

@@ -230,6 +230,8 @@ _ACCOUNT_REGEX = {
 # insurance_*: 보험업 전용 추가 필드 (Optional). 일반 제조업은 None으로 통과.
 #              total_liabilities/total_equity 등 표준 키는 그대로 재사용 — safety_grade 무영향
 #              (ValueScreener 자문 2026-05-09: 백워드 호환 동일 키 재사용 권고).
+# 금융업 전용 (REQ-ACCOUNT-04, 2026-05-16): 예수부채/차입부채/사채/현금및예치금/대출채권.
+#              데이터만 보강(P2) — 화면 표시는 후속 phase. 일반 제조업은 None 채워짐.
 _BS_REGEX = {
     "total_assets":            re.compile(r"^자산총계$"),
     "current_assets":          re.compile(r"^유동자산$"),
@@ -249,6 +251,12 @@ _BS_REGEX = {
     # 보험업 전용 (있으면 추출, 없으면 None)
     "insurance_liabilities":   re.compile(r"^(보험계약부채|책임준비금)$"),
     "insurance_assets":        re.compile(r"^(보험계약자산|재보험계약자산)$"),
+    # 금융업 전용 (REQ-ACCOUNT-04 P2 — 데이터만, UI 미반영)
+    "deposits_payable":        re.compile(r"^예수부채$"),
+    "borrowings_payable":      re.compile(r"^차입부채$"),
+    "debentures":              re.compile(r"^사채$"),
+    "cash_and_deposits":       re.compile(r"^현금\s*및\s*예치금$"),
+    "loans_receivable":        re.compile(r"^상각후원가측정\s*대출채권$"),
 }
 
 # 보험업 자동 감지 힌트 — `보험계약부채`/`책임준비금`/`보험계약자산` 중 하나라도
@@ -268,6 +276,118 @@ def is_insurance_company(items: list[dict]) -> bool:
         if _INSURANCE_HINT_REGEX.match(nm):
             return True
     return False
+
+
+# 금융지주/은행 자동 감지 힌트 (REQ-SECTOR-01, 2026-05-16).
+# 도메인 결정 §D-2/D-7: 회계과목 패턴 직접 감지 (induty_code 별도 호출 회피).
+# bank_holding 신호: IS의 `이자수익` + `수수료수익` 동시 존재.
+# 카카오(035720): 이자수익만 + 영업수익 + 매출원가/매출총이익 일반 손익 구조 → general 회귀.
+# 증권사(006800): 이자수익만 + 영업수익 단독 (매출원가/매출총이익 부재) → securities 분기.
+_INTEREST_INCOME_HINT_REGEX = re.compile(r"^이자(수익|수입)$")
+_FEE_INCOME_HINT_REGEX = re.compile(r"^수수료수익$")
+# 증권사 시그널: 영업수익 단일 보고 (bank_holding 미발동 시 검사).
+_OPERATING_REVENUE_HINT_REGEX = re.compile(r"^영업수익$")
+# 일반 손익 구조 시그널: 매출원가/매출총이익/매출액 (카카오 등 IT/서비스도 사용).
+# 이 중 하나라도 존재하면 securities 미발동 → general (도메인팀장 결정 §D-2 카카오 회귀).
+_GENERAL_IS_HINT_REGEX = re.compile(r"^(매출원가|매출총이익|매출액|매출)$")
+
+
+def detect_sector_tier(items: Optional[list[dict]]) -> str:
+    """업종 4-tier 자동 감지 (REQ-SECTOR-01, 도메인 결정 §D-2).
+
+    DART API `items`(IS+BS+CF) 응답을 단일 패스로 검사하여 분류:
+      `insurance`     — 보험계약부채/책임준비금/보험계약자산 BS 존재
+      `bank_holding`  — IS에 `이자수익` + `수수료수익` 동시 존재 (위 미해당)
+      `securities`    — IS에 `영업수익` 존재 (위 둘 미해당)
+      `general`       — 위 3가지 모두 미해당 (제조/서비스/IT 등)
+
+    우선순위 순서는 위와 동일 (insurance → bank_holding → securities → general).
+    빈 items 또는 None → "general" (보수적 기본값).
+
+    호출자: `_extract_accounts(items, sector_tier=...)` 분기, services API 응답
+    필드 `sector_tier` 노출, 프론트 행 숨김 분기.
+    """
+    if not items:
+        return "general"
+
+    # Phase 1: insurance 신호(BS) 가장 강함 — 보험계약부채/책임준비금/보험계약자산
+    for item in items:
+        nm = (item.get("account_nm") or "").strip().replace(" ", "")
+        if _INSURANCE_HINT_REGEX.match(nm):
+            return "insurance"
+
+    # Phase 2: bank_holding 신호 — IS에 이자수익 AND 수수료수익 동시 존재
+    has_interest_income = False
+    has_fee_income = False
+    has_operating_revenue = False
+    has_general_is = False  # 매출원가/매출총이익/매출액/매출 (일반 손익 구조)
+    for item in items:
+        if item.get("sj_div") not in ("IS", "CIS"):
+            continue
+        nm = (item.get("account_nm") or "").strip()
+        if _INTEREST_INCOME_HINT_REGEX.match(nm):
+            has_interest_income = True
+        elif _FEE_INCOME_HINT_REGEX.match(nm):
+            has_fee_income = True
+        elif _OPERATING_REVENUE_HINT_REGEX.match(nm):
+            has_operating_revenue = True
+        elif _GENERAL_IS_HINT_REGEX.match(nm):
+            has_general_is = True
+
+    if has_interest_income and has_fee_income:
+        return "bank_holding"
+
+    # Phase 3: securities 신호 — 영업수익 단일 보고 + 일반 손익 구조 부재
+    # (카카오: 영업수익 + 이자수익 + 매출원가/매출총이익 있음 → general)
+    # (미래에셋: 영업수익 + 이자수익, 매출원가/매출총이익 없음 → securities)
+    if has_operating_revenue and not has_general_is:
+        return "securities"
+
+    # Phase 4: 위 미해당 → general (매출액/매출/매출액 단독 + 카카오 케이스 포함)
+    return "general"
+
+
+# 금융지주 매출 합산용 정규식 (REQ-ACCOUNT-01, 2026-05-16).
+# bank_holding 분기에서 _ACCOUNT_REGEX["revenue"] 대신 사용. 3개 합산(None은 0).
+_BANK_HOLDING_REVENUE_PARTS = {
+    "interest_income": re.compile(r"^이자(수익|수입)$"),
+    "fee_income":      re.compile(r"^수수료수익$"),
+    "insurance_income": re.compile(r"^보험(영업)?수익$"),
+}
+
+
+def _sum_bank_holding_revenue(is_items: list[dict], amount_key: str) -> Optional[int]:
+    """금융지주 매출 합산: 이자수익 + 수수료수익 + 보험수익.
+
+    개별 None은 0 취급, 전부 None이면 None 반환 (요건 §D-1).
+    각 부문은 첫 매칭만 사용 (중복 가드).
+    """
+    parts: dict[str, Optional[int]] = {k: None for k in _BANK_HOLDING_REVENUE_PARTS}
+    for item in is_items:
+        nm = (item.get("account_nm") or "").strip()
+        for key, pat in _BANK_HOLDING_REVENUE_PARTS.items():
+            if parts[key] is None and _match_account(nm, pat):
+                parts[key] = _parse_amount(item.get(amount_key))
+                break
+    # 전부 None → None
+    if all(v is None for v in parts.values()):
+        return None
+    return sum(v or 0 for v in parts.values())
+
+
+def _find_bank_holding_period_meta(is_items: list[dict]) -> dict:
+    """금융지주 합산 시 period_cur/period_prev/thstrm_dt 메타 추출 (첫 매칭 부문 기준)."""
+    for item in is_items:
+        nm = (item.get("account_nm") or "").strip()
+        for pat in _BANK_HOLDING_REVENUE_PARTS.values():
+            if _match_account(nm, pat):
+                return {
+                    "period_cur": item.get("thstrm_nm", ""),
+                    "period_prev": item.get("frmtrm_nm", ""),
+                    "period_prev2": item.get("bfefrmtrm_nm", ""),
+                    "thstrm_dt": item.get("thstrm_dt", ""),
+                }
+    return {}
 
 # CF/CCF 현금흐름표
 _CF_REGEX = {
@@ -302,22 +422,41 @@ _IS_DETAIL_REGEX = {
 }
 
 
-def _extract_accounts(items: list[dict]) -> dict:
-    """IS/CIS 항목에서 매출/영업이익/순이익 추출. 단위: 원."""
+def _extract_accounts(items: list[dict], sector_tier: Optional[str] = None) -> dict:
+    """IS/CIS 항목에서 매출/영업이익/순이익 추출. 단위: 원.
+
+    sector_tier (REQ-ACCOUNT-01, 2026-05-16):
+      "bank_holding" → revenue = 이자수익 + 수수료수익 + 보험수익 합산 (§D-1).
+      None/general/insurance/securities → 기존 정규식 매칭 그대로.
+    백워드 호환: 미전달 시 기존 동작과 동일 (general 동등).
+    """
     is_items = [
         i for i in items
         if i.get("sj_div") in ("IS", "CIS")
     ]
 
     result: dict[str, Optional[int]] = {}
+
+    # ── bank_holding 분기: revenue 3부문 합산 ──
+    if sector_tier == "bank_holding":
+        result["revenue"] = _sum_bank_holding_revenue(is_items, "thstrm_amount")
+        result["revenue_prev"] = _sum_bank_holding_revenue(is_items, "frmtrm_amount")
+        result["revenue_prev2"] = _sum_bank_holding_revenue(is_items, "bfefrmtrm_amount")
+        # period 메타 (합산 부문 중 첫 매칭 기준)
+        result.update(_find_bank_holding_period_meta(is_items))
+
+    # ── 일반 정규식 매칭 (sector_tier 무관 + bank_holding의 비-revenue 필드) ──
     for field, pattern in _ACCOUNT_REGEX.items():
+        # bank_holding은 revenue만 위에서 합산, 나머지(operating_income/net_income)는 그대로
+        if sector_tier == "bank_holding" and field == "revenue":
+            continue
         for item in is_items:
             nm = item.get("account_nm", "").strip()
             if _match_account(nm, pattern):
                 result[f"{field}"] = _parse_amount(item.get("thstrm_amount"))
                 result[f"{field}_prev"] = _parse_amount(item.get("frmtrm_amount"))
                 result[f"{field}_prev2"] = _parse_amount(item.get("bfefrmtrm_amount"))
-                if "period" not in result:
+                if "period_cur" not in result:
                     result["period_cur"] = item.get("thstrm_nm", "")
                     result["period_prev"] = item.get("frmtrm_nm", "")
                     result["period_prev2"] = item.get("bfefrmtrm_nm", "")
@@ -331,15 +470,25 @@ def _extract_accounts(items: list[dict]) -> dict:
     return result
 
 
-def _extract_period_accounts(is_items: list[dict], period_key: str) -> dict:
+def _extract_period_accounts(
+    is_items: list[dict], period_key: str, sector_tier: Optional[str] = None
+) -> dict:
     """특정 기간(thstrm/frmtrm/bfefrmtrm)의 IS 계정 금액 추출.
 
     period_key: "thstrm" | "frmtrm" | "bfefrmtrm"
+    sector_tier (REQ-ACCOUNT-01): "bank_holding" 시 revenue 3부문 합산.
     반환: {revenue, operating_income, net_income} — 단위: 원
     """
     amount_key = f"{period_key}_amount"
     result: dict[str, Optional[int]] = {}
+
+    # bank_holding 분기: revenue 합산
+    if sector_tier == "bank_holding":
+        result["revenue"] = _sum_bank_holding_revenue(is_items, amount_key)
+
     for field, pattern in _ACCOUNT_REGEX.items():
+        if sector_tier == "bank_holding" and field == "revenue":
+            continue
         result[field] = None
         for item in is_items:
             nm = item.get("account_nm", "").strip()
@@ -396,7 +545,9 @@ def fetch_financials(stock_code: str, refresh: bool = False) -> Optional[dict]:
             if not items:
                 continue
 
-            accounts = _extract_accounts(items)
+            # REQ-SECTOR-02 (2026-05-16): 업종 자동 감지 → revenue 합산 분기
+            sector_tier = detect_sector_tier(items)
+            accounts = _extract_accounts(items, sector_tier=sector_tier)
             # 매출액이 없으면 유효한 데이터로 보지 않음
             if accounts.get("revenue") is None:
                 continue
@@ -404,6 +555,7 @@ def fetch_financials(stock_code: str, refresh: bool = False) -> Optional[dict]:
             result = {
                 "bsns_year": bsns_year,
                 "fs_div": fs_div,
+                "sector_tier": sector_tier,
                 **accounts,
             }
             set_cached(cache_key, result, ttl_hours=168)
@@ -416,7 +568,7 @@ def fetch_financials(stock_code: str, refresh: bool = False) -> Optional[dict]:
             return result
 
     # 재무데이터 없음 (신규상장 등)
-    empty = {"bsns_year": None, "fs_div": None}
+    empty = {"bsns_year": None, "fs_div": None, "sector_tier": "general"}
     set_cached(cache_key, empty, ttl_hours=6)
     return empty
 
@@ -489,8 +641,10 @@ def fetch_financials_multi_year(
             else ""
         )
 
+        # REQ-SECTOR-02: 업종 자동 감지 → revenue 합산 분기
+        sector_tier = detect_sector_tier(items)
         # thstrm(당기)만 추출 — 해당 연도의 고유 데이터 + rcept_no
-        period_data = _extract_period_accounts(is_items, "thstrm")
+        period_data = _extract_period_accounts(is_items, "thstrm", sector_tier=sector_tier)
         if period_data.get("revenue") is None:
             continue
 
@@ -501,6 +655,7 @@ def fetch_financials_multi_year(
             "net_income": period_data["net_income"],
             "rcept_no": rcept_no,
             "dart_url": dart_url,
+            "sector_tier": sector_tier,
         }
 
         if fs_div_used is None:
@@ -535,12 +690,25 @@ def _extract_sheet_period(items: list[dict], sj_divs: tuple, regex_keys: dict, p
     return result
 
 
-def _extract_is_detail_period(items: list[dict], period_key: str) -> dict:
-    """IS 세부 계정 특정 기간 추출."""
+def _extract_is_detail_period(
+    items: list[dict], period_key: str, sector_tier: Optional[str] = None
+) -> dict:
+    """IS 세부 계정 특정 기간 추출.
+
+    sector_tier (REQ-ACCOUNT-01): "bank_holding" 시 revenue 3부문 합산.
+    EPS/순이익/영업이익 등 나머지 필드는 정규식 매칭 그대로.
+    """
     is_items = [i for i in items if i.get("sj_div") in ("IS", "CIS")]
     amount_key = f"{period_key}_amount"
     result: dict = {}
+
+    # bank_holding 분기: revenue 3부문 합산
+    if sector_tier == "bank_holding":
+        result["revenue"] = _sum_bank_holding_revenue(is_items, amount_key)
+
     for field, pattern in _IS_DETAIL_REGEX.items():
+        if sector_tier == "bank_holding" and field == "revenue":
+            continue
         result[field] = None
         for item in is_items:
             nm = item.get("account_nm", "").strip()
@@ -650,10 +818,18 @@ def fetch_bs_cf_annual(stock_code: str, years: int = 5) -> dict:
         if fs_div_used is None and (bs_collected or cf_collected):
             fs_div_used = found_fs
 
+        # REQ-SECTOR-02: 업종 자동 감지 (배치 단위, 최초 1회 결과 유지)
+        if "_detected_sector_tier" not in locals():
+            _detected_sector_tier = detect_sector_tier(items)
+
     bs_result = sorted(bs_collected.values(), key=lambda x: x["year"])[-years:]
     cf_result = sorted(cf_collected.values(), key=lambda x: x["year"])[-years:]
 
-    result = {"balance_sheet": bs_result, "cashflow": cf_result}
+    result = {
+        "balance_sheet": bs_result,
+        "cashflow": cf_result,
+        "sector_tier": locals().get("_detected_sector_tier", "general"),
+    }
     set_cached(cache_key, result, ttl_hours=168)
     return result
 
@@ -714,6 +890,9 @@ def fetch_income_detail_annual(stock_code: str, years: int = 5) -> list[dict]:
         if not items:
             continue
 
+        # REQ-SECTOR-02: 업종 자동 감지 (배치 단위로 한 번 판정)
+        sector_tier = detect_sector_tier(items)
+
         for period_key, year_offset in [
             ("thstrm", 0),
             ("frmtrm", -1),
@@ -722,7 +901,7 @@ def fetch_income_detail_annual(stock_code: str, years: int = 5) -> list[dict]:
             target_year = effective_anchor + year_offset
             if target_year in collected:
                 continue
-            row = _extract_is_detail_period(items, period_key)
+            row = _extract_is_detail_period(items, period_key, sector_tier=sector_tier)
             if row.get("revenue") is None:
                 continue
             # 마진 계산
@@ -731,7 +910,7 @@ def fetch_income_detail_annual(stock_code: str, years: int = 5) -> list[dict]:
             ni = row.get("net_income") or 0
             row["oi_margin"] = round(oi / rev * 100, 1) if rev else None
             row["net_margin"] = round(ni / rev * 100, 1) if rev else None
-            collected[target_year] = {"year": target_year, **row}
+            collected[target_year] = {"year": target_year, "sector_tier": sector_tier, **row}
 
         if fs_div_used is None and collected:
             fs_div_used = found_fs
@@ -781,17 +960,25 @@ def _call_fin_api_reprt(corp_code: str, bsns_year: int, reprt_code: str, fs_div:
         return []
 
 
-def _extract_quarterly_accumulated(items: list[dict]) -> dict:
+def _extract_quarterly_accumulated(
+    items: list[dict], sector_tier: Optional[str] = None
+) -> dict:
     """분기/반기/3분기누계/연간 보고서의 IS(or CIS) 당기 누계값 추출.
 
+    sector_tier (REQ-ACCOUNT-01): "bank_holding" 시 revenue 3부문 합산.
     반환: {revenue, operating_income, net_income} (누계 기준)
     """
     data = {"revenue": None, "operating_income": None, "net_income": None}
-    for it in items:
-        if it.get("sj_div") not in ("IS", "CIS"):
-            continue
+    is_items = [it for it in items if it.get("sj_div") in ("IS", "CIS")]
+
+    if sector_tier == "bank_holding":
+        data["revenue"] = _sum_bank_holding_revenue(is_items, "thstrm_amount")
+
+    for it in is_items:
         nm = (it.get("account_nm") or "").strip()
         for key, pattern in _ACCOUNT_REGEX.items():
+            if sector_tier == "bank_holding" and key == "revenue":
+                continue
             if _match_account(nm, pattern):
                 amt = _parse_amount(it.get("thstrm_amount"))
                 if amt is not None and data[key] is None:
@@ -841,6 +1028,7 @@ def fetch_quarterly_financials(stock_code: str, quarters: int = 4) -> list[dict]
         # 4개 reprt_code 조회 → 누계값 수집
         accum: dict[int, dict] = {}  # quarter(1-4) → {revenue, operating_income, net_income}
         fs_div_used: Optional[str] = None
+        sector_tier_local: Optional[str] = None  # REQ-SECTOR-02: 첫 유효 items에서 판정
         for reprt_code, qnum in _QUARTERLY_REPRT_CODES:
             fs_divs = [fs_div_used] if fs_div_used else ["CFS", "OFS"]
             items: list = []
@@ -852,7 +1040,9 @@ def fetch_quarterly_financials(stock_code: str, quarters: int = 4) -> list[dict]
                         fs_div_used = fs_div
                     break
             if items:
-                accum[qnum] = _extract_quarterly_accumulated(items)
+                if sector_tier_local is None:
+                    sector_tier_local = detect_sector_tier(items)
+                accum[qnum] = _extract_quarterly_accumulated(items, sector_tier=sector_tier_local)
 
         if not accum:
             continue

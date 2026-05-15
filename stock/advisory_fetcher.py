@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import logging
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -501,7 +502,7 @@ def _compute_segments_highlights(years_data: list) -> dict:
 
 
 def fetch_segments_history_kr(
-    code: str, name: str, *, years: int = 5, user_id=None
+    code: str, name: str, *, years: int = 5, user_id=None, sector_tier: Optional[str] = None
 ) -> dict:
     """KR 사업부문 매출비중 N년치 추이.
 
@@ -527,9 +528,11 @@ def fetch_segments_history_kr(
     from datetime import date
 
     empty = {"years_data": [], "highlights": {"growing": [], "shrinking": []},
-             "confidence": "low", "source": "gpt_inference"}
+             "confidence": "low", "source": "gpt_inference",
+             "sector_tier": sector_tier or "general"}
 
-    cache_key = f"advisor:segments_history_kr:{code}:{years}"
+    # REQ-SEGMENT-02 캐시 키 v3 bump (요건서 §4 운영 정책: GPT 프롬프트 변경 → 캐시 키 v3)
+    cache_key = f"advisor:segments_history_kr:{code}:{years}:v3"
     cached = get_cached(cache_key)
     if cached is not None:
         return cached
@@ -538,7 +541,9 @@ def fetch_segments_history_kr(
     # 사용자 결정: AI API는 종목/포트폴리오 자문 + 챗봇 한정. 매출비중은 DART 실측만.
     try:
         from stock.dart_segments import fetch_segments_history_dart
-        dart_result = fetch_segments_history_dart(code, name, years=years, user_id=user_id)
+        dart_result = fetch_segments_history_dart(
+            code, name, years=years, user_id=user_id, sector_tier=sector_tier
+        )
         # 빈 결과도 캐시 (재시도 회피, 24h stale)
         if dart_result.get("years_data"):
             set_cached(cache_key, dart_result, ttl_hours=24 * 7)

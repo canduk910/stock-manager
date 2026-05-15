@@ -60,6 +60,7 @@
 - **PageView 미들웨어** (BaseHTTPMiddleware): `asyncio.create_task` 비동기 INSERT. JWT 직접 파싱(`_extract_user_id_from_jwt`)으로 ContextVar propagation 우회
 - **보안 헤더는 nginx SSoT** — FastAPI 미들웨어로 추가하지 말 것
 - **ServiceError handler**: 응답 본문 `error_id=uuid4().hex[:8]` + `logger.error(f"[{error_id}] ...", exc_info=True)`
+- **Generic Exception handler** (`@app.exception_handler(Exception)`): 비-ServiceError 미처리 예외 캐치 — starlette 기본 `Internal Server Error` 21 bytes 평문 응답 대신 JSON `{"detail":"내부 오류가 발생했습니다.","error_id":"..."}` + traceback 자동 로깅. ServiceError 핸들러가 먼저 매칭되므로 영향 없음 (f1a2b3c4d5e6 hotfix 사후 진단성 보강)
 - KIS API 직접 호출 금지. 모든 로직은 `routers/` → `services/` → `stock/`/`screener/` 위임
 
 ---
