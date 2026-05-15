@@ -5,6 +5,7 @@ APScheduler로 08:00(KR) / 16:00(US) 자동 실행.
 from __future__ import annotations
 
 import logging
+import time
 from datetime import datetime, timezone, timedelta
 
 logger = logging.getLogger(__name__)
@@ -12,6 +13,131 @@ logger = logging.getLogger(__name__)
 KST = timezone(timedelta(hours=9))
 
 _scheduler = None
+
+# REQ-FH-EXT-CRON-01: 외국인 보유 백필 cron 활성 종목 cap (MVP 부하 가시화)
+_FH_BACKFILL_CAP = 50
+
+# REQ-FH-EXT-CRON-01: 종목 호출 간 sleep (KIS 초당 2회 안정선)
+_FH_BACKFILL_SLEEP_SEC = 0.5
+
+
+def _now_kst() -> datetime:
+    """현재 KST 시각. 테스트에서 monkeypatch 가능."""
+    return datetime.now(KST)
+
+
+def _all_advisory_users_codes() -> list[tuple[str, str]]:
+    """모든 사용자 advisory_stocks에서 (code, market) 추출. dedup 적용.
+
+    REQ-FH-EXT-CRON-01: 활성 종목 = advisory_stocks 전체 + watchlist 국내 (50 cap).
+    """
+    seen: set[tuple[str, str]] = set()
+    try:
+        from db.session import get_session
+        from db.models.advisory import AdvisoryStock
+        with get_session() as db:
+            rows = db.query(AdvisoryStock.code, AdvisoryStock.market).distinct().all()
+            for r in rows:
+                key = (r[0], (r[1] or "KR").upper())
+                seen.add(key)
+    except Exception as exc:
+        logger.warning(f"[스케줄러] advisory_stocks 조회 실패: {exc}")
+    return list(seen)
+
+
+def _all_watchlist_codes() -> list[tuple[str, str]]:
+    """모든 사용자 watchlist에서 (code, market) 추출. dedup 적용."""
+    seen: set[tuple[str, str]] = set()
+    try:
+        from db.session import get_session
+        from db.models.watchlist import Watchlist
+        with get_session() as db:
+            rows = db.query(Watchlist.code, Watchlist.market).distinct().all()
+            for r in rows:
+                key = (r[0], (r[1] or "KR").upper())
+                seen.add(key)
+    except Exception as exc:
+        logger.warning(f"[스케줄러] watchlist 조회 실패: {exc}")
+    return list(seen)
+
+
+def _run_foreign_holding_backfill_job():
+    """REQ-FH-EXT-CRON-01: 외국인 보유 일별 백필 (KST 18:00).
+
+    활성 국내 종목 (advisory_stocks ∪ watchlist KR) 외국인 보유 데이터를
+    `fetch_foreign_holding(code, days=30)` 호출로 누적 캐시에 저장.
+
+    안전 정책 (OrderAdvisor 자문):
+    - 토/일 weekday() ≥ 5 → 즉시 return + KIS 호출 0회
+    - 50개 cap (단계적 부하 가시화)
+    - 종목간 sleep 0.5s (KIS 초당 2회 안정선)
+    - 종목별 try/except (1개 실패해도 다음 종목 진행, raise 금지)
+    """
+    started_at = time.time()
+    try:
+        now = _now_kst()
+    except Exception:
+        now = datetime.now(KST)
+
+    if now.weekday() >= 5:  # 토(5)/일(6)
+        logger.info(f"[스케줄러] 외국인 보유 백필 주말 skip (weekday={now.weekday()})")
+        return
+
+    try:
+        from stock.utils import is_domestic
+    except Exception as exc:
+        logger.error(f"[스케줄러] is_domestic import 실패: {exc}")
+        return
+
+    # 활성 종목 수집 (advisory ∪ watchlist, KR만)
+    try:
+        adv = _all_advisory_users_codes() or []
+        wat = _all_watchlist_codes() or []
+    except Exception as exc:
+        logger.error(f"[스케줄러] 활성 종목 조회 실패: {exc}")
+        return
+
+    seen: set[str] = set()
+    candidates: list[str] = []
+    for code, market in list(adv) + list(wat):
+        if not code or (market or "KR").upper() != "KR":
+            continue
+        if not is_domestic(code):
+            continue
+        if code in seen:
+            continue
+        seen.add(code)
+        candidates.append(code)
+
+    if not candidates:
+        logger.info("[스케줄러] 외국인 보유 백필 활성 종목 없음")
+        return
+
+    # 50개 cap
+    if len(candidates) > _FH_BACKFILL_CAP:
+        logger.warning(
+            f"[스케줄러] 외국인 보유 백필 cap 적용: "
+            f"{len(candidates)}개 → {_FH_BACKFILL_CAP}개로 truncate"
+        )
+        candidates = candidates[:_FH_BACKFILL_CAP]
+
+    success = 0
+    fail = 0
+    from services import supply_demand_service  # 지연 import (circular 방지)
+    for code in candidates:
+        try:
+            supply_demand_service.fetch_foreign_holding(code, days=30)
+            success += 1
+        except Exception as exc:
+            fail += 1
+            logger.warning(f"[스케줄러] 외국인 보유 백필 실패: {code} — {exc}")
+        time.sleep(_FH_BACKFILL_SLEEP_SEC)
+
+    elapsed = time.time() - started_at
+    logger.info(
+        f"[스케줄러] 외국인 보유 백필 완료: 성공 {success}건, 실패 {fail}건, "
+        f"소요 {elapsed:.1f}초"
+    )
 
 
 def _run_pipeline_job(market: str):
@@ -98,8 +224,20 @@ def setup_scheduler():
             name="매크로 pre-warm (00:05)",
             replace_existing=True,
         )
+        # REQ-FH-EXT-CRON-01: 외국인 보유 일별 백필 (KST 18:00 평일).
+        # 장 마감 15:30 + 데이터 확정 30분 여유 + KIS 야간 부하 회피.
+        _scheduler.add_job(
+            _run_foreign_holding_backfill_job,
+            CronTrigger(hour=18, minute=0),
+            id="foreign_holding_backfill",
+            name="외국인 보유 추이 백필 (18:00)",
+            replace_existing=True,
+        )
         _scheduler.start()
-        logger.info("[스케줄러] 스케줄러 시작 (08:00 KR / 16:00 US / 00:05 cleanup+prewarm)")
+        logger.info(
+            "[스케줄러] 스케줄러 시작 "
+            "(08:00 KR / 16:00 US / 00:05 cleanup+prewarm / 18:00 FH backfill)"
+        )
     except ImportError:
         logger.warning("[스케줄러] apscheduler 미설치 — 스케줄러 비활성화")
     except Exception as e:

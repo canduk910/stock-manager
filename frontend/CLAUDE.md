@@ -28,7 +28,7 @@ frontend/
 | `watchlist.js` | CRUD + market 파라미터 |
 | `detail.js` | 10년 재무 + 밸류에이션 + 종합 리포트 |
 | `order.js` | placeOrder/fetchOpenOrders/cancelOrder/modifyOrder/fetchExecutions/fetchBuyable/fetchFnoPrice |
-| `advisory.js` | fetchAdvisoryStocks/addAdvisoryStock/refreshAdvisoryData/generateReport(userComment)/fetchReport/fetchReportHistory/fetchReportById/fetchAdvisoryOhlcv/**fetchStockSupplyDemand**(code, days) |
+| `advisory.js` | fetchAdvisoryStocks/addAdvisoryStock/refreshAdvisoryData/generateReport(userComment)/fetchReport/fetchReportHistory/fetchReportById/fetchAdvisoryOhlcv/**fetchStockSupplyDemand**(code, days)/**fetchForeignHolding**(code, days=120) |
 | `search.js` | searchStocks(q, market) |
 | `macro.js` | fetchMacroIndices/fetchMacroNews/fetchMacroSentiment/fetchMacroInvestorQuotes/fetchMacroSummary/**fetchSupplyDemand**(market, days) |
 | `advisor.js` | analyzePortfolio(userComment)/fetchAdvisorHistory/fetchAdvisorReport |
@@ -51,7 +51,7 @@ frontend/
 | `useMarketClock.js` | KST 4구간 KR 거래소 자동 판정 (`UN`/`KRX`/`NXT`). `resolvePhaseByClock(now)` 순수 함수 export. 1분 setInterval **단독 (WS override 제거 — `/ws/market-status` 폐지로 시계 폴백만 사용)** |
 | `useUsMarketClock.js` | ET 4구간 미국 시장 (`pre`/`regular`/`after`/`closed`). `Intl.DateTimeFormat('en-US', {timeZone:'America/New_York'})` DST 자동. `US_HOLIDAYS_ET` 2026~2028 30일 + `isUsHoliday()` 헬퍼 (주말+공휴일) |
 | `useMarketBoard.js` | useMarketBoard (신고가/신저가 + sparkline + ohlc) + useDisplayStocks (관심+별도등록 병합+순서) + **usePricePolling(codes, market)** — `fetchPricesBatch` 폴링(`useMarketClock` phase 기반 장중 15s / 장외 60s 자동 조정). 기존 WS prices shape 호환 (`{[code]: {price, change, change_pct, prev_close, volume, sign}}`) |
-| `useAdvisory.js` | useAdvisoryStocks/useAdvisoryData/useAdvisoryReport/useAdvisoryOhlcv/**useStockSupplyDemand**(code, days) |
+| `useAdvisory.js` | useAdvisoryStocks/useAdvisoryData/useAdvisoryReport/useAdvisoryOhlcv/**useStockSupplyDemand**(code, days)/**useForeignHolding**(code, days=120) |
 | `useMacro.js` | 섹션별 독립 훅 (Indices/News/Sentiment/InvestorQuotes/**SupplyDemand(market, days)**). 부분 실패 격리 |
 | `usePortfolioAdvisor.js` | analyze/loadLatest/loadById. stale closure 해결 (loadHistory 의존성 없음) |
 | `useReport.js` | 5개 훅 (Reports/ReportDetail/Recommendations/Performance/Regimes) |
@@ -91,7 +91,8 @@ frontend/
 - ResearchDataPanel — 입력데이터 16카테고리 통합 미리보기. `_safeText()` 객체 안전 렌더 + `renderSegments` 키 매핑(`s.segment||s.name||s.product`)
 - `UserCommentaryCard` — 사용자 가설 양면 평가. stance 5단계 배지 + 좌(👍 녹색)/우(👎 빨강) 2컬럼 + strength 1~10 게이지. evaluation null 미렌더
 - AnalystReportsModal (KR=네이버리서치/US=yfinance 등급이력)
-- **SupplyDemandPanel** — 종합리포트 5번째 서브탭("수급/투자자") 본체. Recharts ComposedChart(개인/외국인/기관 일별 막대 + 누적 라인). 상단 advisory_note 노란 배너. 매수/매도 분리 토글. 해외종목 진입 시 "국내 전용" 안내. KIS 키 미설정 503 → 안내 카드
+- **SupplyDemandPanel** — 종합리포트 5번째 서브탭("수급/투자자") 본체. Recharts ComposedChart(개인/외국인/기관 일별 막대 + 누적 라인). 상단 advisory_note 노란 배너(통일 문구). 매수/매도 분리 토글. 해외종목 진입 시 "국내 전용" 안내. KIS 키 미설정 503 → 안내 카드. 하단에 `<ForeignHoldingCard />` 통합
+- **ForeignHoldingCard** — 외국인 보유율 + 추가 매수여력. 좌(도넛 게이지 스냅샷, 임계값 4단계 색상 safe/caution/warning/saturated + unlimited/exceeded 배지 + 4지표 그리드: 보유/상장/한도/잔여여력) + 우(소진율 추이 라인 차트, 30일 이하 MM-DD / 90일 이상 YYYY-MM 자동 포맷 + 임계값 ReferenceLine). 5단계 stepper(30/60/90/120/180, 기본 120). `change_alert.breached` 시 라인 #F97316 강조 + 배지. 콜드스타트(`daily_history_total_days < days`) 시 "데이터 누적 중" 노란 안내(매일 18:00 cron으로 자연 누적). 해외 종목 미렌더. KIS 키 503/외부 502/404 부분 실패 격리(V1 차트 무영향)
 
 **report/** ReportDetailView, SectorConceptTabs(3컨셉 + WatchlistButton + 기등록 ★), ReportHistoryList
 **portfolio/** RegimeBanner, AllocationChart, ProfitChart, HoldingsOverview

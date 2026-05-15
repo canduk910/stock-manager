@@ -97,3 +97,8 @@ export const fetchAnalystReports = (code, market = 'KR') =>
 // ── 종목 수급(개인/외국인/기관) (REQ-SUPPLY-ROUTER-02) ─────────────────────
 export const fetchStockSupplyDemand = (code, days = 30) =>
   apiFetch(`/api/advisory/${encodeURIComponent(code)}/supply-demand?days=${days}`)
+
+// ── 종목 외국인 보유 추이 + 매수여력 (REQ-FH-ROUTER-01 / REQ-FH-EXT-ROUTER-01) ─
+// V1.6: 기본값 120 (사용자 요구 "반년"). 범위 5~180.
+export const fetchForeignHolding = (code, days = 120) =>
+  apiFetch(`/api/advisory/${encodeURIComponent(code)}/foreign-holding?days=${days}`)

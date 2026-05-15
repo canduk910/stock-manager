@@ -17,6 +17,7 @@ import {
 } from 'recharts'
 import LoadingSpinner from '../common/LoadingSpinner'
 import { useStockSupplyDemand } from '../../hooks/useAdvisory'
+import ForeignHoldingCard from './ForeignHoldingCard'
 
 function formatAmount(v) {
   if (v == null) return '-'
@@ -277,6 +278,9 @@ export default function SupplyDemandPanel({ code, market = 'KR' }) {
           표시할 수급 데이터가 없습니다.
         </div>
       )}
+
+      {/* REQ-FH-UI-01: 외국인 보유 추이 + 매수여력 카드 (V1 차트 하단) */}
+      <ForeignHoldingCard code={code} market={market} />
     </div>
   )
 }

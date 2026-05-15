@@ -1,5 +1,77 @@
 # 변경 이력
 
+## 2026-05-15 — 종목별 외국인 보유율 차트 + 반년 누적 추이 (V1.5 + V1.6)
+
+### 신규 — 외국인 보유율 + 추가 매수여력 직관적 차트 (V1.5)
+
+**배경**: 종목별 수급정보(`SupplyDemandPanel`)는 V1에서 개인/외국인/기관 일별 매매동향만 제공. 사용자가 외국인 보유수량 / 총상장주식수 비율과 추가 매수여력(외국인한도종목은 한도소진 상한)을 표가 아닌 **직관적 차트**로 보고 싶다고 요청.
+
+**KIS TR 사실관계 (도메인팀 검증)**: 사용자/V1 요건서가 언급한 `FHKST01010800`은 KIS 공식 LLM 카탈로그에 미존재. 대신 이미 노출된 두 TR 조합으로 우회:
+- `FHKST01010100`(주식현재가) — `frgn_hldn_qty`/`hts_frgn_ehrt`(소진율)/`lstn_stcn`(상장주수) 스냅샷
+- `FHKST01010400`(주식현재가 일자별) — 일별 `hts_frgn_ehrt`/`frgn_ntby_qty` 시계열 (**최대 30거래일**)
+
+한도수량 = `보유수량 / (소진율/100)` 역산 (소진율 ≥ 0.01%일 때). 한도 미설정 종목은 `None` 폴백.
+
+**도메인 합의 (3인 만장일치)**:
+- 외국인 보유율은 **가치 지표 아님 → SafetyGrade 7점 등급 편입 금지** (MarginAnalyst/MacroSentinel/OrderAdvisor)
+- 잔여 매수여력 = 외국인 합산 한도 → **개인 매수 적합성과 무관 명시** (OrderAdvisor)
+- V1 `_ADVISORY_NOTE` 강화 통일: "한도소진율과 개인 투자자 매수 적합성은 무관(외국인 합산 한도). 매매 신호로 단독 사용 금지(Graham 원칙)"
+- 한도 미설정/한도 초과 폴백: `None` + `unlimited`/`exceeded` 분기 배지(0 채우면 잘못된 시각화)
+- 임계값 4단계: safe(<50%, 회색)/caution(50~80%, 노랑)/warning(80~95%, 주황)/saturated(≥95%, 빨강)
+
+**변경**:
+- `wrapper.py` — `_opt_int`/`_opt_float` 헬퍼 + `get_foreign_holding_snapshot(code)` (`FHKST01010100`) + `get_foreign_holding_daily(code, days=30)` (`FHKST01010400`, days 1~30 검증). 6자리 숫자 검증, 빈 응답/빈 필드 None 정규화, KIS rt_cd≠0 시 `ExternalAPIError(502)`
+- `services/supply_demand_service.py` — `_FH_COLOR_MAP`/`_FH_DAYS_*`/`_FH_EHRT_UNLIMITED_THRESHOLD` 상수 + `_classify_limit_status`(safe/caution/warning/saturated/unlimited/exceeded) + `_is_defective_fh_snapshot`/`_is_defective_fh_daily` 가드 + `_fetch_or_cache_fh` + `_build_fh_snapshot` + `_build_fh_daily` + `fetch_foreign_holding(code, days=30)` 공개 API. 단위: 보유수량 = **만주**(÷10000 반올림), 소진율 = % 소수점 2자리. `_ADVISORY_NOTE` 통일 (V1 응답도 강화 문구)
+- `routers/advisory.py` — `GET /api/advisory/{code}/foreign-holding?days={5..30}` 엔드포인트. ServiceError(400)/NotFoundError(404)/ConfigError(503)/ExternalAPIError(502) 매핑
+- `frontend/src/api/advisory.js` — `fetchForeignHolding(code, days)` 추가
+- `frontend/src/hooks/useAdvisory.js` — `useForeignHolding(code, days)` 훅 (독립 로딩/에러)
+- `frontend/src/components/advisory/ForeignHoldingCard.jsx` 신규 — 좌(Recharts `PieChart` 도넛 게이지 + 중앙 큰 글씨 + 4지표 그리드 + 상태 배지) + 우(`LineChart` 추이 + 임계값 ReferenceLine + 변동 보조 텍스트). 해외 종목 진입 시 `return null`. 부분 실패 격리(KIS 키 503/404/502 안내, V1 차트 무영향)
+- `frontend/src/components/advisory/SupplyDemandPanel.jsx` — 하단에 `<ForeignHoldingCard code={code} market={market} />` 통합
+
+**테스트 (RED→GREEN→VERIFY)**:
+- `tests/unit/test_kis_wrapper_foreign_holding.py` (18 PASS) — TR_ID/파라미터 일치, 6자리/days 범위 검증, 빈 응답/빈 필드 정규화, KIS rt_cd 에러
+- `tests/unit/test_foreign_holding_service.py` (25 PASS) — 단위 변환, 임계값 6 경계(49.99/50/79.99/80/94.99/95), unlimited/exceeded 분기, 잔여여력 음수 보호(max 0), KIS 키 503/ServiceError 400/매매 액션 키 부재
+- `tests/api/test_advisory_foreign_holding.py` (10 PASS) — 200/400/404/503/502, advisory_note 존재, 매매 액션 키 부재
+- 신규 53 PASS / V1 supply_demand 회귀 27 PASS
+
+### 신규 — 외국인 보유율 반년(180일) 누적 추세 + 일별 백필 cron (V1.6)
+
+**배경**: V1.5는 KIS `FHKST01010400` 30거래일 한도로 30일 추이만 가능. 사용자가 **반년(약 120거래일)** 추세를 요청.
+
+**KIS TR 재검증 (도메인팀 2차)**: LLM 카탈로그 6회 검색 + 후보 TR 4개 본문 직접 확인:
+- `inquire_daily_itemchartprice`(FHKST03010100): 기간 지정 + 100건/회 가능, 그러나 output2 array에 `hts_frgn_ehrt` 부재 (OHLCV만)
+- `investor_trade_by_stock_daily`(FHPTJ04160001): `frgn_ntby_qty`만, `hts_frgn_ehrt` 부재
+- `frgnmem_pchs_trend`(FHKST644400C0): 외국계 회원사 단위, 보유율 없음
+- → **외국인 소진율을 30거래일 초과로 array 제공하는 KIS TR은 존재하지 않음** 확정
+
+**우회 채택**: `macro_store` 일자별 list append 패턴 + 일별 cron 자연 누적. N일 후 자연스럽게 반년 차트 완성.
+
+**도메인 합의 (3인 만장일치 9건)**:
+- 캐시 모델 (가): `macro_store` list append, 키 `foreign_holding:daily_history:{code}`, **FIFO 250거래일**. DB 마이그레이션 0건
+- 백필 전략 (a): Lazy + 일별 cron (advisory_stocks ∪ watchlist 국내, **50개 cap**)
+- 슬라이더: 5단계 stepper (30/60/90/120/180, **기본 120**)
+- `change_alert`: 첫일자↔마지막일자 소진율 차이 **±3.0%p** 초과 시 강조
+- 매매 액션 키 금지 유지 / advisory_note 유지 (V1.5 통일 문구)
+- cron 시각: KST 평일 18:00 (장 마감 후), 휴장일 자동 skip
+
+**변경**:
+- `services/supply_demand_service.py` — `_FH_HISTORY_MAX_KEEP=250` + `_FH_CHANGE_ALERT_THRESHOLD=3.0` 상수 + `_merge_fh_daily(existing, new, max_keep=250)` 헬퍼 (오래된 일자 → 최신, 중복 dedup last-wins, None ehrt 새 행 필터 + 기존 행 보존) + `_build_change_alert(daily)` (signed/abs delta + breached + first/last + color). `fetch_foreign_holding(code, days=120)` 시그니처 확장 (days 5~180, 기본 120), 누적 캐시 조회 + KIS 30일 머지 → 최근 `days` 슬라이스 반환. 응답에 `change_alert`/`daily_history_total_days` 키 추가
+- `services/scheduler_service.py` — `_FH_BACKFILL_CAP=50` + `_run_foreign_holding_backfill_job()` + `_all_advisory_users_codes()`/`_all_watchlist_codes()` 헬퍼 + `setup_scheduler()`에 `foreign_holding_backfill` 잡 등록 (KST 18:00, Mon-Fri). 휴장일(weekday≥5) 즉시 return. 종목별 예외는 logger.error로만, raise 금지(잡 중단 방지)
+- `routers/advisory.py` — foreign-holding `days` 범위 5~180 + 기본 120
+- `frontend/src/api/advisory.js` — `fetchForeignHolding(code, days=120)` 기본값 변경
+- `frontend/src/hooks/useAdvisory.js` — `useForeignHolding(code, days=120)` 기본값 변경
+- `frontend/src/components/advisory/ForeignHoldingCard.jsx` — 슬라이더 → 5단계 stepper 버튼(30/60/90/120/180), x축 자동 포맷 (≤60일 MM-DD / ≥90일 YYYY-MM 격주/월말), 변동 보조 텍스트 동적 days, **`change_alert.breached` 시 라인 강조(#F97316) + 배지** "급증 +3.5%p"/"급감 -4.1%p", **콜드스타트 안내** (`daily_history_total_days < days` 시 "데이터 누적 중 (현재 N일, 매일 자동 채워짐)" 노란 배너)
+
+**테스트 (RED→GREEN→VERIFY)**:
+- `tests/unit/test_foreign_holding_history_merge.py` (9 PASS) — 빈/오버랩/dedup last-wins/FIFO cap 250/None ehrt 필터·보존/중복 dedup
+- `tests/unit/test_foreign_holding_extended.py` (20 PASS) — days 기본 120/5미만 raise/180초과 raise/180 허용/V1.5 회귀(30 동작)/누적 첫 저장+이후 append/change_alert 4 경계(3.0/2.99/+/-)/single row 시 omit/history_total_days/daily 슬라이싱·None 제외/매매 액션 키 부재/advisory_note 존재
+- `tests/unit/test_foreign_holding_backfill_scheduler.py` (7 PASS + 1 skip) — 토/일 skip/평일 활성 종목 fetch/advisory+watchlist dedup/50 cap/종목별 예외 무중단/활성 0건 early return
+- `tests/api/test_advisory_foreign_holding_extended.py` (7 PASS) — days 기본 120/180 허용/180+/5미 400/V1.5 회귀 30/응답 신규 키 포함/매매 액션 키 부재
+
+**회귀 영향 분석**: 본 변경 직접 import 영향권 157 PASS + 2 skip (외국인 96 PASS + V1 supply_demand 59 PASS + macro_prewarm 2 PASS / apscheduler 환경 의존 skip). wrapper.py 변경 0건 + DB 마이그레이션 0건 회귀 가드.
+
+**효과**: 첫 진입 시 30일 노출 + 매일 18:00 cron 자연 누적 → N일 후 사용자 가시 범위 30→60→90→120→180일 자동 확장. 한도소진/매수여력 직관적 시각화 + 단방향 가격 충격 위험 양면성 명시 (MarginAnalyst).
+
 ## 2026-05-12 (후속) — advisory_service stampede 우회 버그 수정
 
 ### 버그 수정 — refresh_stock_data 동시 호출 시 fetcher 중복 호출

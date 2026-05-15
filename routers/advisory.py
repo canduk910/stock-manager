@@ -294,6 +294,29 @@ def get_supply_demand(
     return supply_demand_service.fetch_stock_supply_demand(code.upper(), days=days)
 
 
+@router.get("/{code}/foreign-holding")
+def get_foreign_holding(
+    code: str,
+    days: int = Query(120, description="조회 일수 (5~180, 기본 120)"),
+    _user: dict = Depends(get_current_user),
+):
+    """종목별 외국인 보유율 + 한도소진율 + 잔여 매수여력 추이.
+
+    REQ-FH-ROUTER-01 / REQ-FH-EXT-ROUTER-01.
+
+    V1.5 → V1.6 확장:
+    - KIS TR FHKST01010100(스냅샷) + FHKST01010400(일별, 30일 한도) 조합.
+    - 누적 캐시 `foreign_holding:daily_history:{code}` 머지(FIFO 250).
+    - days 범위 5~180, 기본 120 (사용자 요구 "반년").
+    - 응답에 `daily_history_total_days`(누적 보유 일수) + `change_alert`(±3.0%p 변화) 추가.
+
+    단위: 보유수량 = 만주, 보유율/소진율 = % (소수점 2자리).
+    국내 종목(6자리)만 지원. KIS 키 미설정 → 503. days 범위 외 → 400.
+    매매 액션 키(recommendation/action/buy_signal) 미포함 — OrderAdvisor 안전 정책.
+    """
+    return supply_demand_service.fetch_foreign_holding(code.upper(), days=days)
+
+
 @router.get("/{code}/analyst-reports")
 def get_analyst_reports(
     code: str,

@@ -2058,6 +2058,182 @@ def get_stock_investor_daily(code: str, days: int = 30) -> list[dict]:
     return standardized
 
 
+def _opt_int(value):
+    """문자열/숫자 → int. 빈문자/None → None (예외 X)."""
+    if value is None:
+        return None
+    try:
+        s = str(value).strip()
+        if not s:
+            return None
+        return int(round(float(s)))
+    except (TypeError, ValueError):
+        return None
+
+
+def _opt_float(value):
+    """문자열/숫자 → float. 빈문자/None → None (예외 X)."""
+    if value is None:
+        return None
+    try:
+        s = str(value).strip()
+        if not s:
+            return None
+        return float(s)
+    except (TypeError, ValueError):
+        return None
+
+
+def get_foreign_holding_snapshot(code: str) -> dict:
+    """종목별 외국인 보유 스냅샷. KIS TR_ID FHKST01010100 (주식현재가 시세).
+
+    REQ-FH-API-01.
+
+    Args:
+        code: 6자리 숫자(국내 종목).
+
+    Returns:
+        dict: 표준화 키 — code, lstn_stcn, frgn_hldn_qty, hts_frgn_ehrt, as_of_date.
+            frgn_hldn_qty / hts_frgn_ehrt 빈 문자열 → None.
+
+    Raises:
+        ValueError: code 형식 오류 (6자리 숫자 아님).
+        ExternalAPIError: KIS HTTP 5xx 또는 rt_cd != "0".
+        NotFoundError: output 누락 (종목 미존재 또는 응답 없음).
+    """
+    if not isinstance(code, str) or len(code) != 6 or not code.isdigit():
+        raise ValueError(f"code는 6자리 숫자여야 합니다(국내 종목만 지원): {code!r}")
+
+    token = _kis_token()
+    app_key, app_secret = _kis_app_key()
+    base_url = _kis_base_url()
+
+    url = f"{base_url}/uapi/domestic-stock/v1/quotations/inquire-price"
+    headers = {
+        "content-type": "application/json",
+        "authorization": f"Bearer {token}",
+        "appkey": app_key,
+        "appsecret": app_secret,
+        "tr_id": "FHKST01010100",
+        "custtype": "P",
+    }
+    params = {
+        "FID_COND_MRKT_DIV_CODE": "J",
+        "FID_INPUT_ISCD": code,
+    }
+
+    try:
+        resp = requests.get(url, headers=headers, params=params, timeout=10)
+    except requests.RequestException as exc:
+        from services.exceptions import ExternalAPIError
+        raise ExternalAPIError(f"KIS 외국인 스냅샷 API 호출 실패: {exc}")
+
+    if resp.status_code != 200:
+        from services.exceptions import ExternalAPIError
+        raise ExternalAPIError(
+            f"KIS 외국인 스냅샷 HTTP {resp.status_code}: {getattr(resp, 'text', '')[:200]}"
+        )
+
+    data = resp.json() or {}
+    if str(data.get("rt_cd", "")) != "0":
+        from services.exceptions import ExternalAPIError
+        raise ExternalAPIError(
+            f"KIS 외국인 스냅샷 응답 오류: rt_cd={data.get('rt_cd')} msg={data.get('msg1', '')[:200]}"
+        )
+
+    output = data.get("output") or {}
+    if not output:
+        from services.exceptions import NotFoundError
+        raise NotFoundError(f"종목 {code} 시세 응답 없음")
+
+    _KST = datetime.timezone(datetime.timedelta(hours=9))
+    as_of = datetime.datetime.now(_KST).strftime("%Y-%m-%d")
+
+    return {
+        "code": code,
+        "lstn_stcn": _to_int(output.get("lstn_stcn")),
+        "frgn_hldn_qty": _opt_int(output.get("frgn_hldn_qty")),
+        "hts_frgn_ehrt": _opt_float(output.get("hts_frgn_ehrt")),
+        "as_of_date": as_of,
+    }
+
+
+def get_foreign_holding_daily(code: str, days: int = 30) -> list[dict]:
+    """종목별 외국인 보유율 일별 시계열. KIS TR_ID FHKST01010400 (주식현재가 일자별).
+
+    REQ-FH-API-02. KIS 자체 한도 최근 30거래일.
+
+    Args:
+        code: 6자리 숫자.
+        days: 1~30.
+
+    Returns:
+        list[dict]: 표준화 키 — date(YYYY-MM-DD), close, hts_frgn_ehrt(% or None),
+            frgn_ntby_qty(int, 빈문자 → 0). 과거→최근 오름차순.
+
+    Raises:
+        ValueError: code 또는 days 범위 외.
+        ExternalAPIError: KIS 오류.
+    """
+    if not isinstance(code, str) or len(code) != 6 or not code.isdigit():
+        raise ValueError(f"code는 6자리 숫자여야 합니다(국내 종목만 지원): {code!r}")
+    if not isinstance(days, int) or days < 1 or days > 30:
+        raise ValueError(f"days는 1~30 범위여야 합니다(KIS 자체 한도): {days!r}")
+
+    token = _kis_token()
+    app_key, app_secret = _kis_app_key()
+    base_url = _kis_base_url()
+
+    url = f"{base_url}/uapi/domestic-stock/v1/quotations/inquire-daily-price"
+    headers = {
+        "content-type": "application/json",
+        "authorization": f"Bearer {token}",
+        "appkey": app_key,
+        "appsecret": app_secret,
+        "tr_id": "FHKST01010400",
+        "custtype": "P",
+    }
+    params = {
+        "FID_COND_MRKT_DIV_CODE": "J",
+        "FID_INPUT_ISCD": code,
+        "FID_PERIOD_DIV_CODE": "D",
+        "FID_ORG_ADJ_PRC": "0000000001",
+    }
+
+    try:
+        resp = requests.get(url, headers=headers, params=params, timeout=10)
+    except requests.RequestException as exc:
+        from services.exceptions import ExternalAPIError
+        raise ExternalAPIError(f"KIS 외국인 일별 API 호출 실패: {exc}")
+
+    if resp.status_code != 200:
+        from services.exceptions import ExternalAPIError
+        raise ExternalAPIError(
+            f"KIS 외국인 일별 HTTP {resp.status_code}: {getattr(resp, 'text', '')[:200]}"
+        )
+
+    data = resp.json() or {}
+    if str(data.get("rt_cd", "")) != "0":
+        from services.exceptions import ExternalAPIError
+        raise ExternalAPIError(
+            f"KIS 외국인 일별 응답 오류: rt_cd={data.get('rt_cd')} msg={data.get('msg1', '')[:200]}"
+        )
+
+    raw_rows = data.get("output") or []
+    standardized: list[dict] = []
+    for row in raw_rows:
+        standardized.append({
+            "date": _format_date_yyyymmdd(row.get("stck_bsop_date", "")),
+            "close": _to_int(row.get("stck_clpr")),
+            "hts_frgn_ehrt": _opt_float(row.get("hts_frgn_ehrt")),
+            "frgn_ntby_qty": _to_int(row.get("frgn_ntby_qty")),
+        })
+    standardized.sort(key=lambda r: r["date"])
+    if len(standardized) > days:
+        standardized = standardized[-days:]
+    return standardized
+
+
 if __name__ == "__main__":
     import pprint
 

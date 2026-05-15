@@ -16,6 +16,7 @@ import {
   fetchAdvisoryOhlcv,
   collectResearchData,
   fetchStockSupplyDemand,
+  fetchForeignHolding,
 } from '../api/advisory'
 import { saveActiveJob, loadActiveJob, clearActiveJob } from './_advisoryJobPersist'
 
@@ -300,6 +301,19 @@ export function useStockSupplyDemand() {
   const { data, loading, error, run } = useAsyncState()
   const load = useCallback(
     (code, days = 30) => run(() => fetchStockSupplyDemand(code, days)).catch(() => {}),
+    [run]
+  )
+  return { data, loading, error, load }
+}
+
+/** REQ-FH-UI-01 / REQ-FH-EXT-UI-01: 종목 외국인 보유 추이 + 매수여력.
+ *
+ * V1.5 → V1.6: days 기본값 30 → 120 (사용자 요구 "반년"). 범위 5~180. 부분 실패 격리.
+ */
+export function useForeignHolding() {
+  const { data, loading, error, run } = useAsyncState()
+  const load = useCallback(
+    (code, days = 120) => run(() => fetchForeignHolding(code, days)).catch(() => {}),
     [run]
   )
   return { data, loading, error, load }
