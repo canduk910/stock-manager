@@ -66,6 +66,11 @@ export default function OrderForm({
   externalPrice = null,
   externalSide = null,
   isSimulation = false,
+  // R10 (KIS 멀티 계좌, 2026-05-15): 계좌 드롭다운 props (옵셔널).
+  // accounts=[{label, is_default, acnt_no_masked, ...}], accountLabel=현재 선택값, onAccountLabelChange.
+  accounts = [],
+  accountLabel = null,
+  onAccountLabelChange = null,
 }) {
   const [side, setSide] = useState(defaultValues.side || 'buy')
   const [orderType, setOrderType] = useState('00')
@@ -149,6 +154,10 @@ export default function OrderForm({
     if (market === 'KR') {
       body.exchange = exchange
     }
+    // R10: account_label 부착 — None 이면 백엔드 default 폴백.
+    if (accountLabel) {
+      body.account_label = accountLabel
+    }
     onConfirm(body)
   }
 
@@ -162,6 +171,27 @@ export default function OrderForm({
         <p className="text-xs text-amber-600 bg-amber-50 rounded px-3 py-2">
           위 검색창에서 종목을 먼저 선택해주세요
         </p>
+      )}
+
+      {/* R10 (KIS 멀티 계좌): 계좌 드롭다운 — 등록된 계좌 ≥ 1개일 때만 표시.
+          기본값은 localStorage(마지막 사용) → default 계좌 폴백 (OrderPage가 결정). */}
+      {accounts && accounts.length > 0 && (
+        <div>
+          <label className="block text-xs font-medium text-gray-600 mb-1">계좌</label>
+          <select
+            value={accountLabel || ''}
+            onChange={(e) => onAccountLabelChange?.(e.target.value || null)}
+            className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm"
+          >
+            {accounts.map((a) => (
+              <option key={a.label} value={a.label}>
+                {a.label}
+                {a.is_default ? ' (기본)' : ''}
+                {a.acnt_no_masked ? ` · ${a.acnt_no_masked}` : ''}
+              </option>
+            ))}
+          </select>
+        </div>
       )}
 
       {/* 거래소 셀렉터 (KR 전용, 2026-05-08) */}

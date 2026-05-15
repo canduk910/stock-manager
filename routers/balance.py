@@ -1,378 +1,51 @@
-"""잔고 조회 API 라우터 (main.py에서 이동)."""
+"""잔고 조회 API 라우터.
+
+R4 (KIS 멀티 계좌, 2026-05-15): 합산/단독 모드 지원.
+
+- `GET /api/balance` — 운영자 .env 키 (백워드 호환). 등록 사용자 미지정.
+- `GET /api/balance?account_label=주식` — 사용자의 특정 계좌 단독.
+- `GET /api/balance` (user 로그인 + account_label 미지정) — 사용자의 모든 등록 계좌 합산.
+
+KIS 조회 / 합산 로직은 모두 `services/balance_service.py` 위임. 라우터는 의존성 + 응답 변환만.
+"""
+
+from __future__ import annotations
 
 import logging
-import requests
-from fastapi import APIRouter, Depends
+from typing import Optional
+
+from fastapi import APIRouter, Depends, Query
+
+from routers._kis_auth import (
+    set_current_account_label,
+    set_current_user_id,
+)
+from services import balance_service
+from services.auth_deps import require_admin
 
 logger = logging.getLogger(__name__)
 
-from routers._kis_auth import BASE_URL, get_access_token, get_kis_credentials, clear_token_cache
-from services.auth_deps import require_admin
-from services.exceptions import ExternalAPIError, ServiceError
-from stock.market import fetch_market_metrics
-from stock.yf_client import fetch_detail_yf
-
 router = APIRouter(prefix="/api", tags=["balance"])
-
-# 해외주식 거래소 코드 → 통화 매핑 (미국전체, 홍콩, 상해, 심천, 도쿄, 하노이, 호치민)
-_OVERSEAS_EXCHANGES = [
-    ("NASD", "USD"),
-    ("SEHK", "HKD"),
-    ("SHAA", "CNY"),
-    ("SZAA", "CNY"),
-    ("TKSE", "JPY"),
-    ("HASE", "VND"),
-    ("VNSE", "VND"),
-]
-
-
-def _get_overseas_tr_id(token: str, app_key: str, app_secret: str) -> str:
-    """해외주식 주야간원장 구분 조회 (JTTT3010R).
-
-    야간 원장(PSBL_YN=Y)이면 JTTT3012R, 주간이면 TTTS3012R 반환.
-    조회 실패 시 기본값 TTTS3012R.
-    """
-    url = f"{BASE_URL}/uapi/overseas-stock/v1/trading/dayornight"
-    headers = {
-        "content-type": "application/json",
-        "authorization": f"Bearer {token}",
-        "appkey": app_key,
-        "appsecret": app_secret,
-        "tr_id": "JTTT3010R",
-    }
-    try:
-        res = requests.get(url, headers=headers, timeout=5)
-        if res.status_code == 200:
-            psbl = res.json().get("output", {}).get("PSBL_YN", "N")
-            return "JTTT3012R" if psbl == "Y" else "TTTS3012R"
-    except Exception:
-        pass
-    return "TTTS3012R"
-
-
-def _fetch_overseas_rates_and_summary(token: str, app_key: str, app_secret: str, acnt_no: str, acnt_prdt_cd: str) -> tuple:
-    """CTRP6504R(해외주식 체결기준현재잔고)로 통화별 기준환율 + KRW 합계 조회.
-
-    Returns:
-        (exchange_rates, stock_eval_krw, deposit_krw)
-        exchange_rates: {"USD": 1442.0, "HKD": 184.5, ...}
-        stock_eval_krw: 해외주식 평가금액 합계 (원화)
-        deposit_krw:    외화 예수금 합계 (원화환산)
-    """
-    url = f"{BASE_URL}/uapi/overseas-stock/v1/trading/inquire-present-balance"
-    headers = {
-        "content-type": "application/json",
-        "authorization": f"Bearer {token}",
-        "appkey": app_key,
-        "appsecret": app_secret,
-        "tr_id": "CTRP6504R",
-        "custtype": "P",
-    }
-    params = {
-        "CANO": acnt_no,
-        "ACNT_PRDT_CD": acnt_prdt_cd,
-        "WCRC_FRCR_DVSN_CD": "01",  # 원화 기준
-        "NATN_CD": "000",            # 전체 국가
-        "TR_MKET_CD": "00",
-        "INQR_DVSN_CD": "00",
-    }
-    try:
-        res = requests.get(url, headers=headers, params=params, timeout=10)
-        if res.status_code != 200 or res.json().get("rt_cd") != "0":
-            return {}, 0, 0
-        data = res.json()
-
-        # output2: 통화별 기준환율 (frst_bltn_exrt)
-        exchange_rates: dict[str, float] = {}
-        for item in data.get("output2", []):
-            crcy = item.get("crcy_cd", "")
-            exrt = float(item.get("frst_bltn_exrt", 0) or 0)
-            if crcy and exrt > 0:
-                exchange_rates[crcy] = exrt
-
-        # output3: 해외주식 평가금액 합계(KRW) + 외화 예수금 합계(KRW 환산)
-        output3 = data.get("output3", {})
-        stock_eval_krw = int(float(output3.get("evlu_amt_smtl", 0) or 0))
-        deposit_krw = int(float(output3.get("frcr_evlu_tota", 0) or 0))
-
-        return exchange_rates, stock_eval_krw, deposit_krw
-    except Exception:
-        return {}, 0, 0
-
-
-def _fetch_overseas_balance(token: str, app_key: str, app_secret: str, acnt_no: str, acnt_prdt_cd: str) -> dict:
-    """해외주식 잔고 조회 (전 거래소 순회).
-
-    1단계: CTRP6504R로 통화별 기준환율 + KRW 합계 확보
-    2단계: TTTS3012R로 종목별 외화 잔고 조회 → 기준환율 적용해 profit_loss_krw 산출
-    실패한 거래소는 조용히 건너뜀.
-    """
-    # ── 1단계: 기준환율 + KRW 합계 ───────────────────────────────────────────
-    exchange_rates, stock_eval_krw, deposit_krw = _fetch_overseas_rates_and_summary(
-        token, app_key, app_secret, acnt_no, acnt_prdt_cd
-    )
-
-    # ── 2단계: 종목별 외화 잔고 (TTTS3012R) ──────────────────────────────────
-    tr_id = _get_overseas_tr_id(token, app_key, app_secret)
-    url = f"{BASE_URL}/uapi/overseas-stock/v1/trading/inquire-balance"
-    headers = {
-        "content-type": "application/json",
-        "authorization": f"Bearer {token}",
-        "appkey": app_key,
-        "appsecret": app_secret,
-        "tr_id": tr_id,
-        "custtype": "P",
-    }
-
-    stocks = []
-    for excg_cd, crcy_cd in _OVERSEAS_EXCHANGES:
-        fk200, nk200 = "", ""
-        while True:
-            params = {
-                "CANO": acnt_no,
-                "ACNT_PRDT_CD": acnt_prdt_cd,
-                "OVRS_EXCG_CD": excg_cd,
-                "TR_CRCY_CD": crcy_cd,
-                "CTX_AREA_FK200": fk200,
-                "CTX_AREA_NK200": nk200,
-            }
-            try:
-                res = requests.get(url, headers=headers, params=params, timeout=10)
-                if res.status_code != 200:
-                    break
-                data = res.json()
-                if data.get("rt_cd") != "0":
-                    break
-
-                for item in data.get("output1", []):
-                    try:
-                        if int(item.get("ovrs_cblc_qty", 0) or 0) <= 0:
-                            continue
-                        crcy = item.get("tr_crcy_cd", crcy_cd)
-                        exrt = exchange_rates.get(crcy, 0)
-                        frcr_pfls = float(item.get("frcr_evlu_pfls_amt", 0) or 0)
-                        profit_loss_krw = str(round(frcr_pfls * exrt)) if exrt > 0 else ""
-                        eval_amount_raw = float(item.get("ovrs_stck_evlu_amt", 0) or 0)
-                        eval_amount_krw = str(round(eval_amount_raw * exrt)) if exrt > 0 else ""
-                        stocks.append({
-                            "name": item.get("ovrs_item_name", ""),
-                            "code": item.get("ovrs_pdno", ""),
-                            "exchange": item.get("ovrs_excg_cd", excg_cd),
-                            "currency": crcy,
-                            "quantity": item.get("ovrs_cblc_qty", "0"),
-                            "avg_price": item.get("pchs_avg_pric", "0"),
-                            "current_price": item.get("now_pric2", "0"),
-                            "profit_loss": item.get("frcr_evlu_pfls_amt", "0"),
-                            "profit_loss_krw": profit_loss_krw,
-                            "profit_rate": item.get("evlu_pfls_rt", "0"),
-                            "eval_amount": item.get("ovrs_stck_evlu_amt", "0"),
-                            "eval_amount_krw": eval_amount_krw,
-                        })
-                    except Exception:
-                        continue
-
-                tr_cont = res.headers.get("tr_cont", "")
-                if tr_cont == "M":
-                    fk200 = data.get("ctx_area_fk200", "")
-                    nk200 = data.get("ctx_area_nk200", "")
-                else:
-                    break
-            except Exception:
-                break
-
-    return {
-        "stocks": stocks,
-        "stock_eval_krw": stock_eval_krw,
-        "deposit_krw": deposit_krw,
-    }
-
-
-def _fetch_futures_balance(token: str, app_key: str, app_secret: str, acnt_no: str, acnt_prdt_cd: str) -> list:
-    """국내선물옵션 잔고 조회 (CTFO6118R)."""
-    url = f"{BASE_URL}/uapi/domestic-futureoption/v1/trading/inquire-balance"
-    headers = {
-        "content-type": "application/json",
-        "authorization": f"Bearer {token}",
-        "appkey": app_key,
-        "appsecret": app_secret,
-        "tr_id": "CTFO6118R",
-        "custtype": "P",
-    }
-    params = {
-        "CANO": acnt_no,
-        "ACNT_PRDT_CD": acnt_prdt_cd,
-        "MGNA_DVSN": "01",
-        "EXCC_STAT_CD": "1",
-        "CTX_AREA_FK200": "",
-        "CTX_AREA_NK200": "",
-    }
-    try:
-        res = requests.get(url, headers=headers, params=params, timeout=10)
-        if res.status_code != 200:
-            logger.warning("FNO 잔고 조회 실패 (HTTP %s): %s", res.status_code, res.text[:200])
-            return []
-        data = res.json()
-        if data.get("rt_cd") != "0":
-            logger.warning("FNO 잔고 API 오류 (rt_cd=%s, msg_cd=%s): %s", data.get("rt_cd"), data.get("msg_cd"), data.get("msg1", "unknown"))
-            return []
-        positions = []
-        for item in data.get("output1", []):
-            try:
-                qty = abs(int(item.get("cblc_qty", "0") or "0"))
-                if qty > 0:
-                    # 수익률 계산: evlu_pfls_amt / pchs_amt * 100
-                    pchs_amt = float(item.get("pchs_amt", "0") or "0")
-                    pfls_amt = float(item.get("evlu_pfls_amt", "0") or "0")
-                    profit_rate = round(pfls_amt / pchs_amt * 100, 2) if pchs_amt else 0
-                    positions.append({
-                        "name": item.get("prdt_name", ""),
-                        "code": item.get("shtn_pdno", "") or item.get("pdno", ""),
-                        "trade_type": item.get("sll_buy_dvsn_name", ""),
-                        "quantity": str(qty),
-                        "avg_price": item.get("ccld_avg_unpr1", "0"),
-                        "current_price": item.get("idx_clpr", "0"),
-                        "profit_loss": item.get("evlu_pfls_amt", "0"),
-                        "profit_rate": str(profit_rate),
-                        "eval_amount": item.get("evlu_amt", "0"),
-                    })
-            except Exception:
-                continue
-        return positions
-    except Exception as e:
-        logger.warning("FNO 잔고 조회 예외: %s", e)
-        return []
 
 
 @router.get("/balance")
-def get_balance(_user: dict = Depends(require_admin)):
-    """주식 잔고 조회 (국내주식 + 해외주식 + 국내선물옵션).
+def get_balance(
+    account_label: Optional[str] = Query(None, description="계좌 라벨 (생략 시 사용자 모든 계좌 합산)"),
+    user: dict = Depends(require_admin),
+):
+    """잔고 조회 — 멀티 계좌 합산 또는 단독 모드.
 
-    KIS API 키가 없으면 503을 반환한다.
-    해외주식/선물옵션 조회 실패 시 해당 목록을 빈 배열로 반환 (국내주식은 정상 반환).
+    REQ-API-02:
+    - `account_label=None` → 사용자의 모든 등록 계좌 병렬 조회 후 합산.
+    - `account_label=str` → 해당 라벨 계좌 단독 조회 (동일 합산 shape 반환).
+    - 등록 0개 + account_label=None → 200 + 빈 응답 (raise 금지).
+    - `accounts: [{label, is_default, acnt_no_masked, fno_enabled}]` 메타 포함.
+    - `fno_enabled` = 계좌 중 1개라도 활성이면 True (REQ-BALANCE-04).
+    - `partial_failure` 메타 — 부분 실패 계좌 안내 (REQ-BALANCE-03).
     """
-    app_key, app_secret, acnt_no, acnt_prdt_cd_stk, acnt_prdt_cd_fno = get_kis_credentials()
-    token = get_access_token()
+    user_id = int(user["id"]) if user and user.get("id") else None
+    # ContextVar 전파 (서비스 체인이 직접 인자 없이도 라벨 인지)
+    set_current_user_id(user_id)
+    set_current_account_label(account_label)
 
-    # 국내주식 잔고
-    path = "/uapi/domestic-stock/v1/trading/inquire-balance"
-    url = f"{BASE_URL}{path}"
-    headers = {
-        "Content-Type": "application/json",
-        "authorization": f"Bearer {token}",
-        "appkey": app_key,
-        "appsecret": app_secret,
-        "tr_id": "TTTC8434R",
-        "custtype": "P",
-    }
-    params = {
-        "CANO": acnt_no,
-        "ACNT_PRDT_CD": acnt_prdt_cd_stk,
-        "AFHR_FLPR_YN": "N",
-        "OFL_YN": "N",
-        "INQR_DVSN": "02",
-        "UNPR_DVSN": "01",
-        "FUND_STTL_ICLD_YN": "N",
-        "FNCG_AMT_AUTO_RDPT_YN": "N",
-        "PRCS_DVSN": "00",
-        "CTX_AREA_FK100": "",
-        "CTX_AREA_NK100": "",
-    }
-
-    try:
-        res = requests.get(url, headers=headers, params=params, timeout=10)
-    except requests.RequestException as e:
-        raise ExternalAPIError(f"KIS API 호출 실패: {e}")
-
-    if res.status_code != 200:
-        raise ExternalAPIError(f"잔고 조회 실패 (HTTP {res.status_code})")
-
-    data = res.json()
-    if data.get("rt_cd") != "0":
-        # 토큰 만료일 수 있으므로 캐시 초기화
-        clear_token_cache()
-        raise ServiceError(f"API 오류: {data.get('msg1')}")
-
-    stocks = []
-    for item in data.get("output1", []):
-        try:
-            if int(item.get("hldg_qty", 0)) > 0:
-                stocks.append({
-                    "name": item.get("prdt_name"),
-                    "code": item.get("pdno"),
-                    "quantity": item.get("hldg_qty"),
-                    "current_price": item.get("prpr"),
-                    "profit_loss": item.get("evlu_pfls_amt"),
-                    "profit_rate": item.get("evlu_pfls_rt"),
-                    "eval_amount": item.get("evlu_amt"),
-                    "avg_price": item.get("pchs_avg_pric"),
-                })
-        except Exception:
-            continue
-
-    total_data = data.get("output2", [{}])[0]
-    domestic_stock_eval = int(total_data.get("scts_evlu_amt", 0) or 0)
-    domestic_deposit = int(total_data.get("dnca_tot_amt", 0) or 0)
-    domestic_total = int(total_data.get("tot_evlu_amt", 0) or 0)
-
-    # 해외주식 잔고 (오류 발생 시 빈 결과)
-    try:
-        overseas_result = _fetch_overseas_balance(token, app_key, app_secret, acnt_no, acnt_prdt_cd_stk)
-        overseas_list = overseas_result["stocks"]
-        stock_eval_overseas_krw = overseas_result["stock_eval_krw"]
-        deposit_overseas_krw = overseas_result["deposit_krw"]
-    except Exception:
-        overseas_list = []
-        stock_eval_overseas_krw = 0
-        deposit_overseas_krw = 0
-
-    # 국내선물옵션 잔고 (오류 발생 시 빈 목록)
-    try:
-        futures_list = _fetch_futures_balance(token, app_key, app_secret, acnt_no, acnt_prdt_cd_fno) if acnt_prdt_cd_fno else []
-    except Exception:
-        futures_list = []
-
-    # 국내주식 시가총액·PER·PBR·ROE·배당수익률 보강 (캐시 기반, 실패 시 None)
-    for s in stocks:
-        try:
-            m = fetch_market_metrics(s["code"])
-            s["exchange"] = m.get("market_type")
-            s["mktcap"] = m.get("mktcap")
-            s["per"] = m.get("per")
-            s["pbr"] = m.get("pbr")
-            s["roe"] = m.get("roe")
-            s["dividend_yield"] = m.get("dividend_yield")
-        except Exception:
-            s["exchange"] = s["mktcap"] = s["per"] = s["pbr"] = s["roe"] = s["dividend_yield"] = None
-
-    # 해외주식 시가총액·PER·PBR·ROE·배당수익률 보강 (yfinance, 캐시 기반, 실패 시 None)
-    for s in overseas_list:
-        try:
-            d = fetch_detail_yf(s["code"])
-            if d:
-                s["mktcap"] = d.get("mktcap")
-                s["per"] = d.get("per")
-                s["pbr"] = d.get("pbr")
-                s["roe"] = d.get("roe")
-                s["dividend_yield"] = d.get("dividend_yield")
-            else:
-                s["mktcap"] = s["per"] = s["pbr"] = s["roe"] = s["dividend_yield"] = None
-        except Exception:
-            s["mktcap"] = s["per"] = s["pbr"] = s["roe"] = s["dividend_yield"] = None
-
-    return {
-        # 합산 총계
-        "total_evaluation": str(domestic_total + stock_eval_overseas_krw + deposit_overseas_krw),
-        # 주식 평가금액
-        "stock_eval": str(domestic_stock_eval + stock_eval_overseas_krw),
-        "stock_eval_domestic": str(domestic_stock_eval),
-        "stock_eval_overseas_krw": str(stock_eval_overseas_krw),
-        # 예수금
-        "deposit": str(domestic_deposit + deposit_overseas_krw),
-        "deposit_domestic": str(domestic_deposit),
-        "deposit_overseas_krw": str(deposit_overseas_krw),
-        # 종목 목록
-        "stock_list": stocks,
-        "overseas_list": overseas_list,
-        "futures_list": futures_list,
-        "fno_enabled": bool(acnt_prdt_cd_fno),
-    }
+    return balance_service.fetch_aggregated_balance(user_id, account_label)

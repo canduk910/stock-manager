@@ -672,16 +672,25 @@ def compute_position_size(
     cash_available: float,
     entry_price: float,
 ) -> dict:
-    """등급 × 체제 한도 기반 수량 계산.
+    """등급 × 체제 한도 기반 수량 계산 (멀티 계좌 이중 가드).
+
+    REQ-DOMAIN-01 (OrderAdvisor 합의):
+    - total_portfolio = 모든 계좌의 stock_eval + deposit 합산 (자산 분산 본질).
+    - cash_available = 주문 대상 계좌 단독 예수금 (KIS 결제 보호).
+    - portfolio 한도(자산분산) ∩ cash 한도(결제) 의 교집합으로 최종 qty.
 
     계산 공식:
     target_pct = regime_single_cap_pct × grade_factor / 100
     max_amount = total_portfolio × target_pct
-    available = min(max_amount, cash_available)  # 예수금 제한
-    qty = floor(available / entry_price)
+    portfolio_qty = floor(max_amount / entry_price)
+    cash_qty = floor(cash_available / entry_price)
+    qty = min(portfolio_qty, cash_qty)
+    binding_constraint = "portfolio" if portfolio_qty ≤ cash_qty else "cash"
 
     C/D 등급 또는 진입가 ≤ 0 → qty=0, recommendation="SKIP".
-    qty > 0이면 "ENTER", qty = 0이면 "HOLD" (자금 부족).
+    qty > 0이면 "ENTER", qty = 0이면 "HOLD" (자금 또는 한도 부족).
+    binding_constraint=cash + qty=0 → reason="cash_insufficient_in_account"
+    (프론트에서 "계좌 간 자금 이동 후 재주문" 안내).
     """
     factor = GRADE_FACTOR.get(grade, 0.0)
     if factor == 0 or entry_price <= 0:
@@ -696,8 +705,14 @@ def compute_position_size(
 
     target_pct = regime_single_cap_pct * factor / 100  # 예: 4% × 0.75 = 0.03
     max_amount = total_portfolio * target_pct
-    available = min(max_amount, cash_available)
-    raw_qty = int(available // entry_price) if entry_price > 0 else 0
+    portfolio_qty = int(max_amount // entry_price)
+    cash_qty = int(cash_available // entry_price)
+    raw_qty = max(0, min(portfolio_qty, cash_qty))
+
+    binding = "portfolio" if portfolio_qty <= cash_qty else "cash"
+    reason: Optional[str] = None
+    if raw_qty == 0 and binding == "cash":
+        reason = "cash_insufficient_in_account"
 
     return {
         "qty": raw_qty,
@@ -705,7 +720,12 @@ def compute_position_size(
         "position_pct": round(target_pct * 100, 2),
         "grade_factor": factor,
         "recommendation": "ENTER" if raw_qty > 0 else "HOLD",
-        "reason": None,
+        "reason": reason,
+        "position_meta": {
+            "total_portfolio_limit_qty": portfolio_qty,
+            "account_cash_limit_qty": cash_qty,
+            "binding_constraint": binding,
+        },
     }
 
 

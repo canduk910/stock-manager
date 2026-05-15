@@ -22,6 +22,15 @@ def _ctx_user_id() -> Optional[int]:
         return None
 
 
+def _ctx_account_label() -> Optional[str]:
+    """ContextVar에서 현재 account_label 추출 (라우터 진입 시 set됨). 시스템 호출 시 None."""
+    try:
+        from routers._kis_auth import get_current_account_label
+        return get_current_account_label()
+    except Exception:
+        return None
+
+
 # ── 주문 CRUD ────────────────────────────────────────────────────────────────
 
 def insert_order(
@@ -39,7 +48,14 @@ def insert_order(
     kis_response: str = None,
     status: str = "PLACED",
     exchange: Optional[str] = None,
+    user_id: Optional[int] = None,
+    account_label: Optional[str] = None,
 ) -> dict:
+    # explicit user_id 우선; 없으면 ContextVar fallback.
+    if user_id is None:
+        user_id = _ctx_user_id()
+    if account_label is None:
+        account_label = _ctx_account_label()
     with get_session() as db:
         return OrderRepository(db).insert_order(
             symbol=symbol,
@@ -55,8 +71,9 @@ def insert_order(
             org_no=org_no,
             kis_response=kis_response,
             status=status,
-            user_id=_ctx_user_id(),
+            user_id=user_id,
             exchange=exchange,
+            account_label=account_label,
         )
 
 
@@ -101,6 +118,8 @@ def list_orders(
     date_from: str = None,
     date_to: str = None,
     limit: int = 100,
+    user_id: Optional[int] = None,
+    account_label: Optional[str] = None,
 ) -> list[dict]:
     with get_session() as db:
         return OrderRepository(db).list_orders(
@@ -110,6 +129,8 @@ def list_orders(
             date_from=date_from,
             date_to=date_to,
             limit=limit,
+            user_id=user_id,
+            account_label=account_label,
         )
 
 
@@ -149,7 +170,13 @@ def insert_reservation(
     condition_type: str,
     condition_value: str,
     memo: str = "",
+    user_id: Optional[int] = None,
+    account_label: Optional[str] = None,
 ) -> dict:
+    if user_id is None:
+        user_id = _ctx_user_id()
+    if account_label is None:
+        account_label = _ctx_account_label()
     with get_session() as db:
         return OrderRepository(db).insert_reservation(
             symbol=symbol,
@@ -162,7 +189,8 @@ def insert_reservation(
             condition_type=condition_type,
             condition_value=condition_value,
             memo=memo,
-            user_id=_ctx_user_id(),
+            user_id=user_id,
+            account_label=account_label,
         )
 
 
@@ -180,9 +208,17 @@ def update_reservation_status(
         )
 
 
-def list_reservations(status: str = None) -> list[dict]:
+def list_reservations(
+    status: str = None,
+    user_id: Optional[int] = None,
+    account_label: Optional[str] = None,
+) -> list[dict]:
     with get_session() as db:
-        return OrderRepository(db).list_reservations(status=status)
+        return OrderRepository(db).list_reservations(
+            status=status,
+            user_id=user_id,
+            account_label=account_label,
+        )
 
 
 def get_reservation(res_id: int) -> Optional[dict]:

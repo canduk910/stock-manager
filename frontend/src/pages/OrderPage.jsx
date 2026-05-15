@@ -43,6 +43,7 @@ import {
   useReservations,
 } from '../hooks/useOrder'
 import { useExecutionNotice } from '../hooks/useExecutionNotice'
+import { listAccounts } from '../api/me'
 
 const TABS = [
   { key: 'order', label: '주문 발송' },
@@ -80,6 +81,30 @@ export default function OrderPage({ notify }) {
   const [selectedSide, setSelectedSide] = useState(null)
   const [orderSubTab, setOrderSubTab] = useState('new') // 'new' | 'modify'
   const [modifyTarget, setModifyTarget] = useState(null)
+
+  // R10 (KIS 멀티 계좌): 등록 계좌 목록 + 선택 라벨 (localStorage 보존).
+  const [kisAccounts, setKisAccounts] = useState([])
+  const [accountLabel, setAccountLabel] = useState(() => {
+    try { return localStorage.getItem('order:last_account_label') || null } catch { return null }
+  })
+  useEffect(() => {
+    listAccounts().then((res) => {
+      const accs = res?.accounts || []
+      setKisAccounts(accs)
+      // 마지막 선택 라벨이 없거나 사라졌으면 default 폴백
+      if (!accountLabel || !accs.some((a) => a.label === accountLabel)) {
+        const def = res?.default_label || (accs[0]?.label ?? null)
+        setAccountLabel(def)
+        if (def) try { localStorage.setItem('order:last_account_label', def) } catch {}
+      }
+    }).catch(() => {})
+  // accountLabel 의존성 추가 시 무한 루프 → 마운트 시 1회만.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  const onAccountLabelChange = (lbl) => {
+    setAccountLabel(lbl)
+    if (lbl) try { localStorage.setItem('order:last_account_label', lbl) } catch {}
+  }
 
   // 종목/시장 변경 핸들러 (검색바에서 호출)
   const handleSymbolSelect = ({ code, name, market: mkt }) => {
@@ -151,13 +176,15 @@ export default function OrderPage({ notify }) {
       : exg === 'NXT' ? '◆NXT'
       : exg.startsWith('SOR') ? `⚡${exg}`
       : exg
+    // R10: account_label prefix — 라벨 매칭 성공 시 토스트 앞에 `[주식]` 표기.
+    const labelPrefix = notice.account_label ? `[${notice.account_label}] ` : ''
     const name = notice.symbol_name || notice.symbol
     if (notice.is_filled === '2') {
-      notify?.(`[${exgPrefix}] 체결: ${name} ${sideLabel} ${notice.filled_qty}주 @ ${Number(notice.filled_price).toLocaleString()}원`, 'success')
+      notify?.(`${labelPrefix}[${exgPrefix}] 체결: ${name} ${sideLabel} ${notice.filled_qty}주 @ ${Number(notice.filled_price).toLocaleString()}원`, 'success')
     } else if (notice.is_rejected === '1') {
-      notify?.(`[${exgPrefix}] 거부: ${name} ${sideLabel}`, 'error')
+      notify?.(`${labelPrefix}[${exgPrefix}] 거부: ${name} ${sideLabel}`, 'error')
     } else if (notice.is_accepted === '1') {
-      notify?.(`[${exgPrefix}] 접수: ${name} ${sideLabel} ${notice.order_qty}주`, 'info')
+      notify?.(`${labelPrefix}[${exgPrefix}] 접수: ${name} ${sideLabel} ${notice.order_qty}주`, 'info')
     }
     // 체결/미체결 자동 갱신
     loadOpen(market)
@@ -345,6 +372,9 @@ export default function OrderPage({ notify }) {
                     onConfirm={(body) => setPendingOrder(body)}
                     externalPrice={selectedPrice}
                     externalSide={selectedSide}
+                    accounts={kisAccounts}
+                    accountLabel={accountLabel}
+                    onAccountLabelChange={onAccountLabelChange}
                   />
                   {placeError && <ErrorAlert message={placeError} className="mt-3" />}
                 </div>

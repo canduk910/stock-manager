@@ -86,7 +86,8 @@ def _process_reservation(res: dict):
     if not triggered:
         return
 
-    # 주문 발송
+    # 주문 발송 — R5: 예약에 저장된 account_label 을 그대로 전파.
+    # account_label=NULL 인 기존 예약은 place_order 내부에서 default 계좌 폴백.
     try:
         from services.order_service import place_order
 
@@ -99,6 +100,8 @@ def _process_reservation(res: dict):
             price=res["price"],
             quantity=res["quantity"],
             memo=f"예약주문 자동발송 (reservation_id={res['id']})",
+            user_id=res.get("user_id"),
+            account_label=res.get("account_label"),
         )
         order_no = order.get("order_no", "")
         order_store.update_reservation_status(

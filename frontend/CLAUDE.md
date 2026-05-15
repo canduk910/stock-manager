@@ -24,7 +24,7 @@ frontend/
 | `client.js` | fetch 래퍼 + 401 인터셉터 자동 token refresh |
 | `screener.js` | /api/screener |
 | `earnings.js` | fetchFilings(startDate, endDate, market) |
-| `balance.js` | /api/balance |
+| `balance.js` | `fetchBalance(accountLabel?)` — null/undefined 시 합산 모드 (/api/balance), 라벨 지정 시 단독 (`?account_label=`) |
 | `watchlist.js` | CRUD + market 파라미터 |
 | `detail.js` | 10년 재무 + 밸류에이션 + 종합 리포트 |
 | `order.js` | placeOrder/fetchOpenOrders/cancelOrder/modifyOrder/fetchExecutions/fetchBuyable/fetchFnoPrice |
@@ -36,7 +36,7 @@ frontend/
 | `strategyBuilder.js` | convert/validate/save/load/list/delete (/api/backtest/strategy/*) |
 | `tax.js` | fetchTaxSummary/fetchTaxTransactions/syncTax/recalculateTax/fetchTaxCalculations/addTaxTransaction/deleteTaxTransaction/fetchSimulationHoldings/simulateTax |
 | `admin.js` | fetchAiUsage/fetchMyAiUsage/fetchAiLimits/setAiLimit/deleteAiLimit/fetchAuditLog/fetchUsers/fetchUserById/patchUser/deleteUser/fetchPageStats |
-| `me.js` | getMyKis/saveMyKis/deleteMyKis/validateMyKis (/api/me/kis) |
+| `me.js` | **멀티 계좌**: `listAccounts/createAccount/updateAccount(label)/deleteAccount(label)/setDefaultAccount(label)/validateAccount(label)` + 백워드 호환 `getMyKis/saveMyKis/deleteMyKis/validateMyKis` (/api/me/kis) |
 | `chatbot.js` | chatAboutAdvisory(code, market, reportId, messages)/chatAboutPortfolio(reportId, messages) |
 
 ### `src/hooks/`
@@ -135,7 +135,7 @@ frontend/
 | DashboardPage | `/` | 포트폴리오 요약 + 오늘 공시 |
 | ScreenerPage | `/screener` | 구루 프리셋 6종 + 체제 배너 |
 | EarningsPage | `/earnings` | KR/US 탭 |
-| BalancePage | `/balance` | KR/US/FNO 3섹션 |
+| BalancePage | `/balance` | **상단 탭 [전체\|라벨1\|라벨2\|...]** + KR/US/FNO 3섹션. 탭 라벨은 마운트 시 `listAccounts()`로 별도 fetch(단독 탭 응답 메타 1개로 탭 사라짐 방지). 전체 탭=합산(useBalance(null)), 라벨 탭=단독(useBalance(label)). 합산 시 종목 row에 `accounts:['주식','연금']` 메타 표시 |
 | WatchlistPage | `/watchlist` | |
 | DetailPage | `/detail/:symbol` | 재무분석/종합 리포트 (서브탭 5개: 요약/기본적/기술적/AI자문/**수급·투자자**) |
 | OrderPage | `/order` | 5탭 (주문/미체결/체결/이력/예약) |
@@ -149,7 +149,7 @@ frontend/
 | AdminAIPage | `/admin/ai` | 3탭 (사용량/한도/감사). LimitsTab user_id는 사용자 검색 콤보 |
 | AdminUsersPage | `/admin/users` | CRUD + 방문수 컬럼 |
 | AdminPageStatsPage | `/admin/page-stats` | Recharts (top 20 path), 7d/30d/90d, 평균/p95 latency |
-| SettingsKisPage | `/settings/kis` | 사용자 본인 KIS 등록 (6필드, 저장 시 즉시 검증) |
+| SettingsKisPage | `/settings/kis` | **멀티 계좌 카드 그리드** + 모달 등록/수정/삭제 + 기본 계좌 지정 + 재검증. 카드: 라벨/마스킹 계좌번호/검증 상태/"기본" 배지. 라벨 + 6필드(app_key, app_secret, acnt_no, acnt_prdt_cd_stk, acnt_prdt_cd_fno?, hts_id?, base_url). **계좌상품코드 default 제거** — 사용자가 의식적으로 입력(일반 01 / 연금·IRP·ISA 02·22 등 KIS 발급값) |
 
 ---
 
@@ -170,7 +170,7 @@ frontend/
 ### 페이지별 규칙
 - **ScreenerPage**: "조회하기" 버튼 클릭 시만 호출 (onChange 즉시 X). 구루 프리셋(greenblatt/neff/seo) 선택 시 DART enrichment 자동. 체제 연계(regime_aware) 기본 ON
 - **EarningsPage**: KR/US 탭 → 조회 시 필터 초기화. 클라이언트 사이드 필터
-- **BalancePage**: KR/US/FNO 3섹션. KR 항상 표시, FNO는 `fno_enabled`일 때. KIS 키 없으면 안내 메시지 (에러 대신)
+- **BalancePage**: KR/US/FNO 3섹션. KR 항상 표시, FNO는 `fno_enabled`일 때. KIS 키 없으면 안내 메시지 (에러 대신). **멀티 계좌 탭**: `listAccounts()`로 탭 라벨 별도 fetch(`data.accounts` 의존 X — 단독 모드 응답은 메타 1개라 탭 사라짐), useBalance(activeTab) 분기. partial_failure 노란 배너 표시
 - **WatchlistDashboard**: 종목명 클릭 → `/detail/:symbol`. 통화 배지 (US=`[US]`). `partial_failure` 표시 — 외부 API 부분 실패 영역(price/metrics/financials)은 회색 + ⚠ + tooltip "데이터 일시 미수집". @dnd-kit 드래그핸들(⠿) 행 DnD
 - **DetailPage**: StockHeader → KLineChartPanel → 2탭. 종합 리포트 5개 서브탭(요약/기본적/기술적/AI자문/수급·투자자). advisory + 수급은 lazy load
 - **OrderPage**: 5탭. 공유 상태(symbol/symbolName/market) 최상단. `isMounted` ref 중복 호출 방지. 10초 자동 폴링(미체결/체결), 체결통보 WS 수신 시 토스트+갱신, 발송 후 3초 딜레이 갱신

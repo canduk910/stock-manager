@@ -24,6 +24,7 @@ import json
 import logging
 import time as _time
 from datetime import datetime
+from typing import Optional
 
 import requests
 
@@ -138,10 +139,17 @@ def place_order(
     krx_nmpr_cndt_cd: str = "",
     ord_dvsn_cd: str = "",
     exchange: str = "SOR",
+    user_id: Optional[int] = None,
+    account_label: Optional[str] = None,
 ) -> dict:
     """주문 발송 (매수/매도).
 
     Write-Ahead 패턴: PENDING 선행 기록 → KIS API → PLACED/REJECTED.
+
+    R5 (KIS 멀티 계좌, 2026-05-15):
+    - account_label: 발송 대상 계좌 라벨. None=default 폴백 (백워드 호환).
+    - 로컬 orders.account_label 에 기록 (REQ-SCHEMA-02).
+    - 잔고 캐시(_dashboard_cache) 발송 직후 invalidate — REQ-DOMAIN-03.
 
     Args:
         symbol: 종목코드
@@ -156,9 +164,11 @@ def place_order(
         krx_nmpr_cndt_cd: [FNO] KRX 호가조건코드
         ord_dvsn_cd: [FNO] 주문구분코드
         exchange: [KR] SOR(기본) / KRX / NXT. 모의투자에서는 KRX만 허용.
+        user_id: 사용자 식별자 (None 시 ContextVar/운영자 키)
+        account_label: 계좌 라벨 (None 시 default 폴백)
 
     Returns:
-        로컬 DB에 저장된 주문 dict
+        로컬 DB에 저장된 주문 dict (account_label 포함)
     """
     # KR 시장의 거래소 셀렉터 검증
     exchange = (exchange or "SOR").upper()
@@ -168,8 +178,10 @@ def place_order(
         if _is_simulation() and exchange != "KRX":
             raise ServiceError("모의투자에서는 KRX만 지원됩니다. (NXT/SOR은 실전 한정)")
 
-    app_key, app_secret, acnt_no, acnt_prdt_cd, acnt_prdt_cd_fno = get_kis_credentials()
-    token = get_access_token()
+    app_key, app_secret, acnt_no, acnt_prdt_cd, acnt_prdt_cd_fno = get_kis_credentials(
+        user_id=user_id, account_label=account_label,
+    )
+    token = get_access_token(user_id=user_id, account_label=account_label)
 
     # 1단계: PENDING 선행 기록 (Write-Ahead)
     currency = "KRW" if market in ("KR", "FNO") else "USD"
@@ -181,6 +193,8 @@ def place_order(
         side=side, order_type=ot, price=float(price),
         quantity=quantity, currency=currency, memo=memo,
         status="PENDING", exchange=pending_exchange,
+        user_id=user_id,
+        account_label=account_label,
     )
     pending_id = pending["id"]
 
@@ -224,11 +238,16 @@ def place_order(
     )
 
 
-def get_buyable(symbol: str, market: str, price: float, order_type: str, side: str = "buy") -> dict:
+def get_buyable(
+    symbol: str, market: str, price: float, order_type: str, side: str = "buy",
+    *, user_id: Optional[int] = None, account_label: Optional[str] = None,
+) -> dict:
     """매수가능 금액/수량 조회."""
     market = _validate_market(market)
-    app_key, app_secret, acnt_no, acnt_prdt_cd, acnt_prdt_cd_fno = get_kis_credentials()
-    token = get_access_token()
+    app_key, app_secret, acnt_no, acnt_prdt_cd, acnt_prdt_cd_fno = get_kis_credentials(
+        user_id=user_id, account_label=account_label,
+    )
+    token = get_access_token(user_id=user_id, account_label=account_label)
 
     if market == "KR":
         return get_domestic_buyable(token, app_key, app_secret, acnt_no, acnt_prdt_cd, symbol, price, order_type)
@@ -240,11 +259,16 @@ def get_buyable(symbol: str, market: str, price: float, order_type: str, side: s
         return get_overseas_buyable(token, app_key, app_secret, acnt_no, acnt_prdt_cd, symbol, price, order_type)
 
 
-def get_open_orders(market: str = "KR") -> list[dict]:
+def get_open_orders(
+    market: str = "KR",
+    *, user_id: Optional[int] = None, account_label: Optional[str] = None,
+) -> list[dict]:
     """미체결 주문 목록 (KIS)."""
     market = _validate_market(market)
-    app_key, app_secret, acnt_no, acnt_prdt_cd, acnt_prdt_cd_fno = get_kis_credentials()
-    token = get_access_token()
+    app_key, app_secret, acnt_no, acnt_prdt_cd, acnt_prdt_cd_fno = get_kis_credentials(
+        user_id=user_id, account_label=account_label,
+    )
+    token = get_access_token(user_id=user_id, account_label=account_label)
 
     if market == "KR":
         return get_domestic_open_orders(token, app_key, app_secret, acnt_no, acnt_prdt_cd)
@@ -268,13 +292,39 @@ def modify_order(
     krx_nmpr_cndt_cd: str = "",
     ord_dvsn_cd: str = "",
     symbol: str = "",
+    user_id: Optional[int] = None,
+    account_label: Optional[str] = None,
 ) -> dict:
     """주문 정정. KIS 정정 성공 후 로컬 DB에 가격/수량을 즉시 반영한다.
 
     symbol(PDNO)은 미국 정정에 필수. 클라이언트가 비우면 로컬 DB에서 fallback 조회.
+    REQ-API-05: 원주문의 account_label 자동 사용 (계좌 간 정정 불가).
     """
-    app_key, app_secret, acnt_no, acnt_prdt_cd, acnt_prdt_cd_fno = get_kis_credentials()
-    token = get_access_token()
+    # REQ-API-05 — 원주문 account_label 자동 사용
+    if account_label is None:
+        try:
+            local = order_store.get_order_by_order_no(order_no, market)
+            if local and local.get("account_label"):
+                account_label = local["account_label"]
+        except Exception:
+            pass
+    else:
+        # 클라이언트가 명시한 라벨이 원주문과 다르면 400
+        try:
+            local = order_store.get_order_by_order_no(order_no, market)
+            if local and local.get("account_label") and local["account_label"] != account_label:
+                raise ServiceError(
+                    f"계좌 간 정정은 불가합니다 (원주문: {local['account_label']}, 요청: {account_label})"
+                )
+        except ServiceError:
+            raise
+        except Exception:
+            pass
+
+    app_key, app_secret, acnt_no, acnt_prdt_cd, acnt_prdt_cd_fno = get_kis_credentials(
+        user_id=user_id, account_label=account_label,
+    )
+    token = get_access_token(user_id=user_id, account_label=account_label)
 
     if market == "KR":
         # 원주문 거래소 유지 (거래소 변경 불가). 로컬 DB 누락 시 KRX 폴백.
@@ -326,13 +376,38 @@ def cancel_order(
     quantity: int = 0,
     total: bool = True,
     symbol: str = "",
+    user_id: Optional[int] = None,
+    account_label: Optional[str] = None,
 ) -> dict:
     """주문 취소. KIS 취소 성공 후 로컬 DB 상태를 즉시 갱신한다.
 
     symbol(PDNO)은 미국 취소에 필수. 클라이언트가 비우면 로컬 DB에서 fallback 조회.
+    REQ-API-05: 원주문 account_label 자동 사용.
     """
-    app_key, app_secret, acnt_no, acnt_prdt_cd, acnt_prdt_cd_fno = get_kis_credentials()
-    token = get_access_token()
+    # 원주문 account_label 자동 사용
+    if account_label is None:
+        try:
+            local = order_store.get_order_by_order_no(order_no, market)
+            if local and local.get("account_label"):
+                account_label = local["account_label"]
+        except Exception:
+            pass
+    else:
+        try:
+            local = order_store.get_order_by_order_no(order_no, market)
+            if local and local.get("account_label") and local["account_label"] != account_label:
+                raise ServiceError(
+                    f"계좌 간 취소는 불가합니다 (원주문: {local['account_label']}, 요청: {account_label})"
+                )
+        except ServiceError:
+            raise
+        except Exception:
+            pass
+
+    app_key, app_secret, acnt_no, acnt_prdt_cd, acnt_prdt_cd_fno = get_kis_credentials(
+        user_id=user_id, account_label=account_label,
+    )
+    token = get_access_token(user_id=user_id, account_label=account_label)
 
     if market == "KR":
         # 원주문 거래소 유지 (거래소 변경 불가). 로컬 DB 누락 시 KRX 폴백.
@@ -376,12 +451,17 @@ def cancel_order(
     return result
 
 
-def get_executions(market: str = "KR") -> list[dict]:
+def get_executions(
+    market: str = "KR",
+    *, user_id: Optional[int] = None, account_label: Optional[str] = None,
+) -> list[dict]:
     """당일 체결 내역 조회 (KIS)."""
     _maybe_reconcile()  # 활성 주문 대사 트리거
     market = _validate_market(market)
-    app_key, app_secret, acnt_no, acnt_prdt_cd, acnt_prdt_cd_fno = get_kis_credentials()
-    token = get_access_token()
+    app_key, app_secret, acnt_no, acnt_prdt_cd, acnt_prdt_cd_fno = get_kis_credentials(
+        user_id=user_id, account_label=account_label,
+    )
+    token = get_access_token(user_id=user_id, account_label=account_label)
 
     if market == "KR":
         return get_domestic_executions(token, app_key, app_secret, acnt_no, acnt_prdt_cd)
@@ -550,6 +630,8 @@ def get_order_history(
     date_from: str = None,
     date_to: str = None,
     limit: int = 100,
+    user_id: Optional[int] = None,
+    account_label: Optional[str] = None,
 ) -> list[dict]:
     """주문 이력 조회. 쿨다운(30초) 경과 시 활성 주문을 KIS와 대사하여 최신화한다."""
     # 기간 필터 검증
@@ -566,6 +648,8 @@ def get_order_history(
         date_from=date_from,
         date_to=date_to,
         limit=limit,
+        user_id=user_id,
+        account_label=account_label,
     )
 
 
@@ -631,8 +715,13 @@ def create_reservation(
     condition_type: str,
     condition_value: str,
     memo: str = "",
+    user_id: Optional[int] = None,
+    account_label: Optional[str] = None,
 ) -> dict:
-    """예약주문 등록. 도메인 규칙 검증 후 DB 삽입."""
+    """예약주문 등록. 도메인 규칙 검증 후 DB 삽입.
+
+    R5: account_label 저장 (REQ-ORDER-02). NULL 이면 발동 시 default 계좌 폴백.
+    """
     if condition_type not in _VALID_CONDITION_TYPES:
         raise ServiceError(f"잘못된 condition_type: {condition_type}. 허용: {', '.join(_VALID_CONDITION_TYPES)}")
 
@@ -665,12 +754,21 @@ def create_reservation(
         condition_type=condition_type,
         condition_value=condition_value,
         memo=memo,
+        user_id=user_id,
+        account_label=account_label,
     )
 
 
-def get_reservations(status: str = None) -> list[dict]:
-    """예약주문 목록 조회."""
-    return order_store.list_reservations(status=status)
+def get_reservations(
+    status: str = None,
+    *, user_id: Optional[int] = None, account_label: Optional[str] = None,
+) -> list[dict]:
+    """예약주문 목록 조회. REQ-DOMAIN-02 FIFO 순서(created_at ASC) 유지."""
+    return order_store.list_reservations(
+        status=status,
+        user_id=user_id,
+        account_label=account_label,
+    )
 
 
 def delete_reservation(res_id: int) -> bool:

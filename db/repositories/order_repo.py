@@ -35,6 +35,7 @@ class OrderRepository:
         status: str = "PLACED",
         user_id: Optional[int] = None,
         exchange: Optional[str] = None,
+        account_label: Optional[str] = None,
     ) -> dict:
         now = _now()
         order = Order(
@@ -55,6 +56,7 @@ class OrderRepository:
             updated_at=now,
             kis_response=kis_response,
             exchange=exchange,
+            account_label=account_label,
         )
         self.db.add(order)
         self.db.flush()
@@ -120,6 +122,7 @@ class OrderRepository:
         date_to: str = None,
         limit: int = 100,
         user_id: Optional[int] = None,
+        account_label: Optional[str] = None,
     ) -> list[dict]:
         q = self.db.query(Order)
         if symbol:
@@ -134,6 +137,8 @@ class OrderRepository:
             q = q.filter(Order.placed_at <= date_to + "T23:59:59")
         if user_id is not None:
             q = q.filter(Order.user_id == user_id)
+        if account_label is not None:
+            q = q.filter(Order.account_label == account_label)
         rows = q.order_by(Order.id.desc()).limit(limit).all()
         return [r.to_dict() for r in rows]
 
@@ -184,6 +189,7 @@ class OrderRepository:
         condition_value: str,
         memo: str = "",
         user_id: Optional[int] = None,
+        account_label: Optional[str] = None,
     ) -> dict:
         now = _now()
         res = Reservation(
@@ -200,6 +206,7 @@ class OrderRepository:
             memo=memo,
             created_at=now,
             updated_at=now,
+            account_label=account_label,
         )
         self.db.add(res)
         self.db.flush()
@@ -226,13 +233,22 @@ class OrderRepository:
         self.db.flush()
         return res.to_dict()
 
-    def list_reservations(self, status: str = None, user_id: Optional[int] = None) -> list[dict]:
+    def list_reservations(
+        self,
+        status: str = None,
+        user_id: Optional[int] = None,
+        account_label: Optional[str] = None,
+    ) -> list[dict]:
         q = self.db.query(Reservation)
         if status:
             q = q.filter(Reservation.status == status)
         if user_id is not None:
             q = q.filter(Reservation.user_id == user_id)
-        rows = q.order_by(Reservation.id.desc()).all()
+        if account_label is not None:
+            q = q.filter(Reservation.account_label == account_label)
+        # REQ-DOMAIN-02 — FIFO 정렬(created_at ASC = id ASC).
+        # 동시 트리거 시 "먼저 예약한 사람이 먼저 체결" (KIS 거래소 FIFO 원칙).
+        rows = q.order_by(Reservation.id.asc()).all()
         return [r.to_dict() for r in rows]
 
     def get_reservation(self, res_id: int) -> Optional[dict]:

@@ -752,6 +752,9 @@ class KISQuoteManager:
                 return None
             return {
                 "type": "execution_notice",
+                # R6 (KIS 멀티 계좌): KIS H0STCNI0 응답 [1] = CANO 8자리.
+                # 라우터에서 user_id 컨텍스트와 함께 match_account_label() 호출하여 라벨 부착.
+                "acnt_no_8": tokens[1],
                 "order_no": tokens[2],
                 "org_order_no": tokens[3],
                 "symbol": tokens[8],
@@ -765,6 +768,8 @@ class KISQuoteManager:
                 "order_qty": tokens[16],
                 "symbol_name": tokens[21],
                 "order_price": tokens[22] if len(tokens) > 22 else "",
+                # 라벨 부착은 라우터 단계에서 (사용자 컨텍스트 필요).
+                "account_label": None,
             }
         except ImportError:
             logger.error("[QuoteService] pycryptodome 미설치 — pip install pycryptodome")

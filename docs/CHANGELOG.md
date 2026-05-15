@@ -1,5 +1,133 @@
 # 변경 이력
 
+## 2026-05-15 — KIS 멀티 계좌 지원 (1→N 확장, 전체 자산 합산 평가)
+
+### 신규 기능 — 사용자 1명 N개 KIS 계좌 등록 + 합산 평가 + 계좌별 주문
+
+**배경**: 사용자가 여러 KIS 계좌(주식/연금/IRP/ISA/CMA 등)를 보유하지만 시스템은 1사용자=1계좌로 하드코딩(`user_kis_credentials.user_id` 단독 PK). 전체 자산을 합산 평가하지 못하고 한 계좌만 사용 가능했음.
+
+**사용자 확정 결정사항**:
+1. 잔고 페이지: 전체 합산 + 계좌별 토글 (탭 UI)
+2. 주문 페이지: 주문 폼 상단 계좌 선택 드롭다운
+3. 계좌 식별: 사용자 지정 라벨 + 계좌번호 마스킹
+4. 마이그레이션: 기존 1계좌 사용자 → 라벨 '기본', is_default=true 자동 변환
+
+**도메인 자문 합의** (도메인 전문가 4명 전원 합의, 6건):
+
+| ID | 결정 | 채택안 |
+|----|------|--------|
+| REQ-DOMAIN-01 | 포지션 사이징 자산 기준 | **합산 평가액 + 단독 예수금 이중 가드** — `total_portfolio`는 모든 계좌 합산(자산 분산 원칙), `cash_available`는 주문 계좌 단독(KIS reject 방지). 응답에 `binding_constraint: portfolio\|cash` 메타 노출 |
+| REQ-DOMAIN-02 | 예약주문 동시 트리거 | **FIFO(created_at ASC) + 계좌별 독립 try/except** — `Reservation.id.desc()` → `asc()` 변경. KIS 거래소 FIFO 원칙 정합 |
+| REQ-DOMAIN-03 | 잔고 갱신 범위 | 해당 계좌 + 합산 캐시 동시 invalidate (합산은 단독의 함수) |
+| REQ-DOMAIN-04 | 7점 등급 계좌 영향 | **종목 단위, 계좌 무관** — `compute_grade_7point()` 변경 0줄 (확인용 invariant 테스트) |
+| REQ-DOMAIN-05 | 체제별 현금 버퍼 | **사용자 합산 현금 비율** — portfolio_advisor `_build_context` 변경 0줄 |
+| REQ-DOMAIN-06 | AI 자문 자산 기준 | 합산 (현재 동작 보존) + 계좌별 옵션은 후속 작업 |
+
+### DB 스키마 변경 + Alembic 마이그레이션
+
+**`db/models/user_kis.py` — UserKisCredentials**:
+- PK `user_id` 단독 → `id` (AUTO_INCREMENT) 신규 PK
+- 신규 컬럼: `label VARCHAR(50) NOT NULL` / `is_default BOOLEAN NOT NULL DEFAULT false`
+- 신규 제약: `UNIQUE(user_id, label)` + 사용자당 is_default=true 최대 1개 (Repository 트랜잭션 가드)
+- 기존 컬럼(app_key_enc, app_secret_enc, acnt_no_enc, acnt_prdt_cd_stk/fno, validated_at) 100% 보존
+
+**`db/models/order.py` — Order / Reservation**:
+- 신규 컬럼: `account_label VARCHAR(50) NULL` (기존 row는 NULL, 라우터 조회 시 default 폴백)
+- `(user_id, account_label)` 복합 인덱스 (쿼리 성능)
+
+**`alembic/versions/e7f8a9b0c1d2_multi_account_kis_credentials.py`**:
+- 기존 1계좌 사용자 → 라벨 '기본' + is_default=true 자동 변환
+- SQLite 호환 위해 `op.batch_alter_table` 사용
+- entrypoint.sh `alembic upgrade head` 자동 실행 (lifespan 통합)
+
+### Repository / Auth / Router 멀티 계좌화
+
+**`db/repositories/user_kis_repo.py`**: 신규 9 API (`get_default`/`get_by_label`/`list_accounts_masked`/`create_account`/`update_account`/`delete_account`/`set_default_account`/`mark_validated_label`/`get_masked_by_label`) + 백워드 호환 5 (`upsert`/`get`/`mark_validated`/etc).
+
+**`db/repositories/order_repo.py`**: `insert_order(..., account_label)` + `list_orders(user_id, account_label=None)` 인자 확장 + `list_reservations()` 정렬 `id.asc()` (REQ-DOMAIN-02 FIFO).
+
+**`routers/_kis_auth.py`** (R2):
+- `get_kis_credentials(user_id, account_label)` — None=default, str=특정 라벨
+- `_token_cache` 키 `(user_id, account_label)` 튜플 격리
+- `get_access_token(user_id, account_label)` 시그니처 확장
+- ContextVar `_current_account_label` 추가 (요청 단위 라벨 전파, FastAPI Depends에서 set)
+
+**`routers/me_kis.py`** — 8 라우트 재설계:
+- `POST /api/me/kis` body=`{label, is_default?, app_key, app_secret, acnt_no, acnt_prdt_cd_stk, acnt_prdt_cd_fno?, ...}` — 첫 계좌 자동 is_default=true, 라벨 중복 409
+- `GET /api/me/kis` → `{accounts:[{label, is_default, app_key_masked, acnt_no_masked, ...}], default_label, ...백워드 호환}`
+- `GET /api/me/kis/{label}` 단일 마스킹
+- `PUT /api/me/kis/{label}` 부분 갱신 (라벨 변경 + 자격증명 변경 동시 가능, sensitive 변경 시 자동 재검증)
+- `DELETE /api/me/kis/{label}` 삭제 (기본 계좌 삭제 시 다른 계좌 자동 default 승격)
+- `POST /api/me/kis/{label}/default` 기본 지정
+- `POST /api/me/kis/{label}/validate` 재검증 (24h TTL)
+
+**`services/balance_service.py` (신규)** — 멀티 계좌 잔고 진입점:
+- `fetch_single_account_balance(user_id, account_label)` 한 계좌 KIS 호출(KR/US/FNO 분기) + 메트릭 보강 + partial_failure
+- `aggregate_balance_accounts(list[per_account])` 종목 단위 합산 (key=`(symbol, market)`, qty=sum, avg_price=weighted_avg, eval/pl=sum, accounts 메타)
+- `fetch_aggregated_balance(user_id, account_label=None)` — None 시 모든 계좌 `asyncio.gather(Semaphore=6)` 병렬, 라벨 지정 시 단독. 등록 0개 시 빈 응답 (예외 raise 금지)
+- 환율은 1회 조회 (계좌 무관 동일)
+- FNO는 합산 안 함 (만기/사이즈 차이로 무의미) + `account_label` 부착
+
+**`services/account_label_matcher.py` (신규)** — 체결통보 라벨 매칭:
+- H0STCNI0 ACNT_NO 파싱 → `(user_id, decrypted_acnt_no) → label` LRU 100 인메모리 캐시
+- me_kis 라우터 create/update/delete 시 invalidate
+- 매칭 실패 시 label=None + 경고 로그 (타 사용자 계좌 등)
+
+**`services/order_service.py`**: `place_order(..., user_id, account_label)` 시그니처 확장 + `orders.account_label` 기록. modify/cancel은 원주문 라벨 자동 사용(계좌 간 정정 금지).
+
+**`services/safety_grade.py`** (REQ-DOMAIN-01): `compute_position_size()` 응답에 `position_meta: {total_portfolio_limit_qty, account_cash_limit_qty, binding_constraint, reason?}` 추가.
+
+**`services/reservation_service.py`**: 예약 등록 시 `account_label` 저장 + 발동 시 동일 계좌로 발송.
+
+**`services/quote_kis.py`**: 체결통보 핸들러 `_parse_notice` ACNT_NO 8자 토큰 파싱 → account_label_matcher 위임.
+
+### 프론트엔드 UI
+
+**`pages/SettingsKisPage.jsx`** (R8): 단일 폼 → **카드 그리드 + 모달**
+- 계좌 카드: 라벨 / 마스킹 계좌번호 / 검증 상태 / "기본" 배지 / 수정/삭제/재검증/기본설정 버튼
+- "+ 계좌 추가" 모달 (label + 6필드)
+- **계좌상품코드 default '01' 제거** (사용자가 의식적으로 입력 — 일반 01 / 연금·IRP·ISA 02·22 등 KIS 발급값)
+- 안내문 강화
+
+**`pages/BalancePage.jsx`** (R9): 상단 탭 [전체|라벨1|라벨2|...] + 합산/단독 토글
+- 탭 라벨은 `listAccounts()`로 마운트 시 1회 별도 fetch (`data.accounts` 의존 X — 단독 탭 응답 메타 1개로 탭 사라짐 방지)
+- `useBalance(activeTab)` 분기, partial_failure 노란 배너 표시
+
+**`pages/OrderPage.jsx`** (R10): 주문 폼 상단 계좌 선택 드롭다운 + localStorage 마지막 사용 계좌 + 토스트 라벨 prefix
+
+**`api/me.js`**: 멀티 6 (`listAccounts/createAccount/updateAccount/deleteAccount/setDefaultAccount/validateAccount`) + 백워드 호환 4
+**`api/balance.js`**: `fetchBalance(accountLabel?)` null=합산
+**`api/order.js`**: 전 함수 `accountLabel` 쿼리/body 옵션
+**`hooks/useBalance.js`**: `load(accountLabel = null)` 인자 추가 (백워드 호환)
+
+### TDD 사이클 R1~R11 (도메인팀장 요건 → 개발팀장 RED→GREEN→VERIFY)
+
+- 본 작업 신규/관련 147/147 PASS
+- 전체 `pytest tests/unit/ tests/integration/`: 1676 PASS / 26 사전 환경 결함(pdfplumber/pytest-asyncio 누락, 본 작업 무관) / 18 skip
+- 프론트 `npm run build` PASS
+
+신규 테스트 9개 파일: `test_user_kis_repo.py`(24), `test_user_kis_migration_compat.py`(4), `test_order_repo_account_label.py`(6), `test_kis_auth_multi_account.py`(10), `test_me_kis_multi_account_api.py`(19), `test_balance_aggregate.py`(10), `test_safety_grade_multiaccount.py`(4), `test_order_account_label.py`(4), `test_execution_notice_label.py`(3), `test_domain_invariants_multiaccount.py`(4).
+
+### 백워드 호환 가드 (REQ-MIGRATION-01)
+
+- 기존 1계좌 사용자 → 자동 'label=기본' 변환, 기존 동작 100% 유지
+- `POST /api/order` body `account_label` 누락 → default 계좌 폴백 (기존 클라이언트 호환)
+- `GET /api/balance` 쿼리 미지정 → 합산 모드 (등록 0개 시 빈 응답)
+- `/ws/execution-notice` 메시지 기존 필드 보존 + `account_label`만 추가
+- 기존 orders/reservations row (account_label NULL) → default 계좌로 처리
+
+### 사용자 보고 후속 수정 (재기동 후 발견)
+
+**버그**: 연금 계좌의 `acnt_prdt_cd_stk=22`로 등록했음에도 DB에 `01`로 저장됨.
+- **원인 추정**: SettingsKisPage 폼 default `'01'`이 사용자 입력으로 오인되어 그대로 제출됨
+- **수정**: `initialForm.acnt_prdt_cd_stk: '01'` → `''` (빈 값, 사용자 의식적 입력 강제) + 수정 모드 폴백 `|| '01'` → `|| ''` + 필드 라벨 안내문 강화 "일반 01, 연금/IRP/ISA 등은 02·22 등 KIS 발급값 확인"
+
+**버그**: 잔고 페이지에서 특정 계좌 탭 선택 시 다른 계좌 탭이 사라짐.
+- **원인**: `accountTabs`를 `data.accounts`(현재 응답)에서 그렸는데, 단독 모드 응답은 해당 계좌 1개만 메타에 포함
+- **수정**: 마운트 시 `listAccounts()`로 탭 라벨 1회 별도 fetch + state로 보존. `data.accounts` 의존성 제거
+
+---
+
 ## 2026-05-15 — 관심종목 현재가 캐시 제거 (도메인 원칙 정합)
 
 ### 버그 수정 — 관심종목 대시보드 현재가 갱신 지연

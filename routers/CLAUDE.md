@@ -8,10 +8,10 @@
 |------|-----------|------|
 | `screener.py` | `GET /api/screener/stocks` | 멀티팩터 스크리닝 + yfinance enrichment(섹터 포함) + 구루 공식(preset=greenblatt/neff/seo, DART guru enrichment) + 체제 연계(regime_aware) + 52주 하락률 필터 + Value Trap 경고 |
 | `earnings.py` | `GET /api/earnings/filings` | 정기보고서 (KR DART / US SEC EDGAR) |
-| `balance.py` | `GET /api/balance` | KIS 실전계좌 잔고 (국내+해외+선물옵션). user_id Depends |
+| `balance.py` | `GET /api/balance` | KIS 실전계좌 잔고 (국내+해외+선물옵션). user_id Depends. **멀티 계좌**: `account_label` 쿼리 — 미지정 시 사용자 모든 계좌 병렬 조회 후 종목 단위 합산(가중평균), 지정 시 단독. 응답에 `accounts:[{label, acnt_no_masked, is_default}]` + `partial_failure: list[str]`. 등록 0개 + 미지정 시 200 + 빈 응답 |
 | `watchlist.py` | `/api/watchlist/*` | 관심종목 CRUD + 대시보드 + 종목정보 + 순서 관리. `GET/PUT /order`는 `/{code}` 라우트보다 앞에 등록. **`GET /api/watchlist/batch-details?codes=&market=auto`** — N종목 metrics 병렬 일괄 (codes ≤ 50 가드, ServiceError(400), 부분 실패 부분 반환) |
 | `detail.py` | `/api/detail/*` | 10년 재무 + PER/PBR 히스토리 + 종합 리포트. **`GET /api/detail/{symbol}/bundle?market=auto`** — DetailPage 마운트 시 모든 섹션(basic/financials/valuation/forward_estimates/summary) 병렬 일괄. 부분 실패 시 `partial_failure: list[str]` |
-| `_kis_auth.py` | (내부) | KIS 인증 공통 (토큰 관리, hashkey, **사용자별 토큰 캐시 dict**). `get_kis_credentials(user_id)` 사용자 키 우선 + 운영자 키 폴백 |
+| `_kis_auth.py` | (내부) | KIS 인증 공통 (토큰 관리, hashkey). **멀티 계좌**: `get_kis_credentials(user_id, account_label)` — `account_label=None` → default 계좌, str → 특정 라벨. 토큰 캐시 키 `(user_id, account_label)` 튜플로 격리. ContextVar `_current_user_id` + `_current_account_label` (라우터 진입부 set). 라벨 부재 시 NotFoundError(404) |
 | `order.py` | `/api/order/*` | 주문 발송/정정/취소/미체결/체결/이력/예약주문/FNO 시세 |
 | `quote.py` | `WS /ws/quote/{symbol}`, `WS /ws/execution-notice`, `GET /api/quote/us/{symbol}/orderbook`, `GET /api/quote/us/{symbol}/detail` | 실시간 호가 WS (KR/FNO/US) + 체결통보 WS. `/ws/quote/{symbol}?exchange=auto\|UN\|KRX\|NXT` (기본 auto, KST 시계 4구간 자동 분기). US REST 폴백 — orderbook(HHDFS76200100, 10단계) + detail(HHDFS76200200, 시/고/저/거래량/52주). 응답 200/503(키 부재)/504(KIS None). **장운영정보 WS(`/ws/market-status`) 제거 — `useMarketClock` 시계 폴백 단독 사용 (KIS WS slot 3건 회수)** |
 | `advisory.py` | `/api/advisory/*` | AI자문 종목 관리 + 데이터 수집(+리서치) + AI 리포트 v3 통합. `POST /research` 수동 리서치 수집. `GET /{code}/analyst-reports` (KR=네이버/US=yfinance). `POST /{code}/chat` 보고서 컨텍스트 stateless 챗봇. `POST /{code}/analyze` body `AnalyzeBody(user_comment: Optional[str])` (1000자) — 양면 평가 트리거. `GET /{code}/supply-demand?days=10..60` (기본 30, 국내 6자리 전용) — 종목별 투자자 수급 + advisory_note. **`GET /{code}/foreign-holding?days=5..180`** (기본 120, 국내 전용) — 외국인 보유율 + 한도소진율 + 잔여 매수여력 (스냅샷 + daily 시계열). KIS TR `FHKST01010100`(스냅샷) + `FHKST01010400`(일별 30일 한도) 조합 → `macro_store` 누적 캐시(FIFO 250)로 30일 한도 우회. 응답 `snapshot/daily/change_alert(±3.0%p)/daily_history_total_days/advisory_note`. 매매 액션 키 금지 |
@@ -24,7 +24,7 @@
 | `backtest.py` | `/api/backtest/*` | KIS AI Extensions MCP 백테스트 + 전략빌더 CRUD. fire-and-poll 패턴 (504 + 결과 보존 동시 해소). 17개 엔드포인트 + 로컬 백테스트 2종 (`GET /local/presets`, `POST /run/local`). `commission_rate`/`tax_rate`/`slippage` 거래비용. 4 핸들러에 entry/exit 로그 + ServiceError 본문 `error_id`(8자리 hex) — 동일 id로 stack trace 매칭. telemetry `backtest.local.{success,fail.cause}` (cause: db_error/serialize/timeout/data_load/unknown). `GET /history` 응답에 `symbols_names: [{code,name}]\|null` 추가(백워드 호환) — 포트폴리오(다종목) 백테스트 시 종목명까지 한 번에 전달, 모달 상세 표시에 활용 |
 | `tax.py` | `/api/tax/*` | 해외주식 양도소득세: 연간 요약/매매내역 CRUD/KIS 적응적 동기화/FIFO 재계산/계산 상세(lots)/시뮬레이션. 9개 엔드포인트 |
 | `admin.py` | `/api/admin/*` | AI 사용량 관리: 유저별 일별 사용량 / 한도 CRUD / 감사 로그. `require_admin` (내 사용량 조회만 `get_current_user`) |
-| `me_kis.py` | `/api/me/kis/*` | 사용자 본인 KIS 자격증명 등록/조회(마스킹)/검증/삭제. `POST` 즉시 검증(`/oauth2/tokenP`). `KIS_ENCRYPTION_KEY` 미설정 시 503 |
+| `me_kis.py` | `/api/me/kis/*` | 사용자 본인 KIS 자격증명 멀티 계좌 CRUD. **8 라우트**: `POST /` 신규 등록(첫 계좌 자동 is_default=true, 라벨 중복 409) / `GET /` 목록(`accounts[]`+`default_label`+백워드 호환 메타) / `GET /{label}` 단일 / `PUT /{label}` 갱신(자격증명 변경 시 자동 재검증, 라벨 변경 가능) / `DELETE /{label}` 삭제(기본 계좌 삭제 시 다른 계좌 자동 default 승격) / `POST /{label}/default` 기본 지정 / `POST /{label}/validate` 재검증. `KIS_ENCRYPTION_KEY` 미설정 시 503 |
 | `admin_users.py` | `/api/admin/users/*` | 관리자 전용 사용자 CRUD. 검색(`?q=`)/페이지네이션, role 변경, 비밀번호 reset, 삭제. 응답에 `visit_count`(누적 PageView) |
 | `admin_stats.py` | `/api/admin/page-stats/*` | 페이지별 이용현황: 경로별 호출/평균·p95 latency/유저 수/일별 시계열 |
 
@@ -147,13 +147,18 @@ GET  /api/order/fno-price            선물옵션 현재가
   "stock_eval": "...", "stock_eval_domestic": "...", "stock_eval_overseas_krw": "...",
   "deposit": "...", "deposit_domestic": "...", "deposit_overseas_krw": "...",
   "stock_list": [...], "overseas_list": [...], "futures_list": [...],
-  "fno_enabled": true
+  "fno_enabled": true,
+  "accounts": [{"label": "주식", "acnt_no_masked": "12****34", "is_default": true}],
+  "partial_failure": []
 }
 ```
 
-- `stock_list`: name, code, exchange, quantity, avg_price, current_price, profit_loss, profit_rate, eval_amount, mktcap, per, pbr, roe
-- `overseas_list`: + currency, profit_loss_krw, eval_amount_krw
-- `futures_list`: name, code, trade_type, quantity, avg_price, current_price, profit_loss, profit_rate, eval_amount
-- `fno_enabled`: `KIS_ACNT_PRDT_CD_FNO` 설정 여부 (프론트 FNO 섹션 표시 제어)
+- `stock_list`: name, code, exchange, quantity, avg_price, current_price, profit_loss, profit_rate, eval_amount, mktcap, per, pbr, roe, **account_label**(단독 모드) 또는 **accounts: ['주식','연금']**(합산 모드 시 보유 계좌 메타)
+- `overseas_list`: + currency, profit_loss_krw, eval_amount_krw, account_label/accounts
+- `futures_list`: name, code, trade_type, quantity, avg_price, current_price, profit_loss, profit_rate, eval_amount, **account_label**(FNO는 합산 안 함)
+- `fno_enabled`: 등록된 계좌 중 1개라도 `acnt_prdt_cd_fno` 설정 시 true (OR)
+- `accounts`: 합산 모드 시 모든 계좌 메타 / 단독 모드 시 해당 1개. **프론트 탭 렌더링은 별도 `GET /api/me/kis`로 fetch 권고**(단독 모드 응답은 메타 1개라 탭 사라짐 방지)
+- `partial_failure`: 일부 계좌 KIS 조회 실패 시 메시지 리스트 (다른 계좌는 정상 응답, 다 실패 시 빈 잔고)
+- 합산 종목 키: `(symbol, market)`, qty=sum, avg_price=weighted_avg, eval_amt=sum, pl_amt=sum
 
 > API 파라미터/응답 스키마 상세 → `docs/API_SPEC.md`

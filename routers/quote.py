@@ -188,17 +188,26 @@ def get_us_price_detail(symbol: str, user: dict = Depends(get_current_user)):
 
 @router.websocket("/ws/execution-notice")
 async def execution_notice_ws(websocket: WebSocket):
-    """체결통보(H0STCNI0) 실시간 수신 WebSocket."""
+    """체결통보(H0STCNI0) 실시간 수신 WebSocket.
+
+    R6 (KIS 멀티 계좌): 메시지 payload 에 account_label 부착.
+    토큰 사용자 컨텍스트 + acnt_no_8 평문으로 services.account_label_matcher 호출.
+    매칭 실패 시 label=None (다른 사용자 계좌 또는 신규 미등록).
+    """
     token = websocket.query_params.get("token")
     if not token:
         await websocket.close(code=1008)
         return
     try:
         from services.auth_service import verify_token
-        verify_token(token)
+        payload = verify_token(token)
+        user_id_for_label: int = int(payload["sub"])
     except Exception:
         await websocket.close(code=1008)
         return
+
+    from services.account_label_matcher import match_account_label
+
     await websocket.accept()
     manager = get_manager()
     queue: asyncio.Queue = asyncio.Queue(maxsize=50)
@@ -207,6 +216,11 @@ async def execution_notice_ws(websocket: WebSocket):
         while True:
             try:
                 msg = await asyncio.wait_for(queue.get(), timeout=30.0)
+                # 라벨 부착 (기존 필드 보존 + account_label 추가만)
+                if isinstance(msg, dict) and msg.get("type") == "execution_notice":
+                    acnt_8 = (msg.get("acnt_no_8") or "").strip()
+                    if acnt_8 and msg.get("account_label") is None:
+                        msg["account_label"] = match_account_label(user_id_for_label, acnt_8)
                 await websocket.send_json(msg)
             except asyncio.TimeoutError:
                 await websocket.send_json({"type": "ping"})

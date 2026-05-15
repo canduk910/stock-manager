@@ -17,11 +17,12 @@ from services.exceptions import ServiceError
 
 
 def _patch_kis_creds(mp):
+    # R5: get_kis_credentials/get_access_token 이 user_id/account_label kw 를 받음.
     mp.setattr(
         order_service, "get_kis_credentials",
-        lambda: ("AK", "AS", "12345678", "01", "03"),
+        lambda *a, **kw: ("AK", "AS", "12345678", "01", "03"),
     )
-    mp.setattr(order_service, "get_access_token", lambda: "TKN")
+    mp.setattr(order_service, "get_access_token", lambda *a, **kw: "TKN")
 
 
 def _patch_order_store(mp, *, get_by_no=None):

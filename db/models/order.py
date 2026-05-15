@@ -32,11 +32,15 @@ class Order(Base):
     # 신규 주문은 SOR/KRX/NXT 중 1, KIS 응답에 따라 SOR-KRX/SOR-NXT로 정밀 갱신.
     # 기존 행은 NULL → to_dict에서 'KRX'로 폴백.
     exchange = Column(String(16), nullable=True)
+    # R1 (KIS 멀티 계좌, 2026-05-15): 어느 계좌로 발송했는지 라벨로 추적.
+    # NULL = default 계좌 폴백 (기존 row 호환).
+    account_label = Column(String(50), nullable=True)
 
     __table_args__ = (
         Index("idx_orders_status", "status"),
         Index("idx_orders_order_no_market", "order_no", "market"),
         Index("idx_orders_symbol_market", "symbol", "market", "placed_at"),
+        Index("idx_orders_user_account", "user_id", "account_label"),
     )
 
     def to_dict(self) -> dict:
@@ -62,6 +66,7 @@ class Order(Base):
             "updated_at": self.updated_at,
             "kis_response": self.kis_response,
             "exchange": self.exchange or "KRX",
+            "account_label": self.account_label,
         }
 
 
@@ -85,6 +90,13 @@ class Reservation(Base):
     created_at = Column(String, nullable=False)
     triggered_at = Column(String)
     updated_at = Column(String, nullable=False)
+    # R1 (KIS 멀티 계좌, 2026-05-15): 발동 시 어느 계좌로 발송할지.
+    # NULL = default 계좌 폴백 (기존 예약 호환).
+    account_label = Column(String(50), nullable=True)
+
+    __table_args__ = (
+        Index("idx_reservations_user_account", "user_id", "account_label"),
+    )
 
     def to_dict(self) -> dict:
         return {
@@ -105,4 +117,5 @@ class Reservation(Base):
             "created_at": self.created_at,
             "triggered_at": self.triggered_at,
             "updated_at": self.updated_at,
+            "account_label": self.account_label,
         }
