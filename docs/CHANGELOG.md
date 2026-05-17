@@ -1,5 +1,37 @@
 # 변경 이력
 
+## 2026-05-17 — 포트폴리오 UI 가독성 개선 (전체 종목 표시 + 섹터 파이차트)
+
+### UI 개선 — ProfitChart 전체 종목 + 동적 사이즈
+
+**배경**: 사용자 보고. 포트폴리오 화면(`/portfolio`)에서 종목이 많을 때 손실 종목이 아예 보이지 않음. 원인은 `ProfitChart.jsx:21`의 `.slice(0, 15)` — 수익률 내림차순 정렬 후 상위 15개만 표시하여 16번째 이후 손실 종목 잘림.
+
+**변경** (`frontend/src/components/portfolio/ProfitChart.jsx`):
+- `.slice(0, 15)` 제거 → 전체 보유 종목 표시
+- 동적 height — `Math.max(260, data.length * 26 + 20)` (종목당 26px + 여백, 최소 260px)
+- Y축 너비 동적 — `Math.min(200, Math.max(80, maxNameLen * 11 + 12))` (가장 긴 종목명에 맞춰 자동, 한글 1자 ≈ 11px)
+- 종목명 잘림 제거 — `name.slice(0, 6) + '..'` 제거, 전체 표시
+- `YAxis interval={0}` — Recharts 자동 라벨 생략 차단, 모든 종목 라벨 강제
+- 헤더에 `(N종목)` 카운트 표시 — UX 보강
+- 정렬은 수익률 내림차순 유지(위쪽 이익 빨강 / 아래쪽 손실 파랑 시각 구분)
+
+### UI 개선 — DiagnosisCard 섹터 분석 도넛 파이차트 전환
+
+**배경**: 사용자 보고. 포트폴리오 진단의 섹터 분석에서 섹터명 잘림(이전: `w-28 truncate` = 112px 고정 + ellipsis). 후속 요청으로 시각화도 가로 진행바 → 파이차트로 전환.
+
+**변경** (`frontend/src/components/advisor/DiagnosisCard.jsx`):
+- 가로 진행바 → **도넛 파이차트 (innerRadius=50, outerRadius=85) + 우측 평가 리스트 좌우 분할** (`md:flex-row`, 모바일 `flex-col`)
+- 파이 슬라이스 외부 라벨 `${sector} ${weight_pct}%` (truncate 없음, 자동 배치)
+- 14색 `SECTOR_COLORS` cycle 팔레트 — KR 14 + US 11 GICS 카테고리 모두 시각 구분
+- 우측 리스트: 색상 점(슬라이스와 매칭) + 섹터명(`whitespace-nowrap`) + 비중 + assessment 평가 텍스트 동시 표시
+- `SectorTooltip` — Hover 시 섹터/비중/assessment 한 번에 표시 (정보 손실 없음)
+
+### 검증
+- 프론트 빌드 PASS (`✓ built in 1.42s`)
+- 회귀 가드: AllocationChart 패턴 일관, 다른 컴포넌트 변경 없음
+
+---
+
 ## 2026-05-16 — 금융지주/금융업 데이터 보강 + PostgreSQL SEQUENCE hotfix
 
 ### 신규 기능 — 금융지주/금융업 종목 기본적 분석 정상화

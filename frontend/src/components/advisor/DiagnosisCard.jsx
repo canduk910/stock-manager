@@ -1,4 +1,23 @@
-import { PieChart, Pie, Cell } from 'recharts'
+import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts'
+
+// 섹터 파이차트 색상 — 14색 cycle (KR 14 + US 11 카테고리 커버)
+const SECTOR_COLORS = [
+  '#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6',
+  '#ec4899', '#06b6d4', '#84cc16', '#f97316', '#6366f1',
+  '#14b8a6', '#a855f7', '#eab308', '#64748b',
+]
+
+function SectorTooltip({ active, payload }) {
+  if (!active || !payload?.[0]) return null
+  const d = payload[0].payload
+  return (
+    <div className="bg-white border border-gray-200 rounded-lg shadow px-3 py-2 text-sm">
+      <p className="font-medium text-gray-900">{d.sector}</p>
+      <p className="text-gray-600">{d.weight_pct}%</p>
+      {d.assessment && <p className="text-xs text-gray-500 mt-0.5">{d.assessment}</p>}
+    </div>
+  )
+}
 
 const RISK_COLORS = {
   high: { bg: 'bg-red-100', text: 'text-red-700', border: 'border-red-400', label: '높음' },
@@ -76,24 +95,53 @@ export default function DiagnosisCard({ diagnosis }) {
           </div>
         )}
 
-        {/* 섹터 분석 */}
+        {/* 섹터 분석 — 좌: 파이차트 / 우: 평가 리스트 */}
         {diagnosis.sector_analysis && diagnosis.sector_analysis.length > 0 && (
           <div>
             <h4 className="text-xs font-semibold text-gray-500 uppercase mb-2">섹터 분석</h4>
-            <div className="space-y-1.5">
-              {diagnosis.sector_analysis.map((s, i) => (
-                <div key={i} className="flex items-center gap-2 text-sm">
-                  <span className="w-28 shrink-0 text-gray-600 truncate" title={s.sector}>{s.sector}</span>
-                  <div className="flex-1 bg-gray-100 rounded-full h-2 overflow-hidden">
-                    <div
-                      className="bg-blue-500 h-2 rounded-full"
-                      style={{ width: `${Math.min(s.weight_pct || 0, 100)}%` }}
+            <div className="flex flex-col md:flex-row gap-4 items-center md:items-start">
+              <div className="w-full md:w-1/2">
+                <ResponsiveContainer width="100%" height={220}>
+                  <PieChart>
+                    <Pie
+                      data={diagnosis.sector_analysis}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={50}
+                      outerRadius={85}
+                      dataKey="weight_pct"
+                      nameKey="sector"
+                      stroke="none"
+                      label={({ sector, weight_pct }) => `${sector} ${weight_pct}%`}
+                      labelLine={false}
+                    >
+                      {diagnosis.sector_analysis.map((_, i) => (
+                        <Cell key={i} fill={SECTOR_COLORS[i % SECTOR_COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip content={<SectorTooltip />} />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+              <div className="w-full md:w-1/2 space-y-1.5">
+                {diagnosis.sector_analysis.map((s, i) => (
+                  <div key={i} className="flex items-start gap-2 text-sm">
+                    <span
+                      className="w-3 h-3 mt-1 rounded-full shrink-0"
+                      style={{ backgroundColor: SECTOR_COLORS[i % SECTOR_COLORS.length] }}
                     />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-baseline gap-2">
+                        <span className="font-medium text-gray-700 whitespace-nowrap">{s.sector}</span>
+                        <span className="text-xs text-gray-500">{s.weight_pct}%</span>
+                      </div>
+                      {s.assessment && (
+                        <div className="text-xs text-gray-500 leading-relaxed">{s.assessment}</div>
+                      )}
+                    </div>
                   </div>
-                  <span className="w-12 text-right text-gray-500 text-xs">{s.weight_pct}%</span>
-                  <span className="text-xs text-gray-500">{s.assessment}</span>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
           </div>
         )}

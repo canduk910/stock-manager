@@ -96,7 +96,9 @@ frontend/
 
 **report/** ReportDetailView, SectorConceptTabs(3컨셉 + WatchlistButton + 기등록 ★), ReportHistoryList
 **portfolio/** RegimeBanner, AllocationChart, ProfitChart, HoldingsOverview
+- **ProfitChart**: 보유 종목 수익률 가로 막대(이익 빨강/손실 파랑). 전체 종목 표시(slice 제거) + 동적 height(`Math.max(260, len*26+20)`) + Y축 너비 자동(`min(200, max(80, maxNameLen*11+12))`)으로 종목명 잘림 차단. `YAxis interval={0}` 모든 라벨 강제. 헤더에 `(N종목)` 카운트
 **advisor/** AdvisorPanel, DiagnosisCard, SectorRecommendationCard, RebalanceCard, TradeTable, TradeConfirmModal
+- **DiagnosisCard**: 점수 게이지 + 위험도 + 요약 + 집중도/통화/섹터. **섹터 분석은 도넛 파이차트 + 평가 리스트 좌우 분할** (md:flex-row, 모바일 세로 스택). 14색 cycle 팔레트, Tooltip에 섹터/비중/assessment 동시 표시, 외부 라벨 `${sector} ${weight_pct}%` (truncate 제거로 잘림 없음)
 
 **backtest/**
 - StrategySelector — 4탭 순서: 전략빌더(기본) → MCP 프리셋 → 로컬 프리셋 → 커스텀 YAML. 프리셋 드롭다운+상세(파라미터 슬라이더). `PARAM_KR` 80+ 한글명 매핑. **`allowedModes` prop** — 단위 토글(종목/포트폴리오)이 화이트리스트 전달, 외 탭 자동 숨김
