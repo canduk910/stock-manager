@@ -35,7 +35,7 @@ frontend/
 | `backtest.js` | fetchMcpStatus/fetchPresets/runPresetBacktest/runCustomBacktest/runBatchBacktest/fetchBacktestResult/fetchBacktestHistory/fetchLocalPresets/runLocalBacktest |
 | `strategyBuilder.js` | convert/validate/save/load/list/delete (/api/backtest/strategy/*) |
 | `tax.js` | fetchTaxSummary/fetchTaxTransactions/syncTax/recalculateTax/fetchTaxCalculations/addTaxTransaction/deleteTaxTransaction/fetchSimulationHoldings/simulateTax |
-| `admin.js` | fetchAiUsage/fetchMyAiUsage/fetchAiLimits/setAiLimit/deleteAiLimit/fetchAuditLog/fetchUsers/fetchUserById/patchUser/deleteUser/fetchPageStats |
+| `admin.js` | fetchAiUsage/fetchMyAiUsage/fetchAiLimits/setAiLimit/deleteAiLimit/fetchAuditLog/fetchUsers/fetchUserById/patchUser/deleteUser/fetchPageStats/**fetchUserAccessHistory(user_id, days, top_paths)** |
 | `me.js` | **멀티 계좌**: `listAccounts/createAccount/updateAccount(label)/deleteAccount(label)/setDefaultAccount(label)/validateAccount(label)` + 백워드 호환 `getMyKis/saveMyKis/deleteMyKis/validateMyKis` (/api/me/kis) |
 | `chatbot.js` | chatAboutAdvisory(code, market, reportId, messages)/chatAboutPortfolio(reportId, messages) |
 
@@ -98,7 +98,7 @@ frontend/
 **portfolio/** RegimeBanner, AllocationChart, ProfitChart, HoldingsOverview
 - **ProfitChart**: 보유 종목 수익률 가로 막대(이익 빨강/손실 파랑). 전체 종목 표시(slice 제거) + 동적 height(`Math.max(260, len*26+20)`) + Y축 너비 자동(`min(200, max(80, maxNameLen*11+12))`)으로 종목명 잘림 차단. `YAxis interval={0}` 모든 라벨 강제. 헤더에 `(N종목)` 카운트
 **advisor/** AdvisorPanel, DiagnosisCard, SectorRecommendationCard, RebalanceCard, TradeTable, TradeConfirmModal
-- **DiagnosisCard**: 점수 게이지 + 위험도 + 요약 + 집중도/통화/섹터. **섹터 분석은 도넛 파이차트 + 평가 리스트 좌우 분할** (md:flex-row, 모바일 세로 스택). 14색 cycle 팔레트, Tooltip에 섹터/비중/assessment 동시 표시, 외부 라벨 `${sector} ${weight_pct}%` (truncate 제거로 잘림 없음)
+- **DiagnosisCard**: 점수 게이지 + 위험도 + 요약 + 집중도/통화/섹터. **섹터 분석은 도넛 파이차트 + 평가 리스트 좌우 분할** (md:flex-row, 모바일 세로 스택). 14색 cycle 팔레트, Tooltip에 섹터/비중/assessment 동시 표시, 외부 라벨 `${sector} ${weight_pct}%` (truncate 제거로 잘림 없음). **우측 범례 두 그룹 구성**: ① 보유 섹터 — `classifyAssessment()`로 편중("편중/과잉/과다" → orange ⚠)/부족("부족/미흡/낮음" → yellow ↓)/적정(기본 → green ✓) 배지 색상 코딩. ② ⭐ 신규 편입 추천 — `recommendations` prop(`analysis.sector_recommendations`)에서 보유 섹터 차감한 미보유 섹터만 표시, 점선 emerald 테두리 + 목표 비중 + 진입 타이밍(immediate/this_week/this_month) 배지 + 추천 근거 line-clamp-2
 
 **backtest/**
 - StrategySelector — 4탭 순서: 전략빌더(기본) → MCP 프리셋 → 로컬 프리셋 → 커스텀 YAML. 프리셋 드롭다운+상세(파라미터 슬라이더). `PARAM_KR` 80+ 한글명 매핑. **`allowedModes` prop** — 단위 토글(종목/포트폴리오)이 화이트리스트 전달, 외 탭 자동 숨김
@@ -149,7 +149,7 @@ frontend/
 | TaxPage | `/tax` | 4탭 (요약/매매/계산/시뮬레이션) |
 | AdminPage | `/admin` | → `/admin/ai` redirect |
 | AdminAIPage | `/admin/ai` | 3탭 (사용량/한도/감사). LimitsTab user_id는 사용자 검색 콤보 |
-| AdminUsersPage | `/admin/users` | CRUD + 방문수 컬럼 |
+| AdminUsersPage | `/admin/users` | CRUD + 방문수 컬럼. **방문수 셀 클릭 또는 "이력" 버튼 → `UserAccessHistoryModal`** (사용자별 일별 접속현황 — Recharts ComposedChart로 PV 막대 + 고유 path 라인 보조축, 7/30/90/180일 토글, 상위 path 리스트) |
 | AdminPageStatsPage | `/admin/page-stats` | Recharts (top 20 path), 7d/30d/90d, 평균/p95 latency |
 | SettingsKisPage | `/settings/kis` | **멀티 계좌 카드 그리드** + 모달 등록/수정/삭제 + 기본 계좌 지정 + 재검증. 카드: 라벨/마스킹 계좌번호/검증 상태/"기본" 배지. 라벨 + 6필드(app_key, app_secret, acnt_no, acnt_prdt_cd_stk, acnt_prdt_cd_fno?, hts_id?, base_url). **계좌상품코드 default 제거** — 사용자가 의식적으로 입력(일반 01 / 연금·IRP·ISA 02·22 등 KIS 발급값) |
 

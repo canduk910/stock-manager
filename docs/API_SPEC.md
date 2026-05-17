@@ -1317,6 +1317,41 @@ Request body:
 ### `DELETE /api/admin/users/{user_id}`
 사용자 삭제(또는 soft delete). 자기 자신 삭제 불가.
 
+### `GET /api/admin/users/{user_id}/access-history?days=30&top_paths=5`
+사용자별 일별 접속 현황 + Top N 경로 + 마지막 접속 (admin only).
+
+Query:
+- `days`: 7~180 (default 30) — 7/30/90/180일 토글 대응.
+- `top_paths`: 1~20 (default 5) — 상위 N개 경로.
+
+Response:
+```json
+{
+  "user_id": 1,
+  "username": "alice",
+  "name": "앨리스",
+  "last_seen_at": "2026-05-17T19:00:00+09:00",
+  "total_views": 1234,
+  "days": 30,
+  "daily": [
+    {"date": "2026-04-18", "views": 23, "unique_paths": 8},
+    {"date": "2026-04-19", "views": 0, "unique_paths": 0}
+  ],
+  "top_paths": [
+    {"path": "/api/portfolio", "views": 120},
+    {"path": "/api/balance", "views": 89}
+  ]
+}
+```
+
+- `daily` 배열은 KST 기준 **연속 시계열** — 데이터 없는 날도 `views=0, unique_paths=0`으로 padding.
+- `total_views`/`last_seen_at`은 days 범위와 무관한 **전체 누계** (admin_users.list_users의 `visit_count`와 정의 일치).
+- `top_paths`는 days 범위 내 집계 + views desc 정렬.
+- 익명(`user_id IS NULL`) 행은 모든 집계에서 제외.
+- 404: 존재하지 않는 user_id (`{detail: "user_id=... 사용자를 찾을 수 없습니다."}` + error_id).
+- 422: `days` < 7 또는 > 180, `top_paths` < 1 또는 > 20.
+- 403: 일반 사용자 토큰.
+
 ---
 
 ## 페이지별 이용 통계 — `routers/admin_stats.py` (2026-05-04 Phase 4)

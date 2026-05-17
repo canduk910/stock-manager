@@ -179,7 +179,7 @@ export default function AdvisorPanel({ balanceData, notify, advisor: externalAdv
               )
             })()}
 
-            <DiagnosisCard diagnosis={analysis.diagnosis} />
+            <DiagnosisCard diagnosis={analysis.diagnosis} recommendations={analysis.sector_recommendations} />
             <SectorRecommendationCard recommendations={analysis.sector_recommendations} />
             <RebalanceCard suggestions={analysis.rebalancing} />
             <TradeTable trades={analysis.trades} notify={notify} />

@@ -35,6 +35,15 @@ export const fetchUsers = ({ q = '', limit = 20, offset = 0 } = {}) => {
 
 export const fetchUserById = (userId) => apiFetch(`/api/admin/users/${userId}`)
 
+// 사용자별 일별 접속 이력 (모달).
+// days: 7 | 30 | 90 | 180 (default 30). top_paths: 1~20 (default 5).
+export const fetchUserAccessHistory = (userId, { days = 30, topPaths = 5 } = {}) => {
+  const params = new URLSearchParams()
+  params.set('days', String(days))
+  params.set('top_paths', String(topPaths))
+  return apiFetch(`/api/admin/users/${userId}/access-history?${params.toString()}`)
+}
+
 export const patchUser = (userId, body) =>
   apiFetch(`/api/admin/users/${userId}`, {
     method: 'PATCH',

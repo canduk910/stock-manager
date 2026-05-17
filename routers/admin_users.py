@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
@@ -12,6 +13,7 @@ from db.repositories.page_view_repo import PageViewRepository
 from db.repositories.user_kis_repo import UserKisRepository
 from db.repositories.user_repo import UserRepository
 from db.session import get_session
+from db.utils import KST
 from services.auth_deps import require_admin
 from services.exceptions import ConflictError, NotFoundError
 
@@ -61,6 +63,67 @@ def get_user(user_id: int, _admin: dict = Depends(require_admin)):
         user["has_kis"] = UserKisRepository(db).is_valid(user_id)
         user["visit_count"] = PageViewRepository(db).count_by_user([user_id]).get(user_id, 0)
     return user
+
+
+@router.get("/{user_id}/access-history")
+def get_user_access_history(
+    user_id: int,
+    days: int = Query(30, ge=7, le=180, description="조회 일수 (7/30/90/180)"),
+    top_paths: int = Query(5, ge=1, le=20, description="상위 N개 경로"),
+    _admin: dict = Depends(require_admin),
+):
+    """사용자별 일별 접속 현황 + Top N 경로 + 마지막 접속.
+
+    응답 shape:
+      {
+        user_id, username, name,
+        last_seen_at: ISO|null,   # 전체 누계 기준
+        total_views: int,         # 전체 누계 (days 무관, list_users.visit_count 정의 일치)
+        days: int,
+        daily: [{date, views, unique_paths}],  # KST 연속 시계열 (padding)
+        top_paths: [{path, views}],            # days 범위 내 desc
+      }
+    """
+    # KST 기준 날짜 범위 계산 (date_to=오늘, date_from=days-1일 전)
+    now = datetime.now(KST)
+    date_to = now.strftime("%Y-%m-%d")
+    date_from = (now - timedelta(days=days - 1)).strftime("%Y-%m-%d")
+
+    with get_session() as db:
+        urepo = UserRepository(db)
+        user = urepo.get_by_id(user_id)
+        if not user:
+            raise NotFoundError(f"user_id={user_id} 사용자를 찾을 수 없습니다.")
+
+        pv_repo = PageViewRepository(db)
+        daily_rows = pv_repo.user_daily_timeseries(user_id, date_from, date_to)
+        top_paths_rows = pv_repo.user_top_paths(user_id, date_from, date_to, top_paths)
+        last_seen_at = pv_repo.user_last_seen_at(user_id)
+        total_views = pv_repo.count_by_user([user_id]).get(user_id, 0)
+
+    # 연속 시계열 padding: 데이터 없는 날 0 채움.
+    daily_map = {r["date"]: r for r in daily_rows}
+    daily: list[dict] = []
+    start_date = datetime.strptime(date_from, "%Y-%m-%d").date()
+    for offset in range(days):
+        d = start_date + timedelta(days=offset)
+        d_str = d.strftime("%Y-%m-%d")
+        row = daily_map.get(d_str)
+        if row:
+            daily.append(row)
+        else:
+            daily.append({"date": d_str, "views": 0, "unique_paths": 0})
+
+    return {
+        "user_id": user_id,
+        "username": user.get("username"),
+        "name": user.get("name"),
+        "last_seen_at": last_seen_at,
+        "total_views": total_views,
+        "days": days,
+        "daily": daily,
+        "top_paths": top_paths_rows,
+    }
 
 
 @router.patch("/{user_id}")

@@ -25,7 +25,7 @@
 | `tax.py` | `/api/tax/*` | 해외주식 양도소득세: 연간 요약/매매내역 CRUD/KIS 적응적 동기화/FIFO 재계산/계산 상세(lots)/시뮬레이션. 9개 엔드포인트 |
 | `admin.py` | `/api/admin/*` | AI 사용량 관리: 유저별 일별 사용량 / 한도 CRUD / 감사 로그. `require_admin` (내 사용량 조회만 `get_current_user`) |
 | `me_kis.py` | `/api/me/kis/*` | 사용자 본인 KIS 자격증명 멀티 계좌 CRUD. **8 라우트**: `POST /` 신규 등록(첫 계좌 자동 is_default=true, 라벨 중복 409) / `GET /` 목록(`accounts[]`+`default_label`+백워드 호환 메타) / `GET /{label}` 단일 / `PUT /{label}` 갱신(자격증명 변경 시 자동 재검증, 라벨 변경 가능) / `DELETE /{label}` 삭제(기본 계좌 삭제 시 다른 계좌 자동 default 승격) / `POST /{label}/default` 기본 지정 / `POST /{label}/validate` 재검증. `KIS_ENCRYPTION_KEY` 미설정 시 503 |
-| `admin_users.py` | `/api/admin/users/*` | 관리자 전용 사용자 CRUD. 검색(`?q=`)/페이지네이션, role 변경, 비밀번호 reset, 삭제. 응답에 `visit_count`(누적 PageView) |
+| `admin_users.py` | `/api/admin/users/*` | 관리자 전용 사용자 CRUD. 검색(`?q=`)/페이지네이션, role 변경, 비밀번호 reset, 삭제. 응답에 `visit_count`(누적 PageView). **`GET /{user_id}/access-history?days=7\|30\|90\|180&top_paths=5`** — 사용자별 일별 접속현황 (PV + 고유 path 수 시계열 + top paths + last_seen_at). user_id IS NOT NULL 필터(익명 제외), 연속 시계열 padding(데이터 없는 날도 0) |
 | `admin_stats.py` | `/api/admin/page-stats/*` | 페이지별 이용현황: 경로별 호출/평균·p95 latency/유저 수/일별 시계열 |
 
 ---

@@ -19,6 +19,26 @@ function SectorTooltip({ active, payload }) {
   )
 }
 
+// 평가 텍스트 → 배지 스타일 분류 (편중/적정/부족 키워드 기반)
+function classifyAssessment(assessment) {
+  const txt = (assessment || '').toString()
+  if (txt.includes('편중') || txt.includes('과잉') || txt.includes('과다')) {
+    return { tag: '편중', bg: 'bg-orange-100', text: 'text-orange-700', border: 'border-orange-300', icon: '⚠' }
+  }
+  if (txt.includes('부족') || txt.includes('미흡') || txt.includes('낮음')) {
+    return { tag: '부족', bg: 'bg-yellow-100', text: 'text-yellow-700', border: 'border-yellow-300', icon: '↓' }
+  }
+  // 적정/균형/양호/등 또는 기본
+  return { tag: '적정', bg: 'bg-green-100', text: 'text-green-700', border: 'border-green-300', icon: '✓' }
+}
+
+// 진입 타이밍 배지 스타일
+const TIMING_STYLES = {
+  immediate:  { bg: 'bg-red-100', text: 'text-red-700', label: '즉시' },
+  this_week:  { bg: 'bg-yellow-100', text: 'text-yellow-700', label: '금주' },
+  this_month: { bg: 'bg-gray-100', text: 'text-gray-600', label: '이번 달' },
+}
+
 const RISK_COLORS = {
   high: { bg: 'bg-red-100', text: 'text-red-700', border: 'border-red-400', label: '높음' },
   medium: { bg: 'bg-yellow-100', text: 'text-yellow-700', border: 'border-yellow-400', label: '보통' },
@@ -55,10 +75,18 @@ function ScoreGauge({ score }) {
   )
 }
 
-export default function DiagnosisCard({ diagnosis }) {
+export default function DiagnosisCard({ diagnosis, recommendations = [] }) {
   if (!diagnosis) return null
 
   const risk = RISK_COLORS[diagnosis.risk_level] || RISK_COLORS.medium
+
+  // 보유 섹터명 집합 (정규화 — 공백 제거 비교)
+  const sectorAnalysis = diagnosis.sector_analysis || []
+  const heldNames = new Set(sectorAnalysis.map((s) => (s.sector || '').trim()))
+  // 미보유 추천 섹터 (포트폴리오에 없는 신규 편입 추천)
+  const newEntries = (recommendations || []).filter(
+    (r) => r.sector && !heldNames.has(r.sector.trim()),
+  )
 
   return (
     <div className="border border-gray-200 rounded-lg overflow-hidden">
@@ -123,24 +151,77 @@ export default function DiagnosisCard({ diagnosis }) {
                   </PieChart>
                 </ResponsiveContainer>
               </div>
-              <div className="w-full md:w-1/2 space-y-1.5">
-                {diagnosis.sector_analysis.map((s, i) => (
-                  <div key={i} className="flex items-start gap-2 text-sm">
-                    <span
-                      className="w-3 h-3 mt-1 rounded-full shrink-0"
-                      style={{ backgroundColor: SECTOR_COLORS[i % SECTOR_COLORS.length] }}
-                    />
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-baseline gap-2">
-                        <span className="font-medium text-gray-700 whitespace-nowrap">{s.sector}</span>
-                        <span className="text-xs text-gray-500">{s.weight_pct}%</span>
-                      </div>
-                      {s.assessment && (
-                        <div className="text-xs text-gray-500 leading-relaxed">{s.assessment}</div>
-                      )}
+              <div className="w-full md:w-1/2 space-y-3">
+                {/* 보유 섹터 — 편중/적정/부족 색상 배지 */}
+                <div>
+                  <h5 className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">
+                    보유 섹터 ({sectorAnalysis.length})
+                  </h5>
+                  <div className="space-y-1.5">
+                    {sectorAnalysis.map((s, i) => {
+                      const cls = classifyAssessment(s.assessment)
+                      return (
+                        <div key={i} className="flex items-start gap-2 text-sm">
+                          <span
+                            className="w-3 h-3 mt-1 rounded-full shrink-0"
+                            style={{ backgroundColor: SECTOR_COLORS[i % SECTOR_COLORS.length] }}
+                          />
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-baseline gap-1.5 flex-wrap">
+                              <span className="font-medium text-gray-700 whitespace-nowrap">{s.sector}</span>
+                              <span className="text-xs text-gray-500">{s.weight_pct}%</span>
+                              <span
+                                className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${cls.bg} ${cls.text} ${cls.border} whitespace-nowrap`}
+                                title={s.assessment}
+                              >
+                                {cls.icon} {cls.tag}
+                              </span>
+                            </div>
+                            {s.assessment && (
+                              <div className="text-xs text-gray-500 leading-relaxed mt-0.5">{s.assessment}</div>
+                            )}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+
+                {/* 신규 편입 추천 (포트폴리오 미보유) */}
+                {newEntries.length > 0 && (
+                  <div className="border-t border-gray-100 pt-2.5">
+                    <h5 className="text-[11px] font-semibold text-emerald-700 uppercase tracking-wide mb-1.5 flex items-center gap-1">
+                      ⭐ 신규 편입 추천 ({newEntries.length})
+                      <span className="text-[10px] font-normal text-gray-400 normal-case">— 현재 미보유</span>
+                    </h5>
+                    <div className="space-y-1.5">
+                      {newEntries.map((rec, i) => {
+                        const timing = TIMING_STYLES[rec.entry_timing] || TIMING_STYLES.this_month
+                        return (
+                          <div key={i} className="flex items-start gap-2 text-sm">
+                            <span className="w-3 h-3 mt-1 rounded-full shrink-0 border-2 border-dashed border-emerald-400 bg-emerald-50" />
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-baseline gap-1.5 flex-wrap">
+                                <span className="font-medium text-emerald-700 whitespace-nowrap">{rec.sector}</span>
+                                {rec.target_weight_pct != null && (
+                                  <span className="text-[10px] text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200 whitespace-nowrap">
+                                    목표 {rec.target_weight_pct}%
+                                  </span>
+                                )}
+                                <span className={`text-[10px] px-1.5 py-0.5 rounded ${timing.bg} ${timing.text} whitespace-nowrap`}>
+                                  {timing.label}
+                                </span>
+                              </div>
+                              {rec.rationale && (
+                                <div className="text-xs text-gray-500 leading-relaxed mt-0.5 line-clamp-2">{rec.rationale}</div>
+                              )}
+                            </div>
+                          </div>
+                        )
+                      })}
                     </div>
                   </div>
-                ))}
+                )}
               </div>
             </div>
           </div>

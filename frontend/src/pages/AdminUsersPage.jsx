@@ -7,6 +7,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { fetchUsers, patchUser, deleteUser } from '../api/admin'
 import LoadingSpinner from '../components/common/LoadingSpinner'
 import ErrorAlert from '../components/common/ErrorAlert'
+import UserAccessHistoryModal from '../components/admin/UserAccessHistoryModal'
 
 export default function AdminUsersPage() {
   const [items, setItems] = useState([])
@@ -16,6 +17,7 @@ export default function AdminUsersPage() {
   const limit = 20
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const [historyUser, setHistoryUser] = useState(null)  // 접속이력 모달 대상
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -112,11 +114,18 @@ export default function AdminUsersPage() {
                   <td className="px-4 py-2.5 text-center">
                     {u.has_kis ? <span className="text-green-600 text-xs">✓ 활성</span> : <span className="text-gray-400 text-xs">미등록</span>}
                   </td>
-                  <td className="px-4 py-2.5 text-right font-mono text-xs text-gray-700">
-                    {(u.visit_count ?? 0).toLocaleString()}
+                  <td className="px-4 py-2.5 text-right font-mono text-xs">
+                    <button
+                      onClick={() => setHistoryUser(u)}
+                      className="text-blue-600 underline hover:text-blue-800 cursor-pointer"
+                      title="접속 이력 보기"
+                    >
+                      {(u.visit_count ?? 0).toLocaleString()}
+                    </button>
                   </td>
                   <td className="px-4 py-2.5 text-xs text-gray-500">{u.created_at?.slice(0, 10)}</td>
                   <td className="px-4 py-2.5 text-center space-x-2 text-xs">
+                    <button onClick={() => setHistoryUser(u)} className="text-gray-600 hover:text-gray-900">이력</button>
                     <button onClick={() => handleRoleToggle(u)} className="text-blue-600 hover:text-blue-800">역할변경</button>
                     <button onClick={() => handleResetPassword(u)} className="text-yellow-600 hover:text-yellow-800">PW리셋</button>
                     <button onClick={() => handleDelete(u)} className="text-red-600 hover:text-red-800">삭제</button>
@@ -142,6 +151,13 @@ export default function AdminUsersPage() {
             className="px-3 py-1 border rounded disabled:opacity-50"
           >다음</button>
         </div>
+      )}
+
+      {historyUser && (
+        <UserAccessHistoryModal
+          user={historyUser}
+          onClose={() => setHistoryUser(null)}
+        />
       )}
     </div>
   )

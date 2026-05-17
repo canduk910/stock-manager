@@ -1,5 +1,54 @@
 # 변경 이력
 
+## 2026-05-17 — 사용자별 일별 접속현황 admin 기능 + 섹터 진단 범례 개선
+
+### 신규 기능 — 사용자별 일별 접속현황
+
+**배경**: 관리자가 사용자별 활동 패턴(어느 날 몇 회 접속, 어느 페이지 주로 이용)을 파악할 수 있어야 함. 기존 `/admin/users`는 누적 visit_count만, `/admin/page-stats`는 전체 통합 통계만 제공.
+
+**도메인 자문**: minimal — admin 통계라 권고안 100% 채택(투자 도메인 4명 자문 생략).
+
+**신규 API** (`routers/admin_users.py`):
+- `GET /api/admin/users/{user_id}/access-history?days=7|30|90|180&top_paths=5`
+- 응답: `{user_id, username, last_seen_at, total_views, daily: [{date, views, unique_paths}], top_paths: [{path, views}]}`
+- 권한: `require_admin`. `user_id IS NOT NULL` 필터로 익명 제외. 연속 시계열 padding(데이터 없는 날도 `{views: 0, unique_paths: 0}`).
+
+**PageViewRepository 신규 메서드 3개** (`db/repositories/page_view_repo.py`):
+- `user_daily_timeseries(user_id, days)` — 사용자별 일자별 PV + 고유 path 수
+- `user_top_paths(user_id, days, limit)` — 상위 N path
+- `user_last_seen_at(user_id)` — 마지막 접속 시각 (days 무관 전체 누계)
+- 기존 `(user_id, created_at)` 인덱스 활용 (별도 인덱스 추가 불필요)
+
+**프론트엔드**:
+- `frontend/src/components/admin/UserAccessHistoryModal.jsx` (신규) — Recharts ComposedChart(PV 막대 + 고유 path 라인 보조축) + 7/30/90/180일 토글 + 상위 path 리스트
+- `frontend/src/pages/AdminUsersPage.jsx` — 방문수 셀 클릭(underline + cursor-pointer) 또는 별도 "이력" 작업 버튼 → 모달
+- `frontend/src/api/admin.js` — `fetchUserAccessHistory(user_id, days, top_paths)` 추가
+
+**TDD 사이클 R1~R6, 44/44 PASS**:
+- `tests/unit/test_page_view_repo_user_access.py` (신규, 16): 3 메서드 + 익명 제외 + 인덱스 + padding 보장
+- `tests/api/test_admin_users_access_history.py` (신규, 16): 권한 403 / 404 / 422 / 200 응답 shape / days 4값 4건 / top_paths 정합
+- 기존 admin 영역 회귀 0건 (`test_page_view_repo_count_by_user.py` 4/4, `test_admin_users_visit_count.py` 2/2, `test_admin_page_stats_api.py` 2/2)
+
+**QA Inspector 체크리스트 11/11 PASS**: shape snake_case 정합 / `daily.length == days` / 익명 제외 / 권한 403 / 404 ServiceError 핸들러 / 인덱스 성능 / 모달 ESC+백드롭 / padding 연속성 / AbortController stale 차단 / KST 일자 경계 일관성 / 방문수 셀 시각적 underline + 별도 "이력" 버튼.
+
+### UI 개선 — DiagnosisCard 섹터 진단 우측 범례 재구성
+
+**배경**: 사용자 보고. "파이차트 옆 오른쪽 범례가 좀 더 직관적이었으면 좋겠어. 편중/적정/부족을 확실히 구분하고 포트폴리오에 없는 섹터도 함께 명시, 그 중 신규 편입 추천이 어디인지까지 반영."
+
+**변경** (`frontend/src/components/advisor/DiagnosisCard.jsx`, `AdvisorPanel.jsx`):
+- 우측 영역을 두 그룹으로 재구성:
+  1. **보유 섹터** — `classifyAssessment(assessment)`로 텍스트 키워드 매칭:
+     - "편중"/"과잉"/"과다" → 🟧 ⚠ 편중 (orange)
+     - "부족"/"미흡"/"낮음" → 🟨 ↓ 부족 (yellow)
+     - "적정"/기본 → 🟩 ✓ 적정 (green)
+  2. **⭐ 신규 편입 추천** — `recommendations` prop(`analysis.sector_recommendations`)에서 보유 섹터에 없는 섹터만 필터. 점선 emerald 테두리 + 목표 비중 배지 + 진입 타이밍(immediate/this_week/this_month 색상) + 추천 근거 line-clamp-2.
+- AdvisorPanel: `<DiagnosisCard diagnosis={...} recommendations={analysis.sector_recommendations} />` (1줄 prop 전달).
+- 파이차트는 보유 섹터만 (변경 없음, 14색 cycle 유지).
+
+**검증**: 프론트 빌드 PASS, 도커 재빌드 + 사용자 화면 확인 대기.
+
+---
+
 ## 2026-05-17 — 매크로 미국 뉴스 번역 캐시 mismatch 버그 수정
 
 ### 버그 수정 — NYT/Google News 제목과 링크 불일치
