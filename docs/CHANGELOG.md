@@ -1,5 +1,30 @@
 # 변경 이력
 
+## 2026-05-17 — 매크로 미국 뉴스 번역 캐시 mismatch 버그 수정
+
+### 버그 수정 — NYT/Google News 제목과 링크 불일치
+
+**배경**: 사용자 보고. 매크로 페이지 미국 뉴스 섹션에서 표시된 제목과 클릭 시 열리는 링크 내용이 다름. "원문보기" 했을 때도 화면 제목과 본문이 일치하지 않음.
+
+**원인 사슬**:
+1. `_translate_headlines()` 캐시 키가 `nyt_translation` 단일 문자열로, 인덱스 0~9에 번역만 매핑 (헤드라인 텍스트와 무관)
+2. 3개 캐시 계층의 TTL 불일치:
+   - `fetch_nyt_news` 자체 캐시: **30분** (`macro:news:nyt_raw`)
+   - `get_news` 전체 결과 캐시: **4시간** (`macro:news:full_result_v1`)
+   - `_translate_headlines` 번역 캐시: **일일 KST** (`macro_store nyt_translation`)
+3. 시나리오: 09:00 첫 호출 → 인덱스 0~9에 번역 캐시. 13:01 두 번째 호출(4h cache 만료) → `fetch_nyt_news` 30분 cache도 만료 → **새 기사 fetch** (다른 순서/내용) → `_translate_headlines` 일일 cache HIT → **옛 인덱스 0~9 번역 반환** → 새 기사 + 옛 번역 매핑 → 제목/링크 mismatch.
+
+**수정** (`services/macro_service.py`):
+- **번역 캐시 키 헤드라인 셋 해시화**: `nyt_translation` 단일 → `macro:nyt_translation:<sha256(headlines)[:16]>` 24h TTL. 헤드라인 셋이 1글자라도 변경 시 자동 캐시 미스 → 재번역. 순서 변경도 다른 해시 (인덱스 매핑 안전성).
+- **저장소 전환**: `save_macro_today/get_macro_today` (카테고리 단일 키) → `set_cached/get_cached` (해시별 격리).
+- **`_NEWS_CACHE_KEY` v1 → v2 bump**: 기존 4시간 캐시에 이미 저장된 mismatch 결과를 자동 invalidate. 운영 배포 직후 옛 캐시 자연 폐기.
+
+**검증**:
+- 가설 검증: 같은 헤드라인 셋 → 같은 해시 / 1글자 변경 → 다른 해시 / 순서 변경 → 다른 해시 (3건 모두 OK)
+- 로컬 도커 재빌드 + 사용자 화면 검증 — 제목과 링크 일치 확인 PASS
+
+---
+
 ## 2026-05-17 — 포트폴리오 UI 가독성 개선 (전체 종목 표시 + 섹터 파이차트)
 
 ### UI 개선 — ProfitChart 전체 종목 + 동적 사이즈

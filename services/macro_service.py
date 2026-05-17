@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -80,7 +81,7 @@ def get_indices() -> dict:
 
 # ── 뉴스 ─────────────────────────────────────────────────────────────────────
 
-_NEWS_CACHE_KEY = "macro:news:full_result_v1"
+_NEWS_CACHE_KEY = "macro:news:full_result_v2"  # v2: 번역 캐시 mismatch fix 후 (2026-05-17)
 _NEWS_CACHE_TTL_HOURS = 4
 
 
@@ -562,16 +563,23 @@ def _translate_headlines(
     summaries: list[str] | None = None,
     user_id=None,
 ) -> dict[int, dict]:
-    """영문 헤드라인 배치 한국어 번역. 반환: {index: {title, summary}}."""
+    """영문 헤드라인 배치 한국어 번역. 반환: {index: {title, summary}}.
+
+    2026-05-17 fix: 캐시 키를 헤드라인 셋의 SHA256 해시로 변경.
+    이전: `nyt_translation` 단일 키에 인덱스 매핑만 저장 → 헤드라인 셋이 바뀌면
+    옛 번역이 새 기사 인덱스에 잘못 매핑되어 제목/링크 불일치 결함.
+    """
     if not titles:
         return {}
     if not OPENAI_API_KEY:
         return {}
 
-    # 당일(KST) GPT 결과 재사용
-    cached = get_macro_today("nyt_translation")
-    if cached is not None:
-        return {int(k): v for k, v in cached.items()} if isinstance(cached, dict) else {}
+    # 헤드라인 셋 해시 — 셋이 변경되면 자연 캐시 미스 → 재번역
+    digest = hashlib.sha256("\n".join(titles).encode("utf-8")).hexdigest()[:16]
+    cache_key = f"macro:nyt_translation:{digest}"
+    cached = get_cached(cache_key)
+    if cached is not None and isinstance(cached, dict):
+        return {int(k): v for k, v in cached.items() if isinstance(v, dict)}
 
     summaries = summaries or [""] * len(titles)
     lines = []
@@ -602,7 +610,8 @@ def _translate_headlines(
         content = resp.choices[0].message.content or "{}"
         parsed = json.loads(content)
         result = {int(k): v for k, v in parsed.items() if isinstance(v, dict)}
-        save_macro_today("nyt_translation", parsed)
+        # 헤드라인 셋 해시별 24h TTL — 동일 셋 재호출 시 GPT 재호출 회피
+        set_cached(cache_key, parsed, ttl_hours=24)
         return result
     except Exception as e:
         _handle_openai_error(e)
