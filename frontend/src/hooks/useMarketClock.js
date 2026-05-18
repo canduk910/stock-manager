@@ -28,18 +28,32 @@
  */
 import { useEffect, useState } from 'react'
 
-const KST_OFFSET_MIN = 9 * 60
+// KST wall clock을 브라우저 timezone과 무관하게 추출 (Intl.DateTimeFormat 기준).
+// 2026-05-18 수정: 기존 `now.getTimezoneOffset()` 기반 변환은 KST 브라우저에서
+//   `getTimezoneOffset() = -540` 부호 합산으로 시간을 9시간 뒤로 돌려 평일 장중을
+//   휴장으로 잘못 분류 (예: 14:50 → 05:50 → CLOSED). Intl.DateTimeFormat은 DST/locale 무관.
+const KST_PARTS_FMT = new Intl.DateTimeFormat('en-US', {
+  timeZone: 'Asia/Seoul',
+  weekday: 'short',
+  hour: '2-digit',
+  minute: '2-digit',
+  hour12: false,
+})
 
-function toKstDate(now) {
-  const utcMs = now.getTime() + now.getTimezoneOffset() * 60000
-  return new Date(utcMs + KST_OFFSET_MIN * 60000)
+function kstParts(now) {
+  const parts = KST_PARTS_FMT.formatToParts(now)
+  const weekday = parts.find((p) => p.type === 'weekday')?.value // 'Sun'~'Sat'
+  let hour = parseInt(parts.find((p) => p.type === 'hour')?.value, 10)
+  const minute = parseInt(parts.find((p) => p.type === 'minute')?.value, 10)
+  if (hour === 24) hour = 0 // en-US hour12:false → 자정 24 가능성 정규화
+  return { weekday, minutes: hour * 60 + minute }
 }
 
+const WEEKEND_DAYS = new Set(['Sat', 'Sun'])
+
 export function resolvePhaseByClock(now = new Date()) {
-  const kst = toKstDate(now)
-  const day = kst.getUTCDay() // toKstDate가 UTC 시각으로 KST 시간을 채워둠
-  const minutes = kst.getUTCHours() * 60 + kst.getUTCMinutes()
-  if (day === 0 || day === 6) {
+  const { weekday, minutes } = kstParts(now)
+  if (WEEKEND_DAYS.has(weekday)) {
     return { phase: 'CLOSED', exchange: 'UN', label: '휴장 (주말)', isHoliday: true, isClosed: true }
   }
   if (minutes >= 480 && minutes < 540) {

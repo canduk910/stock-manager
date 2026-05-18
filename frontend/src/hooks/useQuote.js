@@ -78,9 +78,12 @@ export function useQuote(symbol, market = 'KR', exchange = 'auto') {
   // 갱신되어 useWebSocket 의 useEffect 가 재연결을 트리거.
   // KR 거래소 셀렉터(2026-05-08): exchange ∈ {'auto','UN','KRX','NXT'}.
   // 'auto' 기본 — 백엔드(KISQuoteManager)가 KST 4구간으로 자동 분기.
+  // ※ 2026-05-18 결함 수정: 쿼리 파라미터를 path 안에서 합친 후 buildWsUrl 호출
+  //   (이전엔 buildWsUrl이 ?token=... 부착한 base에 또 ?exchange=auto를 이어 붙여
+  //    URL의 '?'가 두 번 등장 → 백엔드가 token 값에 '?exchange=auto'까지 흡수 →
+  //    JWT 서명 검증 실패 1008 무한 close).
   const buildUrl = useCallback(() => {
     if (!symbol) return null
-    const base = buildWsUrl(`/ws/quote/${symbol}`)
     const params = []
     if (market === 'FNO') params.push('market=FNO')
     if (market !== 'FNO' && exchange && exchange !== 'auto') {
@@ -88,7 +91,10 @@ export function useQuote(symbol, market = 'KR', exchange = 'auto') {
     } else if (market !== 'FNO' && exchange === 'auto') {
       params.push('exchange=auto')
     }
-    return params.length ? `${base}?${params.join('&')}` : base
+    const path = params.length
+      ? `/ws/quote/${symbol}?${params.join('&')}`
+      : `/ws/quote/${symbol}`
+    return buildWsUrl(path)
   }, [symbol, market, exchange])
 
   const { connected } = useWebSocket(buildUrl, { onMessage })

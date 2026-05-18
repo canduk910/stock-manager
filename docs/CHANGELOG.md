@@ -1,5 +1,85 @@
 # 변경 이력
 
+## 2026-05-18 — 호가 미수신 결정적 원인 규명 (시계 + WS URL)
+
+### 버그 수정 — 호가창 빈 화면 본진 결함 2건 동시 발견·수정
+
+**배경**: 어제 추가한 silent failure 차단(`ffef462`)을 로컬 docker로 검증하던 중, 사용자 보고가 시간 무관 지속 → **시간 무관**의 진짜 의미는 "휴장 시간대"였음. 시계 결함이 풀린 후에야 WS 결함이 표면화. 두 결함은 별개 원인이고 누적 효과로 사용자에게 같은 증상으로 보였다.
+
+#### Phase 1 — 시계 결함 (`frontend/src/hooks/useMarketClock.js`)
+
+**진단** (사용자 화면 캡처 "통합 (휴장)" 라벨 + 한국 14:50 시각 정보로 모순 발견):
+```js
+// 결함 코드
+const KST_OFFSET_MIN = 9 * 60
+function toKstDate(now) {
+  const utcMs = now.getTime() + now.getTimezoneOffset() * 60000  // KST 브라우저: offset=-540 → 9h 뒤로 돌림
+  return new Date(utcMs + KST_OFFSET_MIN * 60000)
+}
+// KST 브라우저 14:50 → minutes=350 → CLOSED 분기 → "통합(휴장)" 표시
+```
+
+`getTimezoneOffset()` MDN 정의는 `UTC = local + offset`인데, epoch ms에 그대로 더하면 의미 없는 시간 연산. KST 브라우저(`offset=-540`)에서 시간을 9시간 뒤로 돌려, 평일 14:50을 새벽 05:50(=350분)으로 잘못 판정 → `CLOSED` 분기로 떨어져 `isClosed=true` + `exchange='UN'` → 화면에 "🟦 통합 (휴장)" 잘못 표시.
+
+**부수 영향**: `useMarketBoard.js`의 `usePricePolling`이 `clock.phase === 'UN'` 분기로 장중 15s / 장외 60s를 결정 → 평일 장중에도 60s 잘못 폴링하여 시세판 갱신 4배 느림.
+
+**수정**: `Intl.DateTimeFormat({timeZone: 'Asia/Seoul'})` `formatToParts`로 KST wall clock 추출 (`useUsMarketClock`이 이미 사용 중인 패턴과 일관). 브라우저 timezone과 무관하게 동일 결과 보장.
+
+**검증** (8개 경계 케이스 node 직접 실행):
+```
+월 14:50 (장중)    → UN ✓ (이전: CLOSED)
+월 09:00 (정각)    → UN
+월 15:30 (마감)    → KRX_CLOSE
+월 15:40 (NXT)     → NXT_AFTER
+월 20:00 (장 마감) → CLOSED
+월 07:59 (장외)    → CLOSED
+토/일 14:00 (주말) → CLOSED(주말)
+```
+
+#### Phase 2 — WS URL `?` 중복 결함 (`frontend/src/hooks/useQuote.js`)
+
+**진단** (Phase 1 fix 후에도 "● 연결 중..." 무한 지속. `/api/admin/quote-status`로 백엔드 정상 확인 → `subscriber_count: 0` → 클라이언트 WS 연결 자체 실패. `routers/quote.py`에 임시 print 진단 삽입 후 사용자 새로고침 → 로그에서 결정적 단서):
+
+```
+[DIAG] verify_token JWTError: JWTError: Signature verification failed.
+       (expected_type=access, token_head=eyJhbGciOiJIUzI1NiIs...
+        token_tail=...MjpKoE?exchange=auto)  ← 토큰 끝에 ?exchange=auto가 흡수됨
+```
+
+`useQuote.js`의 buildUrl 결함:
+```js
+// 결함 코드
+const base = buildWsUrl(`/ws/quote/${symbol}`)  // → ws://.../ws/quote/005930?token=eyJ...
+const params = []
+if (exchange === 'auto') params.push('exchange=auto')
+return `${base}?${params.join('&')}`  // → ws://.../ws/quote/005930?token=eyJ...?exchange=auto
+                                       //                                  ↑      ↑
+                                       //                       buildWsUrl이 ?    useQuote가 또 ?
+```
+
+백엔드 query parser는 첫 `?`만 separator로 인식하고 나머지는 한 줄로 파싱 → `token = "eyJ...MjpKoE?exchange=auto"` (토큰 값에 `?exchange=auto` 흡수) → JWT 서명 검증 실패 → 1008 close 반복.
+
+**HTTP API는 무영향** — Authorization 헤더로 토큰 전달하므로 URL 결함과 무관. 잔고 등 API가 정상 동작하면서 WS만 거부되어 결함 위치를 잘못 추적하기 쉬웠음. 표면화 시점은 시계 결함이 풀려 "통합(휴장)" 라벨이 정상화된 직후 — 이전엔 휴장 라벨 때문에 사용자가 WS를 진지하게 기대하지 않았음.
+
+**수정**: query 파라미터를 path 안에서 먼저 합친 후 `buildWsUrl` 한 번만 호출. buildWsUrl이 `path.includes('?')` 체크로 자동으로 `&token=...` 부착 → URL `?` 1회만 등장.
+
+```js
+// 수정 코드
+const params = []
+if (market === 'FNO') params.push('market=FNO')
+if (exchange === 'auto') params.push('exchange=auto')
+const path = params.length
+  ? `/ws/quote/${symbol}?${params.join('&')}`
+  : `/ws/quote/${symbol}`
+return buildWsUrl(path)  // path?exchange=auto&token=eyJ...
+```
+
+**검증**: 로컬 docker 재빌드(`docker compose up --build -d`) → 사용자 hard reload → "🟢 NXT" 라벨 + "● 실시간" 초록색 + 005930 호가 실시간 수신 확인.
+
+**도메인 원칙 회복**: silent failure → loud failure(어제 ffef462). 어제 추가한 1008 자동 logout 가드 + manager `getattr` 방어 + `/api/admin/quote-status` 진단 엔드포인트가 본진 결함 좁히기에 결정적 기여.
+
+---
+
 ## 2026-05-18 — 호가 silent failure 차단 + 1008 자동 logout
 
 ### 버그 수정 — 호가창 빈 화면 결함의 단일 점 진단 보강
