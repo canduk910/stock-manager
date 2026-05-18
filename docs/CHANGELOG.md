@@ -40,6 +40,11 @@
 - `tests/unit/test_quote_kis_exchange.py` 21/21 PASS (기존 회귀 가드).
 - 전체 `pytest tests/unit/` baseline 사전 결함(pytest-asyncio + pdfplumber 미설치 25건)을 제외하면 신규 결함 0.
 
+**후속 hotfix — CI 회귀 2건 (`tests/api/test_quote_ws_exchange.py`)**:
+- 원인: `routers/quote.py:57` 매니저 상태 검증이 `manager._running` / `manager._start_failed_reason` 속성을 직접 접근. 테스트 `FakeManager`(이 두 속성 미정의)에서 AttributeError → outer except로 빠져 subscribe 호출 누락 → 빈 dict 응답으로 assertion 실패.
+- 수정: `getattr(manager, "_running", True)` / `getattr(manager, "_start_failed_reason", None)` 방어 fallback. 실제 KISQuoteManager는 두 속성을 명시 정의하므로 운영 동작 동일, mock manager만 호환.
+- 검증: `tests/api/test_quote_ws_exchange.py` 3/3 + `tests/unit/test_quote_start_failure.py` 6/6 PASS.
+
 **운영 진단 가이드** (사용자 후속):
 - `aws sso login` 후 `aws ssm send-command ... docker logs ... grep "QuoteService|approval_key|WS 오류|tokenP"` → 가설 2/3 결정적 신호 식별.
 - 또는 배포 후 `GET /api/admin/quote-status` 1회 호출 → 즉시 manager 상태 확인.

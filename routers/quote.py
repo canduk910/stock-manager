@@ -51,14 +51,18 @@ async def quote_ws(websocket: WebSocket, symbol: str, market: str = "", exchange
     exchange = (exchange or "auto").upper() if exchange.lower() != "auto" else "auto"
 
     # KISQuoteManager start() 실패 시 — 빈 호가창 대신 사유를 사용자에게 노출 후 1011 close.
+    # 테스트의 FakeManager 등 `_running`/`_start_failed_reason` 미정의 객체에서 AttributeError가
+    # 나지 않도록 getattr 방어 (기본: 가동 중 + 사유 없음 → 통과).
     is_kr_or_fno = (market == "FNO") or (not market and is_fno(symbol)) or is_domestic(symbol)
     if is_kr_or_fno:
         manager = get_manager()
-        if not manager._running and manager._start_failed_reason:
+        running = getattr(manager, "_running", True)
+        reason = getattr(manager, "_start_failed_reason", None)
+        if not running and reason:
             try:
                 await websocket.send_json({
                     "type": "error",
-                    "message": f"실시간 시세 비활성화: {manager._start_failed_reason}",
+                    "message": f"실시간 시세 비활성화: {reason}",
                 })
             except Exception:
                 pass
