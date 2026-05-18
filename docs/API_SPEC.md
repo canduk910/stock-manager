@@ -1380,6 +1380,33 @@ Response:
 
 데이터 소스: `PageView` 모델(FastAPI 미들웨어가 매 요청 비동기 INSERT, 제외 path: /api/health, /assets/*, /static/*, /ws/*, /api/admin/page-stats).
 
+### `GET /api/admin/quote-status` (2026-05-18 신규)
+관리자 전용. KISQuoteManager + OverseasQuoteManager 진단. 호가창 빈 화면 결함 단일 점 진단용 + 향후 회귀 모니터링.
+
+응답:
+```json
+{
+  "kis_manager": {
+    "running": true,
+    "ws_connected": true,
+    "fallback_mode": false,
+    "subscriber_count": 3,
+    "subscribed_symbols": ["005930", "035720"],
+    "approval_key_age_sec": 1820,
+    "consecutive_connect_failures": 0,
+    "start_failed_reason": null
+  },
+  "overseas_manager": {
+    "running": true,
+    "subscriber_count": 1
+  }
+}
+```
+
+- `start_failed_reason` non-null → `start()`가 KIS 키 미설정 등으로 silent skip된 상태. SSM Parameter Store 점검 필요.
+- `consecutive_connect_failures >= 5` → `_connect_loop`이 5회 이상 실패 — approval_key 만료/quota/네트워크 점검.
+- `ws_connected=false` + `fallback_mode=true` → REST 폴링 모드(가격만, 호가 미수신).
+
 ---
 
 ## 로컬 백테스트 — `routers/backtest.py` (2026-05-07)

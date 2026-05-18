@@ -1,5 +1,52 @@
 # 변경 이력
 
+## 2026-05-18 — 호가 silent failure 차단 + 1008 자동 logout
+
+### 버그 수정 — 호가창 빈 화면 결함의 단일 점 진단 보강
+
+**배경**: 사용자 보고 — 주문 페이지 호가창에서 KR/US/FNO 모든 시장, 시간 무관 지속, 호가·현재가 둘 다 미수신. 모든 시장 동시 결함이라 시장별 파이프라인이 아니라 공통 진입점(WS 인증/KISQuoteManager/운영자 KIS 키) 단일 점 결함이 후보. 코드 검증 결과:
+- `services/quote_kis.py:144-146` — `start()`에서 KIS 키 미설정 시 `logger.warning` 1줄 후 silent return → `_running=False` → subscribe 호출돼도 무한 침묵 (사용자에게 빈 호가창만 보임).
+- `frontend/src/hooks/useWebSocket.js:77-87` — 1008(Policy Violation, JWT 만료) close 후 무한 백오프 재시도. refresh/logout 분기 부재 → JWT 만료 후에도 stale token으로 재시도 누적.
+- `routers/quote.py:32-41` — WS 핸들러에 ContextVar `set_current_user_id` 호출 부재 → `_stream_overseas`가 user_id=None으로만 운영자 키 사용 (멀티계좌 사용자 키 미적용).
+
+**수정** (silent failure → loud failure 원칙, 어느 가설이 확정되든 안전한 개선):
+
+1. **`services/quote_kis.py`** — `KISQuoteManager` 진단 보강:
+   - `start()` KIS 키 미설정 시 `logger.warning` → `logger.error` 승격 + `_start_failed_reason` 인스턴스 변수에 사유 보관 (SSM Parameter Store 점검 안내 로그 포함).
+   - `_connect_loop` 연속 실패 카운터(`_consecutive_connect_failures`) + 5회 연속 시 `logger.critical` 1회(스팸 방지) → KIS 키 만료/quota 초과/네트워크 차단 알람. backoff 상한 30s → 60s.
+   - `_get_approval_key` HTTP non-200 / JSON 파싱 실패 / approval_key 필드 부재 3분류 `RuntimeError`(상세 메시지) → `_connect_loop` 사유 식별 가능.
+
+2. **`routers/quote.py`** — WS 핸들러 ContextVar + manager 상태 검증:
+   - JWT verify 성공 시 `payload["sub"]`로 `set_current_user_id(user_id)` 호출 → quote_overseas가 사용자별 KIS REST 키 사용.
+   - KR/FNO 진입 전 `manager._running=False`이면 `{"type":"error","message":...}` 송신 후 `close(1011)` → 프론트가 빨간 배너로 사유 표시(빈 호가창 차단).
+
+3. **`routers/admin.py`** — `GET /api/admin/quote-status` 진단 엔드포인트 신규 (`require_admin`):
+   - `kis_manager.{running, ws_connected, fallback_mode, subscriber_count, subscribed_symbols, approval_key_age_sec, consecutive_connect_failures, start_failed_reason}` + `overseas_manager.{running, subscriber_count}` 반환.
+   - 원인 식별 + 향후 회귀 모니터링 양쪽 효용.
+
+4. **`frontend/src/hooks/useWebSocket.js`** — 1008 자동 logout 회귀 가드:
+   - `_tryRefreshForWs()` 모듈 내부 helper — `_refreshing` race 방지 싱글톤 promise.
+   - `onclose` 분기: `event.code === 1008` → refresh 시도 → 성공 시 backoff 리셋 + 즉시 재연결(lazy URL 새 토큰 박힘) / 실패 시 localStorage 클리어 + `/login` 리다이렉트 (client.js와 동일 정책).
+   - 기타 비정상 종료(1006/1011 등)는 기존 지수 백오프 유지.
+
+5. **`frontend/src/hooks/useQuote.js`** — `type:"error"` 메시지 핸들:
+   - `EMPTY_STATE.errorMessage` 추가 → `setState({errorMessage: msg.message})`.
+
+6. **`frontend/src/components/order/OrderbookPanel.jsx`** — silent 빈 호가창 차단:
+   - `errorMessage` 수신 시 헤더 위 빨간 ⚠ 배너 (`bg-red-50 border-red-200`) → 사용자가 즉시 사유 인지.
+
+**검증**:
+- 신규 단위 테스트 `tests/unit/test_quote_start_failure.py` 6/6 PASS — start() 사유 노출 + ERROR 로그 + approval_key 응답 분류 3종 + 카운터 초기값.
+- `tests/unit/test_quote_kis_exchange.py` 21/21 PASS (기존 회귀 가드).
+- 전체 `pytest tests/unit/` baseline 사전 결함(pytest-asyncio + pdfplumber 미설치 25건)을 제외하면 신규 결함 0.
+
+**운영 진단 가이드** (사용자 후속):
+- `aws sso login` 후 `aws ssm send-command ... docker logs ... grep "QuoteService|approval_key|WS 오류|tokenP"` → 가설 2/3 결정적 신호 식별.
+- 또는 배포 후 `GET /api/admin/quote-status` 1회 호출 → 즉시 manager 상태 확인.
+- JWT 만료(가설 1) 시 1008 자동 logout으로 사용자 추가 액션 불필요.
+
+---
+
 ## 2026-05-18 — CI flaky test 수정 (price freshness 시간 의존)
 
 ### 버그 수정 — CI 백엔드 테스트 2건 실패 hotfix

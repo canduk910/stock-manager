@@ -120,6 +120,8 @@ class KISQuoteManager:
         self._ws = None
         self._task: asyncio.Task | None = None
         self._running = False
+        # 사용자 진단용 — 호가창 진입 시 사용자에게 표시 (silent failure 차단)
+        self._start_failed_reason: str | None = None
         # REST fallback
         self._fallback_mode: bool = False
         self._fallback_task: asyncio.Task | None = None
@@ -137,12 +139,19 @@ class KISQuoteManager:
         self._kr_active_exchange: dict[str, str] = {}
         # 1분 주기 시간대 경계 reconcile 태스크
         self._clock_resync_task: asyncio.Task | None = None
+        # _connect_loop 연속 실패 카운터 (5회 이상 시 critical 로그 1회)
+        self._consecutive_connect_failures: int = 0
 
     # ── lifecycle ──────────────────────────────────────────────────
 
     async def start(self):
         if not (KIS_APP_KEY and KIS_APP_SECRET):
-            logger.warning("[QuoteService] KIS 키 미설정 — 실시간 호가 비활성화")
+            self._start_failed_reason = "KIS_APP_KEY/KIS_APP_SECRET 환경변수 미설정"
+            logger.error(
+                "[QuoteService] 실시간 호가 비활성화 — %s. "
+                "운영 EC2 SSM Parameter Store /stock-manager/prod/kis_app_key 점검 필요.",
+                self._start_failed_reason,
+            )
             return
         self._running = True
         self._task = asyncio.create_task(self._connect_loop())
@@ -437,7 +446,18 @@ class KISQuoteManager:
             },
             timeout=10,
         )
-        self._approval_key = res.json()["approval_key"]
+        # 응답 코드 분류 — _connect_loop이 backoff하기 전 사유 기록 (가설 3 진단).
+        if res.status_code != 200:
+            raise RuntimeError(
+                f"KIS approval_key 발급 실패 (status={res.status_code}, body={res.text[:200]})"
+            )
+        try:
+            data = res.json()
+        except ValueError as e:
+            raise RuntimeError(f"KIS approval_key 응답 파싱 실패: {e}, body={res.text[:200]}")
+        if "approval_key" not in data:
+            raise RuntimeError(f"KIS approval_key 응답에 키 부재: {data}")
+        self._approval_key = data["approval_key"]
         self._approval_key_at = time.time()
         return self._approval_key
 
@@ -447,10 +467,20 @@ class KISQuoteManager:
             try:
                 await self._run_ws()
                 backoff = 1.0
+                self._consecutive_connect_failures = 0
             except asyncio.CancelledError:
                 raise
             except Exception as e:
-                logger.error("[QuoteService] WS 오류: %s — %.0f초 후 재연결", e, backoff)
+                self._consecutive_connect_failures += 1
+                # 5회 연속 실패 시 critical 1회(스팸 방지) — approval_key/네트워크/quota 점검 알람.
+                if self._consecutive_connect_failures == 5:
+                    logger.critical(
+                        "[QuoteService] WS 5회 연속 실패 — KIS 키 만료/quota 초과/네트워크 차단 가능성. "
+                        "최근 오류: %s. /api/admin/quote-status 또는 KIS 콘솔 점검 필요.",
+                        e,
+                    )
+                else:
+                    logger.error("[QuoteService] WS 오류: %s — %.0f초 후 재연결", e, backoff)
                 self._approval_key = None
                 self._approval_key_at = 0
                 await self._broadcast_all({"type": "disconnected"})
@@ -459,7 +489,8 @@ class KISQuoteManager:
                     self._fallback_mode = True
                     self._fallback_task = asyncio.create_task(self._rest_fallback_loop())
                 await asyncio.sleep(backoff)
-                backoff = min(backoff * 2, 30.0)
+                # backoff 상한 60s (가설 3 — quota/키 만료 시 재시도 압력 완화)
+                backoff = min(backoff * 2, 60.0)
 
     async def _run_ws(self):
         # WS 재연결 성공 → fallback 해제

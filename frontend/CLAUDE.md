@@ -45,8 +45,8 @@ frontend/
 |------|------|
 | `useAsyncState.js` | data/loading/error 공통 훅. `run(asyncFn)` 자동 관리 |
 | `useScreener/useEarnings/useBalance/useWatchlist/useDetail/useOrder/useNotification` | 각 도메인 데이터 훅. **`useDetailBundle(symbol, market)`** (in `useDetail.js`) — DetailPage 마운트 시 `/api/detail/{symbol}/bundle` 1회 호출로 모든 섹션 일괄 수신, 부분 실패는 `data.partial_failure`로 표시 (기존 N+1 useDetailReport 패턴 대체) |
-| `useWebSocket.js` | 공용 WS 훅. 지수 백오프 재연결(500ms→10s) + visibilitychange. **url 인자에 함수형 지원** — `connect()` 안에서 lazy 평가, 1008 close 후 재시도 시 신선한 access_token 자동 반영 (stale-token 무한 백오프 방지). 호출자는 모듈 함수 또는 useCallback로 안정 reference 전달 |
-| `useQuote.js` | 실시간 호가 WS. `useQuote(symbol, market='KR', exchange='auto')`. exchange 쿼리 자동 부착. rAF throttle 자체 관리 |
+| `useWebSocket.js` | 공용 WS 훅. 지수 백오프 재연결(500ms→10s) + visibilitychange. **url 인자에 함수형 지원** — `connect()` 안에서 lazy 평가, 1008 close 후 재시도 시 신선한 access_token 자동 반영 (stale-token 무한 백오프 방지). 호출자는 모듈 함수 또는 useCallback로 안정 reference 전달. **2026-05-18: 1008 자동 logout 가드** — `_tryRefreshForWs()` 모듈 싱글톤 promise로 refresh 시도 → 성공 시 backoff 리셋 + 즉시 재연결 / 실패 시 localStorage 클리어 + `/login` 리다이렉트 (client.js 401 정책과 일치, JWT 만료 stale-token 무한 백오프 차단) |
+| `useQuote.js` | 실시간 호가 WS. `useQuote(symbol, market='KR', exchange='auto')`. exchange 쿼리 자동 부착. rAF throttle 자체 관리. `type:"error"` 메시지 수신 시 `errorMessage` state 노출 (백엔드 KIS 키 미설정 등 silent failure 차단) |
 | `useExecutionNotice.js` | 체결통보(H0STCNI0) WS 수신. `mapOrdExgGb(code)` 헬퍼로 응답에 `exchange` 필드 (1=KRX/2=NXT/3=SOR-KRX/4=SOR-NXT, NULL→KRX 폴백) |
 | `useMarketClock.js` | KST 4구간 KR 거래소 자동 판정 (`UN`/`KRX`/`NXT`). `resolvePhaseByClock(now)` 순수 함수 export. 1분 setInterval **단독 (WS override 제거 — `/ws/market-status` 폐지로 시계 폴백만 사용)** |
 | `useUsMarketClock.js` | ET 4구간 미국 시장 (`pre`/`regular`/`after`/`closed`). `Intl.DateTimeFormat('en-US', {timeZone:'America/New_York'})` DST 자동. `US_HOLIDAYS_ET` 2026~2028 30일 + `isUsHoliday()` 헬퍼 (주말+공휴일) |
@@ -184,7 +184,7 @@ frontend/
 
 ### 주문 컴포넌트
 - **SymbolSearchBar**: 시장 드롭다운(KR/US/FNO). `markets` prop으로 필터. KR·FNO=자동완성, US=티커 직접 입력. `marketRef` async race 방지
-- **OrderbookPanel**: `useQuote(symbol, market, 'auto')`. KR/FNO/US 모두 동일 그리드 (US 가드 제거). 호가 단계 동적(`displayAsks = asks.slice(0, asks.length || 10)`). US `toFixed(2)` USD, KR/FNO 정수. 매도호가 클릭→sell, 매수호가 클릭→buy. KR=`useMarketClock()` 헤더 거래소 라벨, US=`useUsMarketClock()` 거래시간 라벨
+- **OrderbookPanel**: `useQuote(symbol, market, 'auto')`. KR/FNO/US 모두 동일 그리드 (US 가드 제거). 호가 단계 동적(`displayAsks = asks.slice(0, asks.length || 10)`). US `toFixed(2)` USD, KR/FNO 정수. 매도호가 클릭→sell, 매수호가 클릭→buy. KR=`useMarketClock()` 헤더 거래소 라벨, US=`useUsMarketClock()` 거래시간 라벨. **`errorMessage` 수신 시 헤더 위 빨간 ⚠ 배너** (`bg-red-50 border-red-200`) — 백엔드 KIS 키 미설정 등 silent 빈 호가창 차단
 - **OrderForm**: `symbol`/`symbolName`/`market` props 외부 제어. `externalPrice`/`externalSide`. FNO: 지정/시장/조건부지정/최유리지정 + IOC/FOK. `KR_EXCHANGE_OPTIONS = [SOR(추천)/KRX/NXT]` (market==='KR'만). `isSimulation` 시 SOR/NXT 비활성. US 매수가능 라벨에 `$X (₩X) · 환율 ₩1,XXX/USD` (graceful degrade)
 - **OpenOrdersTable + ExecutionsTable**: `excg_id_dvsn_cd === 'SOR'`(HTS/MTS 주문)은 "앱취소필요" 안내. "거래소" 컬럼 + `ExchangeBadge` (orders.exchange/excg_id_dvsn_cd, NULL→KRX). KR 행에서만 렌더
 

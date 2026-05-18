@@ -49,7 +49,7 @@ function OrderbookPanel({ symbol, market = 'KR', onPriceSelect }) {
   // REQ-FE-09: 미국 거래세션 시계 (프리/정규/애프터/휴장)
   const usClock = useUsMarketClock()
   // KR 종목은 'auto'로 백엔드 시간대 분기 위임. FNO/US는 무시.
-  const { price, change, changeRate, sign, asks, bids, totalAskVolume, totalBidVolume, connected } =
+  const { price, change, changeRate, sign, asks, bids, totalAskVolume, totalBidVolume, connected, errorMessage } =
     useQuote(symbol, market, isDomestic ? 'auto' : undefined)
 
   // 가격 등락 색상: sign '2'=상승(빨강), '5'=하락(파랑), '3'=보합(회색)
@@ -91,6 +91,12 @@ function OrderbookPanel({ symbol, market = 'KR', onPriceSelect }) {
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      {/* 시세 비활성화 안내 — silent failure 차단 */}
+      {errorMessage && (
+        <div className="px-4 py-2 bg-red-50 border-b border-red-200 text-xs text-red-700">
+          ⚠ {errorMessage}
+        </div>
+      )}
       {/* 헤더 */}
       <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
         <div className="flex items-center gap-2">

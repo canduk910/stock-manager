@@ -3,6 +3,8 @@
  * - 지수 백오프 재연결 (500ms → 최대 10초)
  * - visibilitychange 탭 복귀 시 즉시 재연결
  * - 정상 종료(1000) 시 재연결 안 함
+ * - 1008(Policy Violation, JWT 만료) 시 refresh 시도 → 실패 시 /login 리다이렉트
+ *   (호가/체결통보 WS가 stale token으로 무한 재시도되어 빈 호가창 보이는 결함 차단)
  *
  * @param {string|null|(() => string|null)} url - WebSocket URL 또는 매 connect 시
  *   lazy 평가될 함수. 함수형은 401/1008 close 후 백오프 재시도 시점에 최신 token이
@@ -13,6 +15,26 @@
  * @param {(ws: WebSocket) => void} [options.onOpen] - 연결 성공 콜백
  */
 import { useState, useEffect, useRef, useCallback } from 'react'
+
+let _wsRefreshing = null
+
+async function _tryRefreshForWs() {
+  const rt = localStorage.getItem('refresh_token')
+  if (!rt) return false
+  try {
+    const res = await fetch('/api/auth/refresh', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: rt }),
+    })
+    if (!res.ok) return false
+    const data = await res.json()
+    localStorage.setItem('access_token', data.access_token)
+    return true
+  } catch {
+    return false
+  }
+}
 
 export function useWebSocket(url, { onMessage, onOpen } = {}) {
   const [connected, setConnected] = useState(false)
@@ -77,13 +99,32 @@ export function useWebSocket(url, { onMessage, onOpen } = {}) {
     ws.onclose = (event) => {
       if (!mountedRef.current) return
       setConnected(false)
-      if (event.code !== 1000 && mountedRef.current) {
-        const delay = backoffRef.current
-        backoffRef.current = Math.min(delay * 2, 10000)
-        retryRef.current = setTimeout(() => {
-          if (mountedRef.current) connect()
-        }, delay)
+      if (event.code === 1000) return
+
+      // 1008(Policy Violation): JWT 만료/위조 — refresh 시도 후 실패하면 logout
+      if (event.code === 1008) {
+        if (!_wsRefreshing) {
+          _wsRefreshing = _tryRefreshForWs().finally(() => { _wsRefreshing = null })
+        }
+        _wsRefreshing.then((ok) => {
+          if (!mountedRef.current) return
+          if (ok) {
+            backoffRef.current = 500
+            connect() // lazy URL이 새 access_token을 박아 재시도
+          } else {
+            localStorage.removeItem('access_token')
+            localStorage.removeItem('refresh_token')
+            window.location.href = '/login'
+          }
+        })
+        return
       }
+
+      const delay = backoffRef.current
+      backoffRef.current = Math.min(delay * 2, 10000)
+      retryRef.current = setTimeout(() => {
+        if (mountedRef.current) connect()
+      }, delay)
     }
   }, [url])
 

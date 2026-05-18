@@ -20,6 +20,7 @@ const EMPTY_STATE = {
   totalAskVolume: null,
   totalBidVolume: null,
   connected: false,
+  errorMessage: null,
 }
 
 export function useQuote(symbol, market = 'KR', exchange = 'auto') {
@@ -67,6 +68,8 @@ export function useQuote(symbol, market = 'KR', exchange = 'auto') {
       })
     } else if (msg.type === 'disconnected') {
       setState(prev => ({ ...prev, connected: false }))
+    } else if (msg.type === 'error') {
+      setState(prev => ({ ...prev, errorMessage: msg.message || '실시간 시세 오류' }))
     }
   }, [])
 

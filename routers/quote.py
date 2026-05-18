@@ -35,13 +35,36 @@ async def quote_ws(websocket: WebSocket, symbol: str, market: str = "", exchange
         return
     try:
         from services.auth_service import verify_token
-        verify_token(token)
+        payload = verify_token(token)
+        user_id = int(payload.get("sub")) if payload.get("sub") else None
     except Exception:
         await websocket.close(code=1008)
         return
+
+    # ContextVar에 user_id 전파 — quote_overseas가 사용자별 KIS REST 키를 사용할 수 있도록.
+    if user_id is not None:
+        from routers._kis_auth import set_current_user_id
+        set_current_user_id(user_id)
+
     await websocket.accept()
     symbol = symbol.upper()
     exchange = (exchange or "auto").upper() if exchange.lower() != "auto" else "auto"
+
+    # KISQuoteManager start() 실패 시 — 빈 호가창 대신 사유를 사용자에게 노출 후 1011 close.
+    is_kr_or_fno = (market == "FNO") or (not market and is_fno(symbol)) or is_domestic(symbol)
+    if is_kr_or_fno:
+        manager = get_manager()
+        if not manager._running and manager._start_failed_reason:
+            try:
+                await websocket.send_json({
+                    "type": "error",
+                    "message": f"실시간 시세 비활성화: {manager._start_failed_reason}",
+                })
+            except Exception:
+                pass
+            await websocket.close(code=1011)
+            return
+
     try:
         if market == "FNO" or (not market and is_fno(symbol)):
             await _stream_fno(websocket, symbol)

@@ -177,3 +177,42 @@ def get_audit_log(
                         pass
 
         return result
+
+
+# ── 실시간 시세 진단 ───────────────────────────────────────────────────────
+import time as _time
+
+
+@router.get("/quote-status")
+def get_quote_status(_user: dict = Depends(require_admin)):
+    """KIS 실시간 시세 매니저 상태 진단 (admin only).
+
+    호가창 빈 화면 결함의 단일 점 결함 진단용 — start() 실패 사유 / WS 연결 여부 /
+    fallback 모드 / 구독자 수 / approval_key 발급 후 경과시간 / 연속 실패 카운터.
+    """
+    from services.quote_service import get_manager, get_overseas_manager
+
+    m = get_manager()
+    om = get_overseas_manager()
+
+    now = _time.time()
+    approval_key_age = (
+        int(now - m._approval_key_at) if m._approval_key and m._approval_key_at else None
+    )
+
+    return {
+        "kis_manager": {
+            "running": m._running,
+            "ws_connected": m._ws is not None,
+            "fallback_mode": m._fallback_mode,
+            "subscriber_count": sum(len(s) for s in m._subscribers.values()),
+            "subscribed_symbols": list(m._subscribed_symbols),
+            "approval_key_age_sec": approval_key_age,
+            "consecutive_connect_failures": m._consecutive_connect_failures,
+            "start_failed_reason": m._start_failed_reason,
+        },
+        "overseas_manager": {
+            "running": getattr(om, "_running", None),
+            "subscriber_count": sum(len(s) for s in getattr(om, "_subscribers", {}).values()),
+        },
+    }
