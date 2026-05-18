@@ -120,7 +120,7 @@ frontend/
 - IndexSection, SentimentSection (VIX+버핏+F&G), NewsSection (한국+NYT 2컬럼), InvestorSection
 - **SupplyDemandSection** — 코스피/코스닥 토글(SectorHeatmap KR/US 패턴 차용) + 10~60일 슬라이더. Recharts ComposedChart(개인/외국인/기관 일별 막대 + 누적 라인) + 당일 요약 칩(외국인 +X억 / 기관 -Y억 / 개인 +Z억). KIS 키 미설정 503/외부 API 502 → 부분 실패 안내 카드(다른 섹션 무영향). IndexSection 직후 마운트
 - MacroCycleSection (4단계 + 투자체제 나란히 + 괴리설명 + confidence + 지표카드)
-- YieldCurveSection — 3단 레이아웃: 4금리 카드 → SpreadCard|곡선 → 10Y-3M 추이 풀폭 (h-80). NBER 침체+S&P 약세장 ReferenceArea 음영
+- YieldCurveSection — 3단 레이아웃: 4금리 카드 → SpreadCard|곡선 → **10Y-3M 스프레드 + 10Y 금리 듀얼 축 추이** 풀폭 (h-80, ComposedChart). 좌축=스프레드 Area(0% ReferenceLine), 우축=10Y 금리 Line(#6366f1), Legend 자동 구분. NBER 침체+S&P 약세장 ReferenceArea 음영(spread 좌축 yAxisId)
 - CreditSpreadSection — HY OAS 백분위 5단계 시계추 + 5년차트(p10/p25/p75/p90 ReferenceLine) + IG OAS·HY-IG 보조카드(>5%p 정크패닉)
 - EventLabelsOverlay — `computeEventRows` + `makeLabelRenderer`. 글로벌 row 계산으로 침체/약세장 라벨 충돌 차단
 - CurrencySection (4환율), CommoditySection (5원자재)

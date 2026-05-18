@@ -1,5 +1,25 @@
 # 변경 이력
 
+## 2026-05-18 — 매크로 장단기 금리차 차트에 10Y 금리 추이 오버레이
+
+### UI 개선 — YieldCurveSection 스프레드 + 10Y 듀얼 축
+
+**배경**: 사용자 요청. 장단기 금리차(10Y-3M 스프레드) 추이 그래프에 10Y 금리 추이를 겹쳐 표시하여 "스프레드 좁아짐이 10Y 하락 때문인지 3M 상승 때문인지" 직관적 판단 가능하게.
+
+**변경** (`frontend/src/components/macro/YieldCurveSection.jsx` 단일 파일):
+- 백엔드 변경 0 — 응답 history에 이미 `y10y` 포함됨 (`stock/macro_fetcher.py:490`)
+- `SpreadHistoryChart`: `AreaChart` → `ComposedChart` 전환
+- 이중 Y축:
+  - 좌축 (`yAxisId="spread"`): 기존 스프레드 Area + 0% ReferenceLine 유지
+  - 우축 (`yAxisId="y10y"`, `orientation="right"`): 10Y 금리 Line (#6366f1 indigo, strokeWidth 1.5)
+- `<Legend>` 추가 — "10Y-3M 스프레드" / "10Y 금리" 자동 구분
+- NBER 침체 / S&P 약세장 ReferenceArea에 `yAxisId="spread"` 명시 — 음영 좌축에 고정 (충돌 회피)
+- 헤더: "10Y-3M 스프레드 추이" → "10Y-3M 스프레드 + 10Y 금리 추이"
+
+**검증**: 프론트 빌드 PASS, 도커 재빌드 + 사용자 확인 대기. 별도 스케일이라 스프레드 음수 구간과 10Y 절대 수준이 시각적으로 충돌 없음.
+
+---
+
 ## 2026-05-17 — 사용자별 일별 접속현황 admin 기능 + 섹터 진단 범례 개선
 
 ### 신규 기능 — 사용자별 일별 접속현황

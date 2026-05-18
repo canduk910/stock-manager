@@ -1,6 +1,6 @@
 import {
-  ResponsiveContainer, LineChart, Line, AreaChart, Area,
-  XAxis, YAxis, Tooltip, CartesianGrid, ReferenceLine, ReferenceArea,
+  ResponsiveContainer, LineChart, Line, AreaChart, Area, ComposedChart,
+  XAxis, YAxis, Tooltip, CartesianGrid, ReferenceLine, ReferenceArea, Legend,
 } from 'recharts'
 import LoadingSpinner from '../common/LoadingSpinner'
 import ErrorAlert from '../common/ErrorAlert'
@@ -165,14 +165,14 @@ function SpreadHistoryChart({ history, events }) {
   return (
     <div className="rounded-lg border bg-white p-4 shadow-sm">
       <div className="text-sm font-medium text-gray-500 mb-2">
-        10Y-3M 스프레드 추이
+        10Y-3M 스프레드 + 10Y 금리 추이
         <span className="ml-2 text-[10px] text-gray-400">
           ■ 회색=NBER 침체 / ▼ 붉은색=S&amp;P -20% 약세장
         </span>
       </div>
       <div className="h-80">
         <ResponsiveContainer width="100%" height="100%">
-          <AreaChart data={history}>
+          <ComposedChart data={history}>
             <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
             <XAxis
               dataKey="date"
@@ -180,22 +180,34 @@ function SpreadHistoryChart({ history, events }) {
               interval="preserveStartEnd"
               allowDuplicatedCategory={false}
             />
+            {/* 좌축: 스프레드 (Area) */}
             <YAxis
+              yAxisId="spread"
+              tick={{ fontSize: 12 }}
+              domain={['auto', 'auto']}
+              tickFormatter={(v) => `${v}%`}
+            />
+            {/* 우축: 10Y 금리 (Line) — 별도 스케일로 음의 스프레드와 시각적 충돌 방지 */}
+            <YAxis
+              yAxisId="y10y"
+              orientation="right"
               tick={{ fontSize: 12 }}
               domain={['auto', 'auto']}
               tickFormatter={(v) => `${v}%`}
             />
             <Tooltip
-              formatter={(v) => [`${fmt(v)}%`, '스프레드']}
+              formatter={(v, name) => [`${fmt(v)}%`, name]}
               labelFormatter={(l) => l}
               contentStyle={{ fontSize: 12, borderRadius: 8 }}
             />
+            <Legend wrapperStyle={{ fontSize: 11 }} />
             {/* 음영 + ReferenceArea 자체 label(콜백, viewBox 수신). 글로벌 row 할당으로 충돌 회피. */}
             {ev.bear_markets.map((b, i) => {
               const { row, displayLabel } = rowMap.rowDisplayFor('bear', b.x1, b.x2)
               return (
                 <ReferenceArea
                   key={`bear-${i}`}
+                  yAxisId="spread"
                   x1={b.x1}
                   x2={b.x2}
                   fill="#ef4444"
@@ -211,6 +223,7 @@ function SpreadHistoryChart({ history, events }) {
               return (
                 <ReferenceArea
                   key={`rec-${i}`}
+                  yAxisId="spread"
                   x1={r.x1}
                   x2={r.x2}
                   fill="#6b7280"
@@ -223,7 +236,7 @@ function SpreadHistoryChart({ history, events }) {
                 />
               )
             })}
-            <ReferenceLine y={0} stroke="#6b7280" strokeDasharray="4 4" strokeWidth={1.5} />
+            <ReferenceLine yAxisId="spread" y={0} stroke="#6b7280" strokeDasharray="4 4" strokeWidth={1.5} />
             <defs>
               <linearGradient id="spreadPos" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%" stopColor="#22c55e" stopOpacity={0.3} />
@@ -235,15 +248,27 @@ function SpreadHistoryChart({ history, events }) {
               </linearGradient>
             </defs>
             <Area
+              yAxisId="spread"
               type="monotone"
               dataKey="spread"
+              name="10Y-3M 스프레드"
               stroke="#6b7280"
               strokeWidth={1.5}
               fill="url(#spreadPos)"
               dot={false}
               isAnimationActive={false}
             />
-          </AreaChart>
+            <Line
+              yAxisId="y10y"
+              type="monotone"
+              dataKey="y10y"
+              name="10Y 금리"
+              stroke="#6366f1"
+              strokeWidth={1.5}
+              dot={false}
+              isAnimationActive={false}
+            />
+          </ComposedChart>
         </ResponsiveContainer>
       </div>
     </div>
