@@ -95,7 +95,9 @@ class TestStockInfoDictShortcut:
         from db.utils import KST
 
         now = datetime.now(KST).replace(tzinfo=None)
-        recent = (now - timedelta(minutes=5)).isoformat(timespec="seconds")
+        # price TTL: 0.0014h(5초) trading — 5분 전이면 trading hours CI에서 stale.
+        # 1초 전 → trading 5초 / off 30분 둘 다 fresh 보장.
+        recent = (now - timedelta(seconds=1)).isoformat(timespec="seconds")
         old_recent = (now - timedelta(hours=1)).isoformat(timespec="seconds")
         info = {
             "code": "005930", "market": "KR",

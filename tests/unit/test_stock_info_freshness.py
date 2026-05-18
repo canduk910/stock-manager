@@ -40,12 +40,11 @@ class TestIsStaleFromDict:
 
     def test_recent_price_is_fresh_during_trading(self):
         from db.repositories.stock_info_repo import is_stale_from_dict
-        # 트레이딩 시간(KR 평일 9~15:30) 흉내 — 현재 시각에서 5분 전
-        now = datetime.now(KST).replace(tzinfo=None)
-        info = {"price_updated_at": _iso(now - timedelta(minutes=5))}
-        # price TTL: 0.167h(10분) trading. 5분 전이면 fresh.
-        # 단 트레이딩 시간 외라면 12h TTL로 fresh.
-        assert is_stale_from_dict(info, "price") is False
+        # 평일 KST 14:00 (trading) 고정 — CI 시간대 의존 결함 회피.
+        # price TTL: 0.0014h(5초) trading (현재가 캐시 금지 도메인 원칙) → 2초 전이면 fresh.
+        now = datetime(2026, 5, 4, 14, 0, 0)
+        info = {"price_updated_at": _iso(now - timedelta(seconds=2))}
+        assert is_stale_from_dict(info, "price", now=now) is False
 
     def test_old_price_is_stale(self):
         from db.repositories.stock_info_repo import is_stale_from_dict

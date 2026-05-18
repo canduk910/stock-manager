@@ -1,5 +1,23 @@
 # 변경 이력
 
+## 2026-05-18 — CI flaky test 수정 (price freshness 시간 의존)
+
+### 버그 수정 — CI 백엔드 테스트 2건 실패 hotfix
+
+**배경**: GitHub Actions `54b04de` Deploy/CI 모두 failure. pytest 결과 2/2026 fail.
+- `test_stock_info_freshness.py::test_recent_price_is_fresh_during_trading` — `is_stale_from_dict` True 반환 (기대: False)
+- `test_watchlist_partial_failure.py::test_all_fresh_skips_external_api` — price=None, "should not be called" 외부 API 호출 발생
+
+**원인**: 2430c0a 커밋 "관심종목 현재가 캐시 제거 (도메인 원칙 정합)"에서 `_TTL["price"]["trading"] = 0.0014h = 5초` (현재가 캐시 금지 도메인 원칙)로 줄였으나, 두 테스트가 여전히 **5분 전 timestamp를 fresh로 가정**. CI 실행 시각이 평일 KST 10:13(trading hours)이라 발현된 flaky test — 이전 4개 커밋(8089c87/aab3762/c28177f/899ec4a)은 off-hours에 실행되어 30분 TTL로 우연히 통과.
+
+**수정**:
+- `tests/unit/test_stock_info_freshness.py::test_recent_price_is_fresh_during_trading` — `datetime(2026, 5, 4, 14, 0, 0)` 평일 trading 14:00 고정 + `now=now` 명시 주입 + timestamp 2초 전(5초 TTL 내). 시간 의존성 제거로 결정적 통과.
+- `tests/unit/test_watchlist_partial_failure.py::test_all_fresh_skips_external_api` — `_fetch_dashboard_row` 내부는 `now` 주입 불가하여 timestamp를 1초 전으로 변경 (trading 5초 / off 30분 둘 다 fresh 보장). 주석에 회귀 가드 명시.
+
+**검증**: `pytest tests/unit/test_stock_info_freshness.py tests/unit/test_watchlist_partial_failure.py` → 17/17 PASS.
+
+---
+
 ## 2026-05-18 — 매크로 장단기 금리차 차트에 10Y 금리 추이 오버레이
 
 ### UI 개선 — YieldCurveSection 스프레드 + 10Y 듀얼 축
