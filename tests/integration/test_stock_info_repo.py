@@ -106,12 +106,15 @@ class TestStockInfoStale:
         assert repo.is_stale("005930", "KR", "price") is True
 
     def test_is_stale_fresh(self, db_session):
+        """metrics fresh 데이터는 not stale (price는 2026-06-01 도메인 원칙으로 항상 stale)."""
         repo = StockInfoRepository(db_session)
-        repo.upsert_price("005930", "KR", {"close": 62000})
+        repo.upsert_metrics("005930", "KR", {"per": 12.5})
         db_session.commit()
 
-        # 방금 저장한 데이터는 fresh
-        assert repo.is_stale("005930", "KR", "price") is False
+        # 방금 저장한 metrics는 fresh
+        assert repo.is_stale("005930", "KR", "metrics") is False
+        # price 영역은 timestamp 무관 항상 stale (현재가 캐시 금지)
+        assert repo.is_stale("005930", "KR", "price") is True
 
     def test_is_stale_no_field(self, db_session):
         """metrics만 저장했는데 price staleness 확인."""

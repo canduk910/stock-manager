@@ -1,5 +1,13 @@
 # 변경 이력
 
+## 2026-06-02 — CI 차단 hotfix (통합 테스트 누락 보완)
+
+### 버그 수정 — 어제 변경에서 누락된 integration 테스트
+
+- **CI 실패 원인**: `tests/integration/test_stock_info_repo.py::TestStockInfoStale::test_is_stale_fresh`가 여전히 `price` field로 fresh→`is_stale=False`를 기대했으나, 2026-06-01 "현재가 캐시 금지" 강화로 price는 timestamp 무관 항상 stale.
+- **수정**: 동일 도메인 원칙을 integration에도 정렬. `upsert_metrics` 후 `metrics` 필드 not stale + `price` 필드는 stale 양쪽 모두 검증.
+- 영향 파일: `tests/integration/test_stock_info_repo.py` 1개. 운영 코드 무변경.
+
 ## 2026-06-01 — 관심종목 현재가 stale 결함 제거 (현재가 캐시 금지 강화)
 
 ### 버그 수정 — 관심종목 목록/상세 현재가가 과거 시점 데이터 표시
