@@ -57,26 +57,13 @@ def _has_partial_failure(data) -> bool:
 
 
 def get(*, user_id: int, items: Iterable[dict]) -> Optional[list]:
-    """캐시 조회. 만료/미스 시 None."""
-    key = _make_key(user_id, items)
-    with _LOCK:
-        entry = _CACHE.get(key)
-        if not entry:
-            return None
-        data, expires_at = entry
-        if _now() >= expires_at:
-            _CACHE.pop(key, None)
-            return None
-        return data
+    """캐시 조회. 현재가 캐시 금지 도메인 원칙으로 항상 None (캐시 비활성)."""
+    return None
 
 
 def set(*, user_id: int, items: Iterable[dict], data: list, ttl: Optional[float] = None) -> None:
-    """캐시 저장. ttl=None이면 partial_failure 여부에 따라 자동 결정."""
-    key = _make_key(user_id, items)
-    if ttl is None:
-        ttl = PARTIAL_FAILURE_TTL_SEC if _has_partial_failure(data) else DEFAULT_TTL_SEC
-    with _LOCK:
-        _CACHE[key] = (data, _now() + ttl)
+    """캐시 저장. 현재가 캐시 금지 도메인 원칙으로 no-op (캐시 비활성)."""
+    return None
 
 
 def invalidate(user_id: int) -> None:

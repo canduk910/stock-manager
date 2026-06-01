@@ -18,7 +18,7 @@ CLI와 API 라우터 양쪽에서 공용. 비즈니스 데이터는 SQLAlchemy O
 | `indicators.py` | 기술 지표 순수 계산 (MACD/RSI Wilder/Stochastic/BB/MA/ATR/`volume_signal`/`bb_position`). 외부 의존 없음. `calc_technical_indicators(ohlcv)` 최대 300봉. |
 | `utils.py` | `is_domestic(code)` 6자리 숫자=국내 / `is_fno(code)` FNO 단축코드 판별. |
 | `symbol_map.py` | 종목코드↔종목명 매핑 (7일 캐시). `code_to_name()`. pykrx 실패 시 DART corpCode.xml fallback. |
-| `market.py` | yfinance 기반 KR 시세/시총/PER/PBR/배당/섹터. `_kr_yf_ticker_str(code)` `.KS/.KQ` suffix 자동 (score≥1 검증). PER/PBR/ROE는 yfinance 1차 실패 시 income_stmt/대차/분기 TTM으로 직접 계산. **`fetch_prices_batch(codes, market='KR'\|'US')`** — 시세판 다중심볼 일괄 폴링. yfinance `yf.Tickers(...)` fast_info 1차 → 빈응답·예외 시 KIS REST `FHKST01010100` 폴백 (분당 한도 보호 N≤20 가드). in-memory TTL 캐시(장중 10s/장외 60s). `{code: {price, change, change_pct, prev_close, volume, sign}}` 반환, 부분 실패 부분 반환 (시세판 부분 표시 우선). |
+| `market.py` | yfinance 기반 KR 시세/시총/PER/PBR/배당/섹터. `_kr_yf_ticker_str(code)` `.KS/.KQ` suffix 자동 (score≥1 검증). PER/PBR/ROE는 yfinance 1차 실패 시 income_stmt/대차/분기 TTM으로 직접 계산. **`fetch_prices_batch(codes, market='KR'\|'US')`** — 시세판 다중심볼 일괄 폴링. yfinance `yf.Tickers(...)` fast_info 1차 → 빈응답·예외 시 KIS REST `FHKST01010100` 폴백 (분당 한도 보호 N≤20 가드). `{code: {price, change, change_pct, prev_close, volume, sign}}` 반환, 부분 실패 부분 반환 (시세판 부분 표시 우선). **2026-06-01 현재가 캐시 금지 강화**: `fetch_price`/`fetch_prices_batch` 모두 캐시 우회 — 매 호출 외부 API. `fetch_detail`은 가격을 매번 새로 가져오고 메타(market_type/sector/52w/PER/PBR)만 6h 캐시(`market:detail_meta:`). |
 | `market_board.py` | 시세판: 신고가/신저가 탐지 + sparkline + 당일 OHLC 배치 조회. |
 | `market_board_store.py` | 시세판 별도 등록 종목 CRUD. `db/repositories/market_board_repo.py` 위임. |
 | `dart_fin.py` | OpenDart 재무제표 (최대 10년) + `fetch_quarterly_financials()`(누계→분기) + `calc_interest_coverage()`. 연도별 API 호출로 각 연도 고유 `rcept_no`(보고서 링크) 보장. **업종 4-tier 분기** (REQ-SECTOR): `detect_sector_tier(items) → "insurance"\|"bank_holding"\|"securities"\|"general"` (회계과목 패턴 자동 판별, `is_insurance_company()`와 동일 위치). 금융지주 매출 = `_sum_bank_holding_revenue()` (이자수익+수수료수익+보험수익 합산, 086790 28.33조/105560 47.43조 검증). 응답에 `sector_tier` 메타 + BS 신규 필드 5개(만기별 자산/부채). 보험사·증권사·일반 제조업 회귀 가드 PASS. |
@@ -119,14 +119,17 @@ CLI와 API 라우터 양쪽에서 공용. 비즈니스 데이터는 SQLAlchemy O
 | `advisor:52w:{market}:{code}` | 6h |
 | `market:metrics:` | 장중 1h / 장외 12h |
 | `market:period_returns:` | 장중 15m / 장외 6h |
-| `market:price:` | 장중 5s / 장외 30m (현재가 캐시 금지 도메인 원칙, F5 dedup만) |
+| `market:price:` | **2026-06-01 캐시 비활성** — fetch_price는 매 호출 외부 API |
+| `market:detail_meta:` | 6h (가격 제외 메타만: market_type/sector/52w/PER/PBR) |
+| `yf:price:` | **2026-06-01 캐시 비활성** — fetch_price_yf는 매 호출 외부 API |
 | `yf:*` | 1~24h (장중/장외 분리), `yf:forward:` 6h |
 | `market_board:intraday_ohlc:` | 장중 6m / 장외 6h |
 | `analyst:summary:` | 영구 |
 
 ### stock_info_store.py (영속 캐시)
 - Docker 재시작에도 유지 (entrypoint.sh 미초기화)
-- 영역별 TTL: **price (장중 5s / 장외 30m — 현재가 캐시 금지 도메인 원칙, F5 dedup 한정)**, metrics (장중 6h / 장외 24h), financials (7일), returns (장중 30m / 장외 12h)
+- 영역별 TTL: metrics (장중 6h / 장외 24h), financials (7일), returns (장중 30m / 장외 12h)
+- **price 영역은 `is_stale_from_dict` 진입부에서 무조건 stale 반환(2026-06-01) — 영속 캐시 우회. write-through는 디버깅/감사 목적으로 유지하되 조회 시 사용되지 않음**
 - write-through: `market.py`/`dart_fin.py`/`yf_client.py`의 fetch 함수가 결과 자동 저장
 - 대시보드 우선 조회: `watchlist_service.py`에서 stock_info 먼저 → stale 시에만 외부 API
 

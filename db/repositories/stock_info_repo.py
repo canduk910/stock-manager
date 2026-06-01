@@ -77,6 +77,10 @@ def _is_stale_from_dict_impl(
     if not info:
         return True
 
+    # 현재가 캐시 금지 도메인 원칙 — price 영역은 영속 캐시 사용 안 함, 항상 stale.
+    if field == "price":
+        return True
+
     col_name = _FIELD_TO_COLUMN.get(field, f"{field}_updated_at")
     updated_str = info.get(col_name)
     if not updated_str:

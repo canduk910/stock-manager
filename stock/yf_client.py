@@ -178,10 +178,7 @@ def fetch_price_yf(code: str) -> Optional[dict]:
     응답 dict 키 변경 없음 (close/change/change_pct/mktcap/currency).
     KIS는 시가총액(mktcap)을 제공하지 않으므로 KIS 사용 시 mktcap은 None.
     """
-    key = f"yf:price:{code.upper()}"
-    cached = get_cached(key)
-    if cached is not None:
-        return cached or None
+    # 현재가 캐시 금지 도메인 원칙 — 호출 시마다 외부 API 호출.
 
     # ── KIS 우선 ───────────────────────────────────────────────────────────
     try:
@@ -205,9 +202,6 @@ def fetch_price_yf(code: str) -> Optional[dict]:
                     "mktcap": None,  # KIS 미제공
                     "currency": kis.get("currency") or "USD",
                 }
-                # 현재가 캐시 금지 도메인 원칙 — 장중 5초(F5 dedup만), 장외 30분
-                ttl = 5 / 3600 if _is_us_trading_hours() else 0.5
-                set_cached(key, result, ttl_hours=ttl)
                 try:
                     from .stock_info_store import upsert_price
                     upsert_price(code, "US", result)
@@ -224,7 +218,6 @@ def fetch_price_yf(code: str) -> Optional[dict]:
         # 비개장일에 last_price가 None인 경우 previous_close로 fallback
         close = _safe(fi.last_price) or _safe(fi.previous_close)
         if close is None:
-            set_cached(key, {}, ttl_hours=1)
             return None
 
         prev_close = _safe(fi.previous_close) or close
@@ -240,10 +233,7 @@ def fetch_price_yf(code: str) -> Optional[dict]:
             "mktcap": mktcap,
             "currency": fi.currency or "USD",
         }
-        # 현재가 캐시 금지 도메인 원칙 — 장중 5초(F5 dedup만), 장외 30분
-        ttl = 5 / 3600 if _is_us_trading_hours() else 0.5
-        set_cached(key, result, ttl_hours=ttl)
-        # 영속 캐시 write-through
+        # 영속 캐시 write-through (조회 시 stale 판정으로 우회됨, 디버깅용)
         try:
             from .stock_info_store import upsert_price
             upsert_price(code, "US", result)
@@ -251,7 +241,6 @@ def fetch_price_yf(code: str) -> Optional[dict]:
             pass
         return result
     except Exception:
-        set_cached(key, {}, ttl_hours=1)
         return None
 
 

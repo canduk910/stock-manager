@@ -1,5 +1,54 @@
 # 변경 이력
 
+## 2026-06-01 — 관심종목 현재가 stale 결함 제거 (현재가 캐시 금지 강화)
+
+### 버그 수정 — 관심종목 목록/상세 현재가가 과거 시점 데이터 표시
+
+**증상**: 관심종목 목록과 상세 페이지의 "현재가" 컬럼이 장중에도 수 분~수 시간 묵은 가격을 보여줌. F5 새로고침해도 즉시 갱신되지 않음.
+
+**진단** (read-only 코드 추적, 6개 캐시 레이어 발견):
+1. **`stock/market.py:fetch_detail()` 6시간 캐시** — 가장 큰 주범. `market:detail:` 캐시키에 `**price` 통째 묶어 6h 보관 → DetailPage 첫 진입 후 6시간 동안 같은 가격 노출. `fetch_price` 자체는 짧은 TTL이지만 우회됨.
+2. **`db/repositories/stock_info_repo.py:is_stale_from_dict()`** `_is_kr_trading_hours()`만 사용 — 미국 종목도 한국 거래시간 기준 판정. 미국 정규장(KST 22:30~05:00) 중에는 항상 `off` 분기 → price TTL=30분 적용으로 stale 노출.
+3. `stock/market.py:fetch_price()` — `market:price:` 캐시 (장중 5s / 장외 30m). 장외 30분이 길게 느껴짐.
+4. `stock/yf_client.py:fetch_price_yf()` — `yf:price:` 동일 TTL 정책.
+5. `stock/market.py:fetch_prices_batch()` — `_prices_batch_cache` in-memory TTL (장중 10s / 장외 60s).
+6. `services/_dashboard_cache.py` — dashboard 응답 전체 사용자별 5s TTL.
+
+**사용자 결정**: "현재가에는 캐시 적용예외. 무조건 api호출하도록 적용" — 모든 가격 캐시 레이어 무력화.
+
+#### 변경 — 6개 캐시 레이어 우회
+
+| 파일 | 변경 |
+|---|---|
+| `stock/market.py:fetch_price()` | `market:price:` 캐시 read/write 제거. 매 호출 yfinance fast_info 호출. refresh=True는 `kr_yf_ticker` 보조 캐시만 무효화. |
+| `stock/market.py:fetch_detail()` | 가격은 매 호출 `fetch_price()`로 신선 값. 메타(market_type/sector/high_52/low_52/per/pbr)만 `market:detail_meta:` 별도 캐시키로 6h 유지. 응답 dict는 `{**meta, **price}` 병합. |
+| `stock/market.py:fetch_prices_batch()` | `_prices_batch_cache` in-memory dict read/write 제거. 매 호출 yfinance Tickers + KIS 폴백. |
+| `stock/yf_client.py:fetch_price_yf()` | `yf:price:` 캐시 read/write 제거. KIS 우선 / yfinance 폴백 양 경로 모두. |
+| `db/repositories/stock_info_repo.py:is_stale_from_dict()` | `field=="price"` 분기 추가 — timestamp 무관 무조건 True 반환. 영속 캐시 우회. metrics/financials/returns는 기존 TTL 유지. |
+| `services/_dashboard_cache.py` | `get()`→항상 None, `set()`→no-op. 모듈 시그니처 보존하여 호출 측 무변경. |
+
+#### 회귀 가드 (4개 단위 테스트 재작성)
+
+- `tests/unit/test_dashboard_cache.py` — `TestDashboardCacheDisabled`로 전면 재편. `get_always_none` / `set_is_noop` / `each_call_hits_service` (라우터가 매 호출 service 호출 확인).
+- `tests/unit/test_watchlist_partial_failure.py::test_price_always_calls_external_api` — stock_info에 1초 전 fresh price가 있어도 `fetch_price` 호출되어야 함 (metrics/financials는 stock_info hit 유지).
+- `tests/unit/test_market_prices_batch.py::test_cache_disabled_external_called_each_call` — 동일 코드 연속 호출 시 외부 호출 2회 확인.
+- `tests/unit/test_stock_info_freshness.py` — `test_price_always_stale_regardless_of_timestamp` 추가. 기존 `test_recent_price_is_fresh_during_trading`/`test_explicit_now_parameter`/`test_off_hours_uses_off_ttl`는 의미 상실 → metrics 영역 검증으로 재편.
+
+**테스트 결과**: 영향 32건 PASS / 전체 단위 테스트 1508 PASS (사전 결함 `pdfplumber` 미설치 2건만 잔존, 변경 무관).
+
+#### 흐름 변경 영향
+
+- **관심종목 목록**: 매 새로고침 시 `fetch_price`/`fetch_price_yf` → 즉시 yfinance/KIS 호출. 미국 종목도 한국 거래시간 무관 매번 새 값.
+- **DetailPage**: 기존 6시간 묵은 detail 캐시 → price는 매 호출, 메타(sector/52w)는 6h 유지.
+- **시세판**: 다중심볼 batch도 매 호출 외부 API. KIS 폴백 N≤20 가드는 유지.
+- **swap thrashing 보호**: dashboard cache 제거 후 `watchlist_service.py` ThreadPool max_workers=4로만 보호.
+
+#### 도메인 자문 부재 (사용자 직접 결정)
+
+부서장 라우팅으로 진단(유형 C/D 후보)을 수행했으나, 사용자가 "현재가 캐시 적용예외" 명시적 결정으로 도메인 전문가 호출 생략. `현재가 캐시 금지 도메인 원칙`은 이미 기존 주석에 명시되어 있었으나 5s/30m TTL로 우회되고 있던 것을 강화.
+
+---
+
 ## 2026-05-18 — 호가 미수신 결정적 원인 규명 (시계 + WS URL)
 
 ### 버그 수정 — 호가창 빈 화면 본진 결함 2건 동시 발견·수정

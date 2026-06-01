@@ -112,16 +112,13 @@ def _market_type(ticker_str: str) -> str:
 def fetch_price(code: str, refresh: bool = False) -> Optional[dict]:
     """현재가, 전일대비(%), 시가총액, 상장주식수 조회.
 
+    현재가 캐시 금지 — 호출 시마다 외부 API 호출.
+    refresh=True는 보조 캐시(ticker resolver 등) 무효화 용도.
+
     반환: dict 또는 None (종목 없음)
     """
-    cache_key = f"market:price:{code}"
     if refresh:
-        delete_prefix(f"market:price:{code}")
         delete_prefix(f"market:kr_yf_ticker:{code}")
-    else:
-        cached = get_cached(cache_key)
-        if cached is not None:
-            return cached
 
     from .yf_client import _ticker
 
@@ -155,10 +152,7 @@ def fetch_price(code: str, refresh: bool = False) -> Optional[dict]:
             "shares": int(shares) if shares else None,
             "trading_date": date.today().strftime("%Y%m%d"),
         }
-        # 현재가 캐시 금지 도메인 원칙 — 장중 5초(F5 dedup만), 장외 30분
-        ttl = 0.0014 if _is_kr_trading_hours() else 0.5
-        set_cached(cache_key, result, ttl_hours=ttl)
-        # 영속 캐시 write-through
+        # 영속 캐시 write-through (조회 시 stale 판정으로 우회됨, 디버깅용 잔존)
         try:
             from .stock_info_store import upsert_price
             upsert_price(code, "KR", result)
@@ -171,24 +165,31 @@ def fetch_price(code: str, refresh: bool = False) -> Optional[dict]:
 
 
 def fetch_detail(code: str, refresh: bool = False) -> Optional[dict]:
-    """info 커맨드용 상세정보: 시장구분, 업종, 52주 고저, PER, PBR 추가."""
-    cache_key = f"market:detail:{code}"
+    """info 커맨드용 상세정보: 시장구분, 업종, 52주 고저, PER, PBR 추가.
+
+    현재가는 캐시하지 않는다 — 항상 fetch_price()로 신선한 값 사용.
+    메타(market_type/sector/high_52/low_52/per/pbr)만 6시간 캐시.
+    """
+    meta_cache_key = f"market:detail_meta:{code}"
     if refresh:
-        delete_prefix(f"market:detail:{code}")
+        delete_prefix(f"market:detail_meta:{code}")
         delete_prefix(f"market:kr_yf_ticker:{code}")
-    else:
-        cached = get_cached(cache_key)
-        if cached is not None:
-            return cached
+
+    # 가격은 매번 새로 (캐시 우회)
+    price = fetch_price(code, refresh=refresh)
+    if price is None:
+        return None
+
+    # 메타는 6시간 캐시 — 가격과 분리
+    if not refresh:
+        cached_meta = get_cached(meta_cache_key)
+        if cached_meta is not None:
+            return {**cached_meta, **price}
 
     from .yf_client import _ticker
 
     ticker_str = _kr_yf_ticker_str(code)
     if not ticker_str:
-        return None
-
-    price = fetch_price(code, refresh=refresh)
-    if price is None:
         return None
 
     try:
@@ -207,8 +208,7 @@ def fetch_detail(code: str, refresh: bool = False) -> Optional[dict]:
         per_raw = info.get("trailingPE")
         pbr_raw = info.get("priceToBook")
 
-        result = {
-            **price,
+        meta = {
             "market_type": market_type,
             "sector": sector,
             "high_52": int(high_52) if high_52 else None,
@@ -216,8 +216,8 @@ def fetch_detail(code: str, refresh: bool = False) -> Optional[dict]:
             "per": round(per_raw, 2) if per_raw else None,
             "pbr": round(pbr_raw, 2) if pbr_raw else None,
         }
-        set_cached(cache_key, result, ttl_hours=6)
-        return result
+        set_cached(meta_cache_key, meta, ttl_hours=6)
+        return {**meta, **price}
 
     except Exception as e:
         raise RuntimeError(f"상세정보 조회 실패 ({code}): {e}") from e
@@ -758,17 +758,7 @@ def fetch_prices_batch(codes: list[str], market: str = "KR") -> dict[str, dict]:
             seen.add(c)
             unique_codes.append(c)
 
-    # 캐시 조회
-    ttl = _prices_batch_ttl_seconds(market)
-    cache_key = (market, tuple(sorted(unique_codes)))
-    now_ts = _time.time()
-    with _prices_batch_cache_lock:
-        cached = _prices_batch_cache.get(cache_key)
-        if cached is not None:
-            ts, result = cached
-            if (now_ts - ts) < ttl:
-                return dict(result)
-
+    # 현재가 캐시 금지 도메인 원칙 — in-memory TTL 캐시 우회, 매 호출 외부 API
     # 1차: yfinance
     if market == "KR":
         ticker_map = _resolve_kr_yf_tickers(unique_codes)
@@ -812,13 +802,5 @@ def fetch_prices_batch(codes: list[str], market: str = "KR") -> dict[str, dict]:
         for code, rec in kis_result.items():
             result[code] = rec
 
-    # 캐시 저장
-    with _prices_batch_cache_lock:
-        _prices_batch_cache[cache_key] = (now_ts, dict(result))
-        # 캐시 크기 제한 (200건 초과 시 oldest 제거)
-        if len(_prices_batch_cache) > 200:
-            oldest = sorted(_prices_batch_cache.items(), key=lambda kv: kv[1][0])[:50]
-            for k, _ in oldest:
-                _prices_batch_cache.pop(k, None)
-
+    # 현재가 캐시 금지 — 결과 캐시 저장 생략
     return result

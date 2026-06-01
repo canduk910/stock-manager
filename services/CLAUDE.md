@@ -11,7 +11,7 @@
 | `exceptions.py` | 공용 예외 계층 (ServiceError → NotFound/Conflict/ExternalAPI/Config/PaymentRequired/AiQuotaExceeded) |
 | `ai_gateway.py` | 모든 OpenAI 호출 단일 진입점. `call_openai_chat()`, 유저별 일일 쿼터 + 사용량 기록. `user_id=None`은 시스템 호출(쿼터 미차감). `AiQuotaExceededError(429)`. |
 | `_telemetry.py` | 계측 (stdlib only). `@timed` / `record_event` / `observe(p50/p95/p99)` / `start_periodic_flush`. `TELEMETRY_ENABLED`/`TELEMETRY_FLUSH_SEC` 제어. 메모리 < 300KB 상한. |
-| `_dashboard_cache.py` | 워치리스트 dashboard 사용자별 in-memory TTL (장중 5s / 부분 실패 3s) — **현재가 캐시 금지 도메인 원칙**, F5 dedup + t3.small swap thrashing 방지 한정. 시세판 인메모리 캐시(장중 10s)와 일관된 정책. `(user_id, sorted_codes_hash)` 키. add/remove/update 핸들러에서 invalidate. 멀티 인스턴스 시 Redis로 재설계 필요. |
+| `_dashboard_cache.py` | **2026-06-01: 캐시 영구 비활성** (현재가 캐시 금지 도메인 원칙 강화 — 사용자 결정). `get()`→None, `set()`→no-op, `invalidate*()`→no-op. dashboard 응답이 현재가를 포함하므로 5s TTL조차 stale 표시 가능 → 매 요청 service 호출로 회귀. swap thrashing 보호는 ThreadPool max_workers=4(`watchlist_service`)로만 유지. 모듈 시그니처는 보존하여 호출 측 무변경. |
 | `secure_store.py` | AES-GCM 암호화 (`KIS_ENCRYPTION_KEY` 32-byte b64). nonce 12B + ciphertext + tag 16B. 키 미설정 시 `ConfigError(503)`. 사용자 KIS 자격증명 저장. cryptography>=42. |
 | `kis_validator.py` | KIS 자격증명 검증. `/oauth2/tokenP` 호출로 토큰 발급 시도. 실패 시 `ExternalAPIError`. |
 | `balance_service.py` | 멀티 계좌 잔고 진입점. `fetch_single_account_balance(user_id, account_label)` 한 계좌 KIS 호출(국내/해외/FNO) + 메트릭 보강 + partial_failure. `aggregate_balance_accounts(list[per_account])` 종목 단위 합산(qty=sum, avg_price=weighted_avg, eval/pl=sum, accounts 메타). `fetch_aggregated_balance(user_id, account_label=None)` 라우터 진입점 — None 시 모든 계좌 `asyncio.gather`(Semaphore cap=6) 병렬 후 합산, 라벨 지정 시 단독. 등록 0개 시 빈 응답(예외 raise 금지). 환율은 단일(첫 계좌 응답 재사용). FNO는 합산 안 함(만기/사이즈 차이) + account_label 부착. |

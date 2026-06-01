@@ -143,8 +143,8 @@ class TestFetchPricesBatchPartial:
 
 class TestFetchPricesBatchCache:
 
-    def test_cache_hit_skips_external_call(self):
-        """동일 코드 연속 호출 시 캐시 적중 → 외부 호출 1회만."""
+    def test_cache_disabled_external_called_each_call(self):
+        """현재가 캐시 금지(2026-06-01) — 동일 코드 연속 호출 시 매번 외부 호출."""
         from stock.market import fetch_prices_batch
         import stock.market as mkt
 
@@ -158,11 +158,10 @@ class TestFetchPricesBatchCache:
 
         with patch.object(mkt, "_yf_batch_fast_info", side_effect=counting_batch), \
              patch.object(mkt, "_resolve_kr_yf_tickers", return_value={"005930": "005930.KS"}):
-            mkt._prices_batch_cache.clear()
             r1 = fetch_prices_batch(["005930"], market="KR")
             r2 = fetch_prices_batch(["005930"], market="KR")
 
-        assert call_count["n"] == 1, "두 번째 호출은 캐시에서 응답해야 함"
+        assert call_count["n"] == 2, "캐시 비활성 — 매 호출 외부 호출되어야 함"
         assert r1 == r2
 
 

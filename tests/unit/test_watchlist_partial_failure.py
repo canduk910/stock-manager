@@ -87,16 +87,17 @@ class TestPartialFailure:
 # ── QW-1: dict 기반 stock_info 단축회로 검증 ──────────────────────────────
 
 class TestStockInfoDictShortcut:
-    """fresh stock_info 있으면 외부 API 미호출 + DB SELECT 1회만."""
+    """현재가 캐시 금지 도메인 원칙(2026-06-01): price는 매번 fetch_price 호출.
+    metrics/financials는 fresh 시 stock_info 단축회로 유지.
+    """
 
-    def test_all_fresh_skips_external_api(self, kr_item):
+    def test_price_always_calls_external_api(self, kr_item):
+        """stock_info에 price가 fresh로 있어도 fetch_price 무조건 호출."""
         from services import watchlist_service as ws
         from datetime import datetime, timedelta
         from db.utils import KST
 
         now = datetime.now(KST).replace(tzinfo=None)
-        # price TTL: 0.0014h(5초) trading — 5분 전이면 trading hours CI에서 stale.
-        # 1초 전 → trading 5초 / off 30분 둘 다 fresh 보장.
         recent = (now - timedelta(seconds=1)).isoformat(timespec="seconds")
         old_recent = (now - timedelta(hours=1)).isoformat(timespec="seconds")
         info = {
@@ -106,17 +107,19 @@ class TestStockInfoDictShortcut:
             "dividend_yield": 2.0, "sector": "반도체",
             "revenue": 1_000_000, "operating_income": 100_000, "net_income": 80_000,
             "bsns_year": "2024",
-            "price_updated_at": recent,
+            "price_updated_at": recent,   # 1초 전이라도 항상 stale 처리
             "metrics_updated_at": recent,
             "fin_updated_at": old_recent,
         }
+        fresh_price = {"close": 71500, "change": 1500, "change_pct": 2.14, "mktcap": 4_100_000_000_000_000}
 
-        price_mock = patch.object(ws, "fetch_price", side_effect=AssertionError("should not be called"))
         with patch("stock.stock_info_store.get_stock_info", return_value=info), \
-             price_mock:
+             patch.object(ws, "fetch_price", return_value=fresh_price) as mock_fp:
             row = ws._fetch_dashboard_row(kr_item)
 
-        # 모든 영역 fresh → 외부 API 호출 없이 stock_info에서 채워짐
-        assert row["price"] == 70000
+        # price는 매번 외부 API 호출
+        mock_fp.assert_called_once_with("005930")
+        assert row["price"] == 71500
+        # metrics/financials는 stock_info hit
         assert row["dividend_yield"] == 2.0
         assert row["revenue"] is not None
