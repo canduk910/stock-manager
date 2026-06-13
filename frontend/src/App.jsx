@@ -25,6 +25,7 @@ import AdminPageStatsPage from './pages/AdminPageStatsPage'
 import SettingsKisPage from './pages/SettingsKisPage'
 import ToastNotification from './components/common/ToastNotification'
 import { useNotification } from './hooks/useNotification'
+import { useSemiconductorSignalWatcher } from './hooks/useSemiconductorSignalWatcher'
 
 export const WIDTH_OPTIONS = [
   { key: 'normal', label: '표준', maxCls: 'max-w-7xl mx-auto' },
@@ -38,6 +39,9 @@ export default function App() {
     () => localStorage.getItem('layout-width') || 'normal'
   )
   const { toasts, notify, removeToast } = useNotification()
+
+  // 반도체 사이클 신호 60s 폴링 — 로그인 사용자만, ProtectedRoute 안쪽에서 동작
+  useSemiconductorSignalWatcher(user ? notify : null)
 
   const handleWidth = (key) => {
     setWidthKey(key)

@@ -38,6 +38,7 @@ frontend/
 | `admin.js` | fetchAiUsage/fetchMyAiUsage/fetchAiLimits/setAiLimit/deleteAiLimit/fetchAuditLog/fetchUsers/fetchUserById/patchUser/deleteUser/fetchPageStats/**fetchUserAccessHistory(user_id, days, top_paths)** |
 | `me.js` | **멀티 계좌**: `listAccounts/createAccount/updateAccount(label)/deleteAccount(label)/setDefaultAccount(label)/validateAccount(label)` + 백워드 호환 `getMyKis/saveMyKis/deleteMyKis/validateMyKis` (/api/me/kis) |
 | `chatbot.js` | chatAboutAdvisory(code, market, reportId, messages)/chatAboutPortfolio(reportId, messages) |
+| `semiconductor.js` | 반도체 사이클 모니터링 8 fetch. fetchSemiDashboard / fetchSemiIndicatorHistory(name, days) / fetchSemiSignalsRecent(since, limit) / fetchSemiSignals(params) / ackSemiSignal(id) / fetchSemiThresholds / putSemiThreshold(name, key, value, comment) / postSemiRefresh(name) |
 
 ### `src/hooks/`
 
@@ -59,6 +60,8 @@ frontend/
 | `useBacktest.js` | useMcpStatus/usePresets/useBacktest(3초 폴링 MAX_POLLS=200=10분)/useBacktestHistory/useLocalPresets/runLocal |
 | `useTax.js` | useTaxSummary/useTaxTransactions/useTaxCalculations/useTaxSimulation. FIFO 전용 |
 | `useAiUsage.jsx` | AI 사용량 전역 Context. `fetchMyAiUsage()` + `'ai-usage-changed'` window 이벤트 자동 갱신(폴링 없음). 로그아웃 시 클리어 |
+| `useSemiconductor.js` | 반도체 사이클 모니터링 4 훅. useSemiconductorDashboard / useSemiconductorHistory(name) / useSemiconductorSignals(since) / useSemiconductorThresholds |
+| `useSemiconductorSignalWatcher.js` | 60s 폴링 + 상태 변경 토스트 알림. App.jsx ProtectedRoute 안쪽에 1회 마운트. `notify` 인자 null이면 미활성(비로그인). localStorage `semi:last_seen_signal_id`로 incremental. 메시지 포맷: `"[반도체] {label} {prev}→{new} | 현재 {value}{unit} (임계 {threshold}) | 추세: {recent_4}"`. WebSocket 미사용(KIS WS slot 충돌 회피, 매크로는 분/일 단위 변화로 60s 폴링 충분) |
 
 ### `src/components/`
 
@@ -116,6 +119,12 @@ frontend/
 - StrategyListPanel (저장된 전략 + 프리셋 6개)
 - strategyBuilderConstants.js, useStrategyBuilder.js
 
+**semiconductor/** (2026-06-13 신규)
+- **SemiconductorSection** — 매크로 페이지 카드 섹션(MacroCycleSection 직후 마운트). 종합 신호 색 배지(GREEN/YELLOW/RED 상태 색상 토큰) + 5종 미니카드(캐펙스/재고/HBM계약/AI IPO/시장폭) + 신호 카운트 + [상세 보기 →] 버튼. 1분 자동 새로고침
+- **SemiconductorDetailModal** — 좌측 sticky anchor nav + 누적 섹션 모달(StockInfoModal 패턴: `fixed inset-0 bg-black/50` + ESC + 백드롭 + ×). 좌측 nav: 종합 / 지표 2 캐펙스 / 지표 4 재고 / 지표 5 HBM / 지표 6 AI IPO / 지표 8 시장폭 / 신호 이력 / 임계값 관리. 모달 상단 **노란 amber 배너 "Phase 1 임시 규칙: 지표 1(반도체 가격)/지표 3(가이던스) 부재"** 명시
+- **SemiIndicatorChart** — Recharts 시계열 + 임계값 ReferenceLine 공용 차트
+- **SemiThresholdsPanel** — 임계값 편집 폼(관리자만, 모달 마지막 섹션). 관리자 권한 가드 `useAuth().user.role === 'admin'` 클라이언트 + 백엔드 `require_admin` 이중. 별도 라우트 미생성(편집 시 시계열과 동시 비교 필요)
+
 **macro/**
 - IndexSection, SentimentSection (VIX+버핏+F&G), NewsSection (한국+NYT 2컬럼), InvestorSection
 - **SupplyDemandSection** — 코스피/코스닥 토글(SectorHeatmap KR/US 패턴 차용) + 10~60일 슬라이더. Recharts ComposedChart(개인/외국인/기관 일별 막대 + 누적 라인) + 당일 요약 칩(외국인 +X억 / 기관 -Y억 / 개인 +Z억). KIS 키 미설정 503/외부 API 502 → 부분 실패 안내 카드(다른 섹션 무영향). IndexSection 직후 마운트
@@ -142,7 +151,7 @@ frontend/
 | DetailPage | `/detail/:symbol` | 재무분석/종합 리포트 (서브탭 5개: 요약/기본적/기술적/AI자문/**수급·투자자**) |
 | OrderPage | `/order` | 5탭 (주문/미체결/체결/이력/예약) |
 | MarketBoardPage | `/market-board` | 시세판 (**REST 일괄 폴링** — yfinance 일괄 → KIS REST 폴백. `useMarketBoardWS` 폐지 → `usePricePolling`로 교체, 장중 15s / 장외 60s) |
-| MacroPage | `/macro` | 매크로 분석 |
+| MacroPage | `/macro` | 매크로 분석. **MacroCycleSection 직후 `<SemiconductorSection />` 마운트** (반도체 사이클 모니터링 카드 + 상세 모달, Phase 1 5종) |
 | PortfolioPage | `/portfolio` | 통합 (체제+배분+수익+AI자문) |
 | ReportPage | `/reports` | 데일리 추천 (KR/US 토글, 3컨셉 탑픽) |
 | BacktestPage | `/backtest` | **단위 토글(종목/포트폴리오)** segment control이 전략 탭 자동 제한: 종목→빌더/MCP/커스텀 3탭+SymbolSearchBar(단일), 포트폴리오→로컬프리셋 단독+SymbolMultiInput(1~10). 전환 시 state 보존(재전환 시 복원). KR만. 거래비용 입력. 가용 기간 가이드 (US ≥ 1998-01-02 / KR ≥ 2000-01-04) |

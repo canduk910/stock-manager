@@ -1,5 +1,83 @@
 # 변경 이력
 
+## 2026-06-13 — 반도체 사이클 선행지표 모니터링 모듈 신규 (Phase 1, 5종)
+
+### 신규 기능 — 매크로 페이지 카드 섹션 + 상세 모달 + 토스트 알림
+
+**배경**: KOSPI는 삼성전자·SK하이닉스 2종목이 시가총액의 약 50%를 차지하는 극단적 쏠림 장세다. 이 쏠림이 "이익이 실재하는 사이클 정점형 쏠림"이라는 가설 검증을 위해, 사용자가 8종의 선행지표 자동 수집·평가·알림 모듈을 요청. Phase 1은 공식 API 기반 5종(지표 2/4/5/6/8) 우선 구축. 출력은 매매 자동화가 아닌 **신호 감지·알림**까지.
+
+**사용자 의사결정 (4건 확정)**:
+1. 구현 범위: Phase 1 = 5종(공식 API 기반)만, 크롤링 취약 소스(DRAMeXchange/FnGuide/freesis)는 Phase 2 분리
+2. 임계값 관리: `semiconductor_thresholds` DB 테이블 + 관리자 UI (모달 내부 마지막 섹션)
+3. 알림 채널: 토스트만 (`useNotification`/`ToastNotification` 재사용, WebSocket 미사용 — KIS WS slot 충돌 회피)
+4. 종합 RED 임시 규칙 (지표 1 반도체 가격 / 지표 3 가이던스 부재 상황): `capex.level ∈ (WARNING, ALERT) AND (memory_inventory == WARNING OR market_breadth == WARNING)` → RED, WARNING 1+ → YELLOW, 그 외 GREEN
+
+#### Phase 1 — DB 스키마 + Repository
+
+- 신규 ORM 3개 (`db/models/semiconductor.py`): `IndicatorValue` (PK id, `UNIQUE(indicator_name, observed_at)`, `value_meta.unit` 필수) / `Signal` (composite 포함, `level`+`message`+`value_snapshot` 직전 4관측치) / `SemiconductorThreshold` (PK id, `UNIQUE(indicator_name, threshold_key)`, `value JSON`)
+- `db/repositories/semiconductor_repo.py` CRUD + upsert + 시계열 fetch + 평탄 map
+- Alembic 마이그레이션 `g1h2i3j4k5l6_add_semiconductor_indicators.py` — 3 테이블 + 8 seed 임계값 (capex YoY -5% / inventory 2분기 연속 + 120일 / HBM 정규식 `HBM|장기공급|메모리.{0,10}공급계약` / AI IPO -20% + 락업 D-7 / market breadth ADR(20) 0.8)
+- SQLite/PostgreSQL 듀얼 호환: `_BIGINT.with_variant(Integer, "sqlite")`
+
+#### Phase 2 — Collector 인터페이스 + 수집기 5종
+
+- `stock/semi_collectors/base.py`: `CollectorResult` dataclass + `apply_outlier_guard(curr, prev, pct=30.0)` 직전값 대비 ±30% 격리 + `pct_change_or_none`. **단순 함수 패턴 유지** (기존 `macro_fetcher.py`/`dart_fin.py` 컨벤션 따름, `BaseCollector` 추상 클래스 미도입)
+- 지표 2 (`hyperscaler_capex.py`): SEC EDGAR companyfacts XBRL `PaymentsToAcquirePropertyPlantAndEquipment` × MSFT/GOOGL/AMZN/META 4사. FY 누계→Q4 derivation (직전 3분기 차감). 4사 분기 합산 USD + YoY. `config.SEC_EDGAR_USER_AGENT_CONTACT` 참조 (`dukkikim851210@gmail.com`)
+- 지표 4 (`memory_inventory.py`): `stock/dart_fin.py::fetch_quarterly_financials` 재사용 (이미 분기 누계→분기 변환 보유). 005930/000660 BS `재고자산` + IS `매출원가` → `inventory_days = 재고/(매출원가/91)`
+- 지표 5 (`hbm_contracts.py`): `screener/dart.py` 주요사항보고 B 일일 스캔 + 정규식 2단계 (`^단일판매.공급계약체결` AND keyword_regex 임계값 테이블 매칭) + 발행회사 005930/000660 한정으로 false-positive 차감. `re.IGNORECASE`. `value_meta.rcept_no` 멱등성 가드 (당일 빈 결과 캐시 금지 — 골프존 사례 컨벤션). 매칭 시 INFO 즉시
+- 지표 6 (`ai_ipo_tracker.py`): `config.AI_IPO_TICKERS` 화이트리스트 + yfinance 현재가. 공모가는 `semiconductor_thresholds`에 `{ticker}/ipo_price` 관리자 수동 시드. SEC efts.sec.gov full-text `"lock-up" forms=S-1,424B4` → "180-day lock-up" 정규식 해제일. -20% WARNING / D-7 INFO. 첫 5거래일은 outlier guard 우회
+- 지표 8 (`market_breadth.py`): `screener/krx.py::_find_latest_trading_day` + `pykrx.stock.get_market_ohlcv("KOSPI")` 전일/당일. ADR(20) = sum(20일 상승) / sum(20일 하락) + 영속 시계열에 누적 rolling. 삼성+SK 시총 / KOSPI 전체 시총 = 집중도. 252거래일 신고치 비교. KOSPI 신고가 AND ADR<0.8 → WARNING
+- 장애 격리: `services/semiconductor_service.run_all_collectors()`에서 try/except 개별 캡슐화, `failures[name] = str(exc)`로 응답에 노출, 다른 수집기 진행 차단 X (기존 `_run_foreign_holding_backfill_job` 패턴)
+
+#### Phase 3 — Signal Engine + Orchestration + 라우터 + 스케줄러
+
+- `services/semiconductor_signals.py`: 개별 5(capex/inventory/HBM/AI IPO/breadth) + 종합 1. 메시지 포맷 `"[label] {prev}→{new} | 현재 {value}{unit} (임계 {threshold}) | 추세: {recent_4}"` (OrderAdvisor 자문 — 자동 매매 트리거 금지). 상태 변경 시에만 신규 신호 insert (`value_snapshot`에 직전 4관측치)
+- `services/semiconductor_service.py`: orchestration. `evaluate_and_persist()` 단일 진입점 (대시보드 + 스케줄러 공용)
+- `routers/semiconductor.py`: prefix `/api/semiconductor`, 8 라우트. `get_current_user` + 변경 라우트 `require_admin`. 폴링 incremental `GET /signals/recent?since=`
+- `services/scheduler_service.py` 5 cron 신규: `semi_market_breadth`(평일 16:00) / `semi_hbm_contracts`(평일 18:30, DART 18:00 마감 후) / `semi_ai_ipo`(매일 07:00, US 시간외 마감 후) / `semi_quarterly_refresh`(매일 08:30, capex/inventory 멱등 — 신규 분기 도착 시점 편차 대응) / `semi_evaluate`(매시 정각). 각 잡 try/except + `logger.error(exc_info=True)` + raise 금지
+
+#### Phase 4 — 프론트엔드 카드 + 모달 + SignalWatcher
+
+- `frontend/src/api/semiconductor.js` 8 fetch
+- `frontend/src/hooks/useSemiconductor.js` 4 훅 + `useSemiconductorSignalWatcher.js` 60s 폴링
+- `frontend/src/components/semiconductor/SemiconductorSection.jsx` 카드 (종합 색 배지 + 5 미니카드 + 신호 카운트)
+- `frontend/src/components/semiconductor/SemiconductorDetailModal.jsx` 좌측 sticky anchor nav + 누적 섹션 (StockInfoModal 패턴: `fixed inset-0 bg-black/50` + ESC + 백드롭 + ×). 상단 amber 배너 "Phase 1 임시 규칙: 가격/가이던스 부재" 명시
+- `frontend/src/components/semiconductor/SemiIndicatorChart.jsx` Recharts + ReferenceLine
+- `frontend/src/components/semiconductor/SemiThresholdsPanel.jsx` 관리자 편집 (모달 마지막 섹션, 별도 페이지 미생성 — 시계열과 동시 비교 필요)
+- `MacroPage.jsx`에 `<SemiconductorSection />` 마운트 (`MacroCycleSection` 직후)
+- `App.jsx`에 `useSemiconductorSignalWatcher(user ? notify : null)` ProtectedRoute 안쪽
+
+#### 환경변수 신규
+
+- `SEC_EDGAR_USER_AGENT_CONTACT` (`dukkikim851210@gmail.com`) — `stock/sec_filings.py:16`의 하드코딩 `contact@example.com` 제거 + `config.py` 단일 진입점 분리. SEC 정책 위반 위험 제거. 미설정 시 `ConfigError(503)`
+- `AI_IPO_TICKERS` — 추적 대상 화이트리스트 (콤마 구분, 기본 빈 문자열, 예: `"RDDT,ARM"`)
+
+#### 도메인 자문 결과 (4건)
+
+- **MarginAnalyst**: 재고일수 임계값 seed 채택 (2분기 연속 증가 / 120일 절대값). 120일 = 2022-2023 다운사이클 ~140일 대비 선행 경보로 적정. `dart_fin` 누계→분기 차감 신뢰. 매출원가 0/음수 시 None 반환 가드 적용
+- **ValueScreener**: HBM 정규식 seed 채택 + 발행회사 005930/000660 한정으로 false-positive 차감. 한자/영문 확장(HBM3E/고대역폭메모리)은 관리자가 모달 임계값 패널에서 즉시 추가 가능. CLAUDE.md 정규식 컨벤션(단순 `in`/`includes` 금지) 적용
+- **MacroSentinel**: ADR 0.8 = 한국 시장 3년 분포 하위 25%ile. KOSPI 252일 신고가 + ADR<0.8 결합으로 "지수는 신고가인데 폭이 좁다 = 광기 진입" 조기 경보. 종합 RED 임시 규칙 합리적. 모달 상단 "Phase 1 임시 규칙" 노란 amber 배너 명시
+- **OrderAdvisor**: 알림 메시지 포맷 prev→new 변경 방향 prefix 추가. **자동 매매 트리거 절대 금지** — 정보 제공 only (`safety_grade.py` 정책 일치)
+
+#### 회귀 가드
+
+- 단위 테스트 75/75 PASS (1.35s): repo 7 / collector base 10 / HBM 6 / market breadth 4 / capex 5 / inventory 6 / AI IPO 8 / signals 20 / service 9
+- 인접 단위 테스트 118/118 PASS (`test_exceptions/test_macro_regime/test_utils/test_macro_fetcher_oas`)
+- `python -c "import main"` 무에러, 라우트 8개 정상 등록
+- Frontend 빌드 871 modules / 1.47s / 0 errors
+- 기존 매크로 11 섹션 + 기존 스케줄러 4 cron 변경 없음
+- `stock/sec_filings.py` config 분리 후에도 기존 사용처 회귀 없음 (미국 공시 페이지)
+
+#### 알려진 제한 / Phase 2 이월
+
+- 지표 1 (반도체 가격 DRAM/NAND spot/contract) / 지표 3 (CEO 가이던스 GPT 추출) / 지표 7 (반도체 ETF VWAP) — Phase 2 (크롤링 취약 소스 + GPT)
+- 종합 RED 규칙 — 가격/가이던스 추가 시 5-of-8 가중 평가로 재정의
+- AI IPO 공모가 — SEC S-1 자동 파싱 정확도 낮음, Phase 1은 관리자 수동 시드
+- 통합 테스트 (PostgreSQL 5433) — 본 phase 미작성 (단위 테스트로 in-memory 동일 검증), 필요 시 추가
+- `evaluate_and_persist` 동시 호출 시 중복 Signal insert 가능 — 정보 only 매매 트리거 없음, Phase 2 lock 검토
+
+---
+
 ## 2026-06-02 — CI 차단 hotfix (통합 테스트 누락 보완)
 
 ### 버그 수정 — 어제 변경에서 누락된 integration 테스트

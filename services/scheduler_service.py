@@ -140,6 +140,34 @@ def _run_foreign_holding_backfill_job():
     )
 
 
+def _run_semi_collector_job(collector_name: str):
+    """반도체 수집기 단일 실행 (스케줄러).
+
+    수집기 자체 try/except + service 레이어 try/except 2중 격리.
+    raise 금지(잡 중단 방지).
+    """
+    try:
+        from services import semiconductor_service
+        out = semiconductor_service.run_collector(collector_name)
+        logger.info(f"[스케줄러] 반도체 {collector_name} 수집 완료: {out}")
+    except Exception as exc:
+        logger.error(f"[스케줄러] 반도체 {collector_name} 수집 실패: {exc}", exc_info=True)
+
+
+def _run_semi_evaluate_job():
+    """매시 정각 시그널 평가 + 상태 변경 신호 발사."""
+    try:
+        from services import semiconductor_service
+        out = semiconductor_service.evaluate_and_persist()
+        n = len(out.get("signals_inserted", []))
+        if n:
+            logger.info(f"[스케줄러] 반도체 평가: 신호 {n}건 발사")
+        else:
+            logger.debug("[스케줄러] 반도체 평가: 신호 변경 없음")
+    except Exception as exc:
+        logger.error(f"[스케줄러] 반도체 평가 실패: {exc}", exc_info=True)
+
+
 def _run_pipeline_job(market: str):
     """스케줄러에서 호출되는 잡 함수."""
     from services.pipeline_service import run_pipeline
@@ -233,10 +261,60 @@ def setup_scheduler():
             name="외국인 보유 추이 백필 (18:00)",
             replace_existing=True,
         )
+        # 반도체 사이클 모니터링 (Phase 1) — 5 cron + 매시 평가.
+        # 도메인: market_breadth/hbm_contracts는 KRX·DART 마감 후 / capex+inventory는 분기 멱등 매일
+        # / ai_ipo는 매일 아침 / evaluate는 hourly (상태 변경 감지 + 토스트 트리거).
+        _scheduler.add_job(
+            _run_semi_collector_job,
+            CronTrigger(day_of_week="mon-fri", hour=16, minute=0),
+            args=["market_breadth"],
+            id="semi_market_breadth",
+            name="반도체 — KOSPI 시장폭 (평일 16:00)",
+            replace_existing=True,
+        )
+        _scheduler.add_job(
+            _run_semi_collector_job,
+            CronTrigger(day_of_week="mon-fri", hour=18, minute=30),
+            args=["hbm_contracts"],
+            id="semi_hbm_contracts",
+            name="반도체 — HBM 공시 스캔 (평일 18:30)",
+            replace_existing=True,
+        )
+        _scheduler.add_job(
+            _run_semi_collector_job,
+            CronTrigger(hour=7, minute=0),
+            args=["ai_ipo"],
+            id="semi_ai_ipo",
+            name="반도체 — AI IPO 추적 (07:00)",
+            replace_existing=True,
+        )
+        _scheduler.add_job(
+            _run_semi_collector_job,
+            CronTrigger(hour=8, minute=30),
+            args=["hyperscaler_capex"],
+            id="semi_hyperscaler_capex",
+            name="반도체 — 하이퍼스케일러 capex (08:30 멱등)",
+            replace_existing=True,
+        )
+        _scheduler.add_job(
+            _run_semi_collector_job,
+            CronTrigger(hour=8, minute=35),
+            args=["memory_inventory"],
+            id="semi_memory_inventory",
+            name="반도체 — 메모리 재고일수 (08:35 멱등)",
+            replace_existing=True,
+        )
+        _scheduler.add_job(
+            _run_semi_evaluate_job,
+            CronTrigger(minute=0),  # 매시 정각
+            id="semi_evaluate",
+            name="반도체 — 시그널 평가 (매시 정각)",
+            replace_existing=True,
+        )
         _scheduler.start()
         logger.info(
             "[스케줄러] 스케줄러 시작 "
-            "(08:00 KR / 16:00 US / 00:05 cleanup+prewarm / 18:00 FH backfill)"
+            "(08:00 KR / 16:00 US / 00:05 cleanup+prewarm / 18:00 FH backfill / 반도체 5 cron + 매시 평가)"
         )
     except ImportError:
         logger.warning("[스케줄러] apscheduler 미설치 — 스케줄러 비활성화")

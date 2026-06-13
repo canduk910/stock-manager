@@ -1490,3 +1490,63 @@ Response:
 - 부분 실패(일부 종목 실패) → 200 + `failures` 배열에 기록 후 나머지로 시뮬레이션 진행
 
 저장: `BacktestJob`(strategy_type=`"local"`, `symbol`=`symbols[0]`, 신규 `symbols` JSON 컬럼에 전체 리스트). 기존 MCP 백테스트 흐름(`run/preset`/`run/custom`/`run/batch`) 100% 미터치.
+
+---
+
+## 반도체 사이클 모니터링 — `routers/semiconductor.py` (2026-06-13 Phase 1)
+
+prefix `/api/semiconductor`. 모든 라우트 `get_current_user` 의존, 변경 라우트(`PUT`/`POST`/`ack`)는 `require_admin`.
+
+### `GET /api/semiconductor/dashboard`
+
+종합 상태(GREEN/YELLOW/RED) + 5 지표 카드 + 최근 신호 카운트.
+
+응답:
+```json
+{
+  "composite": {"level": "GREEN", "reason": "...", "updated_at": "2026-06-13T16:00:00+09:00"},
+  "indicators": {
+    "hyperscaler_capex": {"level": "INFO", "current_value": 84.2, "unit": "USD", "threshold": -5.0, "recent_4": [...], "last_signal": null},
+    "memory_inventory": {"level": "INFO", "current_value": 82.0, "unit": "days", ...},
+    "hbm_contracts": {...},
+    "ai_ipo": {...},
+    "market_breadth": {...}
+  },
+  "signal_counts": {"WARNING": 1, "INFO": 2},
+  "partial_failure": []
+}
+```
+
+### `GET /api/semiconductor/indicators/{name}/history?days=180`
+
+지표별 시계열. `name ∈ {hyperscaler_capex, memory_inventory, hbm_contracts, ai_ipo, market_breadth}`.
+
+### `GET /api/semiconductor/signals/recent?since=<ISO>&limit=50`
+
+폴링용 incremental. 프론트 `useSemiconductorSignalWatcher`가 60초마다 호출 → 상태 변경 시 토스트 알림.
+
+### `GET /api/semiconductor/signals?indicator_name=&from=&to=`
+
+신호 이력 검색.
+
+### `POST /api/semiconductor/signals/{id}/ack`
+
+관리자 acknowledge. `{"ack": true}` 응답.
+
+### `GET /api/semiconductor/thresholds`
+
+임계값 전체 조회.
+
+### `PUT /api/semiconductor/thresholds/{indicator_name}/{threshold_key}`
+
+임계값 upsert. body `{"value": <FLOAT | dict>, "comment": "..."}`. 관리자 전용.
+
+### `POST /api/semiconductor/admin/refresh?indicator_name=`
+
+수동 수집기 트리거 (디버그용). 관리자 전용.
+
+검증/에러:
+- `name` 미등록 indicator → 400 (`ServiceError`)
+- KRX 자격증명 미설정 시 `market_breadth` → `failures["market_breadth"]` 격리, 다른 지표 정상 진행
+- `SEC_EDGAR_USER_AGENT_CONTACT` 미설정 → 503 (`ConfigError`)
+- OPENDART 키 미설정 시 `hbm_contracts`/`memory_inventory` → 502 (`ExternalAPIError`)

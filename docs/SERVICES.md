@@ -24,6 +24,8 @@
 | `order_kr.py` | 국내주식 KIS API 주문 실행 (발주/조회/정정/취소). **(2026-05-08 신 TR_ID 일괄 전환)** TTTC0012U/0011U/0013U/0084R/0081R + EXCG_ID_DVSN_CD(SOR/KRX/NXT) body 주입 + `_validate_ord_dvsn` + `_normalize_excg_code`. 미체결 3거래소 dedup, 체결 EXCG_ID_DVSN_CD="ALL" 1회. |
 | `order_us.py` | 해외주식 KIS API 주문 실행 |
 | `order_fno.py` | 선물옵션 KIS API 주문 실행 |
+| `semiconductor_signals.py` | **반도체 사이클 신호 평가 엔진** (2026-06-13 신규, Phase 1). `evaluate_indicator_2/4/5/6/8(thresholds, history)` 5종 + `evaluate_composite(per_indicator)` 종합 1종. Phase 1 임시 종합 RED 규칙(지표 1 가격 / 지표 3 가이던스 부재 상황): `capex.level ∈ (WARNING, ALERT) AND (memory_inventory == WARNING OR market_breadth == WARNING)` → RED, WARNING 1+ → YELLOW, 그 외 GREEN. 메시지 포맷 `"[label] {prev}→{new} | 현재 {value}{unit} (임계 {threshold}) | 추세: {recent_4}"` (OrderAdvisor 자문 — 자동 매매 트리거 금지). 상태 변경 시에만 `signals` 신규 row insert + 직전 4관측치 `value_snapshot` 포함. |
+| `semiconductor_service.py` | **반도체 모듈 오케스트레이션** (2026-06-13 신규). `run_all_collectors()` 5 수집기 try/except 개별 캡슐화(장애 격리, `failures` dict 응답에 노출) / `evaluate_and_persist()` 스케줄러+대시보드 진입 단일 진입점 / `get_dashboard()` 종합+5 지표 카드 조립 / `get_indicator_history(name, days)` 시계열 / `get_signals_recent(since, limit)` 폴링용 incremental / `upsert_threshold(name, key, value, updated_by)` 관리자 / `ack_signal(id)`. 모든 외부 API 호출은 `stock/semi_collectors/*` 위임. |
 
 ---
 

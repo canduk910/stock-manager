@@ -15,6 +15,7 @@ import CommoditySection from '../components/macro/CommoditySection'
 import SectorHeatmapSection from '../components/macro/SectorHeatmapSection'
 import NewsSection from '../components/macro/NewsSection'
 import InvestorSection from '../components/macro/InvestorSection'
+import SemiconductorSection from '../components/semiconductor/SemiconductorSection'
 
 export default function MacroPage() {
   const indices = useMacroIndices()
@@ -45,6 +46,7 @@ export default function MacroPage() {
     <div className="space-y-8">
       <h1 className="text-2xl font-bold text-gray-900">매크로 분석</h1>
       <MacroCycleSection data={cycle.data} loading={cycle.loading} error={cycle.error} />
+      <SemiconductorSection />
       <IndexSection data={indices.data} loading={indices.loading} error={indices.error} />
       <SupplyDemandSection />
       <SentimentSection data={sentiment.data} loading={sentiment.loading} error={sentiment.error} />

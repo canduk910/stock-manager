@@ -268,3 +268,35 @@ frontend/
 - **호가창 가격 포맷**: 국내 `Math.floor(price).toLocaleString()` (정수), 해외 `price.toFixed(2)` (소수점 2자리)
 - **호가창 잔량 배경바**: 최대 잔량 대비 비율로 `width: N%` 동적 인라인 스타일. 매도=파란 계열, 매수=빨간 계열.
 - **useQuote 재연결 패턴**: `mountedRef` 언마운트 가드 + `symbol` 변경 시 이전 WS `close(1000)` 후 즉시 재연결. 비정상 code 시 3초 후 retry. 언마운트 시 `clearTimeout` + `ws.close(1000)`.
+
+---
+
+## 반도체 사이클 모니터링 (2026-06-13 Phase 1)
+
+### 컴포넌트 (`components/semiconductor/`)
+
+| 파일 | 역할 |
+|------|------|
+| `SemiconductorSection.jsx` | 매크로 페이지 카드 섹션 (MacroCycleSection 직후 마운트). 종합 신호 색 배지(GREEN/YELLOW/RED) + 5종 미니카드(캐펙스/재고/HBM계약/AI IPO/시장폭, 각각 ●정상/⚠경고/🛑알람 + 핵심 값 1줄) + 최근 신호 카운트 + [상세 보기 →] 버튼. 1분 자동 새로고침 |
+| `SemiconductorDetailModal.jsx` | 좌측 sticky anchor nav + 누적 섹션 모달 (StockInfoModal 패턴: `fixed inset-0 bg-black/50` + ESC + 백드롭 + ×). 좌측 nav: 종합 / 5종 지표 / 신호 이력 / 임계값 관리. 모달 상단 **노란 amber 배너 "Phase 1 임시 규칙: 지표 1(반도체 가격)/지표 3(가이던스) 부재 — Phase 2에서 완전 활성화"** |
+| `SemiIndicatorChart.jsx` | Recharts ComposedChart 공용 (시계열 막대 + 추세 라인 + 임계값 `ReferenceLine`). 단위별 포맷터 분기 (USD/KRW/days/ratio/%) |
+| `SemiThresholdsPanel.jsx` | 임계값 편집 폼 (관리자 전용, 모달 마지막 섹션). 별도 페이지 미생성 — 시계열과 동시 비교 필요 / 일반 사용자 실수 임계값 변경 차단. 권한 가드 `useAuth().user.role === 'admin'` 클라이언트 + 백엔드 `require_admin` 이중 |
+
+### 훅 (`hooks/useSemiconductor.js` + `useSemiconductorSignalWatcher.js`)
+
+- `useSemiconductorDashboard()` — 종합 + 5 지표 카드 (`useAsyncState` 기반)
+- `useSemiconductorHistory(name)` — 지표 시계열 (모달 진입 시 lazy fetch)
+- `useSemiconductorSignals(since)` — 폴링용 incremental
+- `useSemiconductorThresholds()` — 관리자 패널용
+- `useSemiconductorSignalWatcher(notify)` — App.jsx ProtectedRoute 안쪽에 1회 마운트. `notify` null이면 미활성 (비로그인). 60초 폴링 + 상태 변경 감지 + localStorage `semi:last_seen_signal_id`. 토스트 메시지 포맷: `"[반도체] {label} {prev}→{new} | 현재 {value}{unit} (임계 {threshold}) | 추세: {recent_4}"`. WebSocket 미사용 (KIS WS slot 충돌 회피, 매크로 분/일 단위 변화는 60s 폴링 충분)
+
+### API 모듈 (`api/semiconductor.js`)
+
+8 fetch: `fetchSemiDashboard`, `fetchSemiIndicatorHistory(name, days)`, `fetchSemiSignalsRecent(since, limit)`, `fetchSemiSignals(params)`, `ackSemiSignal(id)`, `fetchSemiThresholds`, `putSemiThreshold(name, key, value, comment)`, `postSemiRefresh(name)`.
+
+### UI 규칙
+
+- 종합 신호 색상 토큰: `GREEN bg-green-100/text-green-700` / `YELLOW bg-yellow-100/text-yellow-700` / `RED bg-red-100/text-red-700`
+- 지표 카드 등급: `INFO ● 정상 (text-gray-600)` / `WARNING ⚠ 경고 (text-amber-600)` / `ALERT 🛑 알람 (text-red-600)`
+- Phase 1 임시 규칙 배너는 모달 상단 amber 노란 배너로 항상 표시 — Phase 2 진입 시 제거
+- 단위 포맷터: `USD` → `$X.XB`, `KRW_won` → `XX억원`, `days` → `XX일`, `ratio` → `X.XX`, `%` → `XX.X%`

@@ -9,11 +9,13 @@ import re
 
 import requests
 
+from config import SEC_EDGAR_USER_AGENT_CONTACT
+
 # SEC EDGAR full-text search API
 _SEC_EFTS_URL = "https://efts.sec.gov/LATEST/search-index"
 
 _HEADERS = {
-    "User-Agent": "stock-manager/1.0 (contact@example.com)",
+    "User-Agent": f"stock-manager/1.0 (contact={SEC_EDGAR_USER_AGENT_CONTACT})",
     "Accept": "application/json",
 }
 

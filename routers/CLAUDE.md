@@ -27,6 +27,7 @@
 | `me_kis.py` | `/api/me/kis/*` | 사용자 본인 KIS 자격증명 멀티 계좌 CRUD. **8 라우트**: `POST /` 신규 등록(첫 계좌 자동 is_default=true, 라벨 중복 409) / `GET /` 목록(`accounts[]`+`default_label`+백워드 호환 메타) / `GET /{label}` 단일 / `PUT /{label}` 갱신(자격증명 변경 시 자동 재검증, 라벨 변경 가능) / `DELETE /{label}` 삭제(기본 계좌 삭제 시 다른 계좌 자동 default 승격) / `POST /{label}/default` 기본 지정 / `POST /{label}/validate` 재검증. `KIS_ENCRYPTION_KEY` 미설정 시 503 |
 | `admin_users.py` | `/api/admin/users/*` | 관리자 전용 사용자 CRUD. 검색(`?q=`)/페이지네이션, role 변경, 비밀번호 reset, 삭제. 응답에 `visit_count`(누적 PageView). **`GET /{user_id}/access-history?days=7\|30\|90\|180&top_paths=5`** — 사용자별 일별 접속현황 (PV + 고유 path 수 시계열 + top paths + last_seen_at). user_id IS NOT NULL 필터(익명 제외), 연속 시계열 padding(데이터 없는 날도 0) |
 | `admin_stats.py` | `/api/admin/page-stats/*` | 페이지별 이용현황: 경로별 호출/평균·p95 latency/유저 수/일별 시계열 |
+| `semiconductor.py` | `/api/semiconductor/*` | 반도체 사이클 선행지표 모니터링(Phase 1, 5종). 8 라우트: `GET /dashboard` 종합 상태 + 5 지표 카드 / `GET /indicators/{name}/history?days=180` 시계열 / `GET /signals/recent?since=&limit=` 알림 폴링 incremental / `GET /signals?indicator_name=&from=&to=` 검색 / `POST /signals/{id}/ack` (관리자) / `GET /thresholds` 임계값 전체 / `PUT /thresholds/{indicator_name}/{threshold_key}` upsert(관리자) / `POST /admin/refresh?indicator_name=` 수동 트리거(관리자). 인증 `get_current_user`, 변경 라우트 `require_admin`. 종합 상태(GREEN/YELLOW/RED) 변경 시에만 `signals` 신규 row insert → 프론트 60s 폴링으로 토스트 알림 |
 
 ---
 

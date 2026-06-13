@@ -56,6 +56,17 @@ DATABASE_URL = os.getenv(
 KIS_MCP_URL = os.getenv("KIS_MCP_URL", "http://127.0.0.1:3846/mcp")
 KIS_MCP_ENABLED = os.getenv("KIS_MCP_ENABLED", "false").lower() == "true"
 
+# ── SEC EDGAR 정책 준수 User-Agent ──────────────────────────────────
+# SEC는 자동화 접근 시 식별 가능한 연락처 헤더를 요구한다.
+# 미설정/플레이스홀더 시 SEC 요청이 차단될 수 있다 (정책 위반).
+SEC_EDGAR_USER_AGENT_CONTACT = os.getenv(
+    "SEC_EDGAR_USER_AGENT_CONTACT", "dukkikim851210@gmail.com"
+)
+
+# ── 반도체 사이클 — AI IPO 화이트리스트 ──────────────────────────────
+# 콤마 구분 (예: "RDDT,ARM"). 빈 문자열 = 비활성.
+AI_IPO_TICKERS = os.getenv("AI_IPO_TICKERS", "")
+
 # ── JWT 인증 ──────────────────────────────────────────────────────────
 JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "change-me-in-production-please")
 JWT_ALGORITHM = "HS256"
