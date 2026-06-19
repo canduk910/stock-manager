@@ -8,6 +8,7 @@ import {
   PieChart, Pie, Cell,
 } from 'recharts'
 import AnalystReportsModal from './AnalystReportsModal'
+import RatioAnalysisSection from './RatioAnalysisSection'
 
 const PIE_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6']
 
@@ -744,6 +745,9 @@ export default function FundamentalPanel({ data, market, code }) {
       <SectionTitle>현금흐름표</SectionTitle>
       <CashflowTable rows={cashflow} market={market} />
       <CashflowChart rows={cashflow} market={market} />
+
+      {/* 4축 재무비율 평가 (REQ-SCREEN-03) — 최하단 */}
+      <RatioAnalysisSection ratioAnalysis={fundamental.ratio_analysis} />
     </div>
   )
 }

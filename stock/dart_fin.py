@@ -238,6 +238,7 @@ _BS_REGEX = {
     "non_current_assets":      re.compile(r"^비유동자산$"),
     "cash_and_equiv":          re.compile(r"^현금및현금성자산$"),
     "receivables":             re.compile(r"^(매출채권(및기타채권)?|단기매출채권)$"),
+    "payables":                re.compile(r"^(매입채무(및기타채무)?|단기매입채무|매입채무및기타지급채무)$"),
     "inventories":             re.compile(r"^재고자산$"),
     "ppe":                     re.compile(r"^유형자산$"),
     "intangibles":             re.compile(r"^무형자산$"),

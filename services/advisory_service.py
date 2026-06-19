@@ -45,6 +45,7 @@ from config import OPENAI_API_KEY, OPENAI_MODEL
 
 from stock import advisory_store, advisory_fetcher
 from stock.utils import is_domestic
+from services import financial_ratios
 from services.exceptions import (
     ConfigError, ExternalAPIError, NotFoundError, PaymentRequiredError,
 )
@@ -351,11 +352,34 @@ def _extract_sector_tier_from_fundamental(
     return "general"
 
 
+def _attach_ratio_analysis(collected: dict) -> dict:
+    """fundamental 수집 결과에 4축 재무비율 평가(ratio_analysis) 추가 (REQ-SCREEN-02).
+
+    추가 외부 호출 0건 — 이미 수집한 income_stmt/balance_sheet/cashflow/metrics/
+    sector_tier를 순수 함수 compute_ratio_analysis에 전달. 산출 실패(예외) 시
+    None 할당 + 로깅, fundamental 응답 전체는 정상 반환(부분 실패 격리).
+    """
+    try:
+        collected["ratio_analysis"] = financial_ratios.compute_ratio_analysis(
+            collected.get("income_stmt") or [],
+            collected.get("balance_sheet") or [],
+            collected.get("cashflow") or [],
+            collected.get("metrics") or {},
+            sector_tier=collected.get("sector_tier", "general"),
+        )
+    except Exception as exc:  # noqa: BLE001 — 부분 실패 격리(advisory_service 기존 패턴)
+        logger.error("ratio_analysis 산출 실패 (격리됨): %s", exc, exc_info=True)
+        collected["ratio_analysis"] = None
+    return collected
+
+
 def _collect_fundamental(code: str, market: str, name: str, user_id: int = 1) -> dict:
-    """기본적 분석 데이터 수집."""
+    """기본적 분석 데이터 수집 + 4축 재무비율 평가 부착 (REQ-SCREEN-02)."""
     if market == "KR":
-        return _collect_fundamental_kr(code, name, user_id)
-    return _collect_fundamental_us(code, name, user_id)
+        collected = _collect_fundamental_kr(code, name, user_id)
+    else:
+        collected = _collect_fundamental_us(code, name, user_id)
+    return _attach_ratio_analysis(collected)
 
 
 def _collect_fundamental_kr(code: str, name: str, user_id: int = 1) -> dict:

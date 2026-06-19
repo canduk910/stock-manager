@@ -90,6 +90,7 @@ frontend/
 
 **advisory/**
 - FundamentalPanel, TechnicalPanel
+- **RatioAnalysisSection** (2026-06-19 신설) — FundamentalPanel **최하단**(현금흐름표 뒤) "4축 재무비율 평가". Recharts `RadarChart`(활동성/성장성/수익성/안정성 4축, 0~100) 1장 + 축별 진단 카드 4개(점수 게이지 + §등급 색상 + 자동 진단 문구 + 클릭 시 소속 비율 value/points/trend_pct 펼침). N/A 축(금융업 활동성 등)은 회색 + "N/A" 배지 + na_reason. `ratio_analysis` null/overall None → "재무비율 데이터 부족" EmptyState. 매매 액션 문구 미표시. props: `data.ratio_analysis`
 - AIReportPanel — v3 통합 (6대 비판분석+전략+시나리오). `<UserCommentInput>` 액션바 위 + `<UserCommentaryCard>` 본문 최상단
 - ResearchDataPanel — 입력데이터 16카테고리 통합 미리보기. `_safeText()` 객체 안전 렌더 + `renderSegments` 키 매핑(`s.segment||s.name||s.product`)
 - `UserCommentaryCard` — 사용자 가설 양면 평가. stance 5단계 배지 + 좌(👍 녹색)/우(👎 빨강) 2컬럼 + strength 1~10 게이지. evaluation null 미렌더
@@ -198,7 +199,7 @@ frontend/
 - **OpenOrdersTable + ExecutionsTable**: `excg_id_dvsn_cd === 'SOR'`(HTS/MTS 주문)은 "앱취소필요" 안내. "거래소" 컬럼 + `ExchangeBadge` (orders.exchange/excg_id_dvsn_cd, NULL→KRX). KR 행에서만 렌더
 
 ### Advisory 컴포넌트
-- **FundamentalPanel**: 사업개요(BusinessOverview: #키워드+설명+매출비중 파이) → 비즈니스 모델(BusinessModelSection 3카드: 💰 매출 흐름 / 💵 현금 창출 / 🔬 R&D, 모든 필드 빈 값이면 미렌더) → 애널리스트 추정치(목표가 클릭→AnalystReportsModal) → 계량지표 10개(+EPS+안전마진가격) → 손익(+추정치 바 반투명) → BS → CF. **금융지주/금융업 행 숨김 분기** (`sector_tier`): IS의 `매출원가`/`매출총이익` + BS의 `유동자산`/`비유동자산`/`유동부채`/`비유동부채` 5+2행은 `sector_tier ∈ {insurance, bank_holding, securities}`일 때 미렌더. FinancialTable도 동일 prop 분기
+- **FundamentalPanel**: 사업개요(BusinessOverview: #키워드+설명+매출비중 파이) → 비즈니스 모델(BusinessModelSection 3카드: 💰 매출 흐름 / 💵 현금 창출 / 🔬 R&D, 모든 필드 빈 값이면 미렌더) → 애널리스트 추정치(목표가 클릭→AnalystReportsModal) → 계량지표 10개(+EPS+안전마진가격) → 손익(+추정치 바 반투명) → BS → CF → **`<RatioAnalysisSection>`(4축 재무비율 평가, 최하단)**. **금융지주/금융업 행 숨김 분기** (`sector_tier`): IS의 `매출원가`/`매출총이익` + BS의 `유동자산`/`비유동자산`/`유동부채`/`비유동부채` 5+2행은 `sector_tier ∈ {insurance, bank_holding, securities}`일 때 미렌더. FinancialTable도 동일 prop 분기
 - **TechnicalPanel**: 타임프레임(15m/60m/1d/1wk) + 기간. 시그널 카드 + 캔들+MA+BB → 거래량 → MACD → RSI → Stochastic → PER/PBR 밸류에이션(1d/1wk만, `valuationData` prop)
 - **AIReportPanel**: v3 등급 카드(SafetyGradeBadge A~D + ScoreBar 3개 + Value Trap 배너 + recommendation 배지) → 종합투자의견 → 전략별평가 3컬럼(안전마진가격) → 기술 시그널 → 리스크/투자포인트. `<UserCommentInput>` 액션바 위 (onUserCommentChange prop 있을 때만), `<UserCommentaryCard>` 본문 최상단 (reportData.user_commentary_evaluation 있을 때만)
 
