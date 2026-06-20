@@ -1,5 +1,23 @@
 # 변경 이력
 
+## 2026-06-20 — 4축 재무비율 평가 ultrareview 후속 버그수정 (8건)
+
+### 버그 수정 — false-positive(부실 종목 高점수) 차단 + nit 정리
+
+클라우드 코드리뷰(ultrareview)가 2026-06-19 신설 4축 모듈에 보고한 8건을 부서장 라우팅 + MarginAnalyst 도메인 자문으로 수정. RED(6 신규 재현)→GREEN→VERIFY 완료. `tests/unit` ratio/advisory 관련 **69 PASS**(기존 62 → +7 경계 케이스).
+
+**🔴 코드 결함 (수익성·안정성 축 점수 부풀림 — 본 기능 목적 "부실 신호 탐지"와 충돌)**:
+- **이자보상비율 `interest_expense` None↔0 혼동** (`financial_ratios.py:_score_interest_coverage`): 기존 `ie is None or ie == 0`이 함께 "무차입 우량 4점"을 부여 → DART 라벨 변형("이자비용계"/"지급이자 및 할인료" 등)으로 정규식 파싱 실패한 차입 기업이 수익성 만점을 받음. **수정**: `ie == 0`(실측 무차입)만 영업흑자→4점/적자→1점, `ie is None`(파싱 실패=미지값)은 **None**(§D-6 평균 skip). 근거: Graham "추측으로 빈칸 안 채움".
+- **자본잠식(`total_equity ≤ 0`) 부채비율 sentinel 부재** (`_compute_stability`): `metrics.debt_ratio` 음수값(yfinance 부채/음수자본 → -1100 등)이 `-1100 < 100 → 4점` false-positive. 자본잠식은 거래소 관리종목 1차 트리거(강한 부실). **수정**: `total_equity ≤ 0`이면 부채비율 **1점 강제(sentinel)**, 음수 metrics보다 우선. 자기자본비율(자연히 1점)과 함께 두 비율 1점 보장 → 안정성 축 "주의" 이하로 캡. 진단에 "자본잠식 — 강한 부실 신호" 프리픽스(서술형, §D-7 준수). 응답에 `axes.stability.equity_deficit: true`.
+
+**🟡 일관성/시각 nit**:
+- **ROE fallback 비대칭** (`_compute_profitability`): oi_margin은 latest IS fallback이 있으나 ROE는 `metrics.roe` 단일 경로 → `metrics.roe is None`이면 latest `net_income/total_equity×100` fallback 추가(oi_margin 패턴과 일관). `te ≤ 0`이면 `_ratio` 분모 보호로 None(자본잠식 정책 정합).
+- **RadarChart dead zone** (`RatioAnalysisSection.jsx`): 최저 점수가 25(비율당 1점×25)인데 도메인이 0~100이라 0~24 unreachable. `PolarRadiusAxis domain={[25,100]}` + "최저 25점" 캡션. §D-3 "최저 1점" 채점 정책은 불변, 시각 표현만 보정.
+- **EmptyState 문구 통일**: §D-6 "평가 불가" ↔ §REQ-SCREEN-03 "재무비율 데이터 부족" 불일치 → "**재무비율 데이터 부족**" SSoT 통일(jsx·사양서 cross-reference).
+- **사양서 cross-ref 정정**: 존재하지 않는 `§REQ-GROW`→`[REQ-SCREEN-01]`, `§REQ-STAB`→`[REQ-MARGIN-04]`.
+
+**유지 결정(변경 안 함)**: 차입금의존도 `std/ltd 둘 다 None → 의존도=0(4점)`은 §D-6/REQ-MARGIN-04 명시 도메인 결정으로 유지. 이자보상과 달리 분자(차입금)=0 추정은 그 자체가 안정성 긍정 신호이고, BS 정규식(`^단기차입금$`/`^장기차입금(및사채)?$`)이 이자비용 정규식보다 변형 흡수가 안정적. ValueScreener가 잠재 리스크 인지하되 현 범위 유지 권고(정규식 견고화 시 재검토).
+
 ## 2026-06-19 — 4축 재무비율 평가 기능 신규 (기본적분석 최하단)
 
 ### 신규 기능 — 활동성/성장성/수익성/안정성 4축 레이더 + 진단 카드

@@ -218,16 +218,21 @@ def test_profitability_zero_interest_expense_4points():
     assert result["axes"]["profitability"]["ratios"]["interest_coverage"]["points"] == 4
 
 
-def test_profitability_none_interest_expense_4points():
-    """interest_expense None + 영업흑자 → 4점."""
-    income = [_income(revenue=100, oi=50)]
+def test_profitability_none_interest_expense_is_none():
+    """interest_expense None(파싱 실패) + 영업흑자 → None (bug_004 보정).
+
+    이전엔 '무차입 우량 4점'을 줬으나, None은 무차입(0)이 아니라 DART 라벨 변형
+    파싱 실패일 수 있어 4점 false-positive였음. 실측 무차입은 ie=0으로 표현
+    (test_ic_ie_zero_with_op_profit_is_4 참조).
+    """
+    income = [_income(revenue=100, oi=50)]  # ie 미지정 → None
     result = fr.compute_ratio_analysis(income, [], [], {})
-    assert result["axes"]["profitability"]["ratios"]["interest_coverage"]["points"] == 4
+    assert result["axes"]["profitability"]["ratios"]["interest_coverage"]["points"] is None
 
 
-def test_profitability_no_interest_operating_loss_1point():
-    """무이자 + 영업적자 → 1점."""
-    income = [_income(revenue=100, oi=-10)]
+def test_profitability_zero_interest_operating_loss_1point():
+    """실측 무차입(ie=0) + 영업적자 → 1점."""
+    income = [_income(revenue=100, oi=-10, ie=0)]
     result = fr.compute_ratio_analysis(income, [], [], {})
     assert result["axes"]["profitability"]["ratios"]["interest_coverage"]["points"] == 1
 
@@ -271,6 +276,79 @@ def test_profitability_latest_fallback():
     result = fr.compute_ratio_analysis(income, bs, [], {})
     # 직전 ni=8, ta=100 → ROA 8 → 4점
     assert result["axes"]["profitability"]["ratios"]["roa"]["points"] == 4
+
+
+# ═════════ ultrareview 결함 수정: bug_004 이자보상 None↔0 (도메인 확정) ═════════
+
+def test_ic_ie_none_with_bs_debt_is_none_not_4():
+    """[bug_004] interest_expense 파싱 실패(None) + BS 차입금 보유 → None (4점 false-positive 차단).
+
+    DART 라벨 변형('이자비용계' 등)으로 ie=None인데 차입금이 명백히 있으면
+    '무차입 우량 4점'은 잘못된 신호. §D-6 결손 정책에 따라 비율 None(평균 skip).
+    """
+    income = [_income(revenue=100, oi=50)]  # ie 없음(None), 영업흑자
+    bs = [_bs(ta=200, std=30, ltd=20)]  # 차입금 50 보유
+    result = fr.compute_ratio_analysis(income, bs, [], {})
+    ic = result["axes"]["profitability"]["ratios"]["interest_coverage"]
+    assert ic["points"] is None, f"차입보유+ie None은 None이어야 함, got {ic}"
+
+
+def test_ic_ie_zero_with_op_profit_is_4():
+    """[bug_004] interest_expense == 0(실측 무차입) + 영업흑자 → 4점 유지(회귀 가드)."""
+    income = [_income(revenue=100, oi=100, ie=0)]
+    result = fr.compute_ratio_analysis(income, [], [], {})
+    assert result["axes"]["profitability"]["ratios"]["interest_coverage"]["points"] == 4
+
+
+def test_ic_ie_none_no_bs_debt_info_is_none():
+    """[bug_004] ie None + BS 차입 항목도 전부 None(판별 불가) → 보수적 None.
+
+    차입 유무를 판별할 근거가 없으면 4점을 부여하지 않는다(Graham 보수주의).
+    """
+    income = [_income(revenue=100, oi=50)]
+    bs = [_bs(ta=200)]  # std/ltd 둘 다 None
+    result = fr.compute_ratio_analysis(income, bs, [], {})
+    assert result["axes"]["profitability"]["ratios"]["interest_coverage"]["points"] is None
+
+
+def test_ic_ie_zero_operating_loss_is_1():
+    """[bug_004] ie == 0 + 영업적자 → 1점 유지(회귀 가드)."""
+    income = [_income(revenue=100, oi=-10, ie=0)]
+    result = fr.compute_ratio_analysis(income, [], [], {})
+    assert result["axes"]["profitability"]["ratios"]["interest_coverage"]["points"] == 1
+
+
+# ═════════ ultrareview 결함 수정: bug_011 ROE metrics None fallback ═════════
+
+def test_roe_fallback_from_is_bs_when_metrics_none():
+    """[bug_011] metrics.roe None + IS/BS 존재 → latest net_income/total_equity×100 산출.
+
+    oi_margin은 latest fallback이 있는데 ROE는 metrics 단일 경로라 비대칭이었음.
+    ROE 분모 = 자기자본(MarginAnalyst 확정).
+    """
+    income = [_income(ni=20)]
+    bs = [_bs(ta=100, te=100)]  # ROE = 20/100*100 = 20 → >15 → 4점
+    result = fr.compute_ratio_analysis(income, bs, [], {})  # metrics 비어있음
+    roe = result["axes"]["profitability"]["ratios"]["roe"]
+    assert roe["value"] == 20.0
+    assert roe["points"] == 4
+
+
+def test_roe_fallback_equity_deficit_is_none():
+    """[bug_011] metrics.roe None + total_equity ≤ 0(자본잠식) → ROE None(분모 보호)."""
+    income = [_income(ni=-20)]
+    bs = [_bs(ta=100, te=-50)]
+    result = fr.compute_ratio_analysis(income, bs, [], {})
+    assert result["axes"]["profitability"]["ratios"]["roe"]["points"] is None
+
+
+def test_roe_metrics_takes_priority_over_fallback():
+    """[bug_011] metrics.roe 존재 시 fallback 미사용(우선순위 회귀 가드)."""
+    income = [_income(ni=20)]
+    bs = [_bs(ta=100, te=100)]
+    result = fr.compute_ratio_analysis(income, bs, [], {"roe": 5})  # metrics 우선
+    assert result["axes"]["profitability"]["ratios"]["roe"]["value"] == 5.0
+    assert result["axes"]["profitability"]["ratios"]["roe"]["points"] == 2
 
 
 # ═══════════════════ REQ-MARGIN-04: 안정성 (절대 임계값) ═══════════════════
@@ -333,6 +411,54 @@ def test_stability_debt_dependency_thresholds():
     assert r2["axes"]["stability"]["ratios"]["debt_dependency"]["points"] == 2
     r1 = fr.compute_ratio_analysis([], [_bs(ta=100, std=30, ltd=20)], [], {})  # 50% → 1점
     assert r1["axes"]["stability"]["ratios"]["debt_dependency"]["points"] == 1
+
+
+# ═════════ ultrareview 결함 수정: bug_015 자본잠식 부채비율 sentinel ═════════
+
+def test_stability_equity_deficit_debt_ratio_sentinel_1point():
+    """[bug_015] total_equity ≤ 0(자본잠식) → 부채비율 1점 강제(metrics 음수값보다 우선).
+
+    yfinance가 부채/음수자본으로 음수 debt_ratio(-1100 등)를 주면 -1100<100 → 4점
+    false-positive. 자본잠식은 관리종목 1차 트리거 = 강한 부실 신호 → sentinel 1점.
+    """
+    bs = [_bs(ta=100, te=-50, tl=150)]
+    metrics = {"debt_ratio": -1100}  # yfinance 음수 비정상값
+    result = fr.compute_ratio_analysis([], bs, [], metrics)
+    stab = result["axes"]["stability"]
+    assert stab["ratios"]["debt_ratio"]["points"] == 1, "자본잠식 부채비율은 sentinel 1점"
+
+
+def test_stability_equity_deficit_caps_axis_below_caution():
+    """[bug_015] 자본잠식 시 자기자본비율(음수→1점)+부채비율(sentinel 1점) → 안정성 '주의' 이하.
+
+    이전: debt_ratio 4점 false-positive로 75점 '양호' (관리종목인데 양호 표시).
+    """
+    bs = [_bs(ta=100, te=-50, tl=150)]
+    metrics = {"debt_ratio": -1100}
+    result = fr.compute_ratio_analysis([], bs, [], metrics)
+    stab = result["axes"]["stability"]
+    assert stab["ratios"]["equity_ratio"]["points"] == 1
+    assert stab["ratios"]["debt_ratio"]["points"] == 1
+    # 안정성 등급이 '양호'/'우수'로 잘못 부풀지 않음
+    assert stab["grade"] in ("주의", "위험", "보통")
+    assert stab["score"] <= 69
+
+
+def test_stability_equity_deficit_diagnosis_flag():
+    """[bug_015] 자본잠식 시 진단에 '자본잠식' 별도 표기 + 강한 부실 신호."""
+    bs = [_bs(ta=100, te=-50, tl=150)]
+    metrics = {"debt_ratio": -1100}
+    result = fr.compute_ratio_analysis([], bs, [], metrics)
+    diag = result["axes"]["stability"]["diagnosis"]
+    assert "자본잠식" in diag
+
+
+def test_stability_positive_equity_debt_ratio_unaffected():
+    """[bug_015] 정상 자본(te>0)은 sentinel 미적용(회귀 가드)."""
+    bs = [_bs(ta=100, te=50, tl=80)]
+    metrics = {"debt_ratio": 80}  # 정상 → 4점
+    result = fr.compute_ratio_analysis([], bs, [], metrics)
+    assert result["axes"]["stability"]["ratios"]["debt_ratio"]["points"] == 4
 
 
 # ═══════════════════ §D-5 금융업 분기 ═══════════════════

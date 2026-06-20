@@ -90,7 +90,7 @@ frontend/
 
 **advisory/**
 - FundamentalPanel, TechnicalPanel
-- **RatioAnalysisSection** (2026-06-19 신설) — FundamentalPanel **최하단**(현금흐름표 뒤) "4축 재무비율 평가". Recharts `RadarChart`(활동성/성장성/수익성/안정성 4축, 0~100) 1장 + 축별 진단 카드 4개(점수 게이지 + §등급 색상 + 자동 진단 문구 + 클릭 시 소속 비율 value/points/trend_pct 펼침). N/A 축(금융업 활동성 등)은 회색 + "N/A" 배지 + na_reason. `ratio_analysis` null/overall None → "재무비율 데이터 부족" EmptyState. 매매 액션 문구 미표시. props: `data.ratio_analysis`
+- **RatioAnalysisSection** (2026-06-19 신설) — FundamentalPanel **최하단**(현금흐름표 뒤) "4축 재무비율 평가". Recharts `RadarChart`(활동성/성장성/수익성/안정성 4축, **`PolarRadiusAxis domain={[25,100]}`** — 최저 점수 25=비율당 1점×25라 0~24는 unreachable, dead zone 제거. 2026-06-20 보정) 1장 + "최저 25점" 캡션 + 축별 진단 카드 4개(점수 게이지 + §등급 색상 + 자동 진단 문구 + 클릭 시 소속 비율 value/points/trend_pct 펼침). N/A 축(금융업 활동성 등)은 회색 + "N/A" 배지 + na_reason. 자본잠식 종목은 `axes.stability.equity_deficit` 기반 "자본잠식 — 강한 부실 신호" 진단 표기. `ratio_analysis` null/overall None → "재무비율 데이터 부족" EmptyState. 매매 액션 문구 미표시. props: `data.ratio_analysis`
 - AIReportPanel — v3 통합 (6대 비판분석+전략+시나리오). `<UserCommentInput>` 액션바 위 + `<UserCommentaryCard>` 본문 최상단
 - ResearchDataPanel — 입력데이터 16카테고리 통합 미리보기. `_safeText()` 객체 안전 렌더 + `renderSegments` 키 매핑(`s.segment||s.name||s.product`)
 - `UserCommentaryCard` — 사용자 가설 양면 평가. stance 5단계 배지 + 좌(👍 녹색)/우(👎 빨강) 2컬럼 + strength 1~10 게이지. evaluation null 미렌더

@@ -186,20 +186,21 @@ export default function RatioAnalysisSection({ ratioAnalysis }) {
       {/* 종합 점수 배지 */}
       <div className="flex items-center justify-between mb-2">
         <span className="text-xs text-gray-500">
-          활동성 · 성장성 · 수익성 · 안정성 (각 0~100점)
+          활동성 · 성장성 · 수익성 · 안정성 (각 25~100점)
         </span>
         <span className={`text-sm font-bold px-2 py-0.5 rounded ${overallStyle.bg} ${overallStyle.text} border ${overallStyle.border}`}>
           종합 {overallGrade} · {ra.overall_score.toFixed(0)}점
         </span>
       </div>
 
-      {/* RadarChart */}
+      {/* RadarChart — 최저 점수 25(1점×25)이므로 도메인 floor를 25로 보정(bug_014).
+          §D-3 '최저 1점' 채점 정책은 불변, 차트 시각 표현만 0~24 dead zone 제거. */}
       <div className="w-full h-64">
         <ResponsiveContainer width="100%" height="100%">
           <RadarChart data={radarData} outerRadius="70%">
             <PolarGrid />
             <PolarAngleAxis dataKey="axis" tick={{ fontSize: 12, fill: '#4b5563' }} />
-            <PolarRadiusAxis domain={[0, 100]} tick={{ fontSize: 10, fill: '#9ca3af' }} angle={90} />
+            <PolarRadiusAxis domain={[25, 100]} tick={{ fontSize: 10, fill: '#9ca3af' }} angle={90} />
             <Radar
               name="점수"
               dataKey="score"
@@ -214,6 +215,9 @@ export default function RatioAnalysisSection({ ratioAnalysis }) {
           </RadarChart>
         </ResponsiveContainer>
       </div>
+      <p className="text-[11px] text-gray-400 mb-2 text-right">
+        ※ 각 축 최저 25점(비율당 최저 1점). 레이더 차트 기준선은 25점입니다.
+      </p>
 
       {/* 축별 진단 카드 4개 */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2">

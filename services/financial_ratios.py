@@ -196,11 +196,20 @@ def _score_interest_coverage(
 ) -> Optional[int]:
     """이자보상비율(배): >5=4 / 3~5=3 / 1~3=2 / <1=1.
 
-    interest_expense None/0 → 무차입 우량: 영업흑자면 4점, 영업적자면 1점 (§REQ-MARGIN-03).
+    None↔0 구분 (bug_004 도메인 확정 2026-06-19, MarginAnalyst):
+    - interest_expense == 0 (실측 무차입) → 영업흑자 4점 / 영업적자 1점 (§REQ-MARGIN-03).
+    - interest_expense is None (DART 라벨 변형 파싱 실패: '이자비용계' 등) → None.
+      무차입(0)과 구분하여 '무차입 우량 4점'을 부여하지 않는다(Graham "추측으로
+      빈칸 안 채움"). 호출부(_compute_profitability)는 BS 차입 잔액이 있으면 더더욱
+      파싱 누락이 명백하므로 ie를 None 그대로 전달한다(§D-6 skip).
     """
     ie = _num(interest_expense)
     oi = _num(operating_income)
-    if ie is None or ie == 0:
+    if ie is None:
+        # 파싱 실패 — 무차입(0)과 구분. 4점 false-positive 차단.
+        return None
+    if ie == 0:
+        # 실측 무차입 우량.
         if oi is not None:
             return 4 if oi > 0 else 1
         return None
@@ -466,13 +475,19 @@ def _compute_profitability(income_stmt, balance_sheet, metrics, sector_tier) -> 
     is_financial = sector_tier in _FINANCIAL_TIERS
     ratio_order = ["oi_margin", "interest_coverage", "roe", "roa"]
 
-    # ROE (metrics 우선)
-    roe = _num(metrics.get("roe")) if metrics else None
+    # ROE (metrics 우선, 없으면 latest net_income/total_equity×100 — bug_011 oi_margin 패턴과 일관)
     # ROA = latest net_income / total_assets × 100
     ni = _latest_with_fallback(income_stmt, "net_income")
     ta = _latest_with_fallback(balance_sheet, "total_assets")
     roa_ratio = _ratio(ni, ta)
     roa = roa_ratio * 100 if roa_ratio is not None else None
+
+    roe = _num(metrics.get("roe")) if metrics else None
+    if roe is None:
+        # ROE 분모 = 자기자본(MarginAnalyst 확정). te ≤ 0(자본잠식)이면 _ratio가 None(분모 보호).
+        te_roe = _latest_with_fallback(balance_sheet, "total_equity")
+        roe_ratio = _ratio(ni, te_roe)
+        roe = roe_ratio * 100 if roe_ratio is not None else None
 
     ratios = {
         "roe": {"value": round(roe, 2) if roe is not None else None,
@@ -529,6 +544,9 @@ def _compute_stability(balance_sheet, metrics, sector_tier) -> dict:
                          "points": er_points, "trend_pct": None},
     }
 
+    # 자본잠식 여부 (bug_015): total_equity ≤ 0 → 거래소 관리종목 1차 트리거 = 강한 부실 신호.
+    equity_deficit = te is not None and te <= 0
+
     if not is_financial:
         # 부채비율: metrics 우선, 없으면 total_liabilities/total_equity×100
         dr = _num(metrics.get("debt_ratio")) if metrics else None
@@ -536,9 +554,16 @@ def _compute_stability(balance_sheet, metrics, sector_tier) -> dict:
             tl = _latest_with_fallback(balance_sheet, "total_liabilities")
             r = _ratio(tl, te)
             dr = r * 100 if r is not None else None
+        if equity_deficit:
+            # 자본잠식 sentinel: metrics.debt_ratio 음수/비정상값(yfinance 부채/음수자본)이
+            # `-1100 < 100 → 4점` false-positive를 내므로, 1점 강제(우선) — bug_015.
+            dr_points = 1
+            dr_value = round(dr, 2) if dr is not None else None
+        else:
+            dr_points = _score_debt_ratio(dr)
+            dr_value = round(dr, 2) if dr is not None else None
         ratios["debt_ratio"] = {
-            "value": round(dr, 2) if dr is not None else None,
-            "points": _score_debt_ratio(dr), "trend_pct": None,
+            "value": dr_value, "points": dr_points, "trend_pct": None,
         }
 
         # 차입금의존도 = (short_term_debt + long_term_debt) / total_assets × 100
@@ -570,7 +595,13 @@ def _compute_stability(balance_sheet, metrics, sector_tier) -> dict:
             "points": _score_current_ratio(cr_pct), "trend_pct": None,
         }
 
-    return _finalize_axis("stability", ratios, ratio_order)
+    axis = _finalize_axis("stability", ratios, ratio_order)
+    if equity_deficit:
+        # bug_015: 자본잠식은 점수와 무관하게 진단에 강한 부실 신호로 명시(서술형, §D-7 준수).
+        axis["equity_deficit"] = True
+        base_diag = axis.get("diagnosis") or ""
+        axis["diagnosis"] = f"자본잠식 — 강한 부실 신호. {base_diag}".rstrip()
+    return axis
 
 
 def _finalize_axis(axis_key: str, ratios: dict, ratio_order: list[str]) -> dict:
