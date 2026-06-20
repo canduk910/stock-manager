@@ -18,7 +18,14 @@
 - `.github/workflows/ci.yml`: job `timeout-minutes`(test 15/frontend 10/docker 20) + `concurrency`(group `ci-${{ github.workflow }}-${{ github.ref }}`, `cancel-in-progress: true` — 동일 ref 이전 run 자동 취소)
 - `.github/workflows/deploy.yml`: deploy job `timeout-minutes: 25` + `concurrency`(group `deploy-${{ github.ref }}`, `cancel-in-progress: false` — 배포 진행 중 취소 위험 회피, 큐만 정리)
 - 검증: pytest-timeout 발화 확인(10초 sleep + 3초 timeout → `Failed: Timeout`), YAML 문법 OK, 기존 단위 테스트 회귀 없음
-- 후속: 다음 CI 로그에서 timeout으로 드러나는 실제 hang 테스트 1건 식별 → mock 보강 예정
+
+**후속 2차 수정 (범인 확정 + backstop 강화)**: 1차 가드 푸시 후 CI 로그가 범인을 정확히 지목.
+- **범인 확정**: `tests/api/test_macro_api.py::test_get_summary` → `get_summary()` → `get_macro_cycle()` → `get_credit_spread()` → `macro_fetcher.fetch_credit_spread()` → `_fetch_fred_oas()` → `_http_get_fred_csv()` → mock 없는 실 `requests.get(FRED)`. CI 러너에서 FRED 미응답 → `_FRED_TIMEOUT=25`×재시도×시리즈 2종 누적으로 socket 대기.
+- **1차 가드가 15분 wall까지 간 이유**: 이 호출이 FastAPI TestClient **worker thread**에서 실행됨. pytest-timeout 기본 `signal` 방식은 메인 스레드만 인터럽트 → worker의 socket 블록을 못 죽이고 120s 스택만 덤프 → job `timeout-minutes:15`가 실제 종료. (또한 그 hang이 진행률 5% 지점이라 이후 95% 테스트는 미실행.)
+- **수정**:
+  - `pytest.ini`: `timeout_method = thread` 추가 — 별도 타이머 스레드가 만료 시 프로세스를 강제 종료. TestClient 스레드풀(daemon) 블록도 120s에 확실히 차단(검증: daemon 스레드 60초 sleep + 3초 timeout → 4.3초에 프로세스 종료).
+  - `tests/api/test_macro_api.py`: 클래스 전체 `pytestmark = pytest.mark.slow` — 외부 API 직접 호출 + 검증이 "200/502"뿐인 스모크 테스트 5종을 CI(`-m "not slow"`)에서 제외(검증: 5 deselected, 로컬은 5 collected).
+- **배포 영향**: 1차 가드(`96abf16`)는 hang을 15분에 막았으나 CI를 PASS시키진 못해 `needs: ci`인 Deploy가 미실행 → 그 사이 PCA(`c2de3ba`)·advisory 분할(`6c51d45`)이 운영 미반영 상태로 적체. 본 2차 수정으로 CI 통과 → 적체분 일괄 배포 예상.
 
 ## 2026-06-20 — 거시 팩터(롤링 PCA) 분석 신규 (매크로 페이지)
 
