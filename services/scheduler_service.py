@@ -192,6 +192,26 @@ def _run_macro_cleanup_job():
         logger.error(f"[스케줄러] 매크로 캐시 cleanup 실패: {e}", exc_info=True)
 
 
+def _run_macro_factor_model_job():
+    """거시 팩터(롤링 PCA) 모델 일배치 (KST 00:20, 2026-06-20 신규).
+
+    cleanup(00:05)+prewarm(00:05) 이후 실행 → 충돌 없음(cleanup은 '오늘 이전'
+    삭제, 당일 00:20 생성분 보존). 거시 10지표 7년 수집 → 롤링 PCA → 종목 베타
+    → macro_store.save_today("factor_model"). 무거운 계산은 이 배치에서만.
+    부분 실패는 build 내부 errors에 격리, 함수 자체는 raise 안 함(다른 잡 보호).
+    """
+    from services.macro_factor_model import build_and_cache_factor_model
+    try:
+        result = build_and_cache_factor_model()
+        meta = result.get("meta", {})
+        logger.info(
+            "[스케줄러] 거시 팩터 모델 배치 완료: 윈도우 %s개, 종목 %s개, 오류 %s건",
+            meta.get("n_windows"), meta.get("n_stocks"), len(result.get("errors", [])),
+        )
+    except Exception as e:
+        logger.error(f"[스케줄러] 거시 팩터 모델 배치 실패: {e}", exc_info=True)
+
+
 def _run_macro_prewarm_job():
     """일일 매크로 pre-warm (2026-05-12 신규, MacroSentinel 도메인 자문 결과 KST 00:05 채택).
 
@@ -250,6 +270,16 @@ def setup_scheduler():
             CronTrigger(hour=0, minute=5),
             id="macro_prewarm",
             name="매크로 pre-warm (00:05)",
+            replace_existing=True,
+        )
+        # 2026-06-20: 거시 팩터(롤링 PCA) 모델 일배치 (KST 00:20).
+        # cleanup+prewarm(00:05) 이후 → 당일 00:20 생성분은 cleanup('오늘 이전' 삭제)
+        # 대상 아님. 무거운 PCA는 이 배치에서만(요청 경로 read-only).
+        _scheduler.add_job(
+            _run_macro_factor_model_job,
+            CronTrigger(hour=0, minute=20),
+            id="macro_factor_model",
+            name="거시 팩터 모델 (롤링 PCA, 00:20)",
             replace_existing=True,
         )
         # REQ-FH-EXT-CRON-01: 외국인 보유 일별 백필 (KST 18:00 평일).

@@ -12,6 +12,9 @@ export const fetchCommodities = () => apiFetch('/api/macro/commodities')
 export const fetchSectorHeatmap = () => apiFetch('/api/macro/sector-heatmap')
 export const fetchMacroCycle = () => apiFetch('/api/macro/macro-cycle')
 
+// 거시 팩터(롤링 PCA) 모델 — read-only, status=pending 가능
+export const fetchFactorModel = () => apiFetch('/api/macro/factor-model')
+
 // 수급정보 (REQ-SUPPLY-ROUTER-01)
 export const fetchSupplyDemand = (market = 'kospi', days = 20) =>
   apiFetch(`/api/macro/supply-demand?market=${encodeURIComponent(market)}&days=${days}`)

@@ -30,7 +30,7 @@ frontend/
 | `order.js` | placeOrder/fetchOpenOrders/cancelOrder/modifyOrder/fetchExecutions/fetchBuyable/fetchFnoPrice |
 | `advisory.js` | fetchAdvisoryStocks/addAdvisoryStock/refreshAdvisoryData/generateReport(userComment)/fetchReport/fetchReportHistory/fetchReportById/fetchAdvisoryOhlcv/**fetchStockSupplyDemand**(code, days)/**fetchForeignHolding**(code, days=120) |
 | `search.js` | searchStocks(q, market) |
-| `macro.js` | fetchMacroIndices/fetchMacroNews/fetchMacroSentiment/fetchMacroInvestorQuotes/fetchMacroSummary/**fetchSupplyDemand**(market, days) |
+| `macro.js` | fetchMacroIndices/fetchMacroNews/fetchMacroSentiment/fetchMacroInvestorQuotes/fetchMacroSummary/**fetchSupplyDemand**(market, days)/**fetchFactorModel**() |
 | `advisor.js` | analyzePortfolio(userComment)/fetchAdvisorHistory/fetchAdvisorReport |
 | `backtest.js` | fetchMcpStatus/fetchPresets/runPresetBacktest/runCustomBacktest/runBatchBacktest/fetchBacktestResult/fetchBacktestHistory/fetchLocalPresets/runLocalBacktest |
 | `strategyBuilder.js` | convert/validate/save/load/list/delete (/api/backtest/strategy/*) |
@@ -53,7 +53,7 @@ frontend/
 | `useUsMarketClock.js` | ET 4구간 미국 시장 (`pre`/`regular`/`after`/`closed`). `Intl.DateTimeFormat('en-US', {timeZone:'America/New_York'})` DST 자동. `US_HOLIDAYS_ET` 2026~2028 30일 + `isUsHoliday()` 헬퍼 (주말+공휴일) |
 | `useMarketBoard.js` | useMarketBoard (신고가/신저가 + sparkline + ohlc) + useDisplayStocks (관심+별도등록 병합+순서) + **usePricePolling(codes, market)** — `fetchPricesBatch` 폴링(`useMarketClock` phase 기반 장중 15s / 장외 60s 자동 조정). 기존 WS prices shape 호환 (`{[code]: {price, change, change_pct, prev_close, volume, sign}}`) |
 | `useAdvisory.js` | useAdvisoryStocks/useAdvisoryData/useAdvisoryReport/useAdvisoryOhlcv/**useStockSupplyDemand**(code, days)/**useForeignHolding**(code, days=120) |
-| `useMacro.js` | 섹션별 독립 훅 (Indices/News/Sentiment/InvestorQuotes/**SupplyDemand(market, days)**). 부분 실패 격리 |
+| `useMacro.js` | 섹션별 독립 훅 (Indices/News/Sentiment/InvestorQuotes/**SupplyDemand(market, days)**/**FactorModel**). 부분 실패 격리 |
 | `usePortfolioAdvisor.js` | analyze/loadLatest/loadById. stale closure 해결 (loadHistory 의존성 없음) |
 | `useReport.js` | 5개 훅 (Reports/ReportDetail/Recommendations/Performance/Regimes) |
 | `usePortfolio.js` | balance+sentiment 병렬 + 자산배분/안전마진 등급 계산 |
@@ -130,6 +130,7 @@ frontend/
 - IndexSection, SentimentSection (VIX+버핏+F&G), NewsSection (한국+NYT 2컬럼), InvestorSection
 - **SupplyDemandSection** — 코스피/코스닥 토글(SectorHeatmap KR/US 패턴 차용) + 10~60일 슬라이더. Recharts ComposedChart(개인/외국인/기관 일별 막대 + 누적 라인) + 당일 요약 칩(외국인 +X억 / 기관 -Y억 / 개인 +Z억). KIS 키 미설정 503/외부 API 502 → 부분 실패 안내 카드(다른 섹션 무영향). IndexSection 직후 마운트
 - MacroCycleSection (4단계 + 투자체제 나란히 + 괴리설명 + confidence + 지표카드)
+- **factor/** (2026-06-20, 거시 팩터 롤링 PCA) — `FactorModelSection`(컨테이너, MacroCycle→Semiconductor→**FactorModel**→Index 배치, `status:"pending"` EmptyState "매일 00:20 갱신", 부제로 "가중합 아닌 공분산 구조에서 추출한 직교 축" 차별화) + `FactorSignalRadar`(5축 z-score RadarChart, `RatioAnalysisSection` 패턴 재사용, domain[-3,3], \|z\|≥1.5 강조) + `FactorExplainedChart`(pc0~4 설명력 추이 멀티 LineChart) + `FactorLoadingsTable`(PC별 loadings 막대, 절대값 정렬, 양수 빨강/음수 파랑) + `FactorBetaTable`(종목 5 beta 칩 + R² 가로막대 + 1-R² 고유스토리, `in_portfolio` 강조)
 - YieldCurveSection — 3단 레이아웃: 4금리 카드 → SpreadCard|곡선 → **10Y-3M 스프레드 + 10Y 금리 듀얼 축 추이** 풀폭 (h-80, ComposedChart). 좌축=스프레드 Area(0% ReferenceLine), 우축=10Y 금리 Line(#6366f1), Legend 자동 구분. NBER 침체+S&P 약세장 ReferenceArea 음영(spread 좌축 yAxisId)
 - CreditSpreadSection — HY OAS 백분위 5단계 시계추 + 5년차트(p10/p25/p75/p90 ReferenceLine) + IG OAS·HY-IG 보조카드(>5%p 정크패닉)
 - EventLabelsOverlay — `computeEventRows` + `makeLabelRenderer`. 글로벌 row 계산으로 침체/약세장 라벨 충돌 차단
@@ -152,7 +153,7 @@ frontend/
 | DetailPage | `/detail/:symbol` | 재무분석/종합 리포트 (서브탭 5개: 요약/기본적/기술적/AI자문/**수급·투자자**) |
 | OrderPage | `/order` | 5탭 (주문/미체결/체결/이력/예약) |
 | MarketBoardPage | `/market-board` | 시세판 (**REST 일괄 폴링** — yfinance 일괄 → KIS REST 폴백. `useMarketBoardWS` 폐지 → `usePricePolling`로 교체, 장중 15s / 장외 60s) |
-| MacroPage | `/macro` | 매크로 분석. **MacroCycleSection 직후 `<SemiconductorSection />` 마운트** (반도체 사이클 모니터링 카드 + 상세 모달, Phase 1 5종) |
+| MacroPage | `/macro` | 매크로 분석. **MacroCycle → Semiconductor → `<FactorModelSection />` → Index 순 마운트** (반도체 사이클 모니터링 Phase 1 5종 + 거시 팩터 롤링 PCA 4종) |
 | PortfolioPage | `/portfolio` | 통합 (체제+배분+수익+AI자문) |
 | ReportPage | `/reports` | 데일리 추천 (KR/US 토글, 3컨셉 탑픽) |
 | BacktestPage | `/backtest` | **단위 토글(종목/포트폴리오)** segment control이 전략 탭 자동 제한: 종목→빌더/MCP/커스텀 3탭+SymbolSearchBar(단일), 포트폴리오→로컬프리셋 단독+SymbolMultiInput(1~10). 전환 시 state 보존(재전환 시 복원). KR만. 거래비용 입력. 가용 기간 가이드 (US ≥ 1998-01-02 / KR ≥ 2000-01-04) |

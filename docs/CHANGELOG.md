@@ -1,5 +1,24 @@
 # 변경 이력
 
+## 2026-06-20 — 거시 팩터(롤링 PCA) 분석 신규 (매크로 페이지)
+
+### 거시 팩터 주성분 분해 신규
+
+첨부 PCA 대시보드 아이디어를 매크로 페이지에 이식. 거시지표 간 공분산 구조를 롤링 PCA로 5개 직교 주성분 축으로 분해하고, 사용자 종목을 그 축에 회귀해 거시 민감도+고유 스토리를 산출.
+
+- **신규 모듈 `services/macro_factor_model.py`** (순수 numpy, scikit-learn 미채택). 거시 10지표(미10년/2년금리·HY/IG스프레드·VIX·달러인덱스·원달러·기대인플레·WTI·S&P500) 7년 일별 시계열 → 504일 롤링 PCA(5 주성분, step=5).
+  - `_build_factor_matrix()`: S&P500 거래일 reindex + forward-fill(≤5일) + diff/logret 변환 + 윈도우별 수동 표준화(std=0 가드)
+  - `_pca_window()`: `np.linalg.svd` → components/explained_variance_ratio/scores
+  - `_align_sign()`: anchor(S&P500) loading 항상 +, PC1~4는 직전 윈도우 내적 부호로 연속성(설명력 추이 부호 깜빡임 방지)
+  - `compute_stock_betas()`: 종목 logret를 윈도우 날짜 정렬 → `np.linalg.lstsq`(절편 포함) → betas[5]+r2+idiosyncratic(=1-r2). 유효관측<60 skip
+  - `build_and_cache_factor_model()`: 수집→PCA→종목베타(watchlist∪advisory, 0건이면 대표리스트 폴백)→`macro_store.save_today("factor_model")`
+- **데이터 재사용**: yf는 `.history(period="7y")` 패턴(대시보드의 깨진 yahoo v7 download CSV 폐기), FRED는 `_fetch_fred_via_api`+`oas_history_store`(DGS2/T10YIE 2종만 신규 수집, series_id 파라미터화 재사용)
+- **신규 엔드포인트 `GET /api/macro/factor-model`** (`routers/macro.py`) — read-only. 응답 `{status, as_of, pc_labels, signal_lights[], explained_history[], loadings[], stock_betas[], meta, errors[]}`. 캐시 miss 시 `status:"pending"`. `macro_service.get_factor_model(user_id)` + `_annotate_user_portfolio()`(사용자별 `in_portfolio`/`source` 재주입)
+- **스케줄러 cron** (`services/scheduler_service.py`) — `_run_macro_factor_model_job` KST 00:20(prewarm/cleanup 00:05 이후). 무거운 롤링 PCA는 이 배치에서만(요청 경로 금지, t3.small 보호)
+- **프론트** (`frontend/src/components/macro/factor/`) — `FactorModelSection`(컨테이너) + `FactorSignalRadar`(5축 z-score RadarChart, `RatioAnalysisSection` 패턴 재사용) + `FactorExplainedChart`(설명력 추이 멀티 LineChart) + `FactorLoadingsTable`(loadings 막대) + `FactorBetaTable`(종목 5 beta + R² + 고유스토리). MacroCycle→Semiconductor→**FactorModel**→Index 배치. `useFactorModel`/`fetchFactorModel` 추가
+- **의존성**: 신규 0 (scikit-learn 불채택). `requirements.txt`에 `numpy<2` 명시 핀 추가(yfinance 간접의존 안정화)
+- **회귀 가드**: 신규 단위 테스트 38건(PCA 직교성/evr 합=1/부호정렬 멱등/회귀 R²/결측·금융업·콜드스타트 폴백/요청 경로 무거운 계산 미호출 보증) PASS. 인접 macro/scheduler/financial 100/100 PASS. 프론트 `npm run build` 성공
+
 ## 2026-06-20 — advisory_service.py 분할 리팩토링 (refactor-audit)
 
 ### 리팩토링 — 백엔드 전체 감사 → 비대 파일 분할 1건

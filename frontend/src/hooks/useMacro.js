@@ -12,6 +12,7 @@ import {
   fetchSectorHeatmap,
   fetchMacroCycle,
   fetchSupplyDemand,
+  fetchFactorModel,
 } from '../api/macro'
 
 export function useMacroIndices() {
@@ -71,6 +72,13 @@ export function useSectorHeatmap() {
 export function useMacroCycle() {
   const { data, loading, error, run } = useAsyncState()
   const load = useCallback(() => run(() => fetchMacroCycle()).catch(() => {}), [run])
+  return { data, loading, error, load }
+}
+
+// 거시 팩터(롤링 PCA) 모델. 부분 실패 격리 — status=pending 시 EmptyState
+export function useFactorModel() {
+  const { data, loading, error, run } = useAsyncState()
+  const load = useCallback(() => run(() => fetchFactorModel()).catch(() => {}), [run])
   return { data, loading, error, load }
 }
 

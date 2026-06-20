@@ -2,7 +2,7 @@ import { useEffect } from 'react'
 import {
   useMacroIndices, useMacroSentiment, useMacroNews, useMacroInvestorQuotes,
   useMacroCycle, useYieldCurve, useCreditSpread,
-  useCurrencies, useCommodities, useSectorHeatmap,
+  useCurrencies, useCommodities, useSectorHeatmap, useFactorModel,
 } from '../hooks/useMacro'
 import MacroCycleSection from '../components/macro/MacroCycleSection'
 import IndexSection from '../components/macro/IndexSection'
@@ -16,6 +16,7 @@ import SectorHeatmapSection from '../components/macro/SectorHeatmapSection'
 import NewsSection from '../components/macro/NewsSection'
 import InvestorSection from '../components/macro/InvestorSection'
 import SemiconductorSection from '../components/semiconductor/SemiconductorSection'
+import FactorModelSection from '../components/macro/factor/FactorModelSection'
 
 export default function MacroPage() {
   const indices = useMacroIndices()
@@ -28,6 +29,7 @@ export default function MacroPage() {
   const currencies = useCurrencies()
   const commodities = useCommodities()
   const sectorHeatmap = useSectorHeatmap()
+  const factorModel = useFactorModel()
 
   useEffect(() => {
     indices.load()
@@ -40,6 +42,7 @@ export default function MacroPage() {
     currencies.load()
     commodities.load()
     sectorHeatmap.load()
+    factorModel.load()
   }, [])
 
   return (
@@ -47,6 +50,7 @@ export default function MacroPage() {
       <h1 className="text-2xl font-bold text-gray-900">매크로 분석</h1>
       <MacroCycleSection data={cycle.data} loading={cycle.loading} error={cycle.error} />
       <SemiconductorSection />
+      <FactorModelSection data={factorModel.data} loading={factorModel.loading} error={factorModel.error} />
       <IndexSection data={indices.data} loading={indices.loading} error={indices.error} />
       <SupplyDemandSection />
       <SentimentSection data={sentiment.data} loading={sentiment.loading} error={sentiment.error} />

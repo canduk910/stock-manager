@@ -70,6 +70,16 @@ def get_macro_cycle(_user: dict = Depends(get_current_user)):
     return macro_service.get_macro_cycle()
 
 
+@router.get("/factor-model")
+def get_factor_model(_user: dict = Depends(get_current_user)):
+    """거시 팩터(롤링 PCA) 모델 — 5축 신호등 + 종목 거시베타 + 설명력 추이 + loadings.
+
+    배치(KST 00:20)가 적재한 캐시 read-only. miss 시 `{"status":"pending"}`
+    (요청 경로에서 무거운 PCA 계산 금지, t3.small 보호).
+    """
+    return macro_service.get_factor_model(user_id=_user.get("id"))
+
+
 @router.get("/summary")
 def get_summary(_user: dict = Depends(get_current_user)):
     """전체 매크로 분석 통합 (섹션별 독립 — 부분 실패 허용)."""

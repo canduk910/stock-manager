@@ -529,6 +529,71 @@ def get_summary() -> dict:
     return result
 
 
+# ── 거시 팩터 모델 (롤링 PCA) ─────────────────────────────────────────────────
+
+def get_factor_model(user_id=None) -> dict:
+    """거시 팩터(롤링 PCA) 모델 read-only 조회.
+
+    배치(KST 00:20)가 macro_store에 적재한 `factor_model` 캐시를 그대로 반환.
+    miss(콜드스타트/배치실패) 시 `{"status":"pending"}` — 요청 경로에서 무거운
+    PCA 계산 금지(t3.small 보호). 프론트는 status=pending → EmptyState.
+
+    user_id가 주어지면 stock_betas의 in_portfolio/source 플래그를 해당 사용자
+    watchlist∪advisory 기준으로 재계산(배치는 전 사용자 합집합으로 계산).
+    """
+    cached = get_macro_today("factor_model")
+    if cached is None:
+        return {"status": "pending", "updated_at": now_kst_iso()}
+
+    # 사용자별 in_portfolio 플래그 재주입 (배치는 합집합 기준)
+    if user_id is not None:
+        try:
+            cached = _annotate_user_portfolio(cached, user_id)
+        except Exception as e:
+            logger.debug("factor_model user 플래그 주입 실패: %s", e)
+
+    return cached
+
+
+def _annotate_user_portfolio(model: dict, user_id) -> dict:
+    """stock_betas에 해당 user의 watchlist∪advisory 기준 in_portfolio/source 주입.
+
+    배치 응답을 mutate하지 않도록 얕은 복사 후 betas 리스트만 교체.
+    """
+    user_keys: dict[tuple[str, str], str] = {}
+    try:
+        from db.session import get_session
+        from db.models.watchlist import Watchlist
+        from db.models.advisory import AdvisoryStock
+        with get_session() as db:
+            for r in db.query(AdvisoryStock.code, AdvisoryStock.market).filter(
+                AdvisoryStock.user_id == user_id
+            ).all():
+                user_keys[(r[0], (r[1] or "KR").upper())] = "advisory"
+            for r in db.query(Watchlist.code, Watchlist.market).filter(
+                Watchlist.user_id == user_id
+            ).all():
+                user_keys.setdefault((r[0], (r[1] or "KR").upper()), "watchlist")
+    except Exception as e:
+        logger.debug("user 포트폴리오 조회 실패: %s", e)
+        return model
+
+    betas = model.get("stock_betas") or []
+    new_betas = []
+    for b in betas:
+        key = (b.get("code"), (b.get("market") or "KR").upper())
+        in_pf = key in user_keys
+        nb = dict(b)
+        nb["in_portfolio"] = in_pf
+        if in_pf:
+            nb["source"] = user_keys[key]
+        new_betas.append(nb)
+
+    out = dict(model)
+    out["stock_betas"] = new_betas
+    return out
+
+
 # ── Pre-warm (2026-05-12 트랙 3) ─────────────────────────────────────────────
 
 def prewarm_macro_summary() -> dict:
