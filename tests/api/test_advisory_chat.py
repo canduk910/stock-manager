@@ -41,13 +41,16 @@ class TestAdvisoryChatEndpoint:
         assert resp.status_code in (400, 404)
 
     def test_chat_ok_when_mocked(self, client):
-        from services import advisory_service
+        # chat_with_report 는 2026-06-20 분할로 services/advisory_chat.py 로 이동했고,
+        # OPENAI_API_KEY/advisory_store 도 그 모듈에 모듈 레벨로 바인딩된다. 따라서 patch
+        # 타깃은 advisory_service 가 아니라 advisory_chat 이어야 한다(re-export 경로와 무관).
+        from services import advisory_chat
         fake_row = {
             "id": 100, "user_id": 1, "code": "005930", "market": "KR",
             "name": "삼성전자", "report": {"등급": "B+"}, "model": "gpt-5.4",
         }
-        with patch.object(advisory_service, "OPENAI_API_KEY", "x"), \
-             patch.object(advisory_service.advisory_store, "get_report_by_id",
+        with patch.object(advisory_chat, "OPENAI_API_KEY", "x"), \
+             patch.object(advisory_chat.advisory_store, "get_report_by_id",
                           return_value=fake_row), \
              patch("services.ai_gateway.call_openai_chat",
                    return_value=_ai_resp("등급은 B+입니다.")):

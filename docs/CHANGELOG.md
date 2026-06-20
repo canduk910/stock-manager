@@ -27,6 +27,11 @@
   - `tests/api/test_macro_api.py`: 클래스 전체 `pytestmark = pytest.mark.slow` — 외부 API 직접 호출 + 검증이 "200/502"뿐인 스모크 테스트 5종을 CI(`-m "not slow"`)에서 제외(검증: 5 deselected, 로컬은 5 collected).
 - **배포 영향**: 1차 가드(`96abf16`)는 hang을 15분에 막았으나 CI를 PASS시키진 못해 `needs: ci`인 Deploy가 미실행 → 그 사이 PCA(`c2de3ba`)·advisory 분할(`6c51d45`)이 운영 미반영 상태로 적체. 본 2차 수정으로 CI 통과 → 적체분 일괄 배포 예상.
 
+**후속 3차 수정 (hang 제거 후 드러난 실 테스트 실패 1건)**: 2차 수정(`61e50ae`) 푸시 후 CI가 `cancelled`(hang)→`failure`로 전환, 가드가 정상 작동하며 진짜 실패가 노출됨(`6 deselected` = 매크로 slow 정상 제외, 434초 정상 종료).
+- **현상**: `tests/api/test_advisory_chat.py::test_chat_ok_when_mocked` → `assert 503 == 200`. `POST /api/advisory/005930/chat`이 `ConfigError: OPENAI_API_KEY가 설정되지 않았습니다.` 반환.
+- **근본 원인**: advisory_service 분할(`6c51d45`)로 `chat_with_report`가 `services/advisory_chat.py`로 이동, `OPENAI_API_KEY`가 그 모듈에 **별도 모듈 레벨 바인딩**으로 존재. 테스트는 여전히 stale 타깃 `patch.object(advisory_service, "OPENAI_API_KEY")`를 patch → `advisory_chat.OPENAI_API_KEY`는 빈 값 유지 → 503. **프로덕션 코드는 정상**(실 챗봇은 config에서 정상 로드), 순수 테스트 결함.
+- **수정**: `tests/api/test_advisory_chat.py` — patch 타깃을 `advisory_chat`(`OPENAI_API_KEY` + `advisory_store`)으로 교정. 동일 분할로 인한 stale patch 전수 스캔 → `tests/unit/test_advisory_service_chat.py`는 happy-path가 이미 `advisory_chat`을 patch하고 나머지는 OPENAI 체크 도달 전 raise 경로라 무해(거짓 통과 아님) → 추가 수정 불필요. 검증: 두 chat 테스트 파일 16/16 PASS.
+
 ## 2026-06-20 — 거시 팩터(롤링 PCA) 분석 신규 (매크로 페이지)
 
 ### 거시 팩터 주성분 분해 신규
