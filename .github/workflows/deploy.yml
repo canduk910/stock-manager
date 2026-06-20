@@ -4,6 +4,12 @@ on:
   push:
     branches: [main]
 
+# 동일 ref의 이전 배포 자동 취소 — hang run 누적 방지.
+# 단, 배포 진행 중 취소는 운영 중단 위험이 있어 cancel-in-progress=false (큐만 정리).
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
 env:
   AWS_REGION: ap-northeast-2
   # REQ-OPS-07 (2026-05-09): CloudWatch Logs 통합 토글.
@@ -20,6 +26,7 @@ jobs:
     name: Build & Deploy
     runs-on: ubuntu-latest
     needs: ci
+    timeout-minutes: 25
     permissions:
       id-token: write
       contents: read

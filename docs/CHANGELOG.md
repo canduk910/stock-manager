@@ -1,5 +1,25 @@
 # 변경 이력
 
+## 2026-06-20 — CI/CD 무한 hang 가드 (버그수정)
+
+### 버그 수정
+
+**현상**: `main` push 후 CI·Deploy가 종료되지 않음(`Backend Tests` job에서 1시간+ 무한 대기, hang run이 누적되어 동시 4개 진행).
+
+**진단**: 무한 hang을 끊는 타임아웃 가드가 전 계층에 부재.
+- CI job에 `timeout-minutes` 없음 → GitHub 기본 6시간까지 안 죽음
+- `pytest-timeout` 미설치 + `pytest.ini`에 timeout 설정 없음 → 개별 테스트가 socket에서 무한 대기
+- `concurrency`/`cancel-in-progress` 없음 → 새 push 와도 이전 hang run 누적
+- 근본 트리거: `slow` 마커가 1개뿐이라 `-m "not slow"` 필터가 사실상 무효 → 외부 네트워크를 타는 미마킹 테스트가 CI에서 socket timeout으로 멈춤(실행시간 14m→1h7m→hang 점진 악화)
+
+**수정**:
+- `requirements.txt`: `pytest-timeout` 추가
+- `pytest.ini`: `timeout = 120` (개별 테스트 120초 초과 시 해당 테스트만 실패시키고 stack 덤프로 범인 지목 — CI 무한 hang 차단)
+- `.github/workflows/ci.yml`: job `timeout-minutes`(test 15/frontend 10/docker 20) + `concurrency`(group `ci-${{ github.workflow }}-${{ github.ref }}`, `cancel-in-progress: true` — 동일 ref 이전 run 자동 취소)
+- `.github/workflows/deploy.yml`: deploy job `timeout-minutes: 25` + `concurrency`(group `deploy-${{ github.ref }}`, `cancel-in-progress: false` — 배포 진행 중 취소 위험 회피, 큐만 정리)
+- 검증: pytest-timeout 발화 확인(10초 sleep + 3초 timeout → `Failed: Timeout`), YAML 문법 OK, 기존 단위 테스트 회귀 없음
+- 후속: 다음 CI 로그에서 timeout으로 드러나는 실제 hang 테스트 1건 식별 → mock 보강 예정
+
 ## 2026-06-20 — 거시 팩터(롤링 PCA) 분석 신규 (매크로 페이지)
 
 ### 거시 팩터 주성분 분해 신규

@@ -16,6 +16,7 @@ sqlalchemy
 alembic
 pytest
 pytest-asyncio
+pytest-timeout
 apscheduler
 httpx>=0.27.0
 psycopg2-binary

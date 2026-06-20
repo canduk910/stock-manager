@@ -7,10 +7,18 @@ on:
     branches: [main]
   workflow_call:
 
+# 동일 ref의 이전 실행 자동 취소 — hang run 누적 방지.
+# group에 github.workflow 포함: CI(standalone)와 Deploy의 reusable CI가 서로를 취소하지 않음.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     name: Backend Tests
     runs-on: ubuntu-latest
+    # 외부 네트워크 hang 대비 job 레벨 backstop (pytest-timeout이 1차 가드).
+    timeout-minutes: 15
 
     services:
       postgres:
@@ -47,6 +55,7 @@ jobs:
   build-frontend:
     name: Frontend Build
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
@@ -67,6 +76,7 @@ jobs:
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
     needs: [test, build-frontend]
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
