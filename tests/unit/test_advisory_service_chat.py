@@ -5,6 +5,7 @@ from unittest.mock import patch, MagicMock
 import pytest
 
 from services import advisory_service
+from services import advisory_chat  # chat_with_report 분리 모듈 (2026-06-20)
 from services.exceptions import NotFoundError, ServiceError
 
 
@@ -110,7 +111,7 @@ class TestChatReportLookup:
 
     def test_get_report_by_id_called_with_user_id(self):
         """챗봇 호출 시 Repository에 user_id가 전달되어 권한 필터링되는지 확인."""
-        with patch.object(advisory_service, "OPENAI_API_KEY", "x"), \
+        with patch.object(advisory_chat, "OPENAI_API_KEY", "x"), \
              patch.object(advisory_service.advisory_store, "get_report_by_id",
                           return_value=_fake_report_row()) as m, \
              patch("services.ai_gateway.call_openai_chat", return_value=_ai_resp()):
@@ -138,7 +139,7 @@ class TestChatReportLookup:
 
 class TestChatHappyPath:
     def test_returns_reply_and_calls_gateway(self):
-        with patch.object(advisory_service, "OPENAI_API_KEY", "x"), \
+        with patch.object(advisory_chat, "OPENAI_API_KEY", "x"), \
              patch.object(advisory_service.advisory_store, "get_report_by_id",
                           return_value=_fake_report_row()), \
              patch("services.ai_gateway.call_openai_chat", return_value=_ai_resp("등급은 B+입니다.")) as m:
@@ -164,7 +165,7 @@ class TestChatSlidingWindow:
         many = [{"role": "user" if i % 2 == 0 else "assistant",
                  "content": f"m{i}"} for i in range(30)]
         many[-1] = {"role": "user", "content": "마지막 질문"}
-        with patch.object(advisory_service, "OPENAI_API_KEY", "x"), \
+        with patch.object(advisory_chat, "OPENAI_API_KEY", "x"), \
              patch.object(advisory_service.advisory_store, "get_report_by_id",
                           return_value=_fake_report_row()), \
              patch("services.ai_gateway.call_openai_chat", return_value=_ai_resp()) as m:

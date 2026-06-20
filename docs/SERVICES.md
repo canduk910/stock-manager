@@ -16,7 +16,9 @@
 | `quote_service.py` | 실시간 시세 공개 API 진입점 (싱글턴 `get_manager`/`get_overseas_manager`) |
 | `quote_kis.py` | KIS WebSocket 단일 연결 + 심볼별 pub/sub (국내+FNO) + 체결통보(H0STCNI0). **(2026-05-08)** `_KR_TR_MATRIX(UN/KRX/NXT)` + `_resolve_exchange_by_clock` 4구간 + `subscribe_market_status` 멀티플렉스(H0UNMKO0/H0STMKO0/H0NXMKO0). |
 | `quote_overseas.py` | 해외주식 시세 (Finnhub WS 또는 yfinance 2초 폴링) |
-| `advisory_service.py` | 자문종목 데이터 수집 + OpenAI 리포트 생성. macro_cycle 통합 + cycle×regime 16셀 매트릭스 + 성장 보조등급 병기 (2026-05-02) |
+| `advisory_service.py` | 자문종목 데이터 수집 + OpenAI 리포트 생성. macro_cycle 통합 + cycle×regime 16셀 매트릭스 + 성장 보조등급 병기 (2026-05-02). **2026-06-20 분할**: 1861→800줄. 프롬프트 빌더→`advisory_prompt.py`, 챗봇→`advisory_chat.py` verbatim 이동 + re-export(공개 API 무변경) |
+| `advisory_prompt.py` | **AI자문 프롬프트 빌더** (2026-06-20 advisory_service 분할). GPT 시스템/유저 프롬프트 구성 9함수. 7점 등급/손절/Value Trap 문자열은 safety_grade.py와 3중 일관성 필수. advisory_service가 re-export |
+| `advisory_chat.py` | **AI자문 챗봇** (2026-06-20 advisory_service 분할). `chat_with_report()` stateless 챗봇(DB user_id 검증). advisory_service가 re-export |
 | `growth_grade.py` | **성장주 보조 등급** (신규, 2026-05-02). 5지표 20점 → G-A/G-B/G-C. `combine_grades(value, growth)` → factor 6종 라벨 (가치D+성장A→0.30 등) |
 | `macro_regime.py` | 공용 체제 판단 + cycle×regime 16셀 동적 파라미터 (2026-05-02 `get_regime_params`/`get_margin_requirement` 신규) |
 | `safety_grade.py` | 7점 등급 (가치). `GRADE_FACTOR["C"]=0.25` C 부분진입 허용 (2026-05-02) |

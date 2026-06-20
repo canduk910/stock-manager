@@ -1,5 +1,22 @@
 # 변경 이력
 
+## 2026-06-20 — advisory_service.py 분할 리팩토링 (refactor-audit)
+
+### 리팩토링 — 백엔드 전체 감사 → 비대 파일 분할 1건
+
+부서장(department-head) 라우팅 + refactor-audit 7단계 워크플로우. 백엔드 전체(`routers`/`services`/`stock`) 구조 개선 + 중복 제거 감사. **감사 결과 핵심 규칙은 이미 깨끗**(레이어 위반 0건 — services 내 `HTTPException`/직접 SQL 0, 정규식 키워드 위반 0건, order_service/indicators/quote 분할은 기존 완료). 비대 파일 분할만 실질 후보 → **HIGH-1만 실행, 4건 도메인 사유 보류**.
+
+**✅ `advisory_service.py` 1861 → 800줄 (-1061)**:
+- 신규 `services/advisory_prompt.py`(1010줄): 프롬프트 빌더 9개(`_build_system_prompt` 등) verbatim 이동.
+- 신규 `services/advisory_chat.py`(129줄): `chat_with_report` verbatim 이동.
+- **re-export로 기존 import 경로 100% 보존, 공개 API(엔드포인트 URL/응답 shape/에러 코드) 무변경.**
+- 7점 등급/손절/Value Trap 문자열은 `safety_grade.py`/`macro_regime.py`와 "3중 일관성" 의도적 중복 → byte-identical 이동(제거 금지, margin-analyst 자문).
+- `_calc_graham_number`는 `pipeline_service` private import → 잔류 + re-export.
+
+**⏸ 보류 4건 (도메인 사유)**: macro_fetcher credit 분리(소비처 다수 + 모듈변수 결합 위험, macro-sentinel OK_BUT_DEFER) / routers→stock import 정리(ROI 낮음) / tax·dart·yf 도메인 응집 / except 일괄변경 위험.
+
+**회귀 가드**: import 정합성(main + routers.advisory + pipeline_service, 순환 의존 0) + re-export identity 검증. `pytest tests/unit` **1652 passed / 8 skipped — 신규 회귀 0건**. `test_advisory_service_chat.py` patch 대상 경로만 갱신(로직 이동 반영, 동작 무변경). 산출물: `_workspace/refactor/01~04`.
+
 ## 2026-06-20 — 4축 재무비율 평가 ultrareview 후속 버그수정 (8건)
 
 ### 버그 수정 — false-positive(부실 종목 高점수) 차단 + nit 정리
