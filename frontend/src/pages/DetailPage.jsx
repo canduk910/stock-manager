@@ -9,6 +9,7 @@ import ReportSummary from '../components/detail/ReportSummary'
 import FundamentalPanel from '../components/advisory/FundamentalPanel'
 import TechnicalPanel from '../components/advisory/TechnicalPanel'
 import AIReportPanel from '../components/advisory/AIReportPanel'
+import ReportPdfDocument from '../components/advisory/ReportPdfDocument'
 import ResearchDataPanel from '../components/advisory/ResearchDataPanel'
 import SupplyDemandPanel from '../components/advisory/SupplyDemandPanel'
 import AnalystReportsTable from '../components/advisory/AnalystReportsTable'
@@ -64,6 +65,8 @@ export default function DetailPage() {
   const [subTab, setSubTab] = useState('cagr')
   // 사용자 가설 코멘트 (AI 자문 서브탭) — 페이지 이동 시 초기화 (2026-05-07)
   const [userComment, setUserComment] = useState('')
+  // 종합리포트 PDF 내보내기 진행 상태 (true일 때만 ReportPdfDocument 마운트)
+  const [exporting, setExporting] = useState(false)
   // 2026-05-12: useDetailBundle — DetailPage 마운트 N+1 호출(/financials + /valuation + /report)
   // 패턴을 단일 /bundle 호출로 축약. ThreadPoolExecutor 병렬 + 부분 실패 보존.
   const { data, loading, error, load } = useDetailBundle()
@@ -199,7 +202,7 @@ export default function DetailPage() {
                     </SubTabBtn>
                   ))}
 
-                  {/* 새로고침/AI분석 버튼: cagr + supply-demand 탭에서는 숨김 (advData 의존 안 함) */}
+                  {/* 새로고침/AI분석/PDF 버튼: cagr + supply-demand 탭에서는 숨김 (advData 의존 안 함) */}
                   {subTab !== 'cagr' && subTab !== 'supply-demand' && (
                     <div className="ml-auto flex gap-2 py-1">
                       <button
@@ -218,6 +221,15 @@ export default function DetailPage() {
                           {isReportWorking ? 'AI 분석 중...' : 'AI분석 생성'}
                         </button>
                       )}
+                      {/* 종합리포트 PDF 다운로드: advData 로드 시 활성. 표지+기본적분석(+AI자문) 통합 */}
+                      <button
+                        onClick={() => setExporting(true)}
+                        disabled={!advData || isAdvWorking || exporting}
+                        title={!advData ? '먼저 [새로고침]으로 데이터를 수집하세요.' : '표지 + 기본적분석 + AI자문을 PDF 1개로 저장'}
+                        className="px-3 py-1.5 text-xs font-medium rounded border border-emerald-300 text-emerald-700 hover:bg-emerald-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {exporting ? 'PDF 생성 중...' : 'PDF 다운로드'}
+                      </button>
                     </div>
                   )}
                 </div>
@@ -309,6 +321,16 @@ export default function DetailPage() {
             )}
           </div>
         </>
+      )}
+
+      {/* 종합리포트 PDF 내보내기 — exporting일 때만 off-screen 마운트 후 자동 캡처/저장 */}
+      {exporting && (
+        <ReportPdfDocument
+          advData={advData}
+          report={report}
+          meta={{ code: symbol, name: data?.basic?.name, market }}
+          onDone={() => setExporting(false)}
+        />
       )}
 
       {/* 보고서 챗봇 — AI 자문 탭 + 보고서 존재 시에만 마운트 */}

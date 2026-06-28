@@ -1,6 +1,6 @@
 # frontend/ — React SPA
 
-React 19 + Vite + Tailwind CSS v4 + Recharts. 네이티브 fetch 사용 (외부 HTTP 라이브러리 없음).
+React 19 + Vite + Tailwind CSS v4 + Recharts. 네이티브 fetch 사용 (외부 HTTP 라이브러리 없음). PDF 출력은 `html2canvas-pro`(Tailwind v4 `oklch()` 색상 지원 포크 — 원조 html2canvas는 파싱 throw) + `jspdf` 클라이언트 사이드.
 
 > 변경 이력은 `docs/CHANGELOG.md`가 단일 출처. 본 문서는 디렉토리 구조와 영구 UI 규칙만 기술.
 
@@ -15,6 +15,7 @@ frontend/
     main.jsx
     App.jsx               BrowserRouter + Routes + AiUsageProvider
     index.css             @import "tailwindcss"
+    utils/                pdfExport.js — exportSectionsToPdf(elements, {filename, scale}) A4 멀티페이지 PDF (html2canvas-pro + jspdf)
 ```
 
 ### `src/api/` — REST 모듈 (fetch 래퍼)
@@ -91,7 +92,8 @@ frontend/
 **advisory/**
 - FundamentalPanel, TechnicalPanel
 - **RatioAnalysisSection** (2026-06-19 신설) — FundamentalPanel **최하단**(현금흐름표 뒤) "4축 재무비율 평가". Recharts `RadarChart`(활동성/성장성/수익성/안정성 4축, **`PolarRadiusAxis domain={[25,100]}`** — 최저 점수 25=비율당 1점×25라 0~24는 unreachable, dead zone 제거. 2026-06-20 보정) 1장 + "최저 25점" 캡션 + 축별 진단 카드 4개(점수 게이지 + §등급 색상 + 자동 진단 문구 + 클릭 시 소속 비율 value/points/trend_pct 펼침). N/A 축(금융업 활동성 등)은 회색 + "N/A" 배지 + na_reason. 자본잠식 종목은 `axes.stability.equity_deficit` 기반 "자본잠식 — 강한 부실 신호" 진단 표기. `ratio_analysis` null/overall None → "재무비율 데이터 부족" EmptyState. 매매 액션 문구 미표시. props: `data.ratio_analysis`
-- AIReportPanel — v3 통합 (6대 비판분석+전략+시나리오). `<UserCommentInput>` 액션바 위 + `<UserCommentaryCard>` 본문 최상단
+- AIReportPanel — v3 통합 (6대 비판분석+전략+시나리오). `<UserCommentInput>` 액션바 위 + `<UserCommentaryCard>` 본문 최상단. **`printMode` prop**(2026-06-28): true 시 액션바(이력 select·생성 버튼) + 사용자 코멘트 입력 숨김(PDF 출력용, 기본 false)
+- **ReportPdfDocument** (2026-06-28 신설) — 종합리포트 PDF 출력용 off-screen 숨김 렌더 컴포넌트. props: `advData`/`report`/`meta({code,name,market})`/`onDone`. `position:fixed; left:-10000px; width:760px`(display:none 금지 — Recharts 미계산 방지)에 `[data-pdf]` 3블록(표지/기본적분석(`<FundamentalPanel printMode>`)/AI자문(`<AIReportPanel printMode>`, report 없으면 "AI자문 미생성")) 렌더. useEffect 1회 rAF×2 + 1800ms 정착 대기(차트 애니메이션) → `exportSectionsToPdf` → `onDone`. `startedRef`로 StrictMode 중복 캡처 가드. DetailPage가 `exporting` state로 조건부 마운트
 - ResearchDataPanel — 입력데이터 16카테고리 통합 미리보기. `_safeText()` 객체 안전 렌더 + `renderSegments` 키 매핑(`s.segment||s.name||s.product`)
 - `UserCommentaryCard` — 사용자 가설 양면 평가. stance 5단계 배지 + 좌(👍 녹색)/우(👎 빨강) 2컬럼 + strength 1~10 게이지. evaluation null 미렌더
 - AnalystReportsModal (KR=네이버리서치/US=yfinance 등급이력)
@@ -185,7 +187,7 @@ frontend/
 - **EarningsPage**: KR/US 탭 → 조회 시 필터 초기화. 클라이언트 사이드 필터
 - **BalancePage**: KR/US/FNO 3섹션. KR 항상 표시, FNO는 `fno_enabled`일 때. KIS 키 없으면 안내 메시지 (에러 대신). **멀티 계좌 탭**: `listAccounts()`로 탭 라벨 별도 fetch(`data.accounts` 의존 X — 단독 모드 응답은 메타 1개라 탭 사라짐), useBalance(activeTab) 분기. partial_failure 노란 배너 표시
 - **WatchlistDashboard**: 종목명 클릭 → `/detail/:symbol`. 통화 배지 (US=`[US]`). `partial_failure` 표시 — 외부 API 부분 실패 영역(price/metrics/financials)은 회색 + ⚠ + tooltip "데이터 일시 미수집". @dnd-kit 드래그핸들(⠿) 행 DnD
-- **DetailPage**: StockHeader → KLineChartPanel → 2탭. 종합 리포트 5개 서브탭(요약/기본적/기술적/AI자문/수급·투자자). advisory + 수급은 lazy load
+- **DetailPage**: StockHeader → KLineChartPanel → 2탭. 종합 리포트 5개 서브탭(요약/기본적/기술적/AI자문/수급·투자자). advisory + 수급은 lazy load. **종합리포트 서브탭 액션 영역에 "PDF 다운로드" 버튼**(2026-06-28) — `advData` 로드 시 활성, 클릭 시 `exporting` state로 `<ReportPdfDocument>` 마운트 → 표지+기본적분석+AI자문 단일 PDF 원클릭 저장(`html2canvas-pro`+`jspdf`, 이미 로드된 advData/report 재사용 — 추가 API 0)
 - **OrderPage**: 5탭. 공유 상태(symbol/symbolName/market) 최상단. `isMounted` ref 중복 호출 방지. 10초 자동 폴링(미체결/체결), 체결통보 WS 수신 시 토스트+갱신, 발송 후 3초 딜레이 갱신
 - **MarketBoardPage**: `useDisplayStocks` 훅 (api/ 직접 import 금지). @dnd-kit 카드 순서 (DB 영속). **가격 갱신은 `usePricePolling(polledCodes, 'KR')` REST 폴링** — KIS WS 다중구독 폐지(자동매매 동시구독 41건 충돌 해소)
 

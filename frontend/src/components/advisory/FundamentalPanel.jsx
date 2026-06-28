@@ -667,7 +667,7 @@ function ForwardEstimatesSection({ forward, market, code, currentPrice }) {
 }
 
 // ── 메인 컴포넌트 ─────────────────────────────────────────────────────────
-export default function FundamentalPanel({ data, market, code }) {
+export default function FundamentalPanel({ data, market, code, printMode = false }) {
   const fundamental = data?.fundamental || {}
   const metrics = fundamental.metrics || {}
   const incomeStmt = fundamental.income_stmt || []
@@ -747,7 +747,7 @@ export default function FundamentalPanel({ data, market, code }) {
       <CashflowChart rows={cashflow} market={market} />
 
       {/* 4축 재무비율 평가 (REQ-SCREEN-03) — 최하단 */}
-      <RatioAnalysisSection ratioAnalysis={fundamental.ratio_analysis} />
+      <RatioAnalysisSection ratioAnalysis={fundamental.ratio_analysis} printMode={printMode} />
     </div>
   )
 }

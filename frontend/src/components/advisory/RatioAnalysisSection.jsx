@@ -75,8 +75,10 @@ function fmtRatioValue(key, value) {
 }
 
 // ── 축 진단 카드 ──────────────────────────────────────────────────────────
-function AxisCard({ axisKey, axis }) {
-  const [open, setOpen] = useState(false)
+// printMode(PDF): 기여 비율을 강제 펼침 + 토글 버튼 숨김(접힘 상태가 PDF에
+//   누락되지 않도록).
+function AxisCard({ axisKey, axis, printMode = false }) {
+  const [open, setOpen] = useState(printMode)
   const label = AXIS_LABEL[axisKey]
   const applicable = axis?.applicable
   const grade = axis?.grade || 'N/A'
@@ -115,8 +117,8 @@ function AxisCard({ axisKey, axis }) {
         {axis?.diagnosis || (applicable ? '' : (axis?.na_reason || '해당 업종 적용 불가(N/A)'))}
       </p>
 
-      {/* 기여 비율 펼침 */}
-      {applicable && ratioKeys.length > 0 && (
+      {/* 기여 비율 펼침 — printMode(PDF)에선 토글 숨김(항상 펼침) */}
+      {!printMode && applicable && ratioKeys.length > 0 && (
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
@@ -151,7 +153,7 @@ function AxisCard({ axisKey, axis }) {
 }
 
 // ── 메인 ──────────────────────────────────────────────────────────────────
-export default function RatioAnalysisSection({ ratioAnalysis }) {
+export default function RatioAnalysisSection({ ratioAnalysis, printMode = false }) {
   const ra = ratioAnalysis || null
 
   // EmptyState: ratio_analysis 부재 또는 overall_score None
@@ -222,7 +224,7 @@ export default function RatioAnalysisSection({ ratioAnalysis }) {
       {/* 축별 진단 카드 4개 */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2">
         {AXIS_ORDER.map((key) => (
-          <AxisCard key={key} axisKey={key} axis={axes[key]} />
+          <AxisCard key={key} axisKey={key} axis={axes[key]} printMode={printMode} />
         ))}
       </div>
     </>

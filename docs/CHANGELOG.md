@@ -1,5 +1,27 @@
 # 변경 이력
 
+## 2026-06-28 — 종합리포트 PDF 출력 (신규)
+
+### 종합리포트 PDF 출력 신규
+
+**요청**: 종목 상세(DetailPage) 종합리포트의 **기본적분석 + AI자문**을 표지 포함 **단일 PDF**로 버튼 클릭 즉시 파일명 자동 다운로드. 호환성 최우선.
+
+**방식 검토 → 채택**: 클라이언트 사이드 **`html2canvas-pro` + `jspdf`** 원클릭 다운로드.
+- **`html2canvas-pro` 채택 사유(호환성 핵심)**: Tailwind v4는 색상을 `oklch()`로 출력 → 원조 `html2canvas`는 `unsupported color function oklch`로 throw. oklch/lab/lch/color() 지원 포크인 `-pro`가 직접 해법.
+- 대안 비교: window.print(벡터 최상이나 인쇄 대화상자 한 단계) / @react-pdf/renderer(기존 JSX·Recharts 재사용 불가) / 백엔드 weasyprint·puppeteer(t3.small 부하·구현량) → 모두 미채택.
+- **한글**: 화면 렌더 DOM을 래스터화하므로 시스템 한글 폰트 그대로 캡처 → 폰트 임베딩 불필요(jsPDF는 이미지만 배치).
+
+**구현**:
+- 신규 `frontend/src/utils/pdfExport.js` — `exportSectionsToPdf(elements, {filename, scale=2, margin=8})`. jsPDF A4(mm), 요소별 새 페이지 + canvas 높이를 A4 콘텐츠 비율로 슬라이스하는 음수 offset 멀티페이지 패턴.
+- 신규 `frontend/src/components/advisory/ReportPdfDocument.jsx` — off-screen 고정폭(760px, `position:fixed; left:-10000px`, display:none 금지 — Recharts 미계산 방지) 숨김 컨테이너. `[data-pdf]` 표지/기본적/AI 3블록. useEffect 1회 rAF×2 + 1800ms 정착 대기(차트 애니메이션) → 캡처 → onDone. `startedRef` StrictMode 중복 가드 + try/catch/finally로 실패 시 버튼 복구. 파일명 `${name||code}_종합리포트_${YYYYMMDD}.pdf`.
+- `printMode` prop 추가(기본 false, 기존 동작 무변): `AIReportPanel`(액션바·코멘트 입력 숨김) / `FundamentalPanel`(하위 전달) / `RatioAnalysisSection`(4축 카드 강제 펼침 + 토글 숨김).
+- `DetailPage.jsx` — `exporting` state + 종합리포트 액션 영역에 "PDF 다운로드" 버튼(advData 미로드/수집중/생성중 disabled). 이미 로드된 advData/report 재사용(추가 API 0). report 미생성 시 표지+기본적분석만 + "AI자문 미생성" 표기.
+- `frontend/package.json` — `html2canvas-pro@^1.5.11`, `jspdf@^3.0.3` 추가. **백엔드 변경 0**.
+
+**검증**: `npm install` + `npm run build` 성공(html2canvas/jsPDF 청크 정상 번들). QA 경계면(props 전파·data shape·하위호환·import) 통과. 프론트 JS 테스트 러너 부재 → 실제 PDF 출력 육안 검증(차트/한글/oklch)은 로컬 `npm run dev`/`docker-compose`에서 사용자 확인.
+
+**알려진 한계**: A4 슬라이스 방식상 페이지 경계 줄 잘림 가능(v1 허용, 추후 break-inside 마커 개선) / 차트 정착 대기 1800ms 고정(저사양 기기 잔여 프레임 시 `isAnimationActive={!printMode}` 견고 대안) / PDF 실패 피드백 `window.alert` 폴백(토스트 미연동 영역).
+
 ## 2026-06-20 — CI/CD 무한 hang 가드 (버그수정)
 
 ### 버그 수정

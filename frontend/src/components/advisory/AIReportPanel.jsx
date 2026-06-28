@@ -145,6 +145,7 @@ export default function AIReportPanel({
   onSelectHistory,
   userComment = '',
   onUserCommentChange,
+  printMode = false,
 }) {
   const reportData = report?.report || {}
   const generatedAt = report?.generated_at
@@ -181,8 +182,8 @@ export default function AIReportPanel({
 
   return (
     <div className="space-y-4">
-      {/* 사용자 코멘트 입력 (2026-05-07) — 액션바 위 */}
-      {onUserCommentChange && (
+      {/* 사용자 코멘트 입력 (2026-05-07) — 액션바 위. printMode(PDF)에선 숨김 */}
+      {!printMode && onUserCommentChange && (
         <div className="p-3 bg-blue-50/30 border border-blue-200 rounded-lg">
           <p className="text-xs font-semibold text-blue-700 mb-2">
             💬 사용자 의견 (선택) — 가설을 입력하면 GPT가 동의/반박 양면 평가를 추가합니다
@@ -195,40 +196,42 @@ export default function AIReportPanel({
         </div>
       )}
 
-      {/* 액션 바 */}
-      <div className="flex items-center justify-between gap-4 p-3 bg-gray-50 rounded-lg border border-gray-200">
-        <div className="flex items-center gap-3 min-w-0">
-          {history.length > 1 ? (
-            <select
-              value={report?.id ?? ''}
-              onChange={e => onSelectHistory && onSelectHistory(Number(e.target.value))}
-              className="text-xs border border-gray-300 rounded px-2 py-1 bg-white text-gray-700 max-w-[260px]"
-            >
-              {history.map(h => (
-                <option key={h.id} value={h.id}>
-                  {h.generated_at.slice(0, 16).replace('T', ' ')} · {h.model}
-                </option>
-              ))}
-            </select>
-          ) : (
-            <span className="text-xs text-gray-500">
-              {generatedAt
-                ? `생성: ${generatedAt.slice(0, 16).replace('T', ' ')} · ${model || ''}`
-                : '아직 생성된 리포트가 없습니다.'}
-            </span>
-          )}
-          {history.length > 1 && (
-            <span className="text-xs text-gray-400">({history.length}개)</span>
-          )}
+      {/* 액션 바 — printMode(PDF)에선 이력 select/생성 버튼 숨김 */}
+      {!printMode && (
+        <div className="flex items-center justify-between gap-4 p-3 bg-gray-50 rounded-lg border border-gray-200">
+          <div className="flex items-center gap-3 min-w-0">
+            {history.length > 1 ? (
+              <select
+                value={report?.id ?? ''}
+                onChange={e => onSelectHistory && onSelectHistory(Number(e.target.value))}
+                className="text-xs border border-gray-300 rounded px-2 py-1 bg-white text-gray-700 max-w-[260px]"
+              >
+                {history.map(h => (
+                  <option key={h.id} value={h.id}>
+                    {h.generated_at.slice(0, 16).replace('T', ' ')} · {h.model}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <span className="text-xs text-gray-500">
+                {generatedAt
+                  ? `생성: ${generatedAt.slice(0, 16).replace('T', ' ')} · ${model || ''}`
+                  : '아직 생성된 리포트가 없습니다.'}
+              </span>
+            )}
+            {history.length > 1 && (
+              <span className="text-xs text-gray-400">({history.length}개)</span>
+            )}
+          </div>
+          <button
+            onClick={onGenerate}
+            disabled={loading}
+            className="px-4 py-1.5 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium shrink-0"
+          >
+            {loading ? '분석 중...' : 'AI 분석 생성'}
+          </button>
         </div>
-        <button
-          onClick={onGenerate}
-          disabled={loading}
-          className="px-4 py-1.5 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium shrink-0"
-        >
-          {loading ? '분석 중...' : 'AI 분석 생성'}
-        </button>
-      </div>
+      )}
 
       {error && (
         <div className="p-3 bg-red-50 border border-red-200 rounded text-sm text-red-700">
