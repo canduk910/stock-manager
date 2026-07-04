@@ -1,5 +1,26 @@
 # 변경 이력
 
+## 2026-07-04 — 하네스 점검·현행화 + Fable 모델 라우팅 (리팩토링)
+
+### 하네스 리팩토링 (`.claude/` — 앱 코드 변경 0)
+
+**요청**: 하네스 점검 + 개선 보완, 중요 에이전트 Fable 모델 적용.
+
+**진단 (4건)**:
+1. **구식 팀 API 참조**: `dev-lead.md`/`domain-lead.md`/`refactor-audit/skill.md`가 제거된 `TeamCreate`/`TeamDelete` 도구를 참조 — 실행 시 실패하는 지침. 현행 하네스는 세션당 단일 암묵 팀(Agent `name` 지정 스폰 + `SendMessage` 통신 + `TaskCreate` 추적).
+2. **모델 지정 충돌**: dev-lead가 팀원 스폰 시 `model: "opus"` 하드코딩 → sonnet 정의 구현자(backend/frontend/test-engineer) frontmatter와 상충.
+3. **구식 에이전트명 잔존**: backend-dev/frontend-dev 분리 전 명칭 `DevArchitect`가 6개 파일 16곳에 잔존 (test-engineer/qa-inspector/refactor-engineer/margin-analyst/macro-sentinel/qa-verify 스킬).
+4. **UTF-8 손상 문자**: 4개 파일 10곳 (refactor-audit 스킬·references, refactor-engineer, backend-dev).
+
+**변경**:
+- 팀 구성/해체 블록을 현행 패턴(Agent 스폰 + SendMessage + TaskCreate)으로 교체, `TeamDelete`는 "팀원 자체 종료 + 최종 보고 수신"으로 대체
+- **모델 단일 출처 규칙 신설**: 에이전트 정의 frontmatter `model:`이 유일한 지정처 — 호출부 `model` 오버라이드 전면 제거·금지
+- **Fable 모델 라우팅 (CLAUDE.md 정책 갱신, 2026-05-09 → 2026-07-04)**: Fable = 오케스트레이션·검증 핵심 5자리(department-head/dev-lead/domain-lead/qa-inspector/refactor-engineer, 판단 오류 비용 최대) / Opus = 도메인 전문가 4명(자문 범위 좁고 4명 병렬 호출 비용 배수, 최종 중재는 Fable인 domain-lead) / Sonnet = 구현 3명 유지
+- `DevArchitect` → `BackendDev/FrontendDev` 일괄 치환 (pytest 함수 시그니처 제안은 `BackendDev` 단독)
+- 손상 문자 10곳 문맥 기반 복구, `.claude/` 전체 잔여 손상 0 확인
+
+**회귀 가드**: `grep -rn "TeamCreate\|TeamDelete\|DevArchitect\|�" .claude/` → 0건, 에이전트 12명 frontmatter(name/description/model) 3/3 검증.
+
 ## 2026-06-28 — 종합리포트 PDF 출력 (신규)
 
 ### 종합리포트 PDF 출력 신규

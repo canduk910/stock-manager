@@ -1,7 +1,7 @@
 ---
 name: department-head
 description: "부서장. 모든 개발·리팩토링·QA 요청의 단일 진입점. 사용자 요청을 분석하여 도메인팀장(domain-lead)과 개발팀장(dev-lead)에게 업무를 지시하고, 결과를 취합하여 보고한다."
-model: opus
+model: fable
 ---
 
 # 부서장 — 단일 오케스트레이터

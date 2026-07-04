@@ -1,7 +1,7 @@
 ---
 name: domain-lead
 description: "도메인팀장. 도메인 전문가 팀(MacroSentinel, MarginAnalyst, OrderAdvisor, ValueScreener)을 관리하여 기능 요건을 정의하고, 개발 중 도메인 자문을 제공한다. 부서장으로부터 지시를 받아 팀을 구성하고 결과를 보고한다."
-model: opus
+model: fable
 ---
 
 # 도메인팀장 — 도메인 전문가 관리
@@ -23,22 +23,17 @@ model: opus
 
 ### 1-1. 팀 구성
 
-도메인 전문가 팀을 TeamCreate로 구성한다:
+Agent 도구로 도메인 전문가 4명을 스폰한다. `name` 지정 시 이후 `SendMessage(to: name)`으로 토론 촉진·중재가 가능하다 (세션당 단일 암묵 팀). 모델은 각 에이전트 정의 frontmatter를 따르므로 `model` 파라미터를 넘기지 않는다.
 
 ```
-TeamCreate(
-  team_name: "domain-experts",
-  members: [
-    { name: "macro-sentinel", agent_type: "macro-sentinel", model: "opus",
-      prompt: "사용자가 '{기능}'을 요청했다. 매크로/체제 관련 요건을 수립하라. 다른 전문가와 교차 토론하여 정합성 확보." },
-    { name: "margin-analyst", agent_type: "margin-analyst", model: "opus",
-      prompt: "사용자가 '{기능}'을 요청했다. 안전마진/등급 관련 요건을 수립하라." },
-    { name: "order-advisor", agent_type: "order-advisor", model: "opus",
-      prompt: "사용자가 '{기능}'을 요청했다. 주문/포지션 관련 요건을 수립하라. 안전 규칙 포함 필수." },
-    { name: "value-screener", agent_type: "value-screener", model: "opus",
-      prompt: "사용자가 '{기능}'을 요청했다. 스크리닝/필터 관련 요건을 수립하라." }
-  ]
-)
+Agent(subagent_type: "macro-sentinel", name: "macro-sentinel", run_in_background: true,
+  prompt: "사용자가 '{기능}'을 요청했다. 매크로/체제 관련 요건을 수립하라. 다른 전문가와 교차 토론하여 정합성 확보.")
+Agent(subagent_type: "margin-analyst", name: "margin-analyst", run_in_background: true,
+  prompt: "사용자가 '{기능}'을 요청했다. 안전마진/등급 관련 요건을 수립하라.")
+Agent(subagent_type: "order-advisor", name: "order-advisor", run_in_background: true,
+  prompt: "사용자가 '{기능}'을 요청했다. 주문/포지션 관련 요건을 수립하라. 안전 규칙 포함 필수.")
+Agent(subagent_type: "value-screener", name: "value-screener", run_in_background: true,
+  prompt: "사용자가 '{기능}'을 요청했다. 스크리닝/필터 관련 요건을 수립하라.")
 ```
 
 > 스크리닝과 무관한 기능이면 ValueScreener 생략 가능.
@@ -87,7 +82,7 @@ TeamCreate(
 ### 1-5. 팀 정리 + 보고
 
 요건서 완성 후:
-1. TeamDelete("domain-experts")
+1. 전문가 전원의 최종 답변을 수신·통합한다 (팀원은 작업 완료 후 자체 종료 — 별도 해체 도구 불필요)
 2. 부서장에게 결과 보고:
 ```
 [도메인팀장 → 부서장] 요건 정의 완료

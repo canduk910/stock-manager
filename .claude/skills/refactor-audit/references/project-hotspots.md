@@ -47,7 +47,7 @@ services/order_validation.py       — _validate_market(), _strip_leading_zeros(
 
 **제안**:
 ```
-stock/advisory_fetcher.py  — OHLCV fetch + ���이터 수집
+stock/advisory_fetcher.py  — OHLCV fetch + 데이터 수집
 stock/indicators.py        — 순수 함수: calc_macd, calc_rsi, calc_stochastic, calc_bb, calc_ma
 ```
 

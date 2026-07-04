@@ -1,15 +1,15 @@
 ---
 name: qa-verify
-description: "통합 정합성 QA 검증. DevArchitect가 구현한 코드의 API↔프론트 shape 일치, 라우팅 정합성, DB→API→UI 데이터 흐름, 예외 계층 준수, 투자 도메인 로직 정확성을 교차 비교 검증한다. QA Inspector 에이전트 전용. '코드 검증', 'QA', '테스트', '정합성 검사' 요청 시 사용."
+description: "통합 정합성 QA 검증. BackendDev/FrontendDev가 구현한 코드의 API↔프론트 shape 일치, 라우팅 정합성, DB→API→UI 데이터 흐름, 예외 계층 준수, 투자 도메인 로직 정확성을 교차 비교 검증한다. QA Inspector 에이전트 전용. '코드 검증', 'QA', '테스트', '정합성 검사' 요청 시 사용."
 ---
 
 # 통합 정합성 QA 검증
 
-DevArchitect가 구현한 코드의 경계면 불일치를 체계적으로 검출한다.
+BackendDev/FrontendDev가 구현한 코드의 경계면 불일치를 체계적으로 검출한다.
 
 ## 입력
 
-- DevArchitect의 구현 완료 보고 (변경 파일 목록)
+- BackendDev/FrontendDev의 구현 완료 보고 (변경 파일 목록)
 - `_workspace/dev/01_domain_advice.json` (도메인 자문 결과)
 - `_workspace/dev/02_design.md` (설계 문서)
 
@@ -17,7 +17,7 @@ DevArchitect가 구현한 코드의 경계면 불일치를 체계적으로 검�
 
 ### Step 1: 변경 파일 분류
 
-DevArchitect가 보고한 변경 파일을 레이어별로 분류한다:
+BackendDev/FrontendDev가 보고한 변경 파일을 레이어별로 분류한다:
 
 ```
 DB:        stock/{module}_store.py

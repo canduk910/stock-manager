@@ -257,10 +257,12 @@ if any(p.search(text) for p in PATTERNS): ...
 
 작업 결과 보고 시 "push는 하지 않았습니다 — `/doc-commit` 호출 부탁드립니다" 명시.
 
-### 모델 라우팅 정책 (2026-05-09)
-- **Opus 4.7** — 계획·검증·자문·감사 (department-head/dev-lead/domain-lead/qa-inspector/refactor-engineer + 도메인 전문가 4명)
+### 모델 라우팅 정책 (2026-07-04 갱신)
+- **Fable** — 오케스트레이션·검증·리팩토링 핵심 5자리 (department-head/dev-lead/domain-lead/qa-inspector/refactor-engineer). 라우팅 오판·검증 누락·도메인 로직 파손 등 판단 오류 비용이 가장 큰 자리에 최상위 모델 배치.
+- **Opus** — 도메인 전문가 자문 4명 (macro-sentinel/margin-analyst/order-advisor/value-screener). 자문 범위가 좁고 4명 병렬 호출로 비용이 배수 — 최종 중재는 Fable인 domain-lead가 담당.
 - **Sonnet** — 일반 구현 (backend-dev/frontend-dev/test-engineer)
 - **Haiku** — 명령어 작성 (사용자 정의 에이전트 없음, `/model haiku` 수동)
+- **단일 출처**: 모델은 각 에이전트 정의(`.claude/agents/*.md`) frontmatter `model:`이 유일한 지정처. Agent/팀원 스폰 시 `model` 파라미터로 오버라이드하지 말 것 (정의와 호출부가 어긋나는 이력 방지).
 
 ### 에이전트 12명 (`.claude/agents/`)
 - **관리 (3)**: `department-head`(단일 진입점), `domain-lead`, `dev-lead`

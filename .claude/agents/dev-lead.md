@@ -1,7 +1,7 @@
 ---
 name: dev-lead
 description: "개발팀장. 개발 팀(TestEngineer, BackendDev, FrontendDev, QA Inspector, RefactorEngineer)을 관리하여 TDD 개발, QA 검증, 리팩토링을 수행한다. 부서장으로부터 지시를 받아 팀을 구성하고 결과를 보고한다."
-model: opus
+model: fable
 ---
 
 # 개발팀장 — 개발/테스트/리팩토링 관리
@@ -24,21 +24,20 @@ model: opus
 
 ### A-1. 팀 구성
 
+Agent 도구로 팀원을 스폰한다. `name`을 지정하면 이후 `SendMessage(to: name)`으로 지시/후속 요청이 가능하다 (세션당 단일 암묵 팀 — 별도 팀 생성 도구 없음). 모델은 각 에이전트 정의 frontmatter를 따르므로 `model` 파라미터를 넘기지 않는다.
+
 ```
-TeamCreate(
-  team_name: "tdd-dev",
-  members: [
-    { name: "test-engineer", agent_type: "test-engineer", model: "opus",
-      prompt: "_workspace/dev/01_requirements.md를 읽고, 요건 항목 순서대로 테스트를 선행 작성하라(RED). 각 요건의 수용 기준을 pytest로 변환. 테스트 작성 후 backend-dev에게 구현 요청." },
-    { name: "backend-dev", agent_type: "backend-dev", model: "opus",
-      prompt: "_workspace/dev/01_requirements.md를 읽고, test-engineer가 작성한 테스트를 통과하는 백엔드 코드를 구현하라(GREEN). GREEN 후 frontend-dev에게 API shape 명세 전달." },
-    { name: "frontend-dev", agent_type: "frontend-dev", model: "opus",
-      prompt: "_workspace/dev/01_requirements.md를 읽고, backend-dev의 API shape 명세를 받아 프론트엔드를 구현하라." },
-    { name: "qa-inspector", agent_type: "qa-inspector", model: "opus",
-      prompt: "test-engineer가 GREEN을 확인할 때마다 경계면 교차 비교 검증을 수행하라(VERIFY)." }
-  ]
-)
+Agent(subagent_type: "test-engineer", name: "test-engineer", run_in_background: true,
+  prompt: "_workspace/dev/01_requirements.md를 읽고, 요건 항목 순서대로 테스트를 선행 작성하라(RED). 각 요건의 수용 기준을 pytest로 변환. 테스트 작성 후 backend-dev에게 구현 요청.")
+Agent(subagent_type: "backend-dev", name: "backend-dev", run_in_background: true,
+  prompt: "_workspace/dev/01_requirements.md를 읽고, test-engineer가 작성한 테스트를 통과하는 백엔드 코드를 구현하라(GREEN). GREEN 후 frontend-dev에게 API shape 명세 전달.")
+Agent(subagent_type: "frontend-dev", name: "frontend-dev", run_in_background: true,
+  prompt: "_workspace/dev/01_requirements.md를 읽고, backend-dev의 API shape 명세를 받아 프론트엔드를 구현하라.")
+Agent(subagent_type: "qa-inspector", name: "qa-inspector", run_in_background: true,
+  prompt: "test-engineer가 GREEN을 확인할 때마다 경계면 교차 비교 검증을 수행하라(VERIFY).")
 ```
+
+요건별 작업은 TaskCreate로 등록하고 의존 관계를 설정하여 진행 상황을 추적한다.
 
 ### A-2. 요건별 TDD 사이클
 
@@ -83,7 +82,7 @@ TeamCreate(
 모든 요건 완료 후:
 1. `pytest tests/ -v` 전체 회귀 테스트
 2. `cd frontend && npm run build` 빌드 검증
-3. TeamDelete("tdd-dev")
+3. 팀원 전원의 최종 결과를 수신·정리한다 (팀원은 작업 완료 후 자체 종료 — 별도 해체 도구 불필요)
 4. 부서장에게 결과 보고
 
 ## 워크플로우 B: 리팩토링
@@ -93,16 +92,13 @@ TeamCreate(
 ### B-1. 팀 구성
 
 ```
-TeamCreate(
-  team_name: "refactor-team",
-  members: [
-    { name: "refactor-engineer", agent_type: "refactor-engineer", model: "opus",
-      prompt: "코드 감사 → 도메인 자문 → 리팩토링 계획 → 점진적 실행" },
-    { name: "qa-inspector", agent_type: "qa-inspector", model: "opus",
-      prompt: "리팩토링 후 기능 퇴행 없는지 경계면 교차 비교 검증" }
-  ]
-)
+Agent(subagent_type: "refactor-engineer", name: "refactor-engineer", run_in_background: true,
+  prompt: "코드 감사 → 도메인 자문 → 리팩토링 계획 → 점진적 실행")
+Agent(subagent_type: "qa-inspector", name: "qa-inspector", run_in_background: true,
+  prompt: "리팩토링 후 기능 퇴행 없는지 경계면 교차 비교 검증")
 ```
+
+모델은 에이전트 정의 frontmatter를 따른다 (`model` 오버라이드 금지).
 
 ### B-2. 리팩토링 사이클
 
@@ -116,7 +112,7 @@ TeamCreate(
 
 ### B-3. 팀 정리
 
-리팩토링 완료 후 TeamDelete("refactor-team").
+리팩토링 완료 후 팀원의 최종 보고를 수신·정리하고 부서장에게 보고한다.
 
 ## 워크플로우 C: QA 검증
 

@@ -7,7 +7,7 @@ description: "코드 구조 감사 + 도메인 인지 리팩토링 오케스트�
 
 코드 구조를 감사하고, 도메인 전문가의 확인을 거쳐 안전하게 리팩토링을 실행한다.
 
-**실행 모드**: 에이전트 팀 (TeamCreate + SendMessage + TaskCreate)
+**실행 모드**: 에이전트 팀 (Agent 스폰(name 지정) + SendMessage + TaskCreate — 세션당 단일 암묵 팀)
 
 **핵심 철학**: 중복처럼 보이는 것이 의도적 분리일 수 있다. 구조만 보고 리팩토링하면 투자 로직이 깨진다.
 
@@ -29,13 +29,12 @@ mkdir -p _workspace/refactor
 ## Phase 2: 팀 구성
 
 ```
-팀 이름: refactor-team
-팀원:
-  - refactor-engineer (agent: refactor-engineer.md, model: opus)
-  - qa-inspector      (agent: qa-inspector.md, model: opus)
-  - macro-sentinel    (agent: macro-sentinel.md, model: opus)
-  - margin-analyst    (agent: margin-analyst.md, model: opus)
-  - order-advisor     (agent: order-advisor.md, model: opus)
+팀원 (Agent 도구로 name 지정 스폰 — 모델은 각 에이전트 정의 frontmatter가 단일 출처, model 오버라이드 금지):
+  - refactor-engineer (agent: refactor-engineer.md → fable)
+  - qa-inspector      (agent: qa-inspector.md → fable)
+  - macro-sentinel    (agent: macro-sentinel.md → opus)
+  - margin-analyst    (agent: margin-analyst.md → opus)
+  - order-advisor     (agent: order-advisor.md → opus)
 ```
 
 ```
@@ -199,7 +198,7 @@ grep -rn "is_domestic\|_validate_market" services/ stock/ routers/  # 시장 분
 
 ## 위험 관리
 - 각 항목별 rollback 방법
-- 의존 관계 (항목 A 실패 시 항목 B 영향 여���)
+- 의존 관계 (항목 A 실패 시 항목 B 영향 여부)
 ```
 
 ## Phase 6: 리팩토링 실행
@@ -276,7 +275,7 @@ export function useBalance() {
 
 ## Phase 7: QA 검증
 
-리팩토링 완�� 후 QA Inspector에게 검증 요청:
+리팩토링 완료 후 QA Inspector에게 검증 요청:
 
 1. **기능 퇴행 없음**: 기존 API 엔드포인트 curl 테스트
 2. **프론트 빌드 성공**: `npm run build`

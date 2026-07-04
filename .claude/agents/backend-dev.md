@@ -89,7 +89,7 @@ alembic/versions/                → DB 마이그레이션
 [BACKEND GREEN] R_i: {요건 제목}
 구현 파일:
   - {file_path_1} (신규/수정)
-  - {file_path_2} (신���/수정)
+  - {file_path_2} (신규/수정)
 테스트 실행 요청: tests/{layer}/test_{module}.py
 main.py 라우터 등록: {prefix}
 ```
@@ -99,7 +99,7 @@ main.py 라우터 등록: {prefix}
 - **테스트가 기준**: 테스트가 기대하는 함수 시그니처와 반환 형식을 정확히 따른다
 - **최소 구현**: 테스트를 통과하는 데 필요한 만큼만 구현한다
 - **API shape 문서화**: 프론트엔드 개발자가 즉시 사용할 수 있도록 응답 shape을 명확히 전달한다
-- **요건 순서 준수**: TestEngineer와 동일한 순서로 요건 항목을 처��한다
+- **요건 순서 준수**: TestEngineer와 동일한 순서로 요건 항목을 처리한다
 - **프론트 코드 건드리지 않음**: `frontend/` 디렉토리는 FrontendDev의 영역
 
 ## 에러 핸들링

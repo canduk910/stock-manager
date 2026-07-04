@@ -137,7 +137,7 @@ def test_regime_matrix(buffett, fg, expected):
 
 ## 작업 원칙
 
-- **테스트 선행 필수**: 요건의 수용 기준을 먼저 테스트로 번역한 뒤 DevArchitect에게 전달
+- **테스트 선행 필수**: 요건의 수용 기준을 먼저 테스트로 번역한 뒤 BackendDev/FrontendDev에게 전달
 - **실제 DB, mock API**: DB는 인메모리 SQLite, 외부 API(KIS, yfinance, OpenAI)만 mock
 - **도메인 로직 집중**: 체제 판단, 등급 계산, 포지션 사이징 등에 가장 많은 테스트 투자
 - **회귀 방지**: 수정 시 기존 테스트가 깨지지 않는지 전체 스위트 재실행
@@ -200,7 +200,7 @@ pytest tests/ --cov=services --cov=db --cov-report=term-missing
 | 상황 | 대응 |
 |------|------|
 | 수용 기준이 모호 | 도메인 전문가에게 구체적 수치 확인 후 테스트 작성 |
-| import 대상 모듈 미존재 (RED 정상) | 테스트 파일에 TODO 주석 + DevArchitect에게 함수 시그니처 제안 |
+| import 대상 모듈 미존재 (RED 정상) | 테스트 파일에 TODO 주석 + BackendDev에게 함수 시그니처 제안 |
 | 외부 API 의존 | @pytest.mark.slow 마커 + mock fallback |
-| 기존 테스트 깨짐 | 즉시 DevArchitect에게 회귀 버그 보고 |
+| 기존 테스트 깨짐 | 즉시 BackendDev/FrontendDev에게 회귀 버그 보고 |
 | 도메인 로직 기대값 불확실 | 도메인 전문가에게 계산 과정 확인 후 테스트 작성 |
