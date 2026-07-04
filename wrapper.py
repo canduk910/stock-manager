@@ -1785,19 +1785,19 @@ _VALID_MARKET_CODES = {"U001", "U201"}
 
 def _kis_token():
     """routers/_kis_auth.get_access_token() 위임. 테스트에서는 patch 대상."""
-    from routers._kis_auth import get_access_token
+    from services.kis_auth import get_access_token
     return get_access_token()
 
 
 def _kis_app_key():
     """KIS appkey/appsecret 반환. 테스트에서는 patch 대상."""
-    from routers._kis_auth import get_kis_credentials
+    from services.kis_auth import get_kis_credentials
     app_key, app_secret, _, _, _ = get_kis_credentials()
     return app_key, app_secret
 
 
 def _kis_base_url() -> str:
-    from routers._kis_auth import BASE_URL
+    from services.kis_auth import BASE_URL
     return BASE_URL
 
 

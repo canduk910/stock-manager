@@ -5,6 +5,10 @@
 import { useState } from 'react'
 import { CATEGORY_LABELS, CATEGORY_COLORS, PARAM_KR } from './StrategySelector'
 import BacktestPortfolioModal from './BacktestPortfolioModal'
+import { formatDate, formatPct } from '../../utils/format'
+
+// 이력 테이블은 연도 없이 MM-DD HH:MM 표기 (좁은 컬럼)
+const DATE_OPTS = { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }
 
 const STATUS_BADGE = {
   completed: 'bg-green-100 text-green-800',
@@ -65,18 +69,6 @@ function formatBuilderSummary(params) {
     if (params.risk.trailing_stop != null) riskParts.push(`추적 ${params.risk.trailing_stop}%`)
   }
   return { indicators, conditions: conditions.join(' / '), risk: riskParts.join(' | ') }
-}
-
-function formatDate(iso) {
-  if (!iso) return '-'
-  const d = new Date(iso)
-  return d.toLocaleDateString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
-}
-
-function formatPct(val) {
-  if (val == null) return '-'
-  const n = Number(val)
-  return isNaN(n) ? '-' : `${n >= 0 ? '+' : ''}${n.toFixed(1)}%`
 }
 
 export default function BacktestHistoryTable({ history, onSelect, onDelete, loading }) {
@@ -142,7 +134,7 @@ export default function BacktestHistoryTable({ history, onSelect, onDelete, load
             return (
               <tr key={job.job_id} className="border-b border-gray-100 hover:bg-gray-50 align-top">
                 <td className="py-2 px-2 text-gray-600 whitespace-nowrap">
-                  {formatDate(job.submitted_at || job.completed_at)}
+                  {formatDate(job.submitted_at || job.completed_at, DATE_OPTS)}
                 </td>
                 <td className="py-2 px-2">
                   <div className="font-medium text-gray-900 flex items-center gap-1.5">
@@ -228,7 +220,7 @@ export default function BacktestHistoryTable({ history, onSelect, onDelete, load
                 </td>
                 <td className="py-2 px-2 text-right font-mono">
                   <span className={job.total_return_pct > 0 ? 'text-red-600' : job.total_return_pct < 0 ? 'text-blue-600' : ''}>
-                    {formatPct(job.total_return_pct)}
+                    {formatPct(job.total_return_pct, { digits: 1 })}
                   </span>
                 </td>
                 <td className="py-2 px-2 text-right font-mono">

@@ -18,13 +18,7 @@ import {
 import LoadingSpinner from '../common/LoadingSpinner'
 import { useStockSupplyDemand } from '../../hooks/useAdvisory'
 import ForeignHoldingCard from './ForeignHoldingCard'
-
-function formatAmount(v) {
-  if (v == null) return '-'
-  const abs = Math.abs(v)
-  const sign = v > 0 ? '+' : v < 0 ? '-' : ''
-  return `${sign}${abs.toLocaleString()}억`
-}
+import { formatAmount, INVESTOR_COLORS } from '../../utils/format'
 
 function ChartTooltip({ active, payload, label }) {
   if (!active || !payload?.length) return null
@@ -68,9 +62,7 @@ export default function SupplyDemandPanel({ code, market = 'KR' }) {
   const isClientError = error?.status === 400
   const isOtherError = error && !isKisMissing && !isExternalFail && !isNotFound && !isClientError
 
-  const cm = data?.color_map || {
-    personal: '#EF4444', foreign: '#3B82F6', institution: '#10B981',
-  }
+  const cm = data?.color_map || INVESTOR_COLORS
 
   const chartData = useMemo(() => {
     if (!data?.daily) return []

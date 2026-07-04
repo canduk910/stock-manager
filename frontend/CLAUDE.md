@@ -16,6 +16,7 @@ frontend/
     App.jsx               BrowserRouter + Routes + AiUsageProvider
     index.css             @import "tailwindcss"
     utils/                pdfExport.js — exportSectionsToPdf(elements, {filename, scale}) A4 멀티페이지 PDF (html2canvas-pro + jspdf)
+                          format.js — 공용 표시 포맷터 (2026-07-04 F-2, 메뉴 간 중복 정의 통합). formatPct(val, {digits=2, signed=true}) / formatAmount(억원 순매수) / formatNumber(ko-KR 콤마) / formatDate(Intl 옵션 전달) / INVESTOR_COLORS(개인/외국인/기관 색상). null/NaN → '-'. 화면별 표기 차이는 옵션 인자로 보존 (백테스트 digits:1, 외국인 보유율 signed:false 등). 신규 포맷터는 로컬 정의 대신 이 모듈에 추가
 ```
 
 ### `src/api/` — REST 모듈 (fetch 래퍼)

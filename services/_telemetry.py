@@ -45,6 +45,7 @@ _flush_stop_event: Optional[threading.Event] = None
 # 환경변수로 비활성화 (TESTING 환경에선 자동 off, prod에선 명시 enable)
 _ENABLED = os.environ.get("TELEMETRY_ENABLED", "1") not in ("0", "false", "False")
 
+# stdlib only 제약(모듈 헤더 참조) — db.utils.KST 위임 대신 자체 정의 유지 (의도적 예외)
 _KST = timezone(timedelta(hours=9))
 
 

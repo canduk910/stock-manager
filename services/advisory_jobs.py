@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 # ── 작업 저장소 ──────────────────────────────────────────────────────────
 
-_KST = timezone(timedelta(hours=9))
+from db.utils import KST as _KST
 
 
 def _now_iso() -> str:

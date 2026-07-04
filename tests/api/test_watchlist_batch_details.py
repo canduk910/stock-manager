@@ -38,7 +38,8 @@ def _fake_us_detail(code):
 
 def test_batch_details_success_kr(client):
     """codes 2개 KR 조회 → details에 두 종목 모두 키 존재."""
-    with patch("services.watchlist_service.fetch_market_metrics", side_effect=_fake_kr_metrics), \
+    with patch("services.watchlist_service.fetch_prices_batch", return_value={}), \
+         patch("services.watchlist_service.fetch_market_metrics", side_effect=_fake_kr_metrics), \
          patch("services.watchlist_service.fetch_price", side_effect=_fake_kr_price):
         r = client.get("/api/watchlist/batch-details?codes=005930,000660&market=KR")
     assert r.status_code == 200, r.text
@@ -64,7 +65,8 @@ def test_batch_details_exceeds_50_returns_400(client):
 
 def test_batch_details_auto_market(client):
     """market=auto → 국내 6자리 KR, 알파벳 US 자동 판별."""
-    with patch("services.watchlist_service.fetch_market_metrics", side_effect=_fake_kr_metrics), \
+    with patch("services.watchlist_service.fetch_prices_batch", return_value={}), \
+         patch("services.watchlist_service.fetch_market_metrics", side_effect=_fake_kr_metrics), \
          patch("services.watchlist_service.fetch_price", side_effect=_fake_kr_price), \
          patch("stock.yf_client.fetch_detail_yf", side_effect=_fake_us_detail):
         r = client.get("/api/watchlist/batch-details?codes=005930,AAPL&market=auto")
@@ -84,7 +86,8 @@ def test_batch_details_partial_failure(client):
             raise RuntimeError("not found")
         return _fake_kr_metrics(code)
 
-    with patch("services.watchlist_service.fetch_market_metrics", side_effect=metrics), \
+    with patch("services.watchlist_service.fetch_prices_batch", return_value={}), \
+         patch("services.watchlist_service.fetch_market_metrics", side_effect=metrics), \
          patch("services.watchlist_service.fetch_price", side_effect=_fake_kr_price):
         r = client.get("/api/watchlist/batch-details?codes=005930,999999&market=KR")
     assert r.status_code == 200

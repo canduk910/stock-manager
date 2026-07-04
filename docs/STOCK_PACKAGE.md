@@ -18,6 +18,7 @@
 | `indicators.py` | 기술적 지표 순수 계산 (MACD/RSI/Stochastic/BB/MA/ATR). 외부 의존 없음. |
 | `symbol_map.py` | 종목코드 ↔ 종목명 매핑 (pykrx 기반, fallback 포함). 서버 시작 시 background thread로 pre-warm. |
 | `market.py` | yfinance 기반 국내 시세/펀더멘털 수집. `_is_kr_trading_hours()` / `_is_us_trading_hours()` 장중판별 헬퍼 포함. TTL 장중/장외 자동 분리. |
+| `dart_client.py` | **OpenDART HTTP 공용 클라이언트** (신규 2026-07-04 F-5). `dart_get(url, params, timeout=30, retries=3) -> requests.Response` — `Connection: close` 헤더 + `ConnectionError` 지수 재시도(3회 시도, 대기 1s/2s). 전송 레이어만 공용화, 파라미터/파싱/status 해석은 호출 모듈(screener/dart.py, dart_segments.py, semi_collectors/hbm_contracts.py) 유지. |
 | `dart_fin.py` | OpenDart 재무데이터 수집 (IS + BS + CF) |
 | `yf_client.py` | yfinance 해외주식 데이터 수집 + 밸류에이션 히스토리 추정. **(2026-05-08)** 미국 종목에서 `fetch_price_yf`/`fetch_detail_yf`/`fetch_period_returns_yf`가 `kis_overseas_client` 우선 호출 + yfinance fallback. 함수 시그니처 100% 보존. |
 | `kis_overseas_client.py` | **KIS 해외 시세 단일 게이트웨이** (신규 2026-05-08). `get_kis_price`/`get_kis_ohlcv_daily`/`get_kis_ohlcv_15min`/`get_kis_orderbook`/`get_kis_price_detail`. wrapper.py 직접 호출은 이 모듈에서만. `_resolve_exchange(symbol)` — `stock_info.exchange` 캐시 + NAS→NYS→AMS 순회 후 영속. `_get_kis_client(user_id)` — `routers/_kis_auth.get_kis_credentials(user_id)` 재사용(사용자 키 우선/운영자 키 폴백). 외부 호출 실패 시 None(fallback hook), ConfigError(키 부재) raise. |

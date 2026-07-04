@@ -13,18 +13,16 @@ from __future__ import annotations
 import logging
 import os
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 from typing import Optional
-
-import requests
 
 from db.session import get_session
 from db.repositories.semiconductor_repo import SemiconductorRepository
+from db.utils import KST as _KST
+from stock.dart_client import dart_get
 from stock.semi_collectors.base import CollectorResult
 
 logger = logging.getLogger(__name__)
-
-_KST = timezone(timedelta(hours=9))
 
 # DART 주요사항보고 (Major Reports)
 _DART_LIST_URL = "https://opendart.fss.or.kr/api/list.json"
@@ -67,7 +65,7 @@ def _fetch_dart_major_reports(
         "page_no": 1,
         "page_count": 100,
     }
-    resp = requests.get(_DART_LIST_URL, params=params, timeout=20)
+    resp = dart_get(_DART_LIST_URL, params=params, timeout=20)
     resp.raise_for_status()
     data = resp.json()
     status = data.get("status", "")

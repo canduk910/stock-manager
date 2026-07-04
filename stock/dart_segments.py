@@ -31,6 +31,7 @@ import requests
 
 from config import OPENAI_API_KEY
 from stock.cache import get_cached, set_cached
+from stock.dart_client import DART_HEADERS as _DART_HEADERS, dart_get as _dart_get
 from stock.dart_fin import _fetch_corp_code
 
 logger = logging.getLogger(__name__)
@@ -38,7 +39,7 @@ logger = logging.getLogger(__name__)
 
 _DART_DOCUMENT_URL = "https://opendart.fss.or.kr/api/document.xml"
 _DART_LIST_URL = "https://opendart.fss.or.kr/api/list.json"
-_DART_HEADERS = {"Connection": "close"}
+# _DART_HEADERS 는 stock.dart_client.DART_HEADERS 위임 (상단 import)
 _CACHE_TTL_HOURS = 24 * 7  # 사업보고서 연 1회 공시 → 7일 캐시
 
 # 매출 표 후보 식별 패턴 (정규식, CLAUDE.md "키워드 검색은 정규식" 지침 준수)
@@ -117,7 +118,7 @@ def _find_business_report_rcept(corp_code: str, bsns_year: int) -> Optional[str]
     bgn_de = f"{bsns_year + 1}0101"
     end_de = f"{bsns_year + 1}1231"
     try:
-        resp = requests.get(
+        resp = _dart_get(
             _DART_LIST_URL,
             params={
                 "crtfc_key": api_key,
@@ -128,7 +129,6 @@ def _find_business_report_rcept(corp_code: str, bsns_year: int) -> Optional[str]
                 "page_count": 50,
             },
             timeout=15,
-            headers=_DART_HEADERS,
         )
         if resp.status_code != 200:
             return None
@@ -167,11 +167,10 @@ def _download_business_report_xml(rcept_no: str) -> Optional[str]:
     if not api_key:
         return None
     try:
-        resp = requests.get(
+        resp = _dart_get(
             _DART_DOCUMENT_URL,
             params={"crtfc_key": api_key, "rcept_no": rcept_no},
             timeout=30,
-            headers=_DART_HEADERS,
         )
         if resp.status_code != 200 or not resp.content:
             return None

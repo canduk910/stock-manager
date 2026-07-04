@@ -1328,7 +1328,6 @@ def fetch_macro_indicators() -> dict:
         "usd_krw": "USDKRW=X",
         "usd_jpy": "USDJPY=X",
         "dollar_index": "DX-Y.NYB",
-        "vix": "^VIX",
     }
 
     def _fetch_one(sym: str):
@@ -1340,9 +1339,20 @@ def fetch_macro_indicators() -> dict:
         except Exception:
             return None
 
+    def _fetch_vix_spot():
+        # F-6 (2026-07-04): VIX 스팟은 macro_fetcher.get_vix_spot 공유 캐시(10분) 위임
+        # — 공포탐욕/매크로 페이지와 동일 값 소비 (섹션별 VIX 상이 결함 해소).
+        try:
+            from stock.macro_fetcher import get_vix_spot
+            return get_vix_spot()
+        except Exception:
+            return None
+
     result: dict = {name: None for name in symbols}
-    with ThreadPoolExecutor(max_workers=len(symbols)) as ex:
+    result["vix"] = None
+    with ThreadPoolExecutor(max_workers=len(symbols) + 1) as ex:
         future_to_name = {ex.submit(_fetch_one, sym): name for name, sym in symbols.items()}
+        future_to_name[ex.submit(_fetch_vix_spot)] = "vix"
         for fut in as_completed(future_to_name):
             name = future_to_name[fut]
             try:

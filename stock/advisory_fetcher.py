@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 import requests
 
 from config import KIS_APP_KEY, KIS_APP_SECRET, KIS_BASE_URL, OPENAI_API_KEY, OPENAI_MODEL
-from routers._kis_auth import get_access_token_safe
+from services.kis_auth import get_access_token_safe
 from stock.indicators import calc_technical_indicators
 from stock.kis_overseas_client import get_kis_ohlcv_15min
 

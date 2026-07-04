@@ -28,6 +28,7 @@ frontend/
     main.jsx                 ReactDOM.createRoot 진입점
     App.jsx                  BrowserRouter + Routes 정의
     index.css                @import "tailwindcss"
+    utils/format.js          공용 표시 포맷터 (2026-07-04 F-2). formatPct({digits, signed})/formatAmount/formatNumber/formatDate/INVESTOR_COLORS. null/NaN → '-'. 신규 포맷터는 로컬 정의 대신 이 모듈에 추가
 ```
 
 ---

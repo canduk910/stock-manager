@@ -138,21 +138,57 @@ def fetch_index_sparkline(symbol: str, period: str = "1y") -> list[dict]:
 
 # ── VIX ──────────────────────────────────────────────────────────────────────
 
+def get_vix_spot() -> Optional[float]:
+    """VIX 스팟 스칼라 단일 진입점 (F-6, 2026-07-04 macro-sentinel CAUTION 승인).
+
+    공유 캐시 TTL 10분(0.17h) 고정 — VIX>35 체제 오버라이드의 '즉각 반응' 설계
+    의도 유지를 위해 상향 금지 (macro-sentinel 제약).
+    실패 시 None 반환 + 캐시 미저장 — 폴백값(예: fear_greed의 20)을 실측치로
+    저장하면 체제 오버라이드가 오염되므로 폴백은 소비처 로컬에서만 적용할 것.
+
+    소비처: fetch_vix(표시용 dict 조립) / calc_fear_greed(vix_score) /
+    stock.yf_client.fetch_macro_indicators(vix 필드).
+    시계열 용도(services/macro_factor_model의 ^VIX logret)는 용도가 달라
+    통합 대상이 아님 — 현행 유지.
+    """
+    key = "macro:vix_spot"
+    cached = get_cached(key)
+    if cached is not None:
+        return _safe(cached)
+
+    try:
+        import yfinance as yf
+        fi = yf.Ticker("^VIX").fast_info
+        value = _safe(fi.last_price) or _safe(fi.previous_close)
+        if value is None:
+            return None
+        value = round(float(value), 2)
+        set_cached(key, value, ttl_hours=0.17)
+        return value
+    except Exception as e:
+        logger.warning("VIX 스팟 조회 실패: %s", e)
+        return None
+
+
 def fetch_vix() -> Optional[dict]:
-    """VIX 현재값 + 변동 + 레벨 + 1개월 스파크라인."""
+    """VIX 현재값 + 변동 + 레벨 + 1개월 스파크라인.
+
+    스팟 값은 get_vix_spot() 공유 캐시 위임 (F-6). prev/스파크라인 등
+    표시용 부가 데이터만 본 함수에서 조회.
+    """
     key = "macro:vix"
     cached = get_cached(key)
     if cached is not None:
         return cached or None
 
     try:
+        value = get_vix_spot()
+        if value is None:
+            return None
+
         import yfinance as yf
         t = yf.Ticker("^VIX")
         fi = t.fast_info
-
-        value = _safe(fi.last_price) or _safe(fi.previous_close)
-        if value is None:
-            return None
 
         prev = _safe(fi.previous_close) or value
         change = round(value - prev, 2)
@@ -255,7 +291,8 @@ def calc_fear_greed() -> Optional[dict]:
         import yfinance as yf
 
         # 1) VIX 점수 (VIX 낮을수록 탐욕)
-        vix_val = _safe(yf.Ticker("^VIX").fast_info.last_price) or 20
+        # F-6: 공유 스팟 위임. 폴백 20은 로컬에서만 적용 (공유 캐시 오염 금지).
+        vix_val = get_vix_spot() or 20
         vix_score = max(0, min(100, round((40 - vix_val) / 30 * 100)))
 
         # 2) S&P 500 모멘텀 (현재가 vs 125일 MA)

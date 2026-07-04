@@ -1,0 +1,32 @@
+{
+  "audit_ref": "_workspace/refactor/01_audit_report.md (2026-07-04 메뉴 간 공유 기능/데이터 공통화)",
+  "advices": [
+    {
+      "finding": "F-6",
+      "topic": "VIX 등 매크로 스팟 3중 조회 통합",
+      "expert": "macro-sentinel",
+      "verdict": "CAUTION",
+      "constraints": [
+        "통합 대상은 스팟 3지점에 한정: A fetch_vix (stock/macro_fetcher.py:150) / B calc_fear_greed 내부 (stock/macro_fetcher.py:258) / C fetch_macro_indicators (stock/yf_client.py:1331). D(services/macro_factor_model.py:36 — ^VIX 7년 일별 logret 시계열, PCA용)는 용도가 달라 통합 금지, 현행 유지.",
+        "공유 스팟 캐시 TTL은 반드시 '가장 짧은' 10분(현행 fetch_vix 0.17h) 채택. C의 1h로 상향 통합 금지 — VIX>35 오버라이드의 '즉각 반응' 설계 의도가 회귀함.",
+        "공유 함수는 스팟 스칼라 get_vix_spot() -> float|None 로 승격. fetch_vix의 dict(level/sparkline), fear_greed의 vix_score, macro_indicators의 vix 필드가 이 스칼라를 위임 소비. 표시용 sparkline/level은 fetch_vix에 잔류.",
+        "실패(None) 처리 통일: 조회 실패 시 None 반환, 오버라이드는 None이면 스킵(현행 안전). calc_fear_greed의 'or 20' 폴백값을 공유 캐시에 실측치로 저장 금지(오버라이드 오염 방지)."
+      ],
+      "allowed_ttl": "<= 10분(600초). 권장: 현행 macro:vix 0.17h 유지. 상한 초과 금지.",
+      "rationale": "스팟 3곳은 의도적 신선도 분리가 아닌 중복 구현 — 통합이 '같은 화면 섹션별 VIX 상이' 결함을 해소. 공포탐욕은 연속함수+20점버킷+±5 하이스테리시스로 staleness 내성 높음. 유일한 민감점인 VIX>35 하드 오버라이드도 패닉은 체제급 지속 사건이라 10분 TTL로 충분히 포착."
+    },
+    {
+      "finding": "F-4",
+      "topic": "관심종목 KR 현재가 fetch_prices_batch 전환",
+      "expert": "value-screener",
+      "verdict": "CAUTION",
+      "constraints": [
+        "배치 응답 shape 불일치 처리: fetch_prices_batch는 {price, change, change_pct, prev_close, volume}만 반환 — mktcap/shares 없음, 가격 키가 close가 아닌 price. market_cap은 fetch_market_metrics(6h 캐시)에서 소싱할 것. fetch_batch_details는 이미 metrics.mktcap 폴백이 있으나 _fetch_dashboard_row(services/watchlist_service.py:147)는 price.mktcap만 사용하므로 metrics 쪽으로 이전해야 시총 결측 방지.",
+        "부분 실패 시맨틱 보존: 배치는 실패 종목을 결과 dict에서 누락시킴(예외 아님). 결과에 없는 코드는 기존 per-code try/except와 동등하게 errors/partial_failure에 기록해 시세 결측이 조용히 삼켜지지 않게 할 것.",
+        "PER/PBR/ROE/배당수익률/sector는 배치에 없음 — fetch_market_metrics(6h) 경로 그대로 유지."
+      ],
+      "audit_correction": "감사 리포트는 fetch_prices_batch가 '장중 10s/장외 60s TTL 공유 캐시'를 쓴다고 전제했으나, 현재 코드(stock/market.py:761,805)는 2026-06-01 '현재가 캐시 금지' 강화로 TTL 캐시를 우회하고 매 호출 외부 API를 침. 배치와 개별 fetch_price는 현재 신선도 동일 — 전환 이득은 순수 호출 수 감소(N회→1회).",
+      "rationale": "관심종목은 관찰·스크리닝 용도라 현재가 신선도 요건이 주문 실행보다 느슨. 주문 실행가는 reservation_service._fetch_current_price가 별도 개별 fetch_price 경로라 영향권 밖. 유일한 실질 제약은 필드 커버리지 갭(mktcap/shares 부재, close→price 키명) — metrics 경로로 정확히 매핑하면 도메인상 개별 조회 유지 이유 없음."
+    }
+  ]
+}

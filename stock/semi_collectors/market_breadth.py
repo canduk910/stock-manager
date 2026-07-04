@@ -14,16 +14,15 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 from typing import Optional
 
 from db.session import get_session
 from db.repositories.semiconductor_repo import SemiconductorRepository
+from db.utils import KST as _KST
 from stock.semi_collectors.base import CollectorResult, apply_outlier_guard
 
 logger = logging.getLogger(__name__)
-
-_KST = timezone(timedelta(hours=9))
 
 _SAMSUNG = "005930"
 _HYNIX = "000660"

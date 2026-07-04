@@ -13,15 +13,14 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime
 from typing import Optional
 
+from db.utils import KST as _KST
 from stock import dart_fin
 from stock.semi_collectors.base import CollectorResult, apply_outlier_guard
 
 logger = logging.getLogger(__name__)
-
-_KST = timezone(timedelta(hours=9))
 
 _MEMORY_TICKERS = {
     "005930": "삼성전자",

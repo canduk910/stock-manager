@@ -16,7 +16,7 @@ from db.session import get_session
 def _ctx_user_id() -> Optional[int]:
     """ContextVar에서 현재 user_id 추출 (라우터 진입 시 set됨). 시스템 호출 시 None."""
     try:
-        from routers._kis_auth import get_current_user_id
+        from services.kis_auth import get_current_user_id
         return get_current_user_id()
     except Exception:
         return None
@@ -25,7 +25,7 @@ def _ctx_user_id() -> Optional[int]:
 def _ctx_account_label() -> Optional[str]:
     """ContextVar에서 현재 account_label 추출 (라우터 진입 시 set됨). 시스템 호출 시 None."""
     try:
-        from routers._kis_auth import get_current_account_label
+        from services.kis_auth import get_current_account_label
         return get_current_account_label()
     except Exception:
         return None

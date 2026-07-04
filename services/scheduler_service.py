@@ -10,7 +10,7 @@ from datetime import datetime, timezone, timedelta
 
 logger = logging.getLogger(__name__)
 
-KST = timezone(timedelta(hours=9))
+from db.utils import KST
 
 _scheduler = None
 

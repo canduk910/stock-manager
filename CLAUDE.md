@@ -82,7 +82,11 @@ frontend/           React SPA
 - `services/ai_gateway.py` — 모든 OpenAI 호출 단일 진입점 (쿼터 + 사용량 기록). `AiQuotaExceededError(429)`.
 - `services/macro_regime.py` — 공용 체제 판단 (REGIME_MATRIX 20셀 + VIX 오버라이드 + 하이스테리시스). 3개 서비스 공유.
 - `services/safety_grade.py` — 7점 등급/복합점수/체제정합성/포지션사이징. advisory + pipeline 공유.
-- `db/utils.py` — KST 헬퍼 정의 원본 (`KST`, `now_kst`, `now_kst_iso`).
+- `services/kis_auth.py` — KIS 인증 공통 (토큰/hashkey/멀티 계좌 자격증명). 2026-07-04 `routers/_kis_auth.py`에서 이동(구 경로는 별칭 shim 호환).
+- `stock/dart_client.py` — OpenDART HTTP 공용 클라이언트 (Connection: close + ConnectionError 재시도). screener/dart_segments/hbm_contracts 공유.
+- `stock/macro_fetcher.py:get_vix_spot()` — VIX 스팟 단일 진입점 (공유 캐시 TTL 10분 고정 — VIX>35 오버라이드 즉각 반응 보존, 상향 금지).
+- `frontend/src/utils/format.js` — 프론트 공용 표시 포맷터 (formatPct/formatAmount/formatNumber/formatDate/INVESTOR_COLORS).
+- `db/utils.py` — KST 헬퍼 정의 원본 (`KST`, `now_kst`, `now_kst_iso`). 자체 KST 정의 금지 (`services/_telemetry.py`만 stdlib-only 예외).
 
 ### 분기 기준
 - `stock/utils.py:is_domestic(code)` — 6자리 숫자 → 국내(KRX), 아니면 해외

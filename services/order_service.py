@@ -31,7 +31,7 @@ import requests
 logger = logging.getLogger(__name__)
 from services.exceptions import ConfigError, ExternalAPIError, ServiceError
 
-from routers._kis_auth import (
+from services.kis_auth import (
     BASE_URL,
     get_access_token,
     get_kis_credentials,

@@ -34,18 +34,16 @@ from __future__ import annotations
 import logging
 import math
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, timezone, timedelta
+from datetime import datetime
 from typing import Optional
 
 from services import macro_service, report_service
 from services.advisory_service import refresh_stock_data, _calc_graham_number
 from services.exceptions import ExternalAPIError
 from services.macro_regime import determine_regime as _determine_regime_shared, REGIME_MATRIX, REGIME_PARAMS
-from db.utils import now_kst_iso
+from db.utils import KST, now_kst_iso
 
 logger = logging.getLogger(__name__)
-
-KST = timezone(timedelta(hours=9))
 
 # ── 체제 판단 (공용 모듈 위임) ────────────────────────────────
 

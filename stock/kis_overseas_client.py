@@ -51,7 +51,7 @@ def _get_kis_client(user_id: Optional[int] = None):
     토큰 발급 실패(ExternalAPIError) 등 일시적 장애는 None.
     """
     try:
-        from routers._kis_auth import get_kis_credentials, get_access_token, _get_user_base_url
+        from services.kis_auth import get_kis_credentials, get_access_token, _get_user_base_url
     except Exception as e:
         logger.warning("kis_overseas_client: _kis_auth import 실패: %s", e)
         return None

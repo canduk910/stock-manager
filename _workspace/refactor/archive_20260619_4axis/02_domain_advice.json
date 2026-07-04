@@ -1,0 +1,48 @@
+{
+  "consultations": [
+    {
+      "item": "HIGH-1",
+      "target": "services/advisory_service.py 프롬프트/챗 블록 분리",
+      "domain_expert": "margin-analyst",
+      "advice_source": "services/CLAUDE.md (advisory_service '3중 일관성 필수' 규칙) + safety_grade.py 코드 + _build_system_prompt 직접 검증(L907-1038)",
+      "question": "프롬프트 빌더(consensus/graham/등급 섹션)를 별도 모듈로 단순 이동해도 안전마진/등급 도메인 로직에 영향 없는가? 보존해야 할 결합이 있는가?",
+      "verdict": "CONDITIONAL_OK",
+      "findings": [
+        "_build_system_prompt은 safety_grade.py의 7점 등급 임계값(Graham 할인율 >40/20-40/0-20/<0, 부채비율 <50/50-100/100-200/>200, 등급 A=24-28 등), OrderAdvisor 손절폭(A=-8/B+=-10/B=-12), grade_factor(1.0/0.75/0.50/0/0.25/0.30), ValueScreener Value Trap 6규칙, MacroSentinel VIX>35 오버라이드를 문자열 리터럴로 인코딩한다.",
+        "이 문자열 값들은 safety_grade.py(코드) + Pydantic 스키마(타입)와 '3중 일관성 필수'로 의도적으로 중복된 것 — 우연한 중복이 아니다. safety_grade.py와 '통합/중복제거'하면 안 됨.",
+        "_REGIME_MARGIN = REGIME_PARAMS 파생(L775-776)은 macro_regime.py 공유 모듈에서 가져옴 — 이동 시 import 동반 필요.",
+        "_calc_graham_number(L684)은 pipeline_service.py가 'from services.advisory_service import ... _calc_graham_number'로 직접 import (private 함수!) — 이동 시 반드시 re-export."
+      ],
+      "constraints": [
+        "프롬프트 빌더 함수를 별도 모듈로 옮길 때 문자열 리터럴을 단 한 글자도 수정하지 말 것(pure cut-paste). 임계값 텍스트 편집/리팩토링 금지.",
+        "safety_grade.py와의 '중복'은 의도적 3중 일관성 — 제거 금지, 단순 상수화도 금지(텍스트 표가 프롬프트 가독성 일부).",
+        "_calc_graham_number는 advisory_service.py에 잔류 또는 re-export로 기존 import 경로 100% 보존.",
+        "refresh_stock_data / generate_ai_report / chat_with_report는 routers/advisory.py가 모듈 속성 접근 → advisory_service 네임스페이스에 re-export 필수."
+      ]
+    },
+    {
+      "item": "HIGH-2",
+      "target": "stock/macro_fetcher.py credit/OAS 블록 분리",
+      "domain_expert": "macro-sentinel",
+      "advice_source": "stock/CLAUDE.md (macro_fetcher OAS 5단계 백분위 + OAS>10% 절대 안전장치) + macro_regime.py determine_regime 시그니처 + _classify_oas_sentiment 직접 검증(L572-)",
+      "question": "_classify_oas_sentiment/_compute_oas_stats 임계값·percentile 로직을 별도 모듈로 이동해도 macro_regime 공유 체제 판단과의 정합성이 유지되는가?",
+      "verdict": "OK_BUT_DEFER",
+      "findings": [
+        "_classify_oas_sentiment 백분위 5단계(<10 extreme_greed / <30 greed / <70 normal / <90 fear / >=90 extreme_fear) + 절대 안전장치 OAS>10% extreme_fear는 하워드 막스 시계추 도메인 임계값 — macro_regime.determine_regime(hy_oas_percentile, hy_oas_value)이 이 산출물을 소비.",
+        "macro_fetcher는 거의 전부 'from stock import macro_fetcher' 모듈 속성 접근으로 소비됨(macro_service/advisory_service/portfolio_advisor/order_us/pipeline). 함수 이동 시 macro_fetcher 네임스페이스로 re-import 필수.",
+        "sector_normalize.py가 'from stock.macro_fetcher import _KR_SECTOR_ETFS' (private 모듈변수)에 의존 — 분할 시 이 변수는 macro_fetcher에 잔류시켜야 안전.",
+        "단순 함수 이동은 동작 변경 0 — 임계값 텍스트를 수정하지 않는 한 정합성 유지됨."
+      ],
+      "constraints": [
+        "임계값(<10/<30/<70/<90, OAS>10%, percentile 보간식) 절대 수정 금지 — pure 이동만.",
+        "_KR_SECTOR_ETFS 등 모듈 변수는 macro_fetcher에 잔류.",
+        "credit 분리는 동작상 안전하나 ROI 대비 위험(소비처 다수, oas_history_store/sector_normalize 결합) → 이번 사이클은 HIGH-1 우선, HIGH-2는 보류 권고(여력 시 후속)."
+      ]
+    }
+  ],
+  "summary": {
+    "HIGH-1": "CONDITIONAL_OK — 프롬프트/챗 분리 진행. 단 문자열 리터럴 무수정 cut-paste + _calc_graham_number/공개 3함수 re-export 필수. safety_grade와의 의도적 중복 제거 금지.",
+    "HIGH-2": "OK_BUT_DEFER — 동작상 안전하나 소비처 다수/모듈변수 결합으로 위험. 이번 사이클 보류, HIGH-1 검증 후 여력 시.",
+    "MEDIUM/LOW": "보류 (routers→stock import은 ROI 낮음, tax/dart/yf 분할은 도메인 응집도 높아 별도 사이클, except 일괄 변경 위험)."
+  }
+}

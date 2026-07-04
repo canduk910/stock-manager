@@ -11,12 +11,13 @@ from __future__ import annotations
 
 import logging
 from collections import defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 from typing import Optional
 
 import requests
 
 from config import SEC_EDGAR_USER_AGENT_CONTACT
+from db.utils import KST as _KST
 from services.exceptions import ConfigError
 from stock.semi_collectors.base import (
     CollectorResult,
@@ -25,8 +26,6 @@ from stock.semi_collectors.base import (
 )
 
 logger = logging.getLogger(__name__)
-
-_KST = timezone(timedelta(hours=9))
 
 # CIK 0-padded 10 digit
 _HYPERSCALER_CIK = {

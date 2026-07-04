@@ -8,27 +8,9 @@ import time
 
 import requests
 
+from stock.dart_client import DART_HEADERS as _DART_HEADERS, dart_get as _dart_get
+
 from .cache import get_cached, set_cached
-
-
-_DART_HEADERS = {"Connection": "close"}  # keep-alive 재사용 방지 → RemoteDisconnected 방지
-
-
-def _dart_get(url: str, params: dict, timeout: int = 30) -> requests.Response:
-    """DART API GET 요청.
-
-    Connection: close 헤더로 keep-alive 재사용을 끊어 RemoteDisconnected를 방지.
-    ConnectionError 발생 시 최대 3회 재시도 (1s / 2s 간격).
-    """
-    last_exc: Exception = RuntimeError("no attempt")
-    for attempt in range(3):
-        try:
-            return requests.get(url, params=params, timeout=timeout, headers=_DART_HEADERS)
-        except requests.exceptions.ConnectionError as e:
-            last_exc = e
-            if attempt < 2:
-                time.sleep(2 ** attempt)
-    raise last_exc
 
 import re
 

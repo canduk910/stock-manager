@@ -99,9 +99,8 @@ def _build_user_prompt(
     market: str,
     sector_returns: Optional[list[dict]] = None,
 ) -> str:
-    from datetime import datetime, timezone, timedelta
-    KST = timezone(timedelta(hours=9))
-    today = datetime.now(KST).strftime("%Y-%m-%d")
+    from db.utils import now_kst
+    today = now_kst().strftime("%Y-%m-%d")
 
     regime = regime_data.get("regime", "unknown")
     regime_desc = regime_data.get("regime_desc", regime)

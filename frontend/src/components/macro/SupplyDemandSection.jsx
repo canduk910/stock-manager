@@ -15,18 +15,12 @@ import {
 } from 'recharts'
 import LoadingSpinner from '../common/LoadingSpinner'
 import { useSupplyDemand } from '../../hooks/useMacro'
+import { formatAmount, INVESTOR_COLORS } from '../../utils/format'
 
 const MARKETS = [
   { id: 'kospi', label: '코스피' },
   { id: 'kosdaq', label: '코스닥' },
 ]
-
-function formatAmount(v) {
-  if (v == null) return '-'
-  const abs = Math.abs(v)
-  const sign = v > 0 ? '+' : v < 0 ? '-' : ''
-  return `${sign}${abs.toLocaleString()}억`
-}
 
 function ToggleButton({ id, active, onClick, children }) {
   return (
@@ -123,9 +117,7 @@ export default function SupplyDemandSection() {
   const isExternalFail = error?.status === 502
   const isOtherError = error && !isKisMissing && !isExternalFail
 
-  const cm = data?.color_map || {
-    personal: '#EF4444', foreign: '#3B82F6', institution: '#10B981',
-  }
+  const cm = data?.color_map || INVESTOR_COLORS
 
   return (
     <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-4 mb-6">

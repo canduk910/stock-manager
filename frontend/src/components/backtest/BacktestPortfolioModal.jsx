@@ -13,33 +13,7 @@
  * 닫기 트리거: ✕ 버튼 또는 백드롭 클릭.
  */
 import { useEffect, useMemo } from 'react'
-
-function formatDate(iso) {
-  if (!iso) return '-'
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return iso
-  return d.toLocaleString('ko-KR', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
-}
-
-function formatPct(val, digits = 2) {
-  if (val == null) return '-'
-  const n = Number(val)
-  if (Number.isNaN(n)) return '-'
-  return `${n >= 0 ? '+' : ''}${n.toFixed(digits)}%`
-}
-
-function formatNumber(val) {
-  if (val == null) return '-'
-  const n = Number(val)
-  if (Number.isNaN(n)) return '-'
-  return n.toLocaleString('ko-KR')
-}
+import { formatDate, formatNumber, formatPct } from '../../utils/format'
 
 /**
  * per_symbol_contribution 정규화 — backend에서 다양한 shape 응답 가능.
@@ -155,13 +129,13 @@ export default function BacktestPortfolioModal({ job, onClose }) {
               job.total_return_pct > 0 ? 'text-red-600'
               : job.total_return_pct < 0 ? 'text-blue-600' : 'text-gray-700'
             }`}>
-              {formatPct(job.total_return_pct, 2)}
+              {formatPct(job.total_return_pct)}
             </div>
           </div>
           <div>
             <div className="text-[10px] text-gray-500">CAGR</div>
             <div className="text-sm font-mono font-bold text-gray-700">
-              {formatPct(job.cagr, 2)}
+              {formatPct(job.cagr)}
             </div>
           </div>
           <div>
@@ -238,7 +212,7 @@ export default function BacktestPortfolioModal({ job, onClose }) {
                         <td className={`py-1.5 px-2 text-right font-mono ${
                           ret > 0 ? 'text-red-600' : ret < 0 ? 'text-blue-600' : ''
                         }`}>
-                          {formatPct(ret, 2)}
+                          {formatPct(ret)}
                         </td>
                         <td className="py-1.5 px-2 text-right font-mono">
                           {pnl != null ? formatNumber(Math.floor(pnl)) : '-'}
@@ -246,7 +220,7 @@ export default function BacktestPortfolioModal({ job, onClose }) {
                         <td className={`py-1.5 px-2 text-right font-mono ${
                           contrib > 0 ? 'text-red-600' : contrib < 0 ? 'text-blue-600' : ''
                         }`}>
-                          {formatPct(contrib, 2)}
+                          {formatPct(contrib)}
                         </td>
                       </tr>
                     )

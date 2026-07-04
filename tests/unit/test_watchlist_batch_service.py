@@ -24,7 +24,8 @@ def test_batch_details_threadpool_calls(db_session):
         return {"close": 70000, "change": 100, "change_pct": 0.1, "mktcap": 100}
 
     svc = WatchlistService()
-    with patch("services.watchlist_service.fetch_market_metrics", side_effect=fake_metrics), \
+    with patch("services.watchlist_service.fetch_prices_batch", return_value={}), \
+         patch("services.watchlist_service.fetch_market_metrics", side_effect=fake_metrics), \
          patch("services.watchlist_service.fetch_price", side_effect=fake_price):
         result = svc.fetch_batch_details(["005930", "000660", "035420"], market="KR")
 
@@ -45,7 +46,8 @@ def test_batch_details_partial_failure_skips_failed(db_session):
         return {"close": 1000, "change": 0, "change_pct": 0, "mktcap": 100}
 
     svc = WatchlistService()
-    with patch("services.watchlist_service.fetch_market_metrics", side_effect=fake_metrics), \
+    with patch("services.watchlist_service.fetch_prices_batch", return_value={}), \
+         patch("services.watchlist_service.fetch_market_metrics", side_effect=fake_metrics), \
          patch("services.watchlist_service.fetch_price", side_effect=fake_price):
         result = svc.fetch_batch_details(["005930", "BAD"], market="KR")
 
@@ -67,7 +69,8 @@ def test_batch_details_auto_market_per_code(db_session):
                 "per": 30, "pbr": 10, "dividend_yield": 0.5, "sector": "IT"}
 
     svc = WatchlistService()
-    with patch("services.watchlist_service.fetch_market_metrics", side_effect=fake_metrics), \
+    with patch("services.watchlist_service.fetch_prices_batch", return_value={}), \
+         patch("services.watchlist_service.fetch_market_metrics", side_effect=fake_metrics), \
          patch("services.watchlist_service.fetch_price", side_effect=fake_price), \
          patch("stock.yf_client.fetch_detail_yf", side_effect=fake_us_detail):
         result = svc.fetch_batch_details(["005930", "AAPL"], market="auto")

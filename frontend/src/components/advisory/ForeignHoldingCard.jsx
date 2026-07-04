@@ -28,6 +28,7 @@ import {
 } from 'recharts'
 import LoadingSpinner from '../common/LoadingSpinner'
 import { useForeignHolding } from '../../hooks/useAdvisory'
+import { formatPct as formatPctShared } from '../../utils/format'
 
 const STATUS_COLORS = {
   safe: '#9CA3AF',
@@ -65,10 +66,8 @@ function formatMan(v) {
   return `${Number(v).toLocaleString()}만주`
 }
 
-function formatPct(v, digits = 2) {
-  if (v == null) return '-'
-  return `${Number(v).toFixed(digits)}%`
-}
+// 보유율/소진율은 상승·하락 방향 표기가 아니므로 '+' 접두 없음 (signed: false)
+const formatPct = (v, digits = 2) => formatPctShared(v, { digits, signed: false })
 
 /** SVG 도넛 게이지. percent 0~100. status에 따라 색상. */
 function DonutGauge({ percent, status }) {

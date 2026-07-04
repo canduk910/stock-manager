@@ -1,6 +1,7 @@
 """QW-2: fetch_macro_indicators 병렬화 검증.
 
-7심볼(국채/금/유가/환율/달러인덱스/VIX)을 ThreadPoolExecutor로 병렬 조회.
+6심볼(국채/금/유가/환율/달러인덱스)을 ThreadPoolExecutor로 병렬 조회.
+VIX는 F-6(2026-07-04)부터 macro_fetcher.get_vix_spot 공유 캐시(10분) 위임.
 일부 실패 시 부분 응답 보존(None 채움). 캐시 hit 시 ThreadPool 미생성.
 """
 
@@ -34,7 +35,8 @@ class TestFetchMacroIndicatorsParallel:
 
         with patch.object(yf_client, "get_cached", return_value=None), \
              patch.object(yf_client, "set_cached"), \
-             patch.object(yf_client, "_ticker", side_effect=lambda sym: _make_ticker(100.0)):
+             patch.object(yf_client, "_ticker", side_effect=lambda sym: _make_ticker(100.0)), \
+             patch("stock.macro_fetcher.get_vix_spot", return_value=100.0):
             result = yf_client.fetch_macro_indicators()
 
         assert set(result.keys()) == _EXPECTED_KEYS
@@ -51,7 +53,8 @@ class TestFetchMacroIndicatorsParallel:
 
         with patch.object(yf_client, "get_cached", return_value=None), \
              patch.object(yf_client, "set_cached"), \
-             patch.object(yf_client, "_ticker", side_effect=_ticker_side):
+             patch.object(yf_client, "_ticker", side_effect=_ticker_side), \
+             patch("stock.macro_fetcher.get_vix_spot", return_value=50.0):
             result = yf_client.fetch_macro_indicators()
 
         assert set(result.keys()) == _EXPECTED_KEYS

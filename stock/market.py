@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 # ── 장중/장외 판별 ──────────────────────────────────────────────────────────────
 
-_KST = timezone(timedelta(hours=9))
+from db.utils import KST as _KST
 
 
 def _is_kr_trading_hours() -> bool:

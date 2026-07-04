@@ -128,7 +128,7 @@ def _get_current_holdings() -> dict[str, dict]:
         return {}
 
     try:
-        from routers._kis_auth import get_access_token, make_headers
+        from services.kis_auth import get_access_token, make_headers
 
         token = get_access_token()
 
@@ -362,7 +362,7 @@ def _fetch_from_ctos4001r(year: int) -> dict:
     if not creds:
         raise ValueError("KIS API 키 미설정")
 
-    from routers._kis_auth import get_access_token, make_headers
+    from services.kis_auth import get_access_token, make_headers
 
     token = get_access_token()
     headers = make_headers(token, creds[0], creds[1], "CTOS4001R")
@@ -466,7 +466,7 @@ def _fetch_from_ttts3035r(year: int) -> dict:
     if not creds:
         raise ValueError("KIS API 키 미설정")
 
-    from routers._kis_auth import get_access_token, make_headers
+    from services.kis_auth import get_access_token, make_headers
 
     token = get_access_token()
     headers = make_headers(token, creds[0], creds[1], "TTTS3035R")
@@ -937,7 +937,7 @@ def get_simulation_holdings() -> list[dict]:
         return []
 
     try:
-        from routers._kis_auth import get_access_token, make_headers
+        from services.kis_auth import get_access_token, make_headers
 
         token = get_access_token()
 

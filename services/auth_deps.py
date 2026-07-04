@@ -25,7 +25,7 @@ def get_current_user(
 
     # Phase 4 D.3: ContextVar set — 동일 request 내 모든 KIS 호출이 사용자별로 격리됨.
     try:
-        from routers._kis_auth import set_current_user_id
+        from services.kis_auth import set_current_user_id
         set_current_user_id(user_id)
     except Exception:
         pass

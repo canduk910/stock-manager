@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 from services import _telemetry
 from stock import store, symbol_map
 from stock.dart_fin import fetch_financials, fetch_financials_multi_year
-from stock.market import fetch_detail, fetch_price, fetch_market_metrics
+from stock.market import fetch_detail, fetch_price, fetch_prices_batch, fetch_market_metrics
 from stock.sector_normalize import normalize_sector
 from stock.utils import is_domestic
 import stock.yf_client as yf_client
@@ -53,14 +53,43 @@ def _period_label(fin: dict) -> str:
     return f"{bsns_year}/12" if bsns_year else "-"
 
 
+def _prefetch_kr_prices(kr_codes: list[str]) -> dict[str, dict]:
+    """KR 다건 현재가를 fetch_prices_batch 1회로 프리페치 (F-4).
+
+    반환 값은 fetch_price와 동일 키({close, change, change_pct})로 정규화 —
+    소비측 분기 최소화. mktcap은 배치 응답에 없으므로 의도적으로 미포함
+    (value-screener 자문: 시총은 stock_info/metrics 소싱).
+    2건 미만이면 배치 이득이 없어 빈 dict (per-code 경로 유지).
+    배치 자체가 실패해도 빈 dict — 호출측 per-code 폴백으로 결측 방지.
+    """
+    if len(kr_codes) < 2:
+        return {}
+    try:
+        raw = fetch_prices_batch(kr_codes, market="KR") or {}
+    except Exception as e:
+        logger.warning("watchlist KR 배치 시세 실패 — per-code 폴백: %s", e)
+        return {}
+    return {
+        c: {"close": p.get("price"), "change": p.get("change"), "change_pct": p.get("change_pct")}
+        for c, p in raw.items()
+        if p and p.get("price") is not None
+    }
+
+
 @_telemetry.timed("watchlist.row")
-def _fetch_dashboard_row(item: dict) -> dict:
+def _fetch_dashboard_row(item: dict, price_prefetch: Optional[dict] = None) -> dict:
     """단일 종목 대시보드 행 데이터 수집 (ThreadPoolExecutor에서 실행).
 
     QW-1: stock_info dict를 1번만 fetch 후 dict 기반 fresh 판정 3회 (N+1 제거).
     QW-3: 외부 API 실패는 logger.warning + row.partial_failure 메타필드 기록.
     stock_info.db에 fresh한 데이터가 있으면 외부 API 호출 없이 즉시 반환.
     stale한 영역만 선택적으로 외부 API를 호출한다.
+
+    price_prefetch (F-4, 2026-07-04 value-screener CAUTION 승인):
+        get_dashboard_data()가 fetch_prices_batch()로 일괄 조회한 KR 시세
+        ({close, change, change_pct} — fetch_price와 동일 키로 정규화됨).
+        None이면 기존 per-code fetch_price 경로 (폴백/US/단독 호출 호환).
+        배치 응답에는 mktcap이 없으므로 시총은 stock_info → metrics(6h 캐시)에서 소싱.
     """
     code = item["code"]
     market = item.get("market", "KR")
@@ -89,6 +118,7 @@ def _fetch_dashboard_row(item: dict) -> dict:
     # ── stock_info.db 영속 캐시 우선 조회 (QW-1: dict 기반 단일 SELECT) ──
     _fmt_cap = _awk if domestic else _usd_m
     price_fresh = metrics_fresh = fin_fresh = False
+    info = None
     try:
         from stock.stock_info_store import get_stock_info, is_stale_from_dict
         info = get_stock_info(code, market)  # 1 SELECT
@@ -139,12 +169,19 @@ def _fetch_dashboard_row(item: dict) -> dict:
     if domestic:
         if not price_fresh:
             try:
-                price = fetch_price(code)
+                # 배치 프리페치 우선 (키는 fetch_price와 동일하게 정규화되어 전달됨).
+                # 배치 결과 누락 종목은 per-code fetch_price 폴백 — 실패 시 아래
+                # except에서 partial_failure 기록 (결측이 조용히 삼켜지지 않음).
+                price = price_prefetch if price_prefetch is not None else fetch_price(code)
                 if price:
                     row["price"] = price["close"]
                     row["change"] = price.get("change")
                     row["change_pct"] = price.get("change_pct")
-                    row["market_cap"] = _awk(price.get("mktcap"))
+                    mktcap = price.get("mktcap")
+                    if mktcap is None and info:
+                        # 배치 응답에는 mktcap 없음 → stock_info 영속값 소싱
+                        mktcap = info.get("mktcap")
+                    row["market_cap"] = _awk(mktcap)
             except Exception as e:
                 logger.warning("watchlist fetch failed code=%s field=price err=%s", code, e)
                 row["partial_failure"].append("price")
@@ -154,9 +191,19 @@ def _fetch_dashboard_row(item: dict) -> dict:
                 metrics = fetch_market_metrics(code)
                 row["dividend_yield"] = metrics.get("dividend_yield")
                 row["sector"] = _norm_sector(metrics.get("sector"), code, "KR")
+                if row["market_cap"] is None:
+                    row["market_cap"] = _awk(metrics.get("mktcap"))
             except Exception as e:
                 logger.warning("watchlist fetch failed code=%s field=metrics err=%s", code, e)
                 row["partial_failure"].append("metrics")
+
+        # 배치 프리페치 사용 + metrics fresh인데 시총 결측 → 6h 캐시 metrics로 보충
+        # (value-screener 자문: 배치 전환으로 인한 시총 결측 방지)
+        if price_prefetch is not None and row["market_cap"] is None and metrics_fresh:
+            try:
+                row["market_cap"] = _awk((fetch_market_metrics(code) or {}).get("mktcap"))
+            except Exception:
+                pass
 
         if not fin_fresh:
             try:
@@ -265,9 +312,18 @@ class WatchlistService:
         """
         if not items:
             return []
+        # F-4 (2026-07-04): KR 시세는 fetch_prices_batch 1회 일괄 조회 후 행별 주입.
+        # 배치 실패/누락 종목은 _fetch_dashboard_row 내부 per-code fetch_price 폴백.
+        prefetch = _prefetch_kr_prices(
+            [it["code"] for it in items
+             if it.get("market", "KR") == "KR" and is_domestic(it["code"])]
+        )
         results: list[dict | None] = [None] * len(items)
         with ThreadPoolExecutor(max_workers=min(4, len(items))) as ex:
-            futures = {ex.submit(_fetch_dashboard_row, item): i for i, item in enumerate(items)}
+            futures = {
+                ex.submit(_fetch_dashboard_row, item, prefetch.get(item["code"])): i
+                for i, item in enumerate(items)
+            }
             for fut in as_completed(futures):
                 results[futures[fut]] = fut.result()
         return results
@@ -293,26 +349,39 @@ class WatchlistService:
         details: dict = {}
         errors: list[str] = []
 
+        def _use_kr(code_u: str) -> Optional[bool]:
+            if market_u == "AUTO":
+                return is_domestic(code_u)
+            if market_u == "KR":
+                return True
+            if market_u == "US":
+                return False
+            return None  # invalid market
+
+        # F-4 (2026-07-04): KR 현재가는 배치 1회 프리페치. 누락 종목은 per-code 폴백.
+        kr_prefetch = _prefetch_kr_prices(
+            [c.upper().strip() for c in (codes or [])
+             if c and c.strip() and _use_kr(c.upper().strip())]
+        )
+
         def _fetch_one(code: str) -> tuple[str, dict | None, str | None]:
             code_u = code.upper().strip()
             if not code_u:
                 return code, None, "empty code"
             try:
-                if market_u == "AUTO":
-                    use_kr = is_domestic(code_u)
-                elif market_u == "KR":
-                    use_kr = True
-                elif market_u == "US":
-                    use_kr = False
-                else:
+                use_kr = _use_kr(code_u)
+                if use_kr is None:
                     return code_u, None, f"invalid market: {market}"
 
                 if use_kr:
-                    try:
-                        price = fetch_price(code_u) or {}
-                    except Exception as e:
-                        logger.debug("batch fetch_price KR 실패 %s: %s", code_u, e)
-                        price = {}
+                    price = kr_prefetch.get(code_u)
+                    if price is None:
+                        # 배치 누락/미사용 → 기존 per-code 경로 (실패 시맨틱 동일)
+                        try:
+                            price = fetch_price(code_u) or {}
+                        except Exception as e:
+                            logger.debug("batch fetch_price KR 실패 %s: %s", code_u, e)
+                            price = {}
                     metrics = fetch_market_metrics(code_u) or {}
                     detail = {
                         "currency": "KRW",

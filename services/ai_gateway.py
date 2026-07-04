@@ -28,8 +28,8 @@ class AiQuotaExceededError(ServiceError):
 
 
 def _today_kst() -> str:
-    from datetime import datetime, timezone, timedelta
-    return datetime.now(timezone(timedelta(hours=9))).strftime("%Y-%m-%d")
+    from db.utils import now_kst
+    return now_kst().strftime("%Y-%m-%d")
 
 
 def check_ai_quota(user_id: int) -> None:

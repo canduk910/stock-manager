@@ -18,17 +18,17 @@ import asyncio
 import json
 import logging
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 
 import requests
 import websockets
 from collections import defaultdict
 
 from config import KIS_APP_KEY, KIS_APP_SECRET, KIS_BASE_URL, KIS_HTS_ID
-from routers._kis_auth import get_access_token_safe, clear_token_cache
+from db.utils import KST
+from services.kis_auth import get_access_token_safe, clear_token_cache
 
 KIS_WS_URL = "ws://ops.koreainvestment.com:21000"
-KST = timezone(timedelta(hours=9))
 
 logger = logging.getLogger(__name__)
 

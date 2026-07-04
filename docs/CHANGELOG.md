@@ -1,5 +1,29 @@
 # 변경 이력
 
+## 2026-07-05 — 메뉴 간 공유 기능/데이터 공통화 (리팩토링)
+
+### 리팩토링 (refactor-audit 사이클: 감사 → 도메인 자문 → 실행 → QA)
+
+**요청**: "각 메뉴기능간 공유하는 기능이나 데이터가 있다면 공통화시켜줘 (모듈, 데이터)". 산출물: `_workspace/refactor/` (01_audit_report / 02_domain_advice / 03_plan / qa_report / 04_final_report).
+
+**진단 (HIGH 3 / MEDIUM 3 / LOW 3)**: ① KIS 인증 공통 모듈이 라우터 레이어(`routers/_kis_auth.py`)에 위치 — services 9파일 + stock 4파일 + wrapper 3곳이 역방향 import(17개소, 순환 회피용 지연 import 다수) ② 프론트 포맷터/등락색 17곳 분산(`formatAmount` 바이트 동일 중복, `formatPct` 3곳 표기 불일치) ③ KST 타임존 자체 정의 13곳(`db/utils.py` SSoT 위반) ④ 관심종목 KR 현재가 종목별 개별 조회(N+1) — 시세판은 배치 사용 ⑤ DART `list.json` HTTP 3중 구현(재시도 정책 screener만 보유) ⑥ `^VIX` 스팟 3중 조회(TTL 제각각 — 같은 화면 섹션별 VIX 상이 결함).
+
+**변경 (6건 실행, 42 files +676 −1016 — 신규 공용 모듈 3개 제외 시 본체 약 −340줄)**:
+- **F-1**: `routers/_kis_auth.py` → `services/kis_auth.py` 이동(265줄). 구 경로는 sys.modules 별칭 shim(8줄) — 두 경로가 동일 모듈 객체라 기존 import/monkeypatch/토큰 캐시 접근 완전 호환. 역방향 import 17개소 교정.
+- **F-2**: `frontend/src/utils/format.js` 신설(formatPct/formatAmount/formatNumber/formatDate/INVESTOR_COLORS). 5개 컴포넌트(SupplyDemandSection/SupplyDemandPanel/BacktestPortfolioModal/BacktestHistoryTable/ForeignHoldingCard) 위임 — 화면별 표기 차이는 옵션 인자(digits/signed)로 100% 보존.
+- **F-3**: KST 자체 정의 12곳 → `db/utils.KST` 위임 (`services/_telemetry.py`는 stdlib-only 설계 제약으로 의도적 예외, 주석 문서화).
+- **F-4**: 관심종목 KR 시세 `_prefetch_kr_prices()` — `fetch_prices_batch` 1회 프리페치(외부 API N회→1회, 시세판과 경로 공유). price→close 키 정규화 / mktcap은 stock_info→metrics(6h) 소싱 / 배치 누락 종목 per-code 폴백으로 partial_failure 시맨틱 보존. 회귀 테스트 7건 신규.
+- **F-5**: `stock/dart_client.py` 신설 — `dart_get()` Connection: close + ConnectionError 재시도(3회 시도, 대기 1s/2s, screener `_dart_get` 정책 승격). screener/dart.py·dart_segments.py·hbm_contracts.py 위임(전송 레이어만 공용화, 파싱은 도메인별 유지).
+- **F-6**: `stock/macro_fetcher.py`에 `get_vix_spot() -> float|None` 신설 — 공유 캐시 TTL 10분(0.17h) 고정, 실패 시 None+캐시 미저장. fetch_vix/calc_fear_greed/yf_client.fetch_macro_indicators 3곳 위임. 회귀 테스트 7건 신규.
+
+**도메인 자문 (2건 모두 CAUTION 조건부 승인, `02_domain_advice.json`)**:
+- **value-screener (F-4)**: 신선도 문제 없음(주문 실행가는 reservation_service 별도 경로라 영향권 밖). 제약 — 배치 응답에 mktcap 없음(metrics 소싱), price↔close 키명, 배치 누락 종목 조용한 결측 금지. **감사 전제 정정**: fetch_prices_batch는 2026-06-01 '현재가 캐시 금지'로 TTL 캐시 우회 — 전환 이득은 캐시 공유가 아니라 호출 수 N→1 감소.
+- **macro-sentinel (F-6)**: 스팟 3곳은 의도적 신선도 분리가 아닌 중복 — 통합이 정합성 개선. 제약 — TTL 최단 10분 고정(VIX>35 하드 오버라이드의 '패닉 즉각 반응' 설계 의도 보존, 1h 상향 금지), `services/macro_factor_model.py`의 ^VIX 7년 시계열(PCA용)은 용도 상이로 통합 금지, fear_greed 폴백 20을 공유 캐시에 실측치로 저장 금지.
+
+**보류 (도메인/설계 사유)**: F-7 SEC UA 3곳 조립(LOW, 차기 후보) / F-8 ai_ipo_tracker yfinance 직접 호출(테스트 mock 경계 유지 — 의도적) / F-9 screener_cache.db vs cache.db 2중(날짜키·무만료 vs TTL — 데이터 전략 의도적 상이). 의도적 분리 재확인: order_kr/us/fno(TR_ID·파라미터 규격 상이), quote_kis/overseas, useMarketClock/useUsMarketClock.
+
+**회귀 가드**: unit **1704 passed** + 신규 회귀 테스트 14건(`test_watchlist_price_prefetch.py` 7 + `test_macro_vix_spot.py` 7). 실패 25건은 pytest-asyncio·pdfplumber 미설치 환경성(baseline 동일, 개별 실행으로 수집 단계 실패 확인). `npm run build` PASS / `import main` OK / shim 동일성 assert OK / API 계약(엔드포인트 URL·응답 shape·에러 코드) 무변경. QA 상세: `_workspace/refactor/qa_report.md` (7/7 PASS, 비차단 관찰 4건).
+
 ## 2026-07-04 — 하네스 점검·현행화 + Fable 모델 라우팅 (리팩토링)
 
 ### 하네스 리팩토링 (`.claude/` — 앱 코드 변경 0)

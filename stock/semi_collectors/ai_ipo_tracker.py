@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta
 from typing import Optional
 
 import requests
@@ -21,11 +21,10 @@ import requests
 from config import AI_IPO_TICKERS, SEC_EDGAR_USER_AGENT_CONTACT
 from db.session import get_session
 from db.repositories.semiconductor_repo import SemiconductorRepository
+from db.utils import KST as _KST
 from stock.semi_collectors.base import CollectorResult, apply_outlier_guard
 
 logger = logging.getLogger(__name__)
-
-_KST = timezone(timedelta(hours=9))
 
 # 락업 키워드: "180-day lock-up", "180 day lockup"
 _LOCKUP_PATTERN = re.compile(r"(\d{2,3})[\s-]day\s+lock[\s-]?up", re.IGNORECASE)

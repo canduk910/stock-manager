@@ -288,7 +288,7 @@ class KISOverseasOrderbookWS:
         OverseasQuoteManager 시스템 호출이므로 user_id=None(운영자 키).
         """
         try:
-            from routers._kis_auth import get_kis_credentials
+            from services.kis_auth import get_kis_credentials
         except Exception as e:
             logger.warning("[KIS-OB-WS] _kis_auth import 실패: %s", e)
             return None
