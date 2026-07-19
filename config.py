@@ -67,6 +67,19 @@ SEC_EDGAR_USER_AGENT_CONTACT = os.getenv(
 # 콤마 구분 (예: "RDDT,ARM"). 빈 문자열 = 비활성.
 AI_IPO_TICKERS = os.getenv("AI_IPO_TICKERS", "")
 
+# ── DB retention (RDS 스토리지 비용 절감, 2026-07-17) ────────────────────────
+# append-only 로그/이력 테이블 일일 정리 보존 기간(일). 공격적 기본값 채택.
+# `services/scheduler_service.py:_run_db_retention_cleanup_job()`이 KST 03:00 매일 참조.
+DB_RETENTION_PAGE_VIEWS_DAYS = int(os.getenv("DB_RETENTION_PAGE_VIEWS_DAYS", "30"))
+DB_RETENTION_AI_USAGE_DAYS = int(os.getenv("DB_RETENTION_AI_USAGE_DAYS", "90"))
+DB_RETENTION_AUDIT_DAYS = int(os.getenv("DB_RETENTION_AUDIT_DAYS", "90"))
+DB_RETENTION_RECOMMENDATION_DAYS = int(os.getenv("DB_RETENTION_RECOMMENDATION_DAYS", "60"))
+DB_RETENTION_ADVISORY_REPORTS_DAYS = int(os.getenv("DB_RETENTION_ADVISORY_REPORTS_DAYS", "60"))
+DB_RETENTION_PORTFOLIO_REPORTS_DAYS = int(os.getenv("DB_RETENTION_PORTFOLIO_REPORTS_DAYS", "60"))
+DB_RETENTION_DAILY_REPORTS_DAYS = int(os.getenv("DB_RETENTION_DAILY_REPORTS_DAYS", "60"))
+DB_RETENTION_SEMI_SIGNALS_DAYS = int(os.getenv("DB_RETENTION_SEMI_SIGNALS_DAYS", "90"))
+DB_RETENTION_SEMI_INDICATORS_DAYS = int(os.getenv("DB_RETENTION_SEMI_INDICATORS_DAYS", "180"))
+
 # ── JWT 인증 ──────────────────────────────────────────────────────────
 JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "change-me-in-production-please")
 JWT_ALGORITHM = "HS256"

@@ -179,6 +179,18 @@ class PageViewRepository:
         )
         return result if result else None
 
+    def delete_before(self, cutoff: str) -> int:
+        """cutoff(KST ISO 문자열) 이전 page_views 삭제 (retention cleanup, 2026-07-17 신규).
+
+        순수 로그 테이블이라 보존 안전장치 없음. `created_at < cutoff` 삭제 건수 반환.
+        cutoff와 정확히 같은 값은 보존(`<` 비교).
+        """
+        return (
+            self.db.query(PageView)
+            .filter(PageView.created_at < cutoff)
+            .delete(synchronize_session=False)
+        )
+
     def daily_timeseries(self, date_from: str, date_to: str, top: int = 5) -> list[dict]:
         """일별 path별 호출 수 시계열 (상위 top path만)."""
         # 1) 상위 top path 추출

@@ -118,6 +118,8 @@ nginx SSoT (2026-05-03 Phase 2b). `infra/nginx/app.conf`. FastAPI 미들웨어�
 
 **런타임 튜닝:** `UVICORN_CONCURRENCY`(기본 20, t3.small 보호), `UVICORN_KEEPALIVE`(기본 5s), `ADVISOR_CACHE_TTL_HOURS`(기본 0.5).
 
+**DB retention (RDS 스토리지 비용 절감):** append-only 로그/이력 테이블 정기 정리 보존일수. 매일 KST 03:00 `_run_db_retention_cleanup_job`이 사용. 기본값(공격적) — `DB_RETENTION_PAGE_VIEWS_DAYS`(30), `DB_RETENTION_AI_USAGE_DAYS`(90), `DB_RETENTION_AUDIT_DAYS`(90), `DB_RETENTION_SEMI_SIGNALS_DAYS`(90), `DB_RETENTION_RECOMMENDATION_DAYS`(60), `DB_RETENTION_ADVISORY_REPORTS_DAYS`(60), `DB_RETENTION_PORTFOLIO_REPORTS_DAYS`(60), `DB_RETENTION_DAILY_REPORTS_DAYS`(60), `DB_RETENTION_SEMI_INDICATORS_DAYS`(180). 정리 제외: macro_regime_history/orders/reservations/tax_*/backtest_jobs/market_board_*/advisory_cache. daily/advisory/portfolio 리포트는 그룹별(market·(code,market)·user) 최신 1건 보존. 배포 직후 기존 백로그 1회 정리 + 공간 회수는 `python -m scripts.db_cleanup_once`(PG VACUUM FULL page_views 포함 — 새벽 유지보수 창 권장).
+
 **계측:** `TELEMETRY_ENABLED`(기본 1), `TELEMETRY_FLUSH_SEC`(기본 300).
 
 **테스트:** `TEST_DATABASE_URL`(기본 `postgresql://stocktest:stocktest@localhost:5433/stocktest`), `TEST_KIS_*`(모의계좌).

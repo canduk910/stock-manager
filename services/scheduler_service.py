@@ -229,6 +229,119 @@ def _run_macro_prewarm_job():
         logger.error(f"[스케줄러] 매크로 pre-warm 실패: {e}", exc_info=True)
 
 
+def _run_one_retention_table(label: str, delete_fn):
+    """DB retention 잡의 테이블 1개 처리 단위 (2026-07-19 보강).
+
+    dev-lead 지시 반영: 테이블별로 **독립된 `get_session()` 블록**을 열어
+    "한 테이블 실패가 다른 테이블 삭제에 영향 없음" 불변식을 구조적으로 보장한다.
+    - 세션 오픈~commit(또는 실패 시 rollback)이 테이블 단위로 완결되므로,
+      한 테이블에서 DB 레벨 에러(FK 위반, 락 타임아웃 등)로 세션이 invalid 상태가 되어도
+      이미 커밋된 이전 테이블의 삭제는 되돌아가지 않고, 다음 테이블은 새 세션이라 영향받지 않는다.
+    - `get_session()` 컨텍스트 매니저가 예외 시 자체적으로 rollback+close 하므로
+      별도 `db.rollback()` 호출은 불필요(중복 rollback 방지 위해 생략).
+    - 일일 1회 배치이므로 세션 9회 오픈 비용은 무시 가능(성능 무관).
+
+    delete_fn: `lambda db: Repository(db).delete_x_before(cutoff)` 형태의 콜러블.
+    실패 시 예외를 삼키고 logger.error만 기록(잡 자체는 raise 안 함 — 스케줄러 보호).
+    """
+    from db.session import get_session
+
+    try:
+        with get_session() as db:
+            deleted = delete_fn(db)
+        logger.info(f"[스케줄러] DB retention: {label} {deleted}건 삭제")
+    except Exception as e:
+        logger.error(f"[스케줄러] DB retention: {label} 삭제 실패: {e}", exc_info=True)
+
+
+def _run_db_retention_cleanup_job():
+    """일일 DB retention cleanup (KST 03:00, 2026-07-17 신규 / 2026-07-19 세션 격리 보강).
+
+    append-only 로그/이력 테이블 9종 정리 — RDS 스토리지 비용 절감.
+    각 테이블을 **독립 `get_session()` 블록 + 독립 try/except**로 처리 —
+    한 테이블의 DB 레벨 실패(세션 invalid화 포함)가 나머지 테이블 삭제를 막지 않는다.
+    삭제 건수 logger.info, 실패 시 logger.error(잡 자체는 raise 안 함 — 스케줄러 보호).
+    cutoff는 config.DB_RETENTION_* 값을 함수 실행 시점에 읽어 계산한다(import-time 캐시 금지).
+    정리 제외: macro_regime_history / orders / reservations / tax_* / backtest_jobs /
+    market_board_* / advisory_cache.
+    """
+    import config
+    from datetime import timedelta
+    from db.utils import now_kst
+
+    from db.repositories.page_view_repo import PageViewRepository
+    from db.repositories.admin_repo import AdminRepository
+    from db.repositories.report_repo import ReportRepository
+    from db.repositories.advisory_repo import AdvisoryRepository
+    from db.repositories.semiconductor_repo import SemiconductorRepository
+
+    def _cutoff(days: int) -> str:
+        return (now_kst() - timedelta(days=days)).isoformat()
+
+    # page_views
+    cutoff = _cutoff(config.DB_RETENTION_PAGE_VIEWS_DAYS)
+    _run_one_retention_table(
+        f"page_views (< {cutoff})",
+        lambda db: PageViewRepository(db).delete_before(cutoff),
+    )
+
+    # ai_usage_log
+    cutoff = _cutoff(config.DB_RETENTION_AI_USAGE_DAYS)
+    _run_one_retention_table(
+        f"ai_usage_log (< {cutoff})",
+        lambda db: AdminRepository(db).delete_ai_usage_before(cutoff),
+    )
+
+    # audit_log
+    cutoff = _cutoff(config.DB_RETENTION_AUDIT_DAYS)
+    _run_one_retention_table(
+        f"audit_log (< {cutoff})",
+        lambda db: AdminRepository(db).delete_audit_before(cutoff),
+    )
+
+    # recommendation_history
+    cutoff = _cutoff(config.DB_RETENTION_RECOMMENDATION_DAYS)
+    _run_one_retention_table(
+        f"recommendation_history (< {cutoff})",
+        lambda db: ReportRepository(db).delete_recommendations_before(cutoff),
+    )
+
+    # daily_reports (market별 최신 1건 보존)
+    cutoff = _cutoff(config.DB_RETENTION_DAILY_REPORTS_DAYS)
+    _run_one_retention_table(
+        f"daily_reports (< {cutoff})",
+        lambda db: ReportRepository(db).delete_daily_reports_before(cutoff),
+    )
+
+    # advisory_reports ((code,market)별 최신 1건 보존, advisory_cache 미터치)
+    cutoff = _cutoff(config.DB_RETENTION_ADVISORY_REPORTS_DAYS)
+    _run_one_retention_table(
+        f"advisory_reports (< {cutoff})",
+        lambda db: AdvisoryRepository(db).delete_reports_before(cutoff),
+    )
+
+    # portfolio_reports (user_id별 최신 1건 보존)
+    cutoff = _cutoff(config.DB_RETENTION_PORTFOLIO_REPORTS_DAYS)
+    _run_one_retention_table(
+        f"portfolio_reports (< {cutoff})",
+        lambda db: AdvisoryRepository(db).delete_portfolio_reports_before(cutoff),
+    )
+
+    # semi_signals
+    cutoff = _cutoff(config.DB_RETENTION_SEMI_SIGNALS_DAYS)
+    _run_one_retention_table(
+        f"semi_signals (< {cutoff})",
+        lambda db: SemiconductorRepository(db).delete_signals_before(cutoff),
+    )
+
+    # semi_indicator_values
+    cutoff = _cutoff(config.DB_RETENTION_SEMI_INDICATORS_DAYS)
+    _run_one_retention_table(
+        f"semi_indicator_values (< {cutoff})",
+        lambda db: SemiconductorRepository(db).delete_indicator_values_before(cutoff),
+    )
+
+
 def setup_scheduler():
     """APScheduler 시작 (08:00 KR / 16:00 US KST)."""
     global _scheduler
@@ -341,10 +454,21 @@ def setup_scheduler():
             name="반도체 — 시그널 평가 (매시 정각)",
             replace_existing=True,
         )
+        # 2026-07-17: DB retention cleanup (KST 03:00).
+        # append-only 로그/이력 9종 정리 → RDS 스토리지 비용 절감. 00:05 매크로
+        # cleanup·00:20 팩터모델·파이프라인(08/16)과 시간대 분리, 트래픽 최저 구간.
+        _scheduler.add_job(
+            _run_db_retention_cleanup_job,
+            CronTrigger(hour=3, minute=0),
+            id="db_retention_cleanup",
+            name="DB retention cleanup (03:00)",
+            replace_existing=True,
+        )
         _scheduler.start()
         logger.info(
             "[스케줄러] 스케줄러 시작 "
-            "(08:00 KR / 16:00 US / 00:05 cleanup+prewarm / 18:00 FH backfill / 반도체 5 cron + 매시 평가)"
+            "(08:00 KR / 16:00 US / 00:05 cleanup+prewarm / 18:00 FH backfill / "
+            "반도체 5 cron + 매시 평가 / 03:00 retention)"
         )
     except ImportError:
         logger.warning("[스케줄러] apscheduler 미설치 — 스케줄러 비활성화")

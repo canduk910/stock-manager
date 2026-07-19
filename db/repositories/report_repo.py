@@ -2,6 +2,7 @@
 
 from typing import Optional
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from db.models.report import DailyReport, MacroRegimeHistory, RecommendationHistory
@@ -120,6 +121,50 @@ class ReportRepository:
             "win_rate": round(len(wins) / len(closed) * 100, 1),
             "avg_pnl": round(avg_pnl, 2),
         }
+
+    def delete_recommendations_before(self, cutoff: str) -> int:
+        """cutoff(KST ISO 문자열) 이전 recommendation_history 삭제 (retention cleanup, 2026-07-17 신규).
+
+        보존 안전장치 없음. `created_at < cutoff` 삭제 건수 반환.
+        cutoff와 정확히 같은 값은 보존(`<` 비교).
+        """
+        return (
+            self.db.query(RecommendationHistory)
+            .filter(RecommendationHistory.created_at < cutoff)
+            .delete(synchronize_session=False)
+        )
+
+    def delete_daily_reports_before(self, cutoff: str) -> int:
+        """cutoff(KST ISO 문자열) 이전 daily_reports 삭제, market별 최신 1건 보존
+        (retention cleanup, 2026-07-17 신규).
+
+        market별 최신 created_at 행의 id를 서브쿼리로 구해 keep 대상에서 제외하고,
+        나머지 중 `created_at < cutoff`인 행만 삭제. SQLite/PostgreSQL 공통 동작.
+        """
+        # market별 최신 created_at
+        latest_per_market = (
+            self.db.query(
+                DailyReport.market.label("market"),
+                func.max(DailyReport.created_at).label("max_created_at"),
+            )
+            .group_by(DailyReport.market)
+            .subquery()
+        )
+        # 그 최신 created_at에 해당하는 id 목록 (동률 시 모두 keep — 안전 방향)
+        keep_ids_subq = (
+            self.db.query(DailyReport.id)
+            .join(
+                latest_per_market,
+                (DailyReport.market == latest_per_market.c.market)
+                & (DailyReport.created_at == latest_per_market.c.max_created_at),
+            )
+        )
+        keep_ids = [r[0] for r in keep_ids_subq.all()]
+
+        q = self.db.query(DailyReport).filter(DailyReport.created_at < cutoff)
+        if keep_ids:
+            q = q.filter(DailyReport.id.notin_(keep_ids))
+        return q.delete(synchronize_session=False)
 
     # ── MacroRegimeHistory ────────────────────────────────────
 

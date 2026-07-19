@@ -15,6 +15,18 @@ class AdminRepository:
 
     # ── AI 사용량 ─────────────────────────────────────────────
 
+    def delete_ai_usage_before(self, cutoff: str) -> int:
+        """cutoff(KST ISO 문자열) 이전 ai_usage_log 삭제 (retention cleanup, 2026-07-17 신규).
+
+        순수 로그 테이블이라 보존 안전장치 없음. `created_at < cutoff` 삭제 건수 반환.
+        cutoff와 정확히 같은 값은 보존(`<` 비교).
+        """
+        return (
+            self.db.query(AiUsageLog)
+            .filter(AiUsageLog.created_at < cutoff)
+            .delete(synchronize_session=False)
+        )
+
     def get_daily_usage_count(self, user_id: int, date: str) -> int:
         """특정 유저의 특정 날짜 AI 호출 횟수."""
         return (
@@ -132,6 +144,18 @@ class AdminRepository:
         return count > 0
 
     # ── 감사 로그 ─────────────────────────────────────────────
+
+    def delete_audit_before(self, cutoff: str) -> int:
+        """cutoff(KST ISO 문자열) 이전 audit_log 삭제 (retention cleanup, 2026-07-17 신규).
+
+        순수 로그 테이블이라 보존 안전장치 없음. `created_at < cutoff` 삭제 건수 반환.
+        cutoff와 정확히 같은 값은 보존(`<` 비교).
+        """
+        return (
+            self.db.query(AuditLog)
+            .filter(AuditLog.created_at < cutoff)
+            .delete(synchronize_session=False)
+        )
 
     def add_audit_log(
         self,

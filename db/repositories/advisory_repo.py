@@ -2,6 +2,7 @@
 
 from typing import Optional
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from db.models.advisory import (
@@ -171,6 +172,37 @@ class AdvisoryRepository:
         )
         return row.to_dict() if row else None
 
+    def delete_reports_before(self, cutoff: str) -> int:
+        """cutoff(KST ISO 문자열) 이전 advisory_reports 삭제, (code, market)별 최신 1건 보존
+        (retention cleanup, 2026-07-17 신규).
+
+        advisory_cache는 미터치(별도 테이블, 공유 live 캐시). SQLite/PostgreSQL 공통 동작.
+        """
+        latest_per_pair = (
+            self.db.query(
+                AdvisoryReport.code.label("code"),
+                AdvisoryReport.market.label("market"),
+                func.max(AdvisoryReport.generated_at).label("max_generated_at"),
+            )
+            .group_by(AdvisoryReport.code, AdvisoryReport.market)
+            .subquery()
+        )
+        keep_ids_subq = (
+            self.db.query(AdvisoryReport.id)
+            .join(
+                latest_per_pair,
+                (AdvisoryReport.code == latest_per_pair.c.code)
+                & (AdvisoryReport.market == latest_per_pair.c.market)
+                & (AdvisoryReport.generated_at == latest_per_pair.c.max_generated_at),
+            )
+        )
+        keep_ids = [r[0] for r in keep_ids_subq.all()]
+
+        q = self.db.query(AdvisoryReport).filter(AdvisoryReport.generated_at < cutoff)
+        if keep_ids:
+            q = q.filter(AdvisoryReport.id.notin_(keep_ids))
+        return q.delete(synchronize_session=False)
+
     # ── Portfolio Report CRUD ───────────────────────────────────
     # 2026-05-12: user_id 격리 추가. user_id=None은 백워드 호환 (마이그레이션 전 호출).
 
@@ -222,3 +254,32 @@ class AdvisoryRepository:
             query = query.filter_by(user_id=user_id)
         row = query.order_by(PortfolioReport.id.desc()).first()
         return row.to_dict() if row else None
+
+    def delete_portfolio_reports_before(self, cutoff: str) -> int:
+        """cutoff(KST ISO 문자열) 이전 portfolio_reports 삭제, user_id별 최신 1건 보존
+        (retention cleanup, 2026-07-17 신규).
+
+        SQLite/PostgreSQL 공통 동작.
+        """
+        latest_per_user = (
+            self.db.query(
+                PortfolioReport.user_id.label("user_id"),
+                func.max(PortfolioReport.generated_at).label("max_generated_at"),
+            )
+            .group_by(PortfolioReport.user_id)
+            .subquery()
+        )
+        keep_ids_subq = (
+            self.db.query(PortfolioReport.id)
+            .join(
+                latest_per_user,
+                (PortfolioReport.user_id == latest_per_user.c.user_id)
+                & (PortfolioReport.generated_at == latest_per_user.c.max_generated_at),
+            )
+        )
+        keep_ids = [r[0] for r in keep_ids_subq.all()]
+
+        q = self.db.query(PortfolioReport).filter(PortfolioReport.generated_at < cutoff)
+        if keep_ids:
+            q = q.filter(PortfolioReport.id.notin_(keep_ids))
+        return q.delete(synchronize_session=False)

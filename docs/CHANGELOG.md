@@ -1,5 +1,27 @@
 # 변경 이력
 
+## 2026-07-19 — DB retention cleanup (RDS 스토리지 비용 절감)
+
+### DB retention 자동 정리 신규 (TDD: RED→GREEN→VERIFY)
+
+**요청**: "현재 DB가 너무 과도하게 쌓여서 aws의 비용이 부담되기 시작했어. DB사용량을 절약할 수 있는 방안을 마련해줘." 산출물: `/Users/koscom/.claude/plans/db-swirling-mccarthy.md`.
+
+**진단**: 근본 원인은 인프라가 아니라 "정리 없이 무한 append되는 로그/이력 테이블". RDS(db.t3.micro, 20GB gp3)는 이미 비용 최적화 상태(backup 1일, `max_allocated_storage` 미설정=오토스케일링 OFF, Performance Insights 비활성). 자동 cleanup이 있는 테이블은 `macro_gpt_cache`(00:05) 단 하나뿐이고, `page_views`(매 HTTP 요청 INSERT)·`ai_usage_log`(매 OpenAI 호출)·`recommendation_history`(파이프라인 매일)·`daily_reports`(행당 markdown+JSON ~500KB)·advisory/portfolio reports·audit_log·semi_signals/indicator_values가 무제한 누적.
+
+**사용자 결정**: 보존정책=공격적 / page_views는 정리만(미들웨어·집계 100% 유지) / 배포 직후 즉시 정리 + VACUUM.
+
+**변경 (Part A~D)**:
+- **A. Repository delete 메서드 9종** (`db/repositories/{page_view,admin,report,advisory,semiconductor}_repo.py`): `macro_repo.delete_before_today()` 패턴 재사용, 타임스탬프가 STRING ISO KST라 문자열 cutoff 비교. `delete_before`(page_views), `delete_ai_usage_before`/`delete_audit_before`, `delete_recommendations_before`/`delete_daily_reports_before`, `delete_reports_before`/`delete_portfolio_reports_before`, `delete_signals_before`/`delete_indicator_values_before`. daily(market별)·advisory((code,market)별)·portfolio(user_id별)는 `func.max()` group_by로 최신 1건 keep_id를 파이썬 리스트로 materialize 후 `id.notin_` — 빈리스트 가드로 `NOT IN NULL` 함정 회피. 전부 `.delete(synchronize_session=False)`.
+- **B. 스케줄러 잡** (`services/scheduler_service.py`): `_run_db_retention_cleanup_job()` + KST 03:00 크론(`id=db_retention_cleanup`). 헬퍼 `_run_one_retention_table(label, delete_fn)`이 **테이블별 독립 `get_session()` 블록**으로 처리 — PostgreSQL 트랜잭션 abort 연쇄로 단일 세션 공유 시 테이블별 try/except가 무력화되는 실제 버그를 구조적으로 차단. cutoff는 `config.DB_RETENTION_*`를 실행 시점에 읽음(import-time 캐시 금지).
+- **C. config** (`config.py`): `DB_RETENTION_*` env 9종(공격적 기본값 — page_views 30 / 로그·semi_signals 90 / 이력·리포트 60 / semi_indicators 180).
+- **D. 일회성 스크립트** (`scripts/db_cleanup_once.py` + `scripts/__init__.py` 신규): before 실측(PG `pg_total_relation_size`+rowcount / SQLite count) → 잡 재사용 호출 → VACUUM(PG autocommit `VACUUM (VERBOSE, ANALYZE)` + `VACUUM FULL page_views` / SQLite `VACUUM`) → after 실측.
+
+**정리 제외**: macro_regime_history(일 1행)/orders/reservations/tax_*(자산·세무)/backtest_jobs/market_board_*(사용자 소유)/advisory_cache(upsert 공유 캐시).
+
+**회귀 가드**: `tests/unit/test_db_retention_repos.py`(32) + `test_db_retention_scheduler.py`(6, 실 PostgreSQL 트랜잭션 abort 격리 검증 포함) = **38/38 PASS**. CI 조건 `pytest tests/unit/ -m "not slow"` 신규 실패·에러 0(회귀 없음).
+
+**비용 관점**: gp3는 provisioned 과금이라 VACUUM이 즉시 요금을 낮추진 않으나, 20GB 초과 강제 증설(=증분 과금)·백업 무료분 초과·용량 소진 read-only 장애를 예방. 무한 성장 차단(A/B)이 본질적 방어선. `VACUUM FULL page_views`는 exclusive lock이므로 새벽 유지보수 창 수동 실행 권장.
+
 ## 2026-07-05 — 메뉴 간 공유 기능/데이터 공통화 (리팩토링)
 
 ### 리팩토링 (refactor-audit 사이클: 감사 → 도메인 자문 → 실행 → QA)

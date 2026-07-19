@@ -88,6 +88,18 @@ class SemiconductorRepository:
         )
         return [r.to_dict() for r in reversed(rows)]
 
+    def delete_indicator_values_before(self, cutoff: str) -> int:
+        """cutoff(KST ISO 문자열) 이전 semi_indicator_values 삭제 (retention cleanup, 2026-07-17 신규).
+
+        보존 안전장치 없음. `collected_at < cutoff` 삭제 건수 반환.
+        cutoff와 정확히 같은 값은 보존(`<` 비교).
+        """
+        return (
+            self.db.query(IndicatorValue)
+            .filter(IndicatorValue.collected_at < cutoff)
+            .delete(synchronize_session=False)
+        )
+
     # ── Signal ────────────────────────────────────────────────
 
     def insert_signal(
@@ -144,6 +156,18 @@ class SemiconductorRepository:
         row.ack = True
         self.db.flush()
         return True
+
+    def delete_signals_before(self, cutoff: str) -> int:
+        """cutoff(KST ISO 문자열) 이전 semi_signals 삭제 (retention cleanup, 2026-07-17 신규).
+
+        보존 안전장치 없음. `fired_at < cutoff` 삭제 건수 반환.
+        cutoff와 정확히 같은 값은 보존(`<` 비교).
+        """
+        return (
+            self.db.query(Signal)
+            .filter(Signal.fired_at < cutoff)
+            .delete(synchronize_session=False)
+        )
 
     # ── Threshold ─────────────────────────────────────────────
 
