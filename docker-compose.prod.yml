@@ -24,6 +24,10 @@ services:
     image: nginx:alpine
     container_name: stock-nginx
     restart: unless-stopped
+    # certbot 가 인증서를 자동 갱신해도 nginx 는 메모리에 로드한 옛 인증서를 계속 서빙한다.
+    # 12시간마다 self-reload 하여 디스크의 갱신된 인증서를 자동 반영 (2026-07-31, 만료 재발 방지).
+    # exec 로 nginx 를 PID1 에 배치 → SIGTERM(docker stop) 을 네이티브 graceful 처리. 검증 완료.
+    command: ["sh", "-c", "while :; do sleep 12h; nginx -s reload; done & exec nginx -g 'daemon off;'"]
     ports:
       - "80:80"
       - "443:443"

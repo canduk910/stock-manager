@@ -1,5 +1,32 @@
 # 변경 이력
 
+## 2026-07-31 — SSL 인증서 만료 복구 + 자동 갱신 정상화
+
+### 버그 수정 / 인프라
+
+**증상**: `dkstock.cloud` 서버 인증서 만료 — 외부 `openssl s_client` 확인 결과 `notAfter=Jul 27 11:10:50 2026 GMT` (조치 시점 7/31 기준 4일 초과 만료). 90일 주기 Let's Encrypt 인증서(4/28 발급)의 자동 갱신이 조용히 실패해 온 상태.
+
+**진단** (AWS SSM Run Command, EC2 `i-009db8569d9bd8324`, IP 3.39.188.29 — 로컬 SSH는 SG IP 제한 + 차단으로 SSM 경로 사용):
+- certbot/nginx 컨테이너는 모두 정상 기동(Up 2 months). 디스크상 인증서도 만료본 그대로.
+- certbot 컨테이너 로그: `Invalid response from .../.well-known/acme-challenge/...: 404`, `authenticator: standalone`.
+- **근본 원인**: 갱신 설정(`/etc/letsencrypt/renewal/dkstock.cloud.conf`)이 `authenticator = standalone`. 초기 발급을 standalone로 한 잔재인데, 현재 구성은 nginx 컨테이너가 포트 80을 점유하므로 certbot standalone 임시 웹서버가 뜰 수 없고, ACME HTTP-01 challenge 요청이 nginx로 유입되어 webroot(`/var/www/certbot`)에서 파일을 못 찾아 404 → 매 갱신 실패. nginx의 `app.conf`는 webroot 방식으로 세팅되어 있어 설정 간 불일치.
+
+**조치 A — 인증서 즉시 복구 (서버 반영 완료, SSM)**:
+```
+docker run --rm -v /opt/stock-manager/certbot/conf:/etc/letsencrypt \
+  -v /opt/stock-manager/certbot/www:/var/www/certbot certbot/certbot \
+  certonly --webroot -w /var/www/certbot -d dkstock.cloud -d www.dkstock.cloud \
+  --cert-name dkstock.cloud --non-interactive --agree-tos --force-renewal
+docker exec stock-nginx nginx -s reload
+```
+결과: 새 인증서 `notAfter=Oct 29 2026`, 갱신 설정이 `authenticator = webroot`(+ `webroot_path=/var/www/certbot`)로 교정되어 **향후 자동 갱신 정상화**. 외부 재검증 통과 — dkstock.cloud/www 모두 새 인증서, `https://dkstock.cloud/api/health` → `HTTP 200 / SSL verify 0`.
+
+**조치 B — 재발 방지 영구 수정 (코드)** `docker-compose.prod.yml`:
+- 잠재 결함: certbot 컨테이너가 `certbot renew`만 돌고 갱신 성공 후 nginx reload를 하지 않음 → 자동 갱신돼도 nginx가 메모리의 옛 인증서를 계속 서빙(다음 배포 때만 반영). 배포 공백이 30일 넘으면 재발 가능.
+- 수정: nginx 서비스에 self-reload `command` 추가 — `["sh","-c","while :; do sleep 12h; nginx -s reload; done & exec nginx -g 'daemon off;'"]`. `exec`로 nginx를 PID1에 배치해 SIGTERM(docker stop) graceful 처리, 백그라운드 루프가 12h마다 reload하여 갱신 인증서 자동 반영.
+
+**검증**: EC2 실환경에서 포트 미바인딩 throwaway 컨테이너로 제안 command 검증(운영 stock-nginx 무영향) — PID1=`nginx: master process`, 주기적 reload notice 정상, `docker exec ... nginx -s reload`(deploy.yml 호환) OK, `docker stop` graceful(1s, exit 0). YAML exec-form 파싱 검증 + `docker-compose.cloudwatch.yml`은 nginx `logging`만 override하여 `command` 무충돌 확인.
+
 ## 2026-07-19 — DB retention cleanup (RDS 스토리지 비용 절감)
 
 ### DB retention 자동 정리 신규 (TDD: RED→GREEN→VERIFY)

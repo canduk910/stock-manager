@@ -184,6 +184,7 @@ nginx SSoT (2026-05-03 Phase 2b). `infra/nginx/app.conf`. FastAPI 미들웨어�
 - CI/CD: `main` push → pytest + frontend build → Docker → ECR → backtester MCP health → EC2 자동 배포 (5m timeout)
   - **hang 가드 (2026-06-20)**: pytest `timeout=120` + `timeout_method=thread`(pytest-timeout) + job `timeout-minutes`(test 15/frontend 10/docker 20/deploy 25) + `concurrency`(CI는 `cancel-in-progress=true`로 hang run 누적 차단, Deploy는 `false`로 배포 중단 회피). **`timeout_method=thread` 필수**: API 테스트는 FastAPI TestClient가 엔드포인트를 worker thread에서 실행하므로 기본 `signal` 방식(메인 스레드 전용)은 worker의 socket 블록을 못 죽인다 → thread 방식이 120s에 프로세스 강제 종료. 외부 API를 직접 호출하는 통합 스모크 테스트(예: `tests/api/test_macro_api.py` — 검증이 "200/502"뿐)는 `@pytest.mark.slow`로 표시해 CI(`-m "not slow"`)에서 제외(미응답 시 hang 원천 차단, 로컬에선 실행).
 - 도메인/HTTPS: `dkstock.cloud` (가비아 DNS → Elastic IP), nginx 리버스 프록시 + Let's Encrypt 자동 갱신
+  - **certbot 갱신은 반드시 webroot 방식** (`authenticator=webroot`, `-w /var/www/certbot`). standalone은 포트 80을 nginx가 점유해 ACME challenge 404로 실패 → 재발급 시 `certonly --webroot`로 갱신설정 교정. nginx 컨테이너 `command`가 12h마다 self-reload하여 갱신된 인증서를 메모리에 자동 반영(reload 누락 시 만료 인증서 계속 서빙). 상세: `docs/CHANGELOG.md` 2026-07-31
 - 로그: CloudWatch Logs `/stock-manager/prod` (retention 14일, 옵션 토글)
 
 **nginx 라우팅:** `infra/nginx/app.conf`
