@@ -20,3 +20,6 @@ token.dat
 # 인프라/CI (Docker 빌드 컨텍스트에서 제외)
 infra/
 .github/
+
+# 타 프로젝트 이식 패키지 (본 앱 런타임 무관)
+packaging/

@@ -1,5 +1,28 @@
 # 변경 이력
 
+## 2026-09-18 — 매크로 4섹션 이식 패키지 (packaging/macro_lite)
+
+### macro_lite 이식 패키지 신규
+
+**배경**: 매크로 메뉴의 경기사이클(+투자체제), 장단기금리차, 하이일드 스프레드, 환율/원자재 4개 섹션을 다른 주식시스템 프로젝트(auto_stock)에 신규 메뉴로 이식. 사용자 결정(2026-09-17): 저쪽에서 이 repo를 참조하는 방식이 아니라 **여기서 자체 완결형 패키지로 추출**하고 저쪽은 폴더 복사 + 인증/라우트 연결만 수행. regime 포함, 하이일드 "당일 1회" DB 캐시는 파일 캐시로 단순화, 하이일드 OAS 누적 데이터를 seed로 동봉.
+
+**산출** `packaging/macro_lite/` (본 앱 런타임과 무관 — 어디서도 import하지 않음, `.dockerignore` 제외):
+- `backend/macro_lite/` — `cache`(raw SQLite 파일 캐시 + KST 헬퍼 + daily 캐시: 키에 KST 날짜, 만료 다음날 00:00), `events`/`cycle`/`regime`(원본과 바이트 동일), `oas_history_store`(+`load_seed`), `seed`(`python -m macro_lite.seed` 명시 적재, 자동 적재 없음), `fetcher`(원본 29개 심볼 본문 동일, `config.FRED_API_KEY`→`os.getenv` 1곳만 치환), `service`(7개 함수 본문 동일, partial_failure 캐시 폐기 보존, `previous_regime` 미전달 유지), `router`(5개 GET, `AUTH_DEPENDENCY` 단일 교체 지점, HTTPException 0건).
+- `backend/tests/` — 원본 `tests/unit/test_macro_*` 7개 이관 + cache 자정 경계/seed 멱등/router shape/import 격리 신규. 단독 `pytest` 196 PASS.
+- `backend/data/oas_history_seed.json` — HY(BAMLH0A0HYM2) 881행 / IG(BAMLC0A0CM) 880행, 2023-05-09 ~ 2026-09-16. `macro_regime_history_seed.json` — 체제 판정 일별 이력 147행(2026-04-25 ~ 2026-09-18), macro_lite 미소비·참고용.
+- `frontend/macro/` — 섹션 컴포넌트 5개(import 경로 2줄만 변경) + EventLabelsOverlay/LoadingSpinner/ErrorAlert + 훅 2개 + api 2개 + MacroLitePage. esbuild 번들 및 vite 빌드 검증.
+- `README.md` — 통합 절차, seed 적재, 환경변수(`MACRO_LITE_CACHE_DIR` 영속 필수, `FRED_API_KEY` 선택), 도메인 제약 7개(macro-sentinel 자문), 장애 복구.
+
+**본 앱 변경** (신규 2건, 기존 파일 수정 0건):
+- `scripts/export_oas_history.py` — cache.db `macro:oas_history_persist:*` → seed JSON. `--db` / `--container <name>`(docker cp) / `--container-path`. 표준 라이브러리만.
+- `scripts/export_regime_history.py` — `macro_regime_history` → JSON. `--sqlite` / `--container <postgres>`(psql --csv) / `--pg-url`. 표준 라이브러리만.
+
+**데이터 소재 (운영 지식)**: OAS 누적 키는 로컬 호스트 `~/stock-watchlist/cache.db`에 없고 docker 볼륨(`prodclone-web`:8001 운영 클론 / `stock-manager`:8000)에만 있음. 누적 시작점 2023-05-09(FRED 3년 제한을 2026-05에 확인한 뒤 누적 시작, 그 이전 OAS 데이터는 어디에도 없음). FRED는 ICE BofA 시리즈를 미국 영업일 아침(KST 당일 밤)에 전 영업일분 게시.
+
+**도메인 자문 결론 (macro-sentinel)**: daily 파일 캐시는 원본 `macro_gpt_cache` "당일 1회"와 동치. `previous_regime`은 원본 프로덕션 호출처 0건이므로 패키지도 무상태 유지(이력 저장소 추가 금지). KR 섹터/factor model 제외는 `fetch_cycle_inputs`에 영향 없음. `credit_direction`이 사실상 항상 "stable"인 원본 특성은 버그로 고치지 말 것(README 명시).
+
+**회귀**: 루트 `pytest tests/unit -m "not slow"` 1742 passed / 25 failed — 실패 전부 로컬 환경(pdfplumber 미설치 16, pytest-asyncio 미활성 9), 이번 변경과 무관.
+
 ## 2026-07-31 — SSL 인증서 만료 복구 + 자동 갱신 정상화
 
 ### 버그 수정 / 인프라

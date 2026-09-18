@@ -637,9 +637,15 @@ stock-manager/
 ├── infra/                 # Terraform IaC (VPC, EC2, RDS, ECR, SSM)
 │   └── nginx/app.conf     #   nginx 리버스 프록시 + SSL + WebSocket
 ├── .github/workflows/     # GitHub Actions CI/CD (ci.yml, deploy.yml)
-└── scripts/
-    ├── ec2-deploy.sh      #   EC2 수동 배포 스크립트
-    └── init-ssl.sh        #   Let's Encrypt 초기 인증서 발급
+├── scripts/
+│   ├── ec2-deploy.sh      #   EC2 수동 배포 스크립트
+│   ├── init-ssl.sh        #   Let's Encrypt 초기 인증서 발급
+│   ├── export_oas_history.py     #   cache.db OAS 누적 시계열 → seed JSON (타 프로젝트 이관용)
+│   └── export_regime_history.py  #   macro_regime_history 테이블 → JSON (타 프로젝트 이관용)
+└── packaging/
+    └── macro_lite/        # 매크로 4섹션(경기사이클+체제/금리차/하이일드/환율·원자재) 이식 패키지
+                           #   backend(FastAPI 패키지 + 단독 pytest) + frontend(React) + data(seed) + README
+                           #   본 앱은 import하지 않음. 다른 프로젝트에 폴더 복사로 통합
 ```
 
 **국내/해외/FNO 분기 기준**: `stock/utils.py`의 `is_domestic(code)` — 6자리 숫자이면 국내(KRX), `is_fno(code)` — 1/2/3xxx 형식이면 선물옵션, 나머지는 해외(US).

@@ -76,6 +76,8 @@ services/           서비스 레이어 (advisory, watchlist, order, macro, back
 screener/           스크리너 패키지 (CLI + API 공용)
 stock/              관심종목 패키지 (CLI + API 공용, store 모듈은 db/repositories/ 위임)
 frontend/           React SPA
+scripts/            운영 보조 스크립트 (ec2-deploy, db_cleanup_once, export_oas_history, export_regime_history)
+packaging/          타 프로젝트 이식용 자체 완결 패키지 (macro_lite: 매크로 4섹션 + seed 데이터. 본 앱이 import하지 않음)
 ```
 
 **공유 모듈:**
