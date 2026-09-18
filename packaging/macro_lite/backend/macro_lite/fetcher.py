@@ -497,7 +497,19 @@ _FRED_BROWSER_UA = (
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 )
-_FRED_TIMEOUT = 25
+# 원본 기본값 25s. 이식 환경에서 FRED CSV가 간헐 차단될 때 대기 시간을 줄이려면 환경변수로 조정
+# (I/O 재시도 정책 — 투자 로직·캐시 TTL과 무관). 예: MACRO_LITE_FRED_TIMEOUT=8
+def _env_timeout(name: str, default: float) -> float:
+    """환경변수 timeout 파싱. 빈 값·비숫자·0 이하는 default (오타 하나로 하이일드 섹션이 죽지 않게)."""
+    raw = os.getenv(name, "")
+    try:
+        v = float(raw)
+    except (TypeError, ValueError):
+        return default
+    return v if v > 0 else default
+
+
+_FRED_TIMEOUT = _env_timeout("MACRO_LITE_FRED_TIMEOUT", 25)
 _FRED_STALE_TTL_HOURS = 24 * 7  # 7일
 
 

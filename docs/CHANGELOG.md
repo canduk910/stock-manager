@@ -2,6 +2,14 @@
 
 ## 2026-09-18 — 매크로 4섹션 이식 패키지 (packaging/macro_lite)
 
+### 후속 (같은 날, auto_stock 통합 피드백 반영)
+
+- **`services/macro_cycle.py` + 패키지 `cycle.py`** — `determine_cycle_phase()` 반환에 `final_scores`(recovery/expansion/overheating/contraction 가중합산 점수) 추가. 이미 계산해 `confidence`를 뽑던 dict를 노출만 한 것으로 판정 로직 무변경. 이식처 화면에서 "1·2위 점수차 + 2위 국면 이름"을 표시하려면 필요(프론트 역산은 금리차 방향이 signal에 없어 불가, 로직 이중 정본 금지). 원본·패키지 두 파일 바이트 동일 유지. 불변식 테스트(`phase == argmax`, `confidence == min(100, round(diff×200))`) 양쪽 추가.
+- **패키지 `fetcher.py`** — `_FRED_TIMEOUT`을 `MACRO_LITE_FRED_TIMEOUT` 환경변수로 조정 가능(`_env_timeout`: 빈 값/비숫자/0 이하는 기본 25 복귀). 근거: 이식처 실측에서 FRED CSV가 간헐 차단될 때 `25s×2회×2시리즈≈104s`로 nginx 60s 한도 초과(504). 원본 25s는 2026-05-04 핫픽스 값으로 실측 근거 없음. **CSV→JSON 시도 순서는 변경 금지** — 백분위/z-score baseline이 누적 store가 아니라 그 호출의 신선 rows(`_compute_oas_stats(rows)`)이며, 이식처 실측 CSV 881행(2023-05-09~) vs JSON 787행(2023-09-18~)으로 창이 4개월 어긋나 sentiment가 갈릴 수 있음. → 원본 개선 후보: baseline을 누적 store 기준으로 통일(macro-sentinel 자문 필요, 미착수).
+- **패키지 `requirements.txt`** — `uvicorn[standard]` 누락 보완(빌드·TestClient는 통과하나 컨테이너 기동 시 `exec: "uvicorn": not found`).
+- **패키지 README** — 환경변수 표에 `MACRO_LITE_FRED_TIMEOUT`, "하이일드 첫 호출 지연과 prewarm" 절(순서 변경 금지 근거, 00:05 KST prewarm 권장, seed는 차트용이지 baseline이 아님).
+- 이식처(auto_stock) 상태: 별도 컨테이너 + nginx `/api/macro/` 프록시, 프론트 5섹션 `.tsx`, seed 적재 완료, 운영 타임아웃 8s. dkstock.cloud regime 연동의 대체재로 확정(3단계: 컨테이너+메뉴 → 두 출처 값 비교 → `market_regime` 로컬 전환).
+
 ### macro_lite 이식 패키지 신규
 
 **배경**: 매크로 메뉴의 경기사이클(+투자체제), 장단기금리차, 하이일드 스프레드, 환율/원자재 4개 섹션을 다른 주식시스템 프로젝트(auto_stock)에 신규 메뉴로 이식. 사용자 결정(2026-09-17): 저쪽에서 이 repo를 참조하는 방식이 아니라 **여기서 자체 완결형 패키지로 추출**하고 저쪽은 폴더 복사 + 인증/라우트 연결만 수행. regime 포함, 하이일드 "당일 1회" DB 캐시는 파일 캐시로 단순화, 하이일드 OAS 누적 데이터를 seed로 동봉.

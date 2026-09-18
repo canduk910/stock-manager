@@ -188,6 +188,7 @@ server: {
 |------|------|--------|------|
 | `FRED_API_KEY` | 선택(권장) | `""` | FRED JSON API 폴백 키. `fredgraph.csv` 가 실패(HTML 차단/timeout)할 때만 사용. 없으면 7일 stale 캐시 → 그것도 없으면 `partial_failure: ["hy_oas"]`. 발급: https://fred.stlouisfed.org/docs/api/api_key.html |
 | `MACRO_LITE_CACHE_DIR` | 선택 | `~/macro-lite/` | 파일 캐시(`cache.db`) 디렉토리. **호출 시점에 읽는다**. OAS 누적 store 도 여기에 저장되므로 영속 볼륨이어야 한다 (아래 도메인 제약 3). |
+| `MACRO_LITE_FRED_TIMEOUT` | 선택 | `25` | FRED HTTP 요청 timeout(초). CSV 1회 재시도 × 시리즈 2종이라 CSV가 차단되면 최악 `timeout×4`초 대기 후 JSON 폴백. 정상 CSV는 1초 미만이므로 `8` 정도로 낮춰도 됨(I/O 정책, 투자 로직 무관). |
 
 ## 도메인 제약
 
@@ -238,6 +239,14 @@ server: {
 ### 7. 경기사이클 입력의 `credit_direction` — "버그"로 고치지 말 것
 
 `fetcher.fetch_cycle_inputs()` 2번 블록(원본 `stock/macro_fetcher.py:1495-1509`)은 `fetch_credit_spread()` 응답에서 `oas_momentum_6m` 을 읽지만 **그 응답에는 이 키가 없어 항상 None → `credit_direction` 은 사실상 항상 `"stable"`** 이다. 신용 정보는 이 경로가 아니라 `service.get_macro_cycle()` 이 credit_spread 응답의 `oas_history_5y` 로 6개월 모멘텀을 계산해 `inputs["oas_momentum_6m"]` 로 주입하는 경로(원본 `services/macro_service.py:418-437`)로 사이클 판정(`cycle._score_credit`)에 반영된다. 이는 원본과 동일한 기존 특성이며, 2번 블록을 "고쳐" 두 경로가 이중 반영되면 사이클 가중치가 원본과 달라진다. 또한 KR 섹터·거시 팩터 모델은 `fetch_cycle_inputs`/`determine_cycle_phase` 에 영향이 0 이라 패키지에서 제외해도 결과가 같다(사이클 입력은 US 섹터 ETF 11개만 사용, factor model 은 write-only).
+
+## 하이일드 첫 호출 지연과 prewarm (운영 주의)
+
+`credit-spread` / `macro-cycle` 는 24h 캐시 miss 시 FRED 를 실호출한다. FRED `fredgraph.csv` 는 IP 에 따라 **간헐적으로 응답을 끊으며**, 그때 `_FRED_TIMEOUT × 2회 × 2시리즈`(기본 100초) 를 채운 뒤에야 JSON API(`FRED_API_KEY`) 로 폴백한다. 하루 한 번이지만 그 요청은 nginx `proxy_read_timeout`(보통 60s)에 걸려 504 가 될 수 있다.
+
+- **시도 순서(CSV → JSON)는 바꾸지 말 것.** 백분위·z-score 의 baseline 은 누적 store 가 아니라 **그 호출에서 받은 신선 rows** 로 계산된다(`_compute_oas_stats(rows)`). CSV 는 현재 vintage(~3년), JSON 은 `realtime_start=1776`(전 vintage) 로 호출하므로 두 소스가 같은 date 집합을 돌려준다는 보장이 없고, 다르면 5단계 sentiment 가 갈린다. 순서 변경은 두 소스의 (첫 날짜, 끝 날짜, 행 수, 중복 date 없음) 동일성을 실측으로 확인한 뒤에만.
+- 권장 대응: (1) `MACRO_LITE_FRED_TIMEOUT=8` 로 낮춰 최악 32초, (2) 원 프로젝트처럼 **매일 KST 00:05 경 prewarm**(컨테이너 cron/스케줄러가 `GET /api/macro/credit-spread` 와 `/macro-cycle` 을 미리 호출) 하여 사용자가 miss 경로를 밟지 않게 한다. FRED 는 전 영업일분을 KST 당일 밤(22~23시) 에 게시하므로 00:05 prewarm 이면 최신값이 잡힌다.
+- 동봉 seed 는 차트 시계열(10y/5y 슬라이스)을 채우는 것이지 백분위 baseline 을 채우는 것이 아니다.
 
 ## 장애 복구
 

@@ -22,7 +22,7 @@ def _mk_resp(status=200, ctype="text/csv", text="observation_date,BAMLH0A0HYM2\n
 
 
 def test_uses_browser_ua():
-    """브라우저 UA + 25s timeout 사용."""
+    """브라우저 UA + _FRED_TIMEOUT(기본 25s, 환경변수로 조정) 사용."""
     captured = {}
 
     def fake_get(url, timeout=None, headers=None):
@@ -33,7 +33,7 @@ def test_uses_browser_ua():
     with patch("requests.get", side_effect=fake_get):
         macro_fetcher._http_get_fred_csv("https://example.com/x.csv")
 
-    assert captured["timeout"] == 25
+    assert captured["timeout"] == macro_fetcher._FRED_TIMEOUT
     ua = captured["headers"]["User-Agent"]
     assert "Mozilla" in ua and "Chrome" in ua
 
@@ -109,3 +109,20 @@ def test_parse_fred_csv_skips_invalid_rows():
     assert len(rows) == 2
     assert rows[0] == {"date": "2024-01-01", "oas": 3.45}
     assert rows[1] == {"date": "2024-01-04", "oas": 4.10}
+
+
+# ── MACRO_LITE_FRED_TIMEOUT 환경변수 (I/O 정책, 투자 로직 무관) ────────────
+
+def test_env_timeout_override_and_invalid_values():
+    from macro_lite.fetcher import _env_timeout
+    import os
+    key = "MACRO_LITE_FRED_TIMEOUT_TEST"
+    try:
+        os.environ[key] = "8"
+        assert _env_timeout(key, 25) == 8.0
+        for bad in ("", "0", "-3", "abc", " "):
+            os.environ[key] = bad
+            assert _env_timeout(key, 25) == 25, bad
+    finally:
+        os.environ.pop(key, None)
+    assert _env_timeout("MACRO_LITE_FRED_TIMEOUT_UNSET_XYZ", 25) == 25

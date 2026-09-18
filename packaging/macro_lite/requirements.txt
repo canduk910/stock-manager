@@ -1,5 +1,6 @@
 # macro_lite 런타임 의존성 — 버전 핀은 원 프로젝트(stock-manager) 루트 requirements.txt 와 동일(무핀).
 fastapi
+uvicorn[standard]   # 컨테이너/단독 실행 시 필요 (TestClient 스모크만으로는 누락이 드러나지 않음)
 requests
 numpy<2
 pandas
